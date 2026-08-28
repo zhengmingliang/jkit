@@ -532,6 +532,202 @@ public class HttpUtilsTest {
         assertTrue(body.startsWith("POST"));
         assertTrue(body.contains("hi-curl"));
     }
+    // @Test
+    public void curlTest() throws IOException {
+        String curl = "curl 'https://api.choerodon.com.cn/cbase/choerodon/v1/captcha/send-phone-captcha?phone" +
+                "=17897432573' -H 'User-Agent: EasyPostman/v4.2.9' -H 'Accept: */*' -H 'Accept-Encoding: gzip, " +
+                "deflate, br' -H 'Connection: keep-alive' -H 'h-menu-id: 0' -H 'h-tenant-id: 0' -H 'pragma: no-cache' -H 'priority: u=1, i'";
+        CurlRequest curlRequest = HttpUtils.parseCurl(curl);
+        System.out.println("Headers: "+ JSON.toJsonString(curlRequest.getHeaders()));
+        System.out.println("Method: " + curlRequest.getMethod());
+        System.out.println("url: "+ curlRequest.getUrl());
+//        curlRequest.setProxy("127.0.0.1",7892);
+         HttpResponse response = HttpUtils.execute(curlRequest);
+         System.out.println("response headers: "+response.headers());
+         System.out.println("result: "+ response.body().string());
+    }
+
+    // @Test
+    public void curl() throws IOException {
+        String curl = "curl --url 'https://scaffb06.cc/user' \\\n" +
+                "  -H 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7' \\\n" +
+                "  -H 'Accept-Language: zh-CN,zh;q=0.9' \\\n" +
+                "  -H 'Connection: keep-alive' \\\n" +
+                "  -b '_ga=GA1.2.1285500960.1782264388; _ga_QKR02GTRHG=GS2.2.s1784509033$o2$g0$t1784509033$j60$l0$h0; crisp-client%2Fsession%2F92a11979-b09d-42cb-bb19-db94a953737a=session_c7ffdf83-e85d-4096-b82c-472a781a3a9b; crisp-client%2Fsession%2F92a11979-b09d-42cb-bb19-db94a953737a%2F28e2cf81-2319-3d21-a48f-6ca45b4babbb=session_c7ffdf83-e85d-4096-b82c-472a781a3a9b; site_verified=1; uid=759067; email=1072307340%40qq.com; key=ef3fe8570c4c030c039c4bf425f0f9c268a3456981a95; ip=2b94bb74d8bdd9314219f1413b2154f2; expire_in=1787989919; PHPSESSID=j7ic2skc319icbp3j2kf8ovg0j' \\\n" +
+                "  -H 'Referer: https://scaffb06.cc/auth/login' \\\n" +
+                "  -H 'Sec-Fetch-Dest: document' \\\n" +
+                "  -H 'Sec-Fetch-Mode: navigate' \\\n" +
+                "  -H 'Sec-Fetch-Site: same-origin' \\\n" +
+                "  -H 'Upgrade-Insecure-Requests: 1' \\\n" +
+                "  -H 'User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36' \\\n" +
+                "  -H 'sec-ch-ua: \"Not=A?Brand\";v=\"99\", \"Google Chrome\";v=\"151\", \"Chromium\";v=\"151\"' \\\n" +
+                "  -H 'sec-ch-ua-mobile: ?0' \\\n" +
+                "  -H 'sec-ch-ua-platform: \"Linux\"'";
+        CurlRequest curlRequest = HttpUtils.parseCurl(curl);
+        System.out.println("Headers: "+ JSON.toJsonString(curlRequest.getHeaders()));
+        System.out.println("Method: " + curlRequest.getMethod());
+        System.out.println("url: "+ curlRequest.getUrl());
+        curlRequest.setProxy("127.0.0.1",7892);
+        System.out.println("result: "+HttpUtils.execute(curlRequest).body().string());
+    }
+
+    @Test
+    public void sseFromHttpRequestAndCurl() throws Exception {
+        CountDownLatch sseLatch = new CountDownLatch(1);
+        CopyOnWriteArrayList<SseEvent> events = new CopyOnWriteArrayList<SseEvent>();
+        HttpRequest request = HttpRequest.post(baseUrl + "/sse")
+                .header("X-Token", "custom")
+                .contentType("application/json")
+                .body("{\"q\":1}");
+        HttpCall call = HttpUtils.sse(request, new SseListener() {
+            @Override
+            public void onEvent(SseEvent event) {
+                events.add(event);
+            }
+
+            @Override
+            public void onClosed() {
+                sseLatch.countDown();
+            }
+        });
+        assertTrue(sseLatch.await(10, TimeUnit.SECONDS));
+        assertNotNull(call);
+        assertTrue(events.size() >= 1);
+        assertTrue(events.get(0).getData().contains("body:"));
+        assertTrue(events.get(0).getData().contains("\"q\":1"));
+        assertEquals("application/json", request.getContentType());
+        assertNull(request.getHeader("Accept"));
+
+        CountDownLatch mergeLatch = new CountDownLatch(1);
+        final String[] merged = {""};
+        String curl = "curl -X POST '" + baseUrl + "/openai-sse'"
+                + " -H 'Authorization: Bearer tok'"
+                + " -H 'Content-Type: application/json'"
+                + " --data-raw '{\"stream\":true}'";
+        HttpUtils.sseMerge(HttpUtils.parseCurl(curl), SseMergeFormat.OPENAI, new SseMergeListener() {
+            @Override
+            public void onDelta(SseMergeResult snapshot) {
+                merged[0] = snapshot.getContent();
+            }
+
+            @Override
+            public void onComplete(SseMergeResult result) {
+                merged[0] = result.getContent();
+                mergeLatch.countDown();
+            }
+        });
+        assertTrue(mergeLatch.await(10, TimeUnit.SECONDS));
+        assertEquals("Hello", merged[0]);
+
+        CountDownLatch curlSseLatch = new CountDownLatch(1);
+        CopyOnWriteArrayList<SseEvent> curlEvents = new CopyOnWriteArrayList<SseEvent>();
+        HttpRequest fromCurl = HttpUtils.curlToRequest(
+                "curl '" + baseUrl + "/sse' -H 'X-Token: from-curl'");
+        HttpUtils.sse(fromCurl, new SseListener() {
+            @Override
+            public void onEvent(SseEvent event) {
+                curlEvents.add(event);
+            }
+
+            @Override
+            public void onClosed() {
+                curlSseLatch.countDown();
+            }
+        });
+        assertTrue(curlSseLatch.await(10, TimeUnit.SECONDS));
+        assertTrue(curlEvents.size() >= 2);
+        assertEquals("hello", curlEvents.get(0).getData());
+    }
+
+
+//    @Test
+    public void sseFromCurl() throws Exception {
+       String curl = "curl https://token.sensenova.cn/v1/chat/completions   -H \"Authorization: Bearer xxx\"   -H " +
+               "\"Content-Type: application/json\"   -d '{\n" +
+               "    \"model\": \"sensenova-6.8-flash-lite\",\n" +
+               "    \"messages\": [{\"role\": \"user\", \"content\": \"Hello!\"}],\"stream\":true\n" +
+               "  }'\n";
+
+        CountDownLatch mergeLatch = new CountDownLatch(1);
+        final String[] merged = {""};
+
+        HttpUtils.sseMerge(HttpUtils.parseCurl(curl), SseMergeFormat.OPENAI, new SseMergeListener() {
+            @Override
+            public void onDelta(SseMergeResult snapshot) {
+                String thinkingDelta = snapshot.getThinkingDelta();
+                if (thinkingDelta != null) {
+                    System.out.print(thinkingDelta);
+                }
+                merged[0] = snapshot.getContent();
+                if (snapshot.getContent() != null) {
+                    System.out.print(merged[0]);
+                }
+            }
+
+            @Override
+            public void onComplete(SseMergeResult result) {
+                merged[0] = result.getContent();
+                mergeLatch.countDown();
+            }
+        });
+        mergeLatch.await();
+    }
+    // @Test
+    public void sseFromCurl2() throws Exception {
+       String curl = "curl -N https://ark.cn-beijing.volces.com/api/coding/v1/messages \\\n" +
+               "  -H \"Content-Type: application/json\" \\\n" +
+               "  -H \"anthropic-version: 2023-06-01\" \\\n" +
+               "  -H \"Authorization: Bearer your_key\" \\\n" +
+               "  -d '{\n" +
+               "    \"model\": \"ark-code-latest\",\n" +
+               "    \"max_tokens\": 32000,\n" +
+               "    \"stream\": true,\n" +
+               "    \"system\": [\n" +
+               "      {\"type\": \"text\", \"text\": \"You are ZCode, an interactive coding agent ...(此处是完整系统提示词)\"}\n" +
+               "    ],\n" +
+               "    \"messages\": [\n" +
+               "      {\"role\": \"user\",      \"content\": \"hello\"}\n" +
+               "    ],\n" +
+               "    \"tools\": []\n" +
+               "  }'";
+
+
+        CountDownLatch mergeLatch = new CountDownLatch(1);
+        final String[] merged = {""};
+
+        HttpUtils.sseMerge(HttpUtils.parseCurl(curl), SseMergeFormat.CLAUDE, new SseMergeListener() {
+            @Override
+            public void onEvent(SseEvent event) {
+                System.out.println("event = " + event);
+            }
+
+            @Override
+            public void onDelta(SseMergeResult snapshot) {
+                String thinkingDelta = snapshot.getThinkingDelta();
+                if (thinkingDelta != null) {
+                    System.out.print(thinkingDelta);
+                }
+                merged[0] = snapshot.getContent();
+                if (snapshot.getContent() != null) {
+                    System.out.print(merged[0]);
+                }
+            }
+
+            @Override
+            public void onComplete(SseMergeResult result) {
+                merged[0] = result.getContent();
+                mergeLatch.countDown();
+                System.out.println("result:"+result.getContent());
+                System.out.println("error:"+result.getError());
+            }
+
+            @Override
+            public void onError(IOException e) {
+                e.printStackTrace();
+            }
+        });
+        mergeLatch.await();
+    }
 
     @Test
     public void sseWithRequestBody() throws Exception {
