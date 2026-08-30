@@ -1,0 +1,18 @@
+jkit
+Copyright 2026 the jkit contributors
+
+This product includes software developed as part of the wast project
+(https://github.com/wycst/wast), licensed under the Apache License,
+Version 2.0.
+
+The JSON module under `com.alianga.jkit.json` (including its internal
+support package `com.alianga.jkit.json.internal`) is derived from wast:
+
+    Copyright [2020-2026] [wangyunchao]
+
+The javassist-based expression compile mode of the original wast is
+NOT included; the expression engine runs in pure-Java parse mode only.
+
+The remaining classes in this library are derived from ZmlTools
+(https://github.com/wuyongshi/ZmlTools), also licensed under the
+Apache License, Version 2.0.

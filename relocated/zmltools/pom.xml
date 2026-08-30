@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!--
+      把历史坐标 top.wuyongshi:ZmlTools 转到 com.alianga:jkit:2.0.0。
+      这是一份独立的 POM 工程（packaging=pom，不含代码），需用旧 GAV 的 Central 账号发布：
+
+        cd relocated/zmltools && mvn clean deploy -Ppublish
+
+      依赖 top.wuyongshi:ZmlTools:2.0.0 的项目会被 Maven 自动重定向到 jkit，
+      并在构建日志里看到 relocation 提示。新项目请直接声明 com.alianga:jkit。
+    -->
+    <groupId>top.wuyongshi</groupId>
+    <artifactId>ZmlTools</artifactId>
+    <version>2.0.0</version>
+    <packaging>pom</packaging>
+
+    <name>ZmlTools (relocated to jkit)</name>
+    <description>ZmlTools 已迁移为 com.alianga:jkit，本坐标仅用于 Maven relocation。</description>
+    <url>https://github.com/alianga/jkit</url>
+
+    <licenses>
+        <license>
+            <name>Apache License, Version 2.0</name>
+            <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+    <developers>
+        <developer>
+            <name>zhengmingliang</name>
+            <email>zhengmingliang911@gmail.com</email>
+            <url>https://alianga.com</url>
+            <organizationUrl>https://wuyongshi.top</organizationUrl>
+        </developer>
+    </developers>
+    <scm>
+        <connection>scm:git:https://github.com/zhengmingliang/jkit.git</connection>
+        <developerConnection>scm:git:https://github.com/zhengmingliang/jkit.git</developerConnection>
+        <url>https://github.com/alianga/jkit</url>
+    </scm>
+
+    <distributionManagement>
+        <relocation>
+            <groupId>com.alianga</groupId>
+            <artifactId>jkit</artifactId>
+            <version>2.0.0</version>
+            <message>ZmlTools 已迁移为 com.alianga:jkit，请改用新坐标。详见 https://github.com/alianga/jkit</message>
+        </relocation>
+    </distributionManagement>
+
+    <profiles>
+        <!-- 发布用 profile，只有显式 -Ppublish 才生效。id 不叫 release，是为了避免被
+             settings.xml 里全局的 <activeProfile>release</activeProfile> 自动激活，
+             详见主 pom 里同名 profile 的注释。 -->
+        <profile>
+            <id>publish</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-gpg-plugin</artifactId>
+                        <version>3.2.7</version>
+                        <executions>
+                            <execution>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>sign</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.sonatype.central</groupId>
+                        <artifactId>central-publishing-maven-plugin</artifactId>
+                        <version>0.11.0</version>
+                        <extensions>true</extensions>
+                        <configuration>
+                            <publishingServerId>central-nexus-release</publishingServerId>
+                            <autoPublish>true</autoPublish>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+            <distributionManagement>
+                <snapshotRepository>
+                    <id>central</id>
+                    <url>https://central.sonatype.com/repository/maven-snapshots/</url>
+                </snapshotRepository>
+                <repository>
+                    <id>central</id>
+                    <url>https://central.sonatype.com/api/v1/publisher/upload/</url>
+                </repository>
+            </distributionManagement>
+        </profile>
+    </profiles>
+</project>

@@ -1,0 +1,3 @@
+jkit:
+  ext: from-yml
+  only-yml: yml-only

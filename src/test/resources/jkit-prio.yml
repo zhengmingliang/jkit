@@ -1,0 +1,7 @@
+jkit:
+  source: classpath-root
+  shared: from-root
+  port: 1
+  list:
+    - root-a
+    - root-b

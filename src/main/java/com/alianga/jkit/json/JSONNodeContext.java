@@ -1,0 +1,100 @@
+package com.alianga.jkit.json;
+
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * JSON node 解析上下文
+ *
+ * @time 2021/11/11 0:39
+ */
+public final class JSONNodeContext extends JSONParseContext {
+    JSONNodeContext() {
+        allowLastEndComma = true;
+        allowSingleQuotes = true;
+        allowUnquotedFieldNames = true;
+    }
+
+    /***
+     * 提取模式（提取路径的根对象）
+     */
+    public boolean extract;
+    /**
+     * 提取数据列表
+     */
+    public List<Object> extractValues;
+    JSONNodeCollector collector;
+    private JSONKeyValueMap<String> KEY_32_TABLE;
+    static final JSONKeyValueMap<String> GLOBAL_KEY_8_TABLE = new JSONKeyValueMap<String>(2048);
+
+    // Using an independent writer does not interfere with the impact on concurrent serialization
+    @Override
+    JSONCharArrayWriter getContextWriter() {
+        if (writer == null) {
+            writer = new JSONCharArrayWriter(256);
+        } else {
+            writer.clear();
+        }
+        return writer;
+    }
+
+    static String getString(char[] chars, int offset, int len) {
+        if (len <= 8) {
+            long h = 0;
+            for (int i = 0; i < len; ++i) {
+                char c = chars[offset + i];
+                if (c > 0xFF) {
+                    return new String(chars, offset, len);
+                }
+                h = h << 8 | c;
+            }
+            String val = GLOBAL_KEY_8_TABLE.getValueByHash(h);
+            if (val == null) {
+                GLOBAL_KEY_8_TABLE.putExactHashValue(h, val = new String(chars, offset, len));
+            }
+            return val;
+        }
+        return new String(chars, offset, len);
+    }
+
+    void extractValue(JSONNode value) {
+        if (collector.filter(value)) {
+            extractValues.add(collector.map(value));
+        }
+    }
+
+    void enableExtract(JSONNodeCollector nodeCollector) {
+        collector = nodeCollector;
+        extract = true;
+        extractValues = new ArrayList<Object>();
+    }
+
+    /**
+     * 重置上下文状态，以便复用当前实例继续解析。
+     */
+    public void reset() {
+        super.clear();
+    }
+
+    /**
+     * 清空全局的短 key 缓存表（长度不超过 8 个字符的字段名缓存）。
+     */
+    public static void clearCacheKeys() {
+        synchronized (GLOBAL_KEY_8_TABLE) {
+            GLOBAL_KEY_8_TABLE.reset();
+        }
+    }
+
+    @Override
+    JSONKeyValueMap<String> getTable32() {
+        if (KEY_32_TABLE == null) {
+            KEY_32_TABLE = new JSONKeyValueMap<String>(128, new JSONKeyValueMap.EntryNode[128]);
+        }
+        return KEY_32_TABLE;
+    }
+
+    @Override
+    JSONKeyValueMap<String> getTable8() {
+        return GLOBAL_KEY_8_TABLE;
+    }
+}

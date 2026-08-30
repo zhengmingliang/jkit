@@ -1,0 +1,110 @@
+server:
+  port: 8200
+  max-http-request-header-size: 500KB
+  tomcat:
+    connection-timeout: 70000
+spring:
+  mode: standalone
+  servlet:
+    multipart:
+      max-file-size: 500MB
+      max-request-size: 500MB
+  profiles:
+    active: prod
+  application:
+    name: sample-backend
+  messages:
+    encoding: UTF-8
+  main:
+    allow-circular-references: true
+  cache:
+    type: redis
+    jcache:
+      config: classpath:ehcache/ehcache.xml
+    redis:
+      key-prefix: "app-"
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 6379
+      database: 10
+  jackson:
+    parser:
+      allow-numeric-leading-zeros: true
+management:
+  health:
+    ldap:
+      enabled: false
+    redis:
+      enabled: false
+  endpoints:
+    web:
+      exposure:
+        include: "*"
+        exclude: configprops,heapdump
+  endpoint:
+    health:
+      show-details: always
+mybatis:
+  configuration:
+    map-underscore-to-camel-case: true
+logging:
+  file:
+    path: logs/app
+
+quartz:
+  enabled: true
+  scheduler-name: syncJob
+  properties:
+    org:
+      quartz:
+        jobStore:
+          driverDelegateClass: org.quartz.impl.jdbcjobstore.PostgreSQLDelegate
+
+app:
+  version: '@project.version@'
+  login_timeout: 2880
+  front-distributed: true
+  origin-list: http://localhost:8080
+  metadataSync:
+    enable: true
+
+whitelist:
+  paths: /actuator/**, /druid/**, /sysParameter/**
+  gateway-api:
+    domain: http://127.0.0.1:9180
+    key: demo-gateway-key
+  path:
+    driver: drivers
+    data: data
+    ehcache: ehcache
+    static-resource: data/static-resource
+  marketTemplate:
+    find: true
+
+demo:
+  datasource:
+    init-demo: true
+    auto-sync: false
+  feign:
+    sso: auth-service/sso
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+  api-docs:
+    path: /v3/api-docs
+
+knife4j:
+  enable: true
+  setting:
+    language: zh_cn
+    enable-swagger-models: false
+
+druid:
+  monitor:
+    login-username: admin
+    login-password: admin123
+    reset-enable: false
+    exclusions: '*.js,*.gif,*.jpg,*.png,*.css,*.ico,/druid/*'

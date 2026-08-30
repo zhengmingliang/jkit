@@ -1,0 +1,1470 @@
+package com.alianga.jkit.json;
+
+import com.alianga.jkit.json.internal.compiler.MemoryClassLoader;
+import com.alianga.jkit.json.internal.utils.EnvUtils;
+import com.alianga.jkit.reflect.UnsafeHelper;
+
+// Provide memory API that only supports internal use and can bypass security checks
+final class JSONMemoryHandle {
+    static final JSONEndian JSON_ENDIAN;
+    static final JSONEndian JSON_ENDIAN_RAW;
+    static final JSONEndian JSON_ENDIAN_UNSAFE;
+
+    static {
+        JSON_ENDIAN_UNSAFE = EnvUtils.BIG_ENDIAN ? new JSONEndianBigUnsafe() : new JSONEndianLittleUnsafe();
+        JSON_ENDIAN_RAW = new JSONEndianRawCode();
+        JSONEndian jsonEndian = JSON_ENDIAN_UNSAFE;
+        try {
+            // -Djkit.json.required-memory-alignment=true
+            if (JSONVmOptions.isRequiredMemoryAlignment()) {
+                if (EnvUtils.JDK_9_PLUS) {
+                    MemoryClassLoader memoryClassLoader = new MemoryClassLoader();
+                    Class.forName("com.alianga.jkit.json.JSONEndianVarHandle");
+                    if (EnvUtils.BIG_ENDIAN) {
+                        jsonEndian =
+                                (JSONEndian) Class.forName("com.alianga.jkit.json.JSONBigEndianVarHandle")
+                                        .newInstance();
+                    } else {
+                        jsonEndian = (JSONEndian) Class.forName("com.alianga.jkit.json.JSONLittleEndianVarHandle")
+                                .newInstance();
+                    }
+                } else {
+                    jsonEndian = JSON_ENDIAN_RAW;
+                }
+            }
+        } catch (Exception e) {
+            // fallback use UNSAFE
+        }
+        JSON_ENDIAN = jsonEndian;
+    }
+
+    abstract static class Optimizer {
+        public String[] copy(String[] buf, int offset, int len) {
+            String[] result = new String[len];
+            System.arraycopy(buf, offset, result, 0, len);
+            return result;
+        }
+
+        public double[] copy(double[] buf, int offset, int len) {
+            double[] result = new double[len];
+            System.arraycopy(buf, offset, result, 0, len);
+            return result;
+        }
+
+        public long[] copy(long[] buf, int offset, int len) {
+            long[] result = new long[len];
+            System.arraycopy(buf, offset, result, 0, len);
+            return result;
+        }
+
+        public char[] copyChars(char[] buf, int offset, int len) {
+            char[] result = new char[len];
+            System.arraycopy(buf, offset, result, 0, len);
+            return result;
+        }
+
+        public byte[] copyBytes(byte[] buf, int offset, int len) {
+            byte[] result = new byte[len];
+            System.arraycopy(buf, offset, result, 0, len);
+            return result;
+        }
+
+        void multipleCopyMemory(byte[] source, long sourceOff, byte[] target, long targetOff) {
+        }
+
+        void copyMemory(byte[] source, int sourceOff, byte[] target, int targetOff) {
+        }
+
+        public char[] asciiBytesToChars(byte[] buf, int offset, int len) {
+            char[] result = new char[len];
+            for (int j = 0; j < len; ++j) {
+                result[j] = (char) buf[offset + j];
+            }
+            return result;
+        }
+    }
+
+    static final Optimizer[] SIZE_INSTANCES = new Optimizer[]{
+            s0(),
+            s1(),
+            s2(),
+            s3(),
+            s4(),
+            s5(),
+            s6(),
+            s7(),
+            s8(),
+            s9(),
+            s10(),
+            s11(),
+            s12(),
+            s13(),
+            s14(),
+            s15(),
+            s16(),
+            s17(),
+            s18(),
+            s19(),
+            s20(),
+    };
+    static final int SIZE_LEN = SIZE_INSTANCES.length;
+
+    static Optimizer s0() {
+        return new Optimizer() {
+            @Override
+            public char[] copyChars(char[] buf, int offset, int len) {
+                return JSONGeneral.EMPTY_CHARS;
+            }
+
+            @Override
+            public byte[] copyBytes(byte[] buf, int offset, int len) {
+                return JSONGeneral.EMPTY_BYTES;
+            }
+
+            @Override
+            public String[] copy(String[] buf, int offset, int len) {
+                return JSONGeneral.EMPTY_STRINGS;
+            }
+
+            @Override
+            public double[] copy(double[] buf, int offset, int len) {
+                return JSONGeneral.EMPTY_DOUBLES;
+            }
+
+            @Override
+            public long[] copy(long[] buf, int offset, int len) {
+                return JSONGeneral.EMPTY_LONGS;
+            }
+
+            @Override
+            public char[] asciiBytesToChars(byte[] buf, int offset, int len) {
+                return JSONGeneral.EMPTY_CHARS;
+            }
+        };
+    }
+
+    static Optimizer s1() {
+        return new Optimizer() {
+            @Override
+            public char[] copyChars(char[] buf, int offset, int len) {
+                return new char[]{buf[offset]};
+            }
+
+            @Override
+            public byte[] copyBytes(byte[] buf, int offset, int len) {
+                return new byte[]{buf[offset]};
+            }
+
+            @Override
+            public String[] copy(String[] buf, int offset, int len) {
+                return new String[]{buf[offset]};
+            }
+
+            @Override
+            public double[] copy(double[] buf, int offset, int len) {
+                return new double[]{buf[offset]};
+            }
+
+            @Override
+            public long[] copy(long[] buf, int offset, int len) {
+                return new long[]{buf[offset]};
+            }
+
+            void multipleCopyMemory(byte[] source, long sourceOff, byte[] target, long targetOff) {
+                // TODO
+//                UNSAFE.putLong(target, targetOff, UNSAFE.getLong(source, sourceOff));
+            }
+
+            void copyMemory(byte[] source, int sourceOff, byte[] target, int targetOff) {
+                target[targetOff] = source[sourceOff];
+            }
+
+            @Override
+            public char[] asciiBytesToChars(byte[] buf, int offset, int len) {
+                return new char[]{(char) buf[offset]};
+            }
+        };
+    }
+
+    static Optimizer s2() {
+        return new Optimizer() {
+            @Override
+            public char[] copyChars(char[] buf, int offset, int len) {
+                char[] chars = new char[2];
+                putInt(chars, 0, getInt(buf, offset));
+                return chars;
+            }
+
+            @Override
+            public byte[] copyBytes(byte[] buf, int offset, int len) {
+                byte[] bytes = new byte[2];
+                putShort(bytes, 0, getShort(buf, offset));
+                return bytes;
+            }
+
+            @Override
+            public String[] copy(String[] buf, int offset, int len) {
+                return new String[]{buf[offset++], buf[offset]};
+            }
+
+            @Override
+            public double[] copy(double[] buf, int offset, int len) {
+                return new double[]{buf[offset++], buf[offset]};
+            }
+
+            @Override
+            public long[] copy(long[] buf, int offset, int len) {
+                return new long[]{buf[offset++], buf[offset]};
+            }
+
+            void multipleCopyMemory(byte[] source, long sourceOff, byte[] target, long targetOff) {
+                // TODO
+            }
+
+            void copyMemory(byte[] source, int sourceOff, byte[] target, int targetOff) {
+                JSON_ENDIAN.putShort(target, targetOff, JSON_ENDIAN.getShort(source, sourceOff));
+            }
+
+            @Override
+            public char[] asciiBytesToChars(byte[] buf, int offset, int len) {
+                return new char[]{(char) buf[offset++], (char) buf[offset]};
+            }
+        };
+    }
+
+    static Optimizer s3() {
+        return new Optimizer() {
+            @Override
+            public char[] copyChars(char[] buf, int offset, int len) {
+                char[] chars = new char[3];
+                putInt(chars, 0, getInt(buf, offset));
+                chars[2] = buf[offset + 2];
+                return chars;
+            }
+
+            @Override
+            public byte[] copyBytes(byte[] buf, int offset, int len) {
+                byte[] bytes = new byte[3];
+                putShort(bytes, 0, getShort(buf, offset));
+                bytes[2] = buf[offset + 2];
+                return bytes;
+            }
+
+            @Override
+            public String[] copy(String[] buf, int offset, int len) {
+                return new String[]{buf[offset++], buf[offset++], buf[offset]};
+            }
+
+            @Override
+            public double[] copy(double[] buf, int offset, int len) {
+                return new double[]{buf[offset++], buf[offset++], buf[offset]};
+            }
+
+            @Override
+            public long[] copy(long[] buf, int offset, int len) {
+                return new long[]{buf[offset++], buf[offset++], buf[offset]};
+            }
+
+            void multipleCopyMemory(byte[] source, long sourceOff, byte[] target, long targetOff) {
+                // TODO
+            }
+
+            void copyMemory(byte[] source, int sourceOff, byte[] target, int targetOff) {
+                JSON_ENDIAN.putShort(target, targetOff, JSON_ENDIAN.getShort(source, sourceOff));
+                target[targetOff + 2] = source[sourceOff + 2];
+            }
+
+            @Override
+            public char[] asciiBytesToChars(byte[] buf, int offset, int len) {
+                return new char[]{(char) buf[offset++], (char) buf[offset++], (char) buf[offset]};
+            }
+        };
+    }
+
+    static Optimizer s4() {
+        return new Optimizer() {
+            @Override
+            public char[] copyChars(char[] buf, int offset, int len) {
+                char[] chars = new char[4];
+                putLong(chars, 0, getLong(buf, offset));
+                return chars;
+            }
+
+            @Override
+            public byte[] copyBytes(byte[] buf, int offset, int len) {
+                byte[] bytes = new byte[4];
+                putInt(bytes, 0, getInt(buf, offset));
+                return bytes;
+            }
+
+            @Override
+            public String[] copy(String[] buf, int offset, int len) {
+                return new String[]{buf[offset++], buf[offset++], buf[offset++], buf[offset]};
+            }
+
+            @Override
+            public double[] copy(double[] buf, int offset, int len) {
+                return new double[]{buf[offset++], buf[offset++], buf[offset++], buf[offset]};
+            }
+
+            @Override
+            public long[] copy(long[] buf, int offset, int len) {
+                return new long[]{buf[offset++], buf[offset++], buf[offset++], buf[offset]};
+            }
+
+            void multipleCopyMemory(byte[] source, long sourceOff, byte[] target, long targetOff) {
+                // todo
+            }
+
+            void copyMemory(byte[] source, int sourceOff, byte[] target, int targetOff) {
+                JSON_ENDIAN.putInt(target, targetOff, JSON_ENDIAN.getInt(source, sourceOff));
+            }
+
+            @Override
+            public char[] asciiBytesToChars(byte[] buf, int offset, int len) {
+                return new char[]{(char) buf[offset++], (char) buf[offset++], (char) buf[offset++], (char) buf[offset]};
+            }
+        };
+    }
+
+    static Optimizer s5() {
+        return new Optimizer() {
+            @Override
+            public char[] copyChars(char[] buf, int offset, int len) {
+                char[] chars = new char[5];
+                putLong(chars, 0, getLong(buf, offset));
+                chars[4] = buf[offset + 4];
+                return chars;
+            }
+
+            @Override
+            public byte[] copyBytes(byte[] buf, int offset, int len) {
+                byte[] bytes = new byte[5];
+                putInt(bytes, 0, getInt(buf, offset));
+                bytes[4] = buf[offset + 4];
+                return bytes;
+            }
+
+            @Override
+            public String[] copy(String[] buf, int offset, int len) {
+                return new String[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset]};
+            }
+
+            @Override
+            public double[] copy(double[] buf, int offset, int len) {
+                return new double[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset]};
+            }
+
+            @Override
+            public long[] copy(long[] buf, int offset, int len) {
+                return new long[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset]};
+            }
+
+            void multipleCopyMemory(byte[] source, long sourceOff, byte[] target, long targetOff) {
+                // TODO
+            }
+
+            void copyMemory(byte[] source, int sourceOff, byte[] target, int targetOff) {
+                JSON_ENDIAN.putInt(target, targetOff, JSON_ENDIAN.getInt(source, sourceOff));
+                target[targetOff + 4] = source[sourceOff + 4];
+            }
+
+            @Override
+            public char[] asciiBytesToChars(byte[] buf, int offset, int len) {
+                return new char[]{(char) buf[offset++], (char) buf[offset++], (char) buf[offset++],
+                        (char) buf[offset++], (char) buf[offset]};
+            }
+        };
+    }
+
+    static Optimizer s6() {
+        return new Optimizer() {
+            @Override
+            public char[] copyChars(char[] buf, int offset, int len) {
+                char[] chars = new char[6];
+                putLong(chars, 0, getLong(buf, offset));
+                putInt(chars, 4, getInt(buf, offset + 4));
+                return chars;
+            }
+
+            @Override
+            public byte[] copyBytes(byte[] buf, int offset, int len) {
+                byte[] bytes = new byte[6];
+                putInt(bytes, 0, getInt(buf, offset));
+                putShort(bytes, 4, getShort(buf, offset + 4));
+                return bytes;
+            }
+
+            @Override
+            public String[] copy(String[] buf, int offset, int len) {
+                return new String[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset]};
+            }
+
+            @Override
+            public double[] copy(double[] buf, int offset, int len) {
+                return new double[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset]};
+            }
+
+            @Override
+            public long[] copy(long[] buf, int offset, int len) {
+                return new long[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset]};
+            }
+
+            void multipleCopyMemory(byte[] source, long sourceOff, byte[] target, long targetOff) {
+                // TODO
+            }
+
+            void copyMemory(byte[] source, int sourceOff, byte[] target, int targetOff) {
+                JSON_ENDIAN.putInt(target, targetOff, JSON_ENDIAN.getInt(source, sourceOff));
+                JSON_ENDIAN.putShort(target, targetOff + 4, JSON_ENDIAN.getShort(source, sourceOff + 4));
+            }
+
+            @Override
+            public char[] asciiBytesToChars(byte[] buf, int offset, int len) {
+                return new char[]{(char) buf[offset++], (char) buf[offset++], (char) buf[offset++],
+                        (char) buf[offset++], (char) buf[offset++], (char) buf[offset]};
+            }
+        };
+    }
+
+    static Optimizer s7() {
+        return new Optimizer() {
+            @Override
+            public char[] copyChars(char[] buf, int offset, int len) {
+                char[] chars = new char[7];
+                putLong(chars, 0, getLong(buf, offset));
+                putLong(chars, 3, getLong(buf, offset + 3));
+                return chars;
+            }
+
+            @Override
+            public byte[] copyBytes(byte[] buf, int offset, int len) {
+                byte[] bytes = new byte[7];
+                putInt(bytes, 0, getInt(buf, offset));
+                putInt(bytes, 3, getInt(buf, offset + 3));
+                return bytes;
+            }
+
+            @Override
+            public String[] copy(String[] buf, int offset, int len) {
+                return new String[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset]};
+            }
+
+            @Override
+            public double[] copy(double[] buf, int offset, int len) {
+                return new double[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset]};
+            }
+
+            @Override
+            public long[] copy(long[] buf, int offset, int len) {
+                return new long[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset]};
+            }
+
+            void multipleCopyMemory(byte[] source, long sourceOff, byte[] target, long targetOff) {
+                // TODO
+            }
+
+            void copyMemory(byte[] source, int sourceOff, byte[] target, int targetOff) {
+                JSON_ENDIAN.putInt(target, targetOff, JSON_ENDIAN.getInt(source, sourceOff));
+                JSON_ENDIAN.putShort(target, targetOff + 4, JSON_ENDIAN.getShort(source, sourceOff + 4));
+                target[targetOff + 6] = source[sourceOff + 6];
+            }
+
+            @Override
+            public char[] asciiBytesToChars(byte[] buf, int offset, int len) {
+                return new char[]{(char) buf[offset++], (char) buf[offset++], (char) buf[offset++],
+                        (char) buf[offset++], (char) buf[offset++], (char) buf[offset++], (char) buf[offset]};
+            }
+        };
+    }
+
+    static Optimizer s8() {
+        return new Optimizer() {
+            @Override
+            public char[] copyChars(char[] buf, int offset, int len) {
+                char[] chars = new char[8];
+                putLong(chars, 0, getLong(buf, offset));
+                putLong(chars, 4, getLong(buf, offset + 4));
+                return chars;
+            }
+
+            @Override
+            public byte[] copyBytes(byte[] buf, int offset, int len) {
+                byte[] bytes = new byte[8];
+                putLong(bytes, 0, getLong(buf, offset));
+                return bytes;
+            }
+
+            @Override
+            public String[] copy(String[] buf, int offset, int len) {
+                return new String[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset]};
+            }
+
+            @Override
+            public double[] copy(double[] buf, int offset, int len) {
+                return new double[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset]};
+            }
+
+            @Override
+            public long[] copy(long[] buf, int offset, int len) {
+                return new long[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset]};
+            }
+
+            void multipleCopyMemory(byte[] source, long sourceOff, byte[] target, long targetOff) {
+                // TODO
+            }
+
+            void copyMemory(byte[] source, int sourceOff, byte[] target, int targetOff) {
+                JSON_ENDIAN.putLong(target, targetOff, JSON_ENDIAN.getLong(source, sourceOff));
+            }
+
+            @Override
+            public char[] asciiBytesToChars(byte[] buf, int offset, int len) {
+                return new char[]{(char) buf[offset++], (char) buf[offset++], (char) buf[offset++],
+                        (char) buf[offset++], (char) buf[offset++], (char) buf[offset++], (char) buf[offset++],
+                        (char) buf[offset]};
+            }
+        };
+    }
+
+    static Optimizer s9() {
+        return new Optimizer() {
+            @Override
+            public char[] copyChars(char[] buf, int offset, int len) {
+                char[] chars = new char[9];
+                putLong(chars, 0, getLong(buf, offset));
+                putLong(chars, 4, getLong(buf, offset + 4));
+                chars[8] = buf[offset + 8];
+                return chars;
+            }
+
+            @Override
+            public byte[] copyBytes(byte[] buf, int offset, int len) {
+                byte[] bytes = new byte[9];
+                putLong(bytes, 0, getLong(buf, offset));
+                bytes[8] = buf[offset + 8];
+                return bytes;
+            }
+
+            @Override
+            public String[] copy(String[] buf, int offset, int len) {
+                return new String[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset]};
+            }
+
+            @Override
+            public double[] copy(double[] buf, int offset, int len) {
+                return new double[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset]};
+            }
+
+            @Override
+            public long[] copy(long[] buf, int offset, int len) {
+                return new long[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset]};
+            }
+
+            @Override
+            public char[] asciiBytesToChars(byte[] buf, int offset, int len) {
+                return new char[]{(char) buf[offset++], (char) buf[offset++], (char) buf[offset++],
+                        (char) buf[offset++], (char) buf[offset++], (char) buf[offset++], (char) buf[offset++],
+                        (char) buf[offset++], (char) buf[offset]};
+            }
+        };
+    }
+
+    static Optimizer s10() {
+        return new Optimizer() {
+            @Override
+            public char[] copyChars(char[] buf, int offset, int len) {
+                char[] chars = new char[10];
+                putLong(chars, 0, getLong(buf, offset));
+                putLong(chars, 4, getLong(buf, offset + 4));
+                putInt(chars, 8, getInt(buf, offset + 8));
+                return chars;
+            }
+
+            @Override
+            public byte[] copyBytes(byte[] buf, int offset, int len) {
+                byte[] bytes = new byte[10];
+                putLong(bytes, 0, getLong(buf, offset));
+                putShort(bytes, 8, getShort(buf, offset + 8));
+                return bytes;
+            }
+
+            @Override
+            public String[] copy(String[] buf, int offset, int len) {
+                return new String[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset]};
+            }
+
+            @Override
+            public double[] copy(double[] buf, int offset, int len) {
+                return new double[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset]};
+            }
+
+            @Override
+            public long[] copy(long[] buf, int offset, int len) {
+                return new long[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset]};
+            }
+
+            @Override
+            public char[] asciiBytesToChars(byte[] buf, int offset, int len) {
+                return new char[]{(char) buf[offset++], (char) buf[offset++], (char) buf[offset++],
+                        (char) buf[offset++], (char) buf[offset++], (char) buf[offset++], (char) buf[offset++],
+                        (char) buf[offset++], (char) buf[offset++], (char) buf[offset]};
+            }
+        };
+    }
+
+    static Optimizer s11() {
+        return new Optimizer() {
+            @Override
+            public char[] copyChars(char[] buf, int offset, int len) {
+                char[] chars = new char[11];
+                putLong(chars, 0, getLong(buf, offset));
+                putLong(chars, 4, getLong(buf, offset + 4));
+                putLong(chars, 7, getLong(buf, offset + 7));
+                return chars;
+            }
+
+            @Override
+            public byte[] copyBytes(byte[] buf, int offset, int len) {
+                byte[] bytes = new byte[11];
+                putLong(bytes, 0, getLong(buf, offset));
+                putInt(bytes, 7, getInt(buf, offset + 7));
+                return bytes;
+            }
+
+            @Override
+            public String[] copy(String[] buf, int offset, int len) {
+                return new String[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset]};
+            }
+
+            @Override
+            public double[] copy(double[] buf, int offset, int len) {
+                return new double[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset]};
+            }
+
+            @Override
+            public long[] copy(long[] buf, int offset, int len) {
+                return new long[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset]};
+            }
+
+            @Override
+            public char[] asciiBytesToChars(byte[] buf, int offset, int len) {
+                return new char[]{(char) buf[offset++], (char) buf[offset++], (char) buf[offset++],
+                        (char) buf[offset++], (char) buf[offset++], (char) buf[offset++], (char) buf[offset++],
+                        (char) buf[offset++], (char) buf[offset++], (char) buf[offset++], (char) buf[offset]};
+            }
+        };
+    }
+
+    static Optimizer s12() {
+        return new Optimizer() {
+            @Override
+            public char[] copyChars(char[] buf, int offset, int len) {
+                char[] chars = new char[12];
+                putLong(chars, 0, getLong(buf, offset));
+                putLong(chars, 4, getLong(buf, offset + 4));
+                putLong(chars, 8, getLong(buf, offset + 8));
+                return chars;
+            }
+
+            @Override
+            public byte[] copyBytes(byte[] buf, int offset, int len) {
+                byte[] bytes = new byte[12];
+                putLong(bytes, 0, getLong(buf, offset));
+                putInt(bytes, 8, getInt(buf, offset + 8));
+                return bytes;
+            }
+
+            @Override
+            public String[] copy(String[] buf, int offset, int len) {
+                return new String[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset]};
+            }
+
+            @Override
+            public double[] copy(double[] buf, int offset, int len) {
+                return new double[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset]};
+            }
+
+            @Override
+            public long[] copy(long[] buf, int offset, int len) {
+                return new long[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset]};
+            }
+
+            @Override
+            public char[] asciiBytesToChars(byte[] buf, int offset, int len) {
+                return new char[]{(char) buf[offset++], (char) buf[offset++], (char) buf[offset++],
+                        (char) buf[offset++], (char) buf[offset++], (char) buf[offset++], (char) buf[offset++],
+                        (char) buf[offset++], (char) buf[offset++], (char) buf[offset++], (char) buf[offset++],
+                        (char) buf[offset]};
+            }
+        };
+    }
+
+    static Optimizer s13() {
+        return new Optimizer() {
+            @Override
+            public char[] copyChars(char[] buf, int offset, int len) {
+                char[] chars = new char[13];
+                putLong(chars, 0, getLong(buf, offset));
+                putLong(chars, 4, getLong(buf, offset + 4));
+                putLong(chars, 8, getLong(buf, offset + 8));
+                chars[12] = buf[offset + 12];
+                return chars;
+            }
+
+            @Override
+            public byte[] copyBytes(byte[] buf, int offset, int len) {
+                byte[] bytes = new byte[13];
+                putLong(bytes, 0, getLong(buf, offset));
+                putInt(bytes, 8, getInt(buf, offset + 8));
+                bytes[12] = buf[offset + 12];
+                return bytes;
+            }
+
+            @Override
+            public String[] copy(String[] buf, int offset, int len) {
+                return new String[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset]};
+            }
+
+            @Override
+            public double[] copy(double[] buf, int offset, int len) {
+                return new double[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset]};
+            }
+
+            @Override
+            public long[] copy(long[] buf, int offset, int len) {
+                return new long[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset]};
+            }
+
+            @Override
+            public char[] asciiBytesToChars(byte[] buf, int offset, int len) {
+                return new char[]{(char) buf[offset++], (char) buf[offset++], (char) buf[offset++],
+                        (char) buf[offset++], (char) buf[offset++], (char) buf[offset++], (char) buf[offset++],
+                        (char) buf[offset++], (char) buf[offset++], (char) buf[offset++], (char) buf[offset++],
+                        (char) buf[offset++], (char) buf[offset]};
+            }
+        };
+    }
+
+    static Optimizer s14() {
+        return new Optimizer() {
+            @Override
+            public char[] copyChars(char[] buf, int offset, int len) {
+                char[] chars = new char[14];
+                putLong(chars, 0, getLong(buf, offset));
+                putLong(chars, 4, getLong(buf, offset + 4));
+                putLong(chars, 8, getLong(buf, offset + 8));
+                putInt(chars, 12, getInt(buf, offset + 12));
+                return chars;
+            }
+
+            @Override
+            public byte[] copyBytes(byte[] buf, int offset, int len) {
+                byte[] bytes = new byte[14];
+                putLong(bytes, 0, getLong(buf, offset));
+                putLong(bytes, 6, getLong(buf, offset + 6));
+                return bytes;
+            }
+
+            @Override
+            public String[] copy(String[] buf, int offset, int len) {
+                return new String[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset]};
+            }
+
+            @Override
+            public double[] copy(double[] buf, int offset, int len) {
+                return new double[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset]};
+            }
+
+            @Override
+            public long[] copy(long[] buf, int offset, int len) {
+                return new long[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset]};
+            }
+
+            @Override
+            public char[] asciiBytesToChars(byte[] buf, int offset, int len) {
+                return new char[]{(char) buf[offset++], (char) buf[offset++], (char) buf[offset++],
+                        (char) buf[offset++], (char) buf[offset++], (char) buf[offset++], (char) buf[offset++],
+                        (char) buf[offset++], (char) buf[offset++], (char) buf[offset++], (char) buf[offset++],
+                        (char) buf[offset++], (char) buf[offset++], (char) buf[offset]};
+            }
+        };
+    }
+
+    static Optimizer s15() {
+        return new Optimizer() {
+            @Override
+            public char[] copyChars(char[] buf, int offset, int len) {
+                char[] chars = new char[15];
+                putLong(chars, 0, getLong(buf, offset));
+                putLong(chars, 4, getLong(buf, offset + 4));
+                putLong(chars, 8, getLong(buf, offset + 8));
+                putLong(chars, 11, getLong(buf, offset + 11));
+                return chars;
+            }
+
+            @Override
+            public byte[] copyBytes(byte[] buf, int offset, int len) {
+                byte[] bytes = new byte[15];
+                putLong(bytes, 0, getLong(buf, offset));
+                putLong(bytes, 7, getLong(buf, offset + 7));
+                return bytes;
+            }
+
+            @Override
+            public String[] copy(String[] buf, int offset, int len) {
+                return new String[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset]};
+            }
+
+            @Override
+            public double[] copy(double[] buf, int offset, int len) {
+                return new double[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset]};
+            }
+
+            @Override
+            public long[] copy(long[] buf, int offset, int len) {
+                return new long[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset]};
+            }
+
+            @Override
+            public char[] asciiBytesToChars(byte[] buf, int offset, int len) {
+                return new char[]{(char) buf[offset++], (char) buf[offset++], (char) buf[offset++],
+                        (char) buf[offset++], (char) buf[offset++], (char) buf[offset++], (char) buf[offset++],
+                        (char) buf[offset++], (char) buf[offset++], (char) buf[offset++], (char) buf[offset++],
+                        (char) buf[offset++], (char) buf[offset++], (char) buf[offset++], (char) buf[offset]};
+            }
+        };
+    }
+
+    static Optimizer s16() {
+        return new Optimizer() {
+            @Override
+            public char[] copyChars(char[] buf, int offset, int len) {
+                char[] chars = new char[16];
+                putLong(chars, 0, getLong(buf, offset));
+                putLong(chars, 4, getLong(buf, offset + 4));
+                putLong(chars, 8, getLong(buf, offset + 8));
+                putLong(chars, 12, getLong(buf, offset + 12));
+                return chars;
+            }
+
+            @Override
+            public byte[] copyBytes(byte[] buf, int offset, int len) {
+                byte[] bytes = new byte[16];
+                putLong(bytes, 0, getLong(buf, offset));
+                putLong(bytes, 8, getLong(buf, offset + 8));
+                return bytes;
+            }
+
+            @Override
+            public String[] copy(String[] buf, int offset, int len) {
+                return new String[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset]};
+            }
+
+            @Override
+            public double[] copy(double[] buf, int offset, int len) {
+                return new double[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset]};
+            }
+
+            @Override
+            public long[] copy(long[] buf, int offset, int len) {
+                return new long[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset]};
+            }
+
+            @Override
+            public char[] asciiBytesToChars(byte[] buf, int offset, int len) {
+                return new char[]{(char) buf[offset++], (char) buf[offset++], (char) buf[offset++],
+                        (char) buf[offset++], (char) buf[offset++], (char) buf[offset++], (char) buf[offset++],
+                        (char) buf[offset++], (char) buf[offset++], (char) buf[offset++], (char) buf[offset++],
+                        (char) buf[offset++], (char) buf[offset++], (char) buf[offset++], (char) buf[offset++],
+                        (char) buf[offset]};
+            }
+        };
+    }
+
+    static Optimizer s17() {
+        return new Optimizer() {
+            @Override
+            public char[] copyChars(char[] buf, int offset, int len) {
+                char[] chars = new char[17];
+                putLong(chars, 0, getLong(buf, offset));
+                putLong(chars, 4, getLong(buf, offset + 4));
+                putLong(chars, 8, getLong(buf, offset + 8));
+                putLong(chars, 12, getLong(buf, offset + 12));
+                chars[16] = buf[offset + 16];
+                return chars;
+            }
+
+            @Override
+            public byte[] copyBytes(byte[] buf, int offset, int len) {
+                byte[] bytes = new byte[17];
+                putLong(bytes, 0, getLong(buf, offset));
+                putLong(bytes, 8, getLong(buf, offset + 8));
+                bytes[16] = buf[offset + 16];
+                return bytes;
+            }
+
+            @Override
+            public String[] copy(String[] buf, int offset, int len) {
+                return new String[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset]};
+            }
+
+            @Override
+            public double[] copy(double[] buf, int offset, int len) {
+                return new double[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset]};
+            }
+
+            @Override
+            public long[] copy(long[] buf, int offset, int len) {
+                return new long[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset]};
+            }
+
+            @Override
+            public char[] asciiBytesToChars(byte[] buf, int offset, int len) {
+                return new char[]{(char) buf[offset++], (char) buf[offset++], (char) buf[offset++],
+                        (char) buf[offset++], (char) buf[offset++], (char) buf[offset++], (char) buf[offset++],
+                        (char) buf[offset++], (char) buf[offset++], (char) buf[offset++], (char) buf[offset++],
+                        (char) buf[offset++], (char) buf[offset++], (char) buf[offset++], (char) buf[offset++],
+                        (char) buf[offset++], (char) buf[offset]};
+            }
+        };
+    }
+
+    static Optimizer s18() {
+        return new Optimizer() {
+            @Override
+            public char[] copyChars(char[] buf, int offset, int len) {
+                char[] chars = new char[18];
+                putLong(chars, 0, getLong(buf, offset));
+                putLong(chars, 4, getLong(buf, offset + 4));
+                putLong(chars, 8, getLong(buf, offset + 8));
+                putLong(chars, 12, getLong(buf, offset + 12));
+                putInt(chars, 16, getInt(buf, offset + 16));
+                return chars;
+            }
+
+            @Override
+            public byte[] copyBytes(byte[] buf, int offset, int len) {
+                byte[] bytes = new byte[18];
+                putLong(bytes, 0, getLong(buf, offset));
+                putLong(bytes, 8, getLong(buf, offset + 8));
+                putShort(bytes, 16, getShort(buf, offset + 16));
+                return bytes;
+            }
+
+            @Override
+            public String[] copy(String[] buf, int offset, int len) {
+                return new String[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset]};
+            }
+
+            @Override
+            public double[] copy(double[] buf, int offset, int len) {
+                return new double[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset]};
+            }
+
+            @Override
+            public long[] copy(long[] buf, int offset, int len) {
+                return new long[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset]};
+            }
+
+            @Override
+            public char[] asciiBytesToChars(byte[] buf, int offset, int len) {
+                return new char[]{(char) buf[offset++], (char) buf[offset++], (char) buf[offset++],
+                        (char) buf[offset++], (char) buf[offset++], (char) buf[offset++], (char) buf[offset++],
+                        (char) buf[offset++], (char) buf[offset++], (char) buf[offset++], (char) buf[offset++],
+                        (char) buf[offset++], (char) buf[offset++], (char) buf[offset++], (char) buf[offset++],
+                        (char) buf[offset++], (char) buf[offset++], (char) buf[offset]};
+            }
+        };
+    }
+
+    static Optimizer s19() {
+        return new Optimizer() {
+            @Override
+            public char[] copyChars(char[] buf, int offset, int len) {
+                char[] chars = new char[19];
+                putLong(chars, 0, getLong(buf, offset));
+                putLong(chars, 4, getLong(buf, offset + 4));
+                putLong(chars, 8, getLong(buf, offset + 8));
+                putLong(chars, 12, getLong(buf, offset + 12));
+                putLong(chars, 15, getLong(buf, offset + 15));
+                return chars;
+            }
+
+            @Override
+            public byte[] copyBytes(byte[] buf, int offset, int len) {
+                byte[] bytes = new byte[19];
+                putLong(bytes, 0, getLong(buf, offset));
+                putLong(bytes, 8, getLong(buf, offset + 8));
+                putInt(bytes, 15, getInt(buf, offset + 15));
+                return bytes;
+            }
+
+            @Override
+            public String[] copy(String[] buf, int offset, int len) {
+                return new String[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset]};
+            }
+
+            @Override
+            public double[] copy(double[] buf, int offset, int len) {
+                return new double[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset]};
+            }
+
+            @Override
+            public long[] copy(long[] buf, int offset, int len) {
+                return new long[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset]};
+            }
+
+            @Override
+            public char[] asciiBytesToChars(byte[] buf, int offset, int len) {
+                return new char[]{(char) buf[offset++], (char) buf[offset++], (char) buf[offset++],
+                        (char) buf[offset++], (char) buf[offset++], (char) buf[offset++], (char) buf[offset++],
+                        (char) buf[offset++], (char) buf[offset++], (char) buf[offset++], (char) buf[offset++],
+                        (char) buf[offset++], (char) buf[offset++], (char) buf[offset++], (char) buf[offset++],
+                        (char) buf[offset++], (char) buf[offset++], (char) buf[offset++], (char) buf[offset]};
+            }
+        };
+    }
+
+    static Optimizer s20() {
+        return new Optimizer() {
+            @Override
+            public char[] copyChars(char[] buf, int offset, int len) {
+                char[] chars = new char[20];
+                putLong(chars, 0, getLong(buf, offset));
+                putLong(chars, 4, getLong(buf, offset + 4));
+                putLong(chars, 8, getLong(buf, offset + 8));
+                putLong(chars, 12, getLong(buf, offset + 12));
+                putLong(chars, 16, getLong(buf, offset + 16));
+                return chars;
+            }
+
+            @Override
+            public byte[] copyBytes(byte[] buf, int offset, int len) {
+                byte[] bytes = new byte[20];
+                putLong(bytes, 0, getLong(buf, offset));
+                putLong(bytes, 8, getLong(buf, offset + 8));
+                putInt(bytes, 16, getInt(buf, offset + 16));
+                return bytes;
+            }
+
+            @Override
+            public String[] copy(String[] buf, int offset, int len) {
+                return new String[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset]};
+            }
+
+            @Override
+            public double[] copy(double[] buf, int offset, int len) {
+                return new double[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset]};
+            }
+
+            @Override
+            public long[] copy(long[] buf, int offset, int len) {
+                return new long[]{buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++], buf[offset++],
+                        buf[offset++], buf[offset++], buf[offset]};
+            }
+
+            @Override
+            public char[] asciiBytesToChars(byte[] buf, int offset, int len) {
+                return new char[]{(char) buf[offset++], (char) buf[offset++], (char) buf[offset++],
+                        (char) buf[offset++], (char) buf[offset++], (char) buf[offset++], (char) buf[offset++],
+                        (char) buf[offset++], (char) buf[offset++], (char) buf[offset++], (char) buf[offset++],
+                        (char) buf[offset++], (char) buf[offset++], (char) buf[offset++], (char) buf[offset++],
+                        (char) buf[offset++], (char) buf[offset++], (char) buf[offset++], (char) buf[offset++],
+                        (char) buf[offset]};
+            }
+        };
+    }
+
+    static long getLong(byte[] buf, int offset) {
+        return JSON_ENDIAN.getLong(buf, offset);
+    }
+
+    static long getLong(char[] buf, int offset) {
+        return JSON_ENDIAN.getLong(buf, offset);
+    }
+
+    static int getInt(byte[] buf, int offset) {
+        return JSON_ENDIAN.getInt(buf, offset);
+    }
+
+    static int getInt(char[] buf, int offset) {
+        return JSON_ENDIAN.getInt(buf, offset);
+    }
+
+    static short getShort(byte[] buf, int offset) {
+        return JSON_ENDIAN.getShort(buf, offset);
+    }
+
+    static int putInt(char[] buf, int offset, int value) {
+        JSON_ENDIAN.putInt(buf, offset, value);
+        return 2;
+    }
+
+    static int putLong(char[] buf, int offset, long value) {
+        JSON_ENDIAN.putLong(buf, offset, value);
+        return 4;
+    }
+
+    static int putLong(byte[] buf, int offset, long value) {
+        JSON_ENDIAN.putLong(buf, offset, value);
+        return 8;
+    }
+
+    static int putInt(byte[] buf, int offset, int value) {
+        JSON_ENDIAN.putInt(buf, offset, value);
+        return 4;
+    }
+
+    static int putShort(byte[] buf, int offset, short value) {
+        JSON_ENDIAN.putShort(buf, offset, value);
+        return 2;
+    }
+
+    static int[] getByteInts(String value) {
+        byte[] bytes = value.getBytes();
+        int byteLen = bytes.length;
+        int l = byteLen >> 2;
+        int rem = byteLen & 3;
+        if (rem > 0) {
+            ++l;
+        }
+        byte[] buf = new byte[l << 2];
+        System.arraycopy(bytes, 0, buf, 0, byteLen);
+        int[] results = new int[l];
+        int offset = 0;
+        for (int i = 0; i < l; ++i) {
+            results[i] = getInt(buf, offset);
+            offset += 4;
+        }
+        return results;
+    }
+
+    static long[] getCharLongs(String value) {
+        char[] chars = UnsafeHelper.getChars(value);
+        int strLength = chars.length;
+        int l = strLength >> 2;
+        int rem = strLength & 3;
+        if (rem > 0) {
+            ++l;
+        }
+        char[] buf = new char[l << 2];
+        value.getChars(0, strLength, buf, 0);
+
+        long[] results = new long[l];
+        int offset = 0;
+        for (int i = 0; i < l; ++i) {
+            results[i] = getLong(buf, offset);
+            offset += 4;
+        }
+        return results;
+    }
+
+    static long[] getByteLongs(String value) {
+        byte[] bytes = value.getBytes();
+        int byteLen = bytes.length;
+        int l = byteLen >> 3;
+        int rem = byteLen & 7;
+        if (rem > 0) {
+            ++l;
+        }
+        byte[] buf = new byte[l << 3];
+        System.arraycopy(bytes, 0, buf, 0, byteLen);
+        long[] results = new long[l];
+        int offset = 0;
+        for (int i = 0; i < l; ++i) {
+            results[i] = getLong(buf, offset);
+            offset += 8;
+        }
+        return results;
+    }
+
+    public static Object getStringValue(String value) {
+//        return JSON_ENDIAN.getStringValue(value);
+        return JSON_ENDIAN_UNSAFE.getStringValue(value);
+    }
+
+    static String createStringJDK8(char[] buf, int beginIndex, int len) {
+        return JSON_ENDIAN_UNSAFE.createStringJDK8(copyChars(buf, beginIndex, len));
+    }
+
+    static String createStringByAsciiBytesJDK8(byte[] buf, int beginIndex, int endIndex) {
+        int len = endIndex - beginIndex;
+        char[] result;
+        if (len < SIZE_LEN) {
+            result = SIZE_INSTANCES[len].asciiBytesToChars(buf, beginIndex, len);
+        } else {
+            result = new char[len];
+            for (int j = 0; j < len; ++j) {
+                result[j] = (char) buf[beginIndex + j];
+            }
+        }
+        return JSON_ENDIAN_UNSAFE.createStringJDK8(result);
+    }
+
+    static int asciiBytesToChars(byte[] buf, int beginIndex, int endIndex, char[] chars, int offset) {
+        int len = endIndex - beginIndex;
+        for (int j = 0; j < len; ++j) {
+            chars[offset + j] = (char) buf[beginIndex + j];
+        }
+        return len;
+    }
+
+    public static char[] copyChars(char[] buf, int offset, int len) {
+        if (len < SIZE_LEN) {
+            return SIZE_INSTANCES[len].copyChars(buf, offset, len);
+        } else {
+            char[] chars = new char[len];
+            System.arraycopy(buf, offset, chars, 0, len);
+            return chars;
+        }
+    }
+
+    public static byte[] copyBytes(byte[] buf, int offset, int len) {
+        if (len < SIZE_LEN) {
+            return SIZE_INSTANCES[len].copyBytes(buf, offset, len);
+        } else {
+            byte[] bytes = new byte[len];
+            System.arraycopy(buf, offset, bytes, 0, len);
+            return bytes;
+        }
+    }
+
+    public static String[] copyStrings(String[] buf, int offset, int len) {
+        if (len < SIZE_LEN) {
+            return SIZE_INSTANCES[len].copy(buf, offset, len);
+        } else {
+            String[] result = new String[len];
+            System.arraycopy(buf, offset, result, 0, len);
+            return result;
+        }
+    }
+
+    public static double[] copyDoubles(double[] buf, int offset, int len) {
+        if (len < SIZE_LEN) {
+            return SIZE_INSTANCES[len].copy(buf, offset, len);
+        } else {
+            double[] result = new double[len];
+            System.arraycopy(buf, offset, result, 0, len);
+            return result;
+        }
+    }
+
+    /**
+     * 拷贝long数组
+     *
+     * @param buf
+     * @param offset
+     * @param len
+     * @return
+     */
+    public static long[] copyLongs(long[] buf, int offset, int len) {
+        if (len < SIZE_LEN) {
+            return SIZE_INSTANCES[len].copy(buf, offset, len);
+        } else {
+            long[] result = new long[len];
+            System.arraycopy(buf, offset, result, 0, len);
+            return result;
+        }
+    }
+
+    static String createAsciiString(byte[] bytes, int offset, int len) {
+        return JSON_ENDIAN_UNSAFE.createAsciiString(copyBytes(bytes, offset, len));
+    }
+
+    static String createAsciiString(byte[] asciiBytes) {
+        return JSON_ENDIAN_UNSAFE.createAsciiString(asciiBytes);
+    }
+
+    static byte[] getStringUTF8Bytes(String value) {
+        if (EnvUtils.JDK_9_PLUS) {
+            byte[] bytes = (byte[]) getStringValue(value.toString());
+            if (bytes.length == value.length()) {
+                return bytes;
+            }
+        }
+        return value.getBytes(EnvUtils.CHARSET_UTF8_OR_DEF);
+    }
+
+    /**
+     * <p> 高效比较两个字节数组片段 </p>
+     * <p>
+     * Refer to ArraysSupport # vectorizedMismatch
+     *
+     * @param a
+     * @param aOffset
+     * @param b
+     * @param bOffset
+     * @param len
+     * @return
+     * @throws IndexOutOfBoundsException
+     */
+    public static boolean equals(byte[] a, int aOffset, byte[] b, int bOffset, int len, long remValueForBytes) {
+        if (len >= 8) {
+            do {
+                long la = getLong(a, aOffset);
+                long lb = getLong(b, bOffset);
+                if (la != lb) {
+                    return false;
+                }
+                len -= 8;
+                aOffset += 8;
+                bOffset += 8;
+            } while (len >= 8);
+            if (len == 0) {
+                return true;
+            }
+            int padd = 8 - len;
+            aOffset -= padd;
+            bOffset -= padd;
+            return getLong(a, aOffset) == getLong(b, bOffset);
+        }
+        if (len >= 4) {
+            int la = getInt(a, aOffset);
+            int lb = getInt(b, bOffset);
+            if (la != lb) {
+                return false;
+            }
+            int v = len - 4;
+            if (v == 0) {
+                return true;
+            }
+            aOffset += v;
+            bOffset += v;
+            return getInt(a, aOffset) == getInt(b, bOffset);
+        }
+        // 1 2 3
+        switch (len) {
+            case 1:
+                return a[aOffset] == remValueForBytes;
+            case 2:
+                return getShort(a, aOffset) == remValueForBytes;
+            default:
+                return a[aOffset++] == b[bOffset] && getShort(a, aOffset) == remValueForBytes;
+        }
+    }
+
+    /**
+     * <p> 高效比较两个字符数组片段 </p>
+     * <p>
+     * Refer to ArraysSupport # vectorizedMismatch
+     *
+     * @param a
+     * @param aOffset
+     * @param b
+     * @param bOffset
+     * @param len
+     * @return
+     * @throws IndexOutOfBoundsException
+     */
+    public static boolean equals(char[] a, int aOffset, char[] b, int bOffset, int len, long remValueForChars) {
+        if (len >= 4) {
+            do {
+                long la = getLong(a, aOffset);
+                long lb = getLong(b, bOffset);
+                if (la != lb) {
+                    return false;
+                }
+                len -= 4;
+                aOffset += 4;
+                bOffset += 4;
+            } while (len >= 4);
+            if (len == 0) {
+                return true;
+            }
+            int v = 4 - len;
+            aOffset -= v;
+            bOffset -= v;
+            return getLong(a, aOffset) == getLong(b, bOffset);
+        }
+        // 1 2 3
+        switch (len) {
+            case 1:
+                return a[aOffset] == remValueForChars;
+            case 2:
+                return getInt(a, aOffset) == remValueForChars;
+            default:
+                return a[aOffset++] == b[bOffset] && getInt(a, aOffset) == remValueForChars;
+        }
+    }
+}

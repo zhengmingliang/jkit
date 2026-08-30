@@ -1,0 +1,36 @@
+spring:
+  mode: distributed
+  cloud:
+    nacos:
+      discovery:
+        enabled: true
+        server-addr: 127.0.0.1:8848
+  datasource:
+    url: jdbc:postgresql://127.0.0.1:5432/sampledb?currentSchema=public
+    username: demo
+    password: secret
+  messages:
+    basename: i18n/core,i18n/messages
+  flyway:
+    enabled: false
+  liquibase:
+    change-log: classpath:/db/change-log/master.xml
+    enabled: true
+    clear-checksums: true
+  security:
+    oauth2:
+      client:
+        registration:
+          internal-client:
+            provider: auth-server
+            client-id: demo-client
+            client-secret: demo-secret
+            client-authentication-method: client_secret_post
+            authorization-grant-type: client_credentials
+            scope: manager
+        provider:
+          auth-server:
+            token-uri: http://auth-service/sso/oauth/token
+
+mybatis-plus:
+  mapper-locations: classpath:mybatis/*.xml

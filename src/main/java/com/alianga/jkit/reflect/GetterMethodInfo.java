@@ -1,0 +1,61 @@
+package com.alianga.jkit.reflect;
+
+import com.alianga.jkit.exception.InvokeReflectException;
+
+import java.lang.reflect.Method;
+
+/**
+ * 使用getter方法反射
+ *
+ * @time 2022/1/8 13:32
+ */
+final class GetterMethodInfo extends GetterInfo {
+    private final Method method;
+
+    GetterMethodInfo(Method method) {
+        this.method = method;
+    }
+
+    /**
+     * 反射属性
+     */
+    public Object invokeObjectValue(Object target) {
+        try {
+            return method.invoke(target);
+        } catch (Exception e) {
+            throw new InvokeReflectException(e);
+        }
+    }
+
+    // 是否通过getter方法
+    public boolean isMethod() {
+        return true;
+    }
+
+    // always public
+    public boolean isAccess() {
+        return true;
+    }
+
+    @Override
+    public boolean isPublic() {
+        return true;
+    }
+
+    public Class<?> getReturnType() {
+        return method.getReturnType();
+    }
+
+    public boolean isPrimitive() {
+        return method.getReturnType().isPrimitive();
+    }
+
+    @Override
+    public String getMethodName() {
+        return method.getName();
+    }
+
+    public String generateCode() {
+        return method.getName() + "()";
+    }
+}

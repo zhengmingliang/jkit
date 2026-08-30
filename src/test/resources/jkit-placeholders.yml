@@ -1,0 +1,6 @@
+app:
+  host: localhost
+  port: 9999
+  url: http://${app.host}:${app.port}
+  missing: ${app.unknown:fallback}
+  nested: ${app.url}/api

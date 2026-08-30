@@ -1,0 +1,15 @@
+custom:
+  name: yaml-custom
+  timeout: 30
+  enabled: true
+  items:
+    - one
+    - two
+    - three
+  ids: 1,2,3
+  nested:
+    - name: a
+      value: 10
+    - name: b
+      value: 20
+  url: http://${custom.host:localhost}:${custom.timeout}

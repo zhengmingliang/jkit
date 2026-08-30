@@ -1,0 +1,3 @@
+jkit:
+  source: classpath-config
+  port: 2
