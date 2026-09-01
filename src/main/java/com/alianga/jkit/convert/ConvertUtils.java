@@ -4,13 +4,16 @@ import com.alianga.jkit.DataUtils;
 import com.alianga.jkit.DateUtils;
 import com.alianga.jkit.StringUtils;
 import com.alianga.jkit.collection.Booleans;
-import com.alianga.jkit.math.NumberUtils;
 import com.alianga.jkit.math.Numbers;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.temporal.TemporalAccessor;
 import java.util.Calendar;
 import java.util.Date;
 
@@ -513,8 +516,9 @@ public class ConvertUtils {
     }
 
     /**
-     * 转换为Date类型，支持 {@link Date}、{@link java.sql.Date}、{@link Calendar}、{@link LocalDate}、
-     * {@link LocalDateTime}、10 位或 13 位时间戳，以及常见的日期时间字符串（自动推断格式）。
+     * 转换为Date类型，支持 {@link Date}、{@link Calendar}、{@link LocalDate}、
+     * {@link LocalDateTime}、{@link Instant}、{@link OffsetDateTime}、{@link ZonedDateTime}、
+     * 10 位或 13 位时间戳，以及常见的日期时间字符串（自动推断格式，不经过 SimpleDateFormat）。
      *
      * @param obj          要转换类型的对象
      * @param defaultValue 当 obj 为 {@code null} 时返回的默认值
@@ -529,145 +533,37 @@ public class ConvertUtils {
             return (Date) obj;
         }
 
-        if (obj instanceof java.sql.Date) {
-            Date date = new Date();
-            date.setTime(((java.sql.Date) obj).getTime());
-            return date;
-        }
-
         if (obj instanceof Calendar) {
             return ((Calendar) obj).getTime();
         }
 
-        if (obj instanceof LocalDate) {
-            return Date.from(((LocalDate) obj).atStartOfDay(ZoneId.systemDefault()).toInstant());
+        if (obj instanceof Number) {
+            return DateUtils.fromEpochNumber(((Number) obj).longValue());
         }
 
+        if (obj instanceof Instant) {
+            return Date.from((Instant) obj);
+        }
         if (obj instanceof LocalDateTime) {
             return Date.from(((LocalDateTime) obj).atZone(ZoneId.systemDefault()).toInstant());
         }
-
-        String strValue = obj.toString();
-        int strLength = strValue.length();
-        if (obj instanceof Number) {
-            int length = strValue.length();
-            if (length == 10) {
-                return new Date(toLong(strValue + "000"));
-            } else {
-                return new Date(((Number) obj).longValue());
+        if (obj instanceof LocalDate) {
+            return Date.from(((LocalDate) obj).atStartOfDay(ZoneId.systemDefault()).toInstant());
+        }
+        if (obj instanceof OffsetDateTime) {
+            return Date.from(((OffsetDateTime) obj).toInstant());
+        }
+        if (obj instanceof ZonedDateTime) {
+            return Date.from(((ZonedDateTime) obj).toInstant());
+        }
+        if (obj instanceof TemporalAccessor) {
+            Date temporalDate = DateUtils.fromTemporal((TemporalAccessor) obj);
+            if (temporalDate != null) {
+                return temporalDate;
             }
         }
 
-        char[] chars = strValue.toCharArray();
-        // 判断是否是时间戳
-        if (strLength == 10 && NumberUtils.isNumber(chars)) {
-            return new Date(toLong(strValue + "000"));
-        } else if (strLength == 13 && NumberUtils.isNumber(chars)) {
-            return new Date(toLong(strValue));
-        }
-        // 计算pattern和日期对应配置的偏移量
-        // 如：yyyy-MM-dd 对于2021-5-2 偏移量为-2， 对于2021-5-12 偏移量为-1 ，对于2021-05-12 偏移量为0
-        int offset = 0;
-        StringBuilder pattern = new StringBuilder();
-        // 2021-11-12   2021/11/12
-        if (NumberUtils.isNotNumber(chars[4]) && NumberUtils.isNotNumber(chars[7])) {
-            String split1 = toString(chars[4]);
-            String split2 = toString(chars[7]);
-            pattern.append("yyyy").append(split1).append("MM").append(split2).append("dd");
-            // 2021/5/2
-        } else if ((NumberUtils.isNotNumber(chars[4]) && NumberUtils.isNotNumber(chars[6]))) {
-            String split1 = toString(chars[4]);
-            String split2 = toString(chars[6]);
-            pattern.append("yyyy").append(split1).append("MM").append(split2).append("dd");
-
-            if (strLength > 8) {
-                // 如果第8个字符是数字则说明日期为两位数，否则为一位数
-                if (NumberUtils.isNumber(chars[8])) {
-                    offset = -1;
-                } else {
-                    offset = -2;
-                }
-            }
-
-            // 5/11/2021
-        } else if ((NumberUtils.isNotNumber(chars[1]) && NumberUtils.isNotNumber(chars[4]))) {
-            String dateSplit1 = toString(chars[1]);
-            String dateSplit2 = toString(chars[4]);
-            pattern.append("dd").append(dateSplit1).append("MM").append(dateSplit2).append("yyyy");
-            offset = -1;
-            // 12-5-2021
-        } else if ((NumberUtils.isNotNumber(chars[2]) && NumberUtils.isNotNumber(chars[4]))) {
-            String dateSplit1 = toString(chars[2]);
-            String dateSplit2 = toString(chars[4]);
-            pattern.append("dd").append(dateSplit1).append("MM").append(dateSplit2).append("yyyy");
-            offset = -1;
-        } else if (NumberUtils.isNotNumber(chars[3]) && NumberUtils.isNotNumber(chars[6])) {
-            String dateSplit1 = toString(chars[3]);
-            String dateSplit2 = toString(chars[6]);
-            pattern.append("dd").append(dateSplit1).append("MM").append(dateSplit2).append("yyyy");
-        } else {
-            pattern.append("yyyyMMdd");
-        }
-
-        int patternLength = pattern.length();
-        if (patternLength >= strValue.trim().length()) {
-            return DateUtils.getDateByGiven(strValue, pattern.toString());
-        }
-        int nextPosition = patternLength + offset;
-        if (chars[nextPosition] == ' ') {
-            pattern.append(" ");
-        } else if (chars[nextPosition] == 'T') {
-            pattern.append("'T'");
-            offset -= 2;
-        } else if (NumberUtils.isNotNumber(chars[nextPosition])) {
-            pattern.append(toString(chars[nextPosition]));
-        }
-
-        patternLength = pattern.length();
-        if (patternLength >= strValue.trim().length()) {
-            return DateUtils.getDateByGiven(strValue, pattern.toString());
-        }
-
-        nextPosition = patternLength + offset;
-        if (strLength >= nextPosition + 6) {
-            if (chars[nextPosition + 2] == chars[nextPosition + 5] && (!NumberUtils.isNumber(
-                    chars[nextPosition + 2]))) {
-                pattern.append("HH").append(toString(chars[nextPosition + 2])).append("mm")
-                        .append(toString(chars[nextPosition + 5])).append("ss");
-            } else {
-                pattern.append("HHmmss");
-            }
-        } else if (strLength >= nextPosition + 3) {
-            // 5:42 或12:5 或者5:3
-            if (NumberUtils.isNotNumber(chars[nextPosition + 1]) || NumberUtils.isNotNumber(chars[nextPosition + 2])) {
-                pattern.append("HH:mm");
-            } else {
-                pattern.append("HHmm");
-            }
-
-        } else {
-            pattern.append("HHmmss");
-        }
-
-        patternLength = pattern.length();
-        if (patternLength >= strLength) {
-            return DateUtils.getDateByGiven(strValue, pattern.toString());
-        }
-        if (chars[patternLength] == '.') {
-            pattern.append(".SSS");
-        } else if (chars[patternLength] == '+' || chars[patternLength] == '-') {
-            pattern.append("Z");
-        }
-
-        patternLength = pattern.length();
-        if (patternLength >= strLength) {
-            return DateUtils.getDateByGiven(strValue, pattern.toString());
-        }
-
-        if (chars[patternLength] == '+' || chars[patternLength] == '-') {
-            pattern.append("Z");
-        }
-        return DateUtils.getDateByGiven(strValue, pattern.toString());
+        return DateUtils.parse(obj.toString());
     }
 
     /**

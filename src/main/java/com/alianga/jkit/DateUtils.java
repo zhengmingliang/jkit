@@ -3,14 +3,14 @@ package com.alianga.jkit;
 import com.alianga.jkit.convert.ConvertUtils;
 
 import java.text.ParseException;
-import java.text.SimpleDateFormat;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.time.temporal.TemporalAccessor;
 import java.util.Calendar;
 import java.util.Date;
-import java.util.TimeZone;
 
 /**
  * @time 2017年2月1日 下午6:35:24
@@ -75,9 +75,11 @@ public class DateUtils {
      * @return 返回数字，如20170201
      */
     public static int getIntNowDate(String pattern) {
-        Date date = new Date();
-        SimpleDateFormat format = new SimpleDateFormat(pattern);
-        String nowDateString = format.format(date);
+        if (DateTimes.COMPACT_DATE.equals(pattern)) {
+            LocalDate today = LocalDate.now();
+            return today.getYear() * 10000 + today.getMonthValue() * 100 + today.getDayOfMonth();
+        }
+        String nowDateString = getNowDateStrByPattern(pattern);
         if (nowDateString != null) {
             return Integer.parseInt(nowDateString);
         }
@@ -96,16 +98,7 @@ public class DateUtils {
      * <br>
      */
     public static Date getFormatNowDate(String datePattern) {
-        Date currentTime = new Date();
-        SimpleDateFormat formatter = new SimpleDateFormat(datePattern);
-        String dateString = formatter.format(currentTime);
-        Date d = null;
-        try {
-            d = formatter.parse(dateString);
-        } catch (ParseException e) {
-            e.printStackTrace();
-        }
-        return d;
+        return getDateByPattern(new Date(), datePattern);
     }
 
     /**
@@ -115,9 +108,7 @@ public class DateUtils {
      * @return getNowDateStrByPattern
      */
     public static String getNowDateStrByPattern(String datePattern) {
-        Date currentTime = new Date();
-        SimpleDateFormat formatter = new SimpleDateFormat(datePattern);
-        return formatter.format(currentTime);
+        return DateTimes.format(System.currentTimeMillis(), datePattern);
     }
 
     /**
@@ -195,15 +186,7 @@ public class DateUtils {
      * @return Date
      */
     public static Date getDateByPattern(Date date, String pattern) {
-        SimpleDateFormat formatter = new SimpleDateFormat(pattern);
-        String dateString = formatter.format(date);
-        Date d = null;
-        try {
-            d = formatter.parse(dateString);
-        } catch (ParseException e) {
-            e.printStackTrace();
-        }
-        return d;
+        return DateTimes.truncate(date, pattern);
     }
 
     /**
@@ -232,12 +215,7 @@ public class DateUtils {
      */
     public static String utc2Local(String utcTime, String utcTimePatten,
                                    String localTimePatten) throws ParseException {
-        SimpleDateFormat utcFormater = new SimpleDateFormat(utcTimePatten);
-        utcFormater.setTimeZone(TimeZone.getTimeZone("UTC"));
-        Date gpsUTCDate = utcFormater.parse(utcTime);
-        SimpleDateFormat localFormater = new SimpleDateFormat(localTimePatten);
-        localFormater.setTimeZone(TimeZone.getDefault());
-        return localFormater.format(gpsUTCDate.getTime());
+        return DateTimes.utcToLocal(utcTime, utcTimePatten, localTimePatten);
     }
 
     /**
@@ -260,15 +238,7 @@ public class DateUtils {
      * @description <p> UTC时间字符串转换为Date类型 时间 </P>
      */
     public static Date utc2LocalDate(String utcTime, String utcTimePatten) {
-        SimpleDateFormat utcFormater = new SimpleDateFormat(utcTimePatten);
-        utcFormater.setTimeZone(TimeZone.getTimeZone("UTC"));
-        Date gpsUTCDate = null;
-        try {
-            gpsUTCDate = utcFormater.parse(utcTime);
-        } catch (ParseException e) {
-            e.printStackTrace();
-        }
-        return gpsUTCDate;
+        return DateTimes.parseUtc(utcTime, utcTimePatten);
     }
 
     /**
@@ -279,7 +249,7 @@ public class DateUtils {
      * @return 得到指定String形式日期
      */
     public static String getStringByPattern(Date date, String pattern) {
-        return new SimpleDateFormat(pattern).format(date);
+        return DateTimes.format(date.getTime(), pattern);
     }
 
     /**
@@ -289,7 +259,7 @@ public class DateUtils {
      * @return 得到指定String形式日期
      */
     public static String getDateTimeString(Date date) {
-        return new SimpleDateFormat(DATE_TIME_PATTERN).format(date);
+        return DateTimes.formatDateTime(date.getTime());
     }
 
     /**
@@ -299,7 +269,7 @@ public class DateUtils {
      * @return 得到指定String形式日期
      */
     public static String getDateString(Date date) {
-        return new SimpleDateFormat(DATE_PATTERN).format(date);
+        return DateTimes.formatDate(date.getTime());
     }
 
     /**
@@ -310,14 +280,47 @@ public class DateUtils {
      * @return 解析后的日期；解析失败时返回 {@code null}
      */
     public static Date getDateByGiven(String date, String pattern) {
-        SimpleDateFormat formatter = new SimpleDateFormat(pattern);
-        Date d = null;
-        try {
-            d = formatter.parse(date);
-        } catch (ParseException e) {
-            e.printStackTrace();
+        return DateTimes.parse(date, pattern);
+    }
+
+    /**
+     * 自动识别常见日期字符串并解析为 {@link Date}。
+     *
+     * <p>支持 10/13 位时间戳，紧凑数字（{@code yyyyMMdd}、{@code yyyyMMddHHmmss} 等），
+     * 常见分隔日期（{@code -}/{@code /}/{@code .}、中文、韩文），ISO-8601（含 {@code T}、
+     * {@code Z}、{@code +0800}、{@code +08:00}），以及日/月在前的写法。</p>
+     *
+     * @param date 日期字符串
+     * @return 解析得到的日期；无法识别时返回 {@code null}
+     */
+    public static Date parse(String date) {
+        if (date == null) {
+            return null;
         }
-        return d;
+        return DateTimes.parseFlexible(date);
+    }
+
+    /**
+     * 将 10 位秒级或 13 位毫秒级时间戳转换为 {@link Date}。
+     *
+     * @param epoch 10 位秒或其它位数的毫秒时间戳
+     * @return 对应的日期
+     */
+    public static Date fromEpochNumber(long epoch) {
+        return DateTimes.fromEpochNumber(epoch);
+    }
+
+    /**
+     * 将 {@link TemporalAccessor} 转换为 {@link Date}。
+     *
+     * @param temporal 时间对象
+     * @return 转换后的日期；无法提取日期时间字段时返回 {@code null}
+     */
+    public static Date fromTemporal(TemporalAccessor temporal) {
+        if (temporal == null) {
+            return null;
+        }
+        return DateTimes.fromTemporal(temporal);
     }
 
     /**
@@ -518,7 +521,7 @@ public class DateUtils {
      * @return getNowDateTime
      */
     public static String getNowDateTime() {
-        return new SimpleDateFormat(DATE_TIME_PATTERN).format(new Date());
+        return DateTimes.formatDateTime(System.currentTimeMillis());
     }
 
     /**
@@ -623,15 +626,10 @@ public class DateUtils {
      * @return String 指定格式的当前时间
      */
     public static String getSystemTime(String formateString) {
-        SimpleDateFormat dateFormat = null;
         if (formateString == null) {
-            dateFormat = new SimpleDateFormat(DATE_TIME_PATTERN);
-        } else {
-            dateFormat = new SimpleDateFormat(formateString);
+            return getNowDateTime();
         }
-
-        return dateFormat.format(new Date());
-
+        return DateTimes.format(System.currentTimeMillis(), formateString);
     }
 
     /**

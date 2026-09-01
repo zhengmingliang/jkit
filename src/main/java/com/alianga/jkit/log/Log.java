@@ -1,5 +1,7 @@
 package com.alianga.jkit.log;
 
+import java.util.Locale;
+import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -21,6 +23,21 @@ public class Log {
 
     private Log(Logger logger) {
         this.logger = logger;
+        if (logger != null) {
+            Logger parent = logger.getParent();
+            if (parent != null) {
+                Handler[] handlers = parent.getHandlers();
+                if (handlers != null) {
+                    for (Handler handler : handlers) {
+                        handler.setFormatter(new LocaleFormatter(Locale.ENGLISH));
+                    }
+                }
+            }
+            Handler[] handlers = logger.getHandlers();
+            for (Handler handler : handlers) {
+                handler.setFormatter(new LocaleFormatter(Locale.ENGLISH));
+            }
+        }
     }
 
     /**

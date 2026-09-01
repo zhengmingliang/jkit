@@ -114,6 +114,74 @@
                     </execution>
                 </executions>
             </plugin>
+            <!-- git 提交信息 / 构建号，供 sources jar 的 manifest 使用 -->
+            <plugin>
+                <groupId>pl.project13.maven</groupId>
+                <artifactId>git-commit-id-plugin</artifactId>
+                <version>4.9.10</version>
+                <executions>
+                    <execution>
+                        <id>get-the-git-infos</id>
+                        <goals>
+                            <goal>revision</goal>
+                        </goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <!--没有 git 版本信息时，忽略构建失败-->
+                    <failOnNoGitDirectory>false</failOnNoGitDirectory>
+                    <dateFormat>yyyy-MM-dd HH:mm:ss</dateFormat>
+                    <generateGitPropertiesFile>true</generateGitPropertiesFile>
+                    <excludeProperties>
+                        <exclude>git.remote.origin.url</exclude>
+                    </excludeProperties>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>buildnumber-maven-plugin</artifactId>
+                <version>3.2.1</version>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>create</goal>
+                        </goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <doCheck>false</doCheck>
+                    <doUpdate>false</doUpdate>
+                    <revisionOnScmFailure>unknown</revisionOnScmFailure>
+                </configuration>
+            </plugin>
+            <!-- Sources jar：Central 的必备产物 -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-source-plugin</artifactId>
+                <version>3.3.1</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>jar-no-fork</goal>
+                        </goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <archive>
+                        <manifestEntries>
+                            <Project-version>${project.version}</Project-version>
+                            <Scm-version>${buildNumber}</Scm-version>
+                            <!--当前分支名称-->
+                            <Scm-branch>${git.branch}</Scm-branch>
+                            <!--本地打包的git用户名-->
+                            <Build-user>${git.build.user.name}</Build-user>
+                            <Timestamp>${maven.build.timestamp}</Timestamp>
+                        </manifestEntries>
+
+                    </archive>
+                </configuration>
+            </plugin>
         </plugins>
     </build>
 
@@ -319,46 +387,6 @@
             <id>publish</id>
             <build>
                 <plugins>
-                    <!-- git 提交信息 / 构建号，供 sources jar 的 manifest 使用 -->
-                    <plugin>
-                        <groupId>pl.project13.maven</groupId>
-                        <artifactId>git-commit-id-plugin</artifactId>
-                        <version>4.9.10</version>
-                        <executions>
-                            <execution>
-                                <id>get-the-git-infos</id>
-                                <goals>
-                                    <goal>revision</goal>
-                                </goals>
-                            </execution>
-                        </executions>
-                        <configuration>
-                            <!--没有 git 版本信息时，忽略构建失败-->
-                            <failOnNoGitDirectory>false</failOnNoGitDirectory>
-                            <dateFormat>yyyy-MM-dd HH:mm:ss</dateFormat>
-                            <generateGitPropertiesFile>true</generateGitPropertiesFile>
-                            <excludeProperties>
-                                <exclude>git.remote.origin.url</exclude>
-                            </excludeProperties>
-                        </configuration>
-                    </plugin>
-                    <plugin>
-                        <groupId>org.codehaus.mojo</groupId>
-                        <artifactId>buildnumber-maven-plugin</artifactId>
-                        <version>3.2.1</version>
-                        <executions>
-                            <execution>
-                                <goals>
-                                    <goal>create</goal>
-                                </goals>
-                            </execution>
-                        </executions>
-                        <configuration>
-                            <doCheck>false</doCheck>
-                            <doUpdate>false</doUpdate>
-                            <revisionOnScmFailure>unknown</revisionOnScmFailure>
-                        </configuration>
-                    </plugin>
                     <!-- Javadoc jar：Central 的必备产物 -->
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
@@ -423,34 +451,7 @@
                             </execution>
                         </executions>
                     </plugin>
-                    <!-- Sources jar：Central 的必备产物 -->
-                    <plugin>
-                        <groupId>org.apache.maven.plugins</groupId>
-                        <artifactId>maven-source-plugin</artifactId>
-                        <version>3.3.1</version>
-                        <executions>
-                            <execution>
-                                <phase>package</phase>
-                                <goals>
-                                    <goal>jar-no-fork</goal>
-                                </goals>
-                            </execution>
-                        </executions>
-                        <configuration>
-                            <archive>
-                                <manifestEntries>
-                                    <Project-version>${project.version}</Project-version>
-                                    <Scm-version>${buildNumber}</Scm-version>
-                                    <!--当前分支名称-->
-                                    <Scm-branch>${git.branch}</Scm-branch>
-                                    <!--本地打包的git用户名-->
-                                    <Build-user>${git.build.user.name}</Build-user>
-                                    <Timestamp>${maven.build.timestamp}</Timestamp>
-                                </manifestEntries>
 
-                            </archive>
-                        </configuration>
-                    </plugin>
                     <!-- GPG 签名：Central 的强制要求，-Dgpg.skip=true 可跳过 -->
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>

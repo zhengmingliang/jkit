@@ -10,6 +10,10 @@ import java.util.function.Supplier;
  */
 public class Print {
     private static final Log log = Log.get(Print.class);
+    /**
+     * 启用日志打印
+     */
+    public static boolean enableLog = true;
 
 //    正常normal
 //    警告 warning
@@ -198,7 +202,9 @@ public class Print {
     public static void normal(Object object) {
         String print = wrapNormal(object);
         System.out.println(print);
-        log.info(print);
+        if (enableLog) {
+            log.info(print);
+        }
     }
 
     /**
@@ -209,7 +215,9 @@ public class Print {
     public static void warning(Object object) {
         String print = wrapWarning(object);
         System.out.println(print);
-        log.warn(print);
+        if (enableLog) {
+            log.warn(print);
+        }
     }
 
     /**
@@ -220,7 +228,9 @@ public class Print {
     public static void error(Object object) {
         String print = wrapError(object);
         System.out.println(print);
-        log.error(print);
+        if (enableLog) {
+            log.error(print);
+        }
     }
 
 }
