@@ -107,10 +107,14 @@ final class DateTimes {
 
     static String formatCompactDate(long epochMilli) {
         LocalDateTime ldt = localDateTime(epochMilli);
+        return formatYmd(ldt.getYear(), ldt.getMonthValue(), ldt.getDayOfMonth());
+    }
+
+    static String formatYmd(int year, int month, int day) {
         char[] buf = new char[8];
-        write4(buf, 0, ldt.getYear());
-        write2(buf, 4, ldt.getMonthValue());
-        write2(buf, 6, ldt.getDayOfMonth());
+        write4(buf, 0, year);
+        write2(buf, 4, month);
+        write2(buf, 6, day);
         return new String(buf);
     }
 

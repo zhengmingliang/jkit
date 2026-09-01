@@ -32,6 +32,25 @@ public class IdCardUtilsTest {
             assertTrue(info.getAge() >= 19 && info.getAge() <= 41);
             assertTrue("男".equals(info.getGender()) || "女".equals(info.getGender()));
             assertEquals("男".equals(info.getGender()), info.isMale());
+            assertEquals(id.charAt(17), RandomUtils.getIdCardCheckNum(id.substring(0, 17)));
+        }
+    }
+
+    @Test
+    public void generatedBirthdayShouldBeRealCalendarDate() {
+        for (int i = 0; i < 80; i++) {
+            String id = IdCardUtils.generate(18, 50);
+            String ymd = id.substring(6, 14);
+            int year = Integer.parseInt(ymd.substring(0, 4));
+            int month = Integer.parseInt(ymd.substring(4, 6));
+            int day = Integer.parseInt(ymd.substring(6, 8));
+            assertTrue(ymd, month >= 1 && month <= 12);
+            assertTrue(ymd, day >= 1 && day <= 31);
+            Calendar calendar = Calendar.getInstance();
+            calendar.setLenient(false);
+            calendar.clear();
+            calendar.set(year, month - 1, day);
+            calendar.getTime();
         }
     }
 

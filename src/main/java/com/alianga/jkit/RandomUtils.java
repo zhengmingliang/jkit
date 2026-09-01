@@ -3,9 +3,7 @@ package com.alianga.jkit;
 import com.alianga.jkit.math.NumberUtils;
 
 import java.security.SecureRandom;
-import java.text.SimpleDateFormat;
-import java.util.Calendar;
-import java.util.Date;
+import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Random;
@@ -122,8 +120,6 @@ public class RandomUtils {
             "44", "45", "46", "50", "51", "52", "53", "54", "61", "62",
             "63", "64", "65", "71", "81", "82"};
 
-    private static final char[] ID_CARD_SEX_CHECK_NUMS = {'1', '0', 'X', '9', '8', '7', '6', '5', '4', '3', '2'};
-
     /**
      * 获取随机ip地址
      *
@@ -147,14 +143,12 @@ public class RandomUtils {
      * @return
      */
     private static String numToip(int ip) {
-        int[] b = new int[4];
-
-        b[0] = (ip >> 24) & 0xff;
-        b[1] = (ip >> 16) & 0xff;
-        b[2] = (ip >> 8) & 0xff;
-        b[3] = ip & 0xff;
-        String ipStr = b[0] + "." + b[1] + "." + b[2] + "." + b[3];
-        return ipStr;
+        StringBuilder builder = new StringBuilder(15);
+        builder.append((ip >> 24) & 0xff).append('.')
+                .append((ip >> 16) & 0xff).append('.')
+                .append((ip >> 8) & 0xff).append('.')
+                .append(ip & 0xff);
+        return builder.toString();
     }
 
     /**
@@ -284,29 +278,10 @@ public class RandomUtils {
      *         入参不足 17 位时返回空格字符
      */
     public static char getIdCardCheckNum(String id) {
-        char[] chars = id.toCharArray();
-        if (chars.length < 17) {
+        if (id == null) {
             return ' ';
         }
-        int total = Integer.parseInt(chars[0] + "") * 7
-                + Integer.parseInt(chars[1] + "") * 9
-                + Integer.parseInt(chars[2] + "") * 10
-                + Integer.parseInt(chars[3] + "") * 5
-                + Integer.parseInt(chars[4] + "") * 8
-                + Integer.parseInt(chars[5] + "") * 4
-                + Integer.parseInt(chars[6] + "") * 2
-                + Integer.parseInt(chars[7] + "")
-                + Integer.parseInt(chars[8] + "") * 6
-                + Integer.parseInt(chars[9] + "") * 3
-                + Integer.parseInt(chars[10] + "") * 7
-                + Integer.parseInt(chars[11] + "") * 9
-                + Integer.parseInt(chars[12] + "") * 10
-                + Integer.parseInt(chars[13] + "") * 5
-                + Integer.parseInt(chars[14] + "") * 8
-                + Integer.parseInt(chars[15] + "") * 4
-                + Integer.parseInt(chars[16] + "") * 2;
-        int check = total % 11;
-        return ID_CARD_SEX_CHECK_NUMS[check];
+        return IdCardUtils.calcTrailingNumber(id.toCharArray());
     }
 
     /**
@@ -316,7 +291,7 @@ public class RandomUtils {
      * @return 数组中随机位置上的字符串元素
      */
     public static String randomOne(String[] randomArray) {
-        return randomArray[RANDOM.nextInt(randomArray.length - 1)];
+        return randomArray[RANDOM.nextInt(randomArray.length)];
     }
 
     /**
@@ -326,7 +301,7 @@ public class RandomUtils {
      * @return 数组中随机位置上的字符转换成的单字符字符串
      */
     public static String randomOne(char[] randomArray) {
-        return randomArray[RANDOM.nextInt(randomArray.length - 1)] + "";
+        return String.valueOf(randomArray[RANDOM.nextInt(randomArray.length)]);
     }
 
     /**
@@ -337,7 +312,10 @@ public class RandomUtils {
      */
     private static String randomCityCode(int max) {
         int i = RANDOM.nextInt(max) + 1;
-        return i > 9 ? i + "" : "0" + i;
+        char[] buf = new char[2];
+        buf[0] = (char) ('0' + i / 10);
+        buf[1] = (char) ('0' + i % 10);
+        return new String(buf);
     }
 
     /**
@@ -348,14 +326,21 @@ public class RandomUtils {
      * @return 格式为 {@code yyyyMMdd} 的随机生日日期字符串
      */
     public static String randomBirth(int minAge, int maxAge) {
-        SimpleDateFormat dft = new SimpleDateFormat("yyyyMMdd"); // 设置日期格式
-        Calendar date = Calendar.getInstance();
-        date.setTime(new Date()); // 设置当前日期
-        // 随机设置日期为前maxAge年到前minAge年的任意一天
-        int randomDay = 365 * minAge
-                + RANDOM.nextInt(365 * (maxAge - minAge));
-        date.set(Calendar.DATE, date.get(Calendar.DATE) - randomDay);
-        return dft.format(date.getTime());
+        if (minAge > maxAge) {
+            int tmp = minAge;
+            minAge = maxAge;
+            maxAge = tmp;
+        }
+        if (minAge < 0) {
+            minAge = 0;
+        }
+        int dayRange = 365 * (maxAge - minAge);
+        int randomDay = 365 * minAge;
+        if (dayRange > 0) {
+            randomDay += RANDOM.nextInt(dayRange);
+        }
+        LocalDate birth = LocalDate.now().minusDays(randomDay);
+        return DateTimes.formatYmd(birth.getYear(), birth.getMonthValue(), birth.getDayOfMonth());
     }
 
     /**
@@ -366,7 +351,15 @@ public class RandomUtils {
      * @return 位于 {@code [start, end]} 闭区间内的随机整数
      */
     public static int getNum(int start, int end) {
-        return (int) (Math.random() * (end - start + 1) + start);
+        if (start == end) {
+            return start;
+        }
+        if (start > end) {
+            int tmp = start;
+            start = end;
+            end = tmp;
+        }
+        return start + RANDOM.nextInt(end - start + 1);
     }
 
     /**
@@ -385,7 +378,7 @@ public class RandomUtils {
      * @return 位于 {@code [start, end)} 区间内的随机浮点数
      */
     public static double getDoubleNum(int start, int end) {
-        return (Math.random() * (end - start) + start);
+        return getDoubleNum((double) start, end);
     }
 
     /**
@@ -396,7 +389,15 @@ public class RandomUtils {
      * @return 位于 {@code [start, end)} 区间内的随机浮点数
      */
     public static double getDoubleNum(double start, double end) {
-        return (Math.random() * (end - start) + start);
+        if (start == end) {
+            return start;
+        }
+        if (start > end) {
+            double tmp = start;
+            start = end;
+            end = tmp;
+        }
+        return RANDOM.nextDouble() * (end - start) + start;
     }
 
     /**
@@ -423,27 +424,20 @@ public class RandomUtils {
      * @return 由随机姓氏加 1 到 2 个随机名字组成的中文姓名
      */
     public static String getChineseName() {
-        int index = getNum(0, FIRST_NAME.length() - 1);
-        String first = FIRST_NAME.substring(index, index + 1);
-        int sex = getNum(0, 1);
+        StringBuilder name = new StringBuilder(3);
+        name.append(FIRST_NAME.charAt(getNum(0, FIRST_NAME.length() - 1)));
         String str = BOY;
-        int length = BOY.length();
-        if (sex == 0) {
+        if (getNum(0, 1) == 0) {
             str = GIRL;
-            length = GIRL.length();
             name_sex = "0";
         } else {
             name_sex = "1";
         }
-        index = getNum(0, length - 1);
-        String second = str.substring(index, index + 1);
-        int hasThird = getNum(0, 1);
-        String third = "";
-        if (hasThird == 1) {
-            index = getNum(0, length - 1);
-            third = str.substring(index, index + 1);
+        name.append(str.charAt(getNum(0, str.length() - 1)));
+        if (getNum(0, 1) == 1) {
+            name.append(str.charAt(getNum(0, str.length() - 1)));
         }
-        return first + second + third;
+        return name.toString();
     }
 
     /**
@@ -483,12 +477,12 @@ public class RandomUtils {
      * @return 由 {@code number} 位随机数字字符组成的字符串
      */
     public static String getRandomNumCode(int number) {
-        StringBuilder codeNum = new StringBuilder();
-
-//        Random random = new Random();
+        if (number <= 0) {
+            return "";
+        }
+        StringBuilder codeNum = new StringBuilder(number);
         for (int i = 0; i < number; i++) {
-            int next = RANDOM.nextInt(10000);
-            codeNum.append(NUMBERS[next % 10]);
+            codeNum.append(NUMBERS[RANDOM.nextInt(10)]);
         }
         return codeNum.toString();
     }
@@ -501,19 +495,20 @@ public class RandomUtils {
      * @author 郑明亮
      */
     public static String getRandomCode(int number) {
-        StringBuilder codeNum = new StringBuilder();
-        int[] code = new int[3];
-//        Random random = new Random();
-        for (int i = 0; i < number; i++) {
-            int num = RANDOM.nextInt(10) + 48;
-            int uppercase = RANDOM.nextInt(26) + 65;
-            int lowercase = RANDOM.nextInt(26) + 97;
-            code[0] = num;
-            code[1] = uppercase;
-            code[2] = lowercase;
-            codeNum.append((char) code[RANDOM.nextInt(3)]);
+        if (number <= 0) {
+            return "";
         }
-
+        StringBuilder codeNum = new StringBuilder(number);
+        for (int i = 0; i < number; i++) {
+            int pick = RANDOM.nextInt(62);
+            if (pick < 10) {
+                codeNum.append((char) ('0' + pick));
+            } else if (pick < 36) {
+                codeNum.append((char) ('A' + pick - 10));
+            } else {
+                codeNum.append((char) ('a' + pick - 36));
+            }
+        }
         return codeNum.toString();
     }
 
@@ -543,18 +538,24 @@ public class RandomUtils {
      * @return 解码后的数字
      */
     public static long decoding(String str) {
+        if (str == null) {
+            throw new RuntimeException("str must not be empty.");
+        }
         str = str.trim();
         if (str.length() < 1) {
             throw new RuntimeException("str must not be empty.");
-        } else {
-            long result = 0L;
-
-            for (int i = 0; i < str.length(); ++i) {
-                result += (long) ((double) ALPHABET.indexOf(str.charAt(i)) * Math.pow(62.0D, i));
-            }
-
-            return result;
         }
+        long result = 0L;
+        long power = 1L;
+        for (int i = 0; i < str.length(); i++) {
+            int index = ALPHABET.indexOf(str.charAt(i));
+            if (index < 0) {
+                throw new RuntimeException("str contains invalid character.");
+            }
+            result += index * power;
+            power *= 62L;
+        }
+        return result;
     }
 
     /**
@@ -565,12 +566,16 @@ public class RandomUtils {
      * <br>
      */
     public static String getUUID() {
-        //生成一个唯一的36位UUID
-        UUID uuid = UUID.randomUUID();
-        String id = uuid.toString();
-        //把"-"去掉，则剩下为32位数字和字母随机组合的唯一字符id
-        id = id.replaceAll("-", "");
-        return id;
+        String id = UUID.randomUUID().toString();
+        char[] buf = new char[32];
+        int n = 0;
+        for (int i = 0; i < id.length(); i++) {
+            char ch = id.charAt(i);
+            if (ch != '-') {
+                buf[n++] = ch;
+            }
+        }
+        return new String(buf, 0, n);
     }
 
     /**

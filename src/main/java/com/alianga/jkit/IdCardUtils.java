@@ -5,6 +5,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
+import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Collections;
@@ -155,24 +157,10 @@ public class IdCardUtils {
     }
 
     private static String randomBirthday(int minAge, int maxAge) {
-        Calendar birthday = Calendar.getInstance();
-        int year = birthday.get(Calendar.YEAR) - RandomUtils.getNum(minAge, maxAge);
-        birthday.set(Calendar.YEAR, year);
-        birthday.set(Calendar.MONTH, RandomUtils.getNum(1, 12));
-        birthday.set(Calendar.DATE, RandomUtils.getNum(1, 31));
-        StringBuilder builder = new StringBuilder(8);
-        builder.append(year);
-        long month = birthday.get(Calendar.MONTH) + 1;
-        if (month < 10) {
-            builder.append('0');
-        }
-        builder.append(month);
-        long date = birthday.get(Calendar.DATE);
-        if (date < 10) {
-            builder.append('0');
-        }
-        builder.append(date);
-        return builder.toString();
+        int year = LocalDate.now().getYear() - RandomUtils.getNum(minAge, maxAge);
+        int month = RandomUtils.getNum(1, 12);
+        int day = RandomUtils.getNum(1, YearMonth.of(year, month).lengthOfMonth());
+        return DateTimes.formatYmd(year, month, day);
     }
 
     /**
@@ -196,13 +184,11 @@ public class IdCardUtils {
 
     private static String randomCode() {
         int code = RandomUtils.nextInt(1000);
-        if (code < 10) {
-            return "00" + code;
-        }
-        if (code < 100) {
-            return "0" + code;
-        }
-        return Integer.toString(code);
+        char[] buf = new char[3];
+        buf[0] = (char) ('0' + code / 100);
+        buf[1] = (char) ('0' + (code / 10) % 10);
+        buf[2] = (char) ('0' + code % 10);
+        return new String(buf);
     }
 
     /**
