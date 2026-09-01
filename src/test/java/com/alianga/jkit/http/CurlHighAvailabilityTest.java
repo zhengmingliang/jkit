@@ -89,7 +89,7 @@ public class CurlHighAvailabilityTest {
                         + "--cookie 'sid=1; theme=dark' --proxy http://proxy.example:8080 "
                         + "--insecure --location");
         assertEquals("GET", request.getMethod());
-        assertTrue(request.getUrl().contains("q=hello world"));
+        assertTrue(request.getUrl().contains("q=hello%20world"));
         assertEquals("jkit test", request.getHeaders().get("User-Agent"));
         assertEquals("https://from.example", request.getHeaders().get("Referer"));
         assertEquals("sid=1; theme=dark", request.getHeaders().get("Cookie"));
@@ -103,8 +103,11 @@ public class CurlHighAvailabilityTest {
         assertEquals("HEAD", head.getMethod());
 
         CurlRequest form = CurlParser.parse("curl -F 'name=Tom' -F 'empty=' https://example.com");
+        assertEquals("POST", form.getMethod());
         assertEquals("name=Tom&empty=", form.getBody());
-        assertEquals("application/x-www-form-urlencoded", form.getContentType());
+        assertEquals(com.alianga.jkit.http.curl.ParsedCurlRequest.Body.Kind.MULTIPART,
+                form.model().body().kind());
+        assertEquals(2, form.model().body().parts().size());
 
         CurlRequest upload = CurlParser.parse("curl -T " + uploadFile.getAbsolutePath() + " http://example.com/upload");
         assertEquals("PUT", upload.getMethod());

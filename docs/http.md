@@ -459,8 +459,24 @@ HttpResponse response = HttpUtils.curl(curl);
 String body = HttpUtils.curlString(curl);
 ```
 
-支持 `-X/-H/-d/--data-raw/-u/-G/-k/-x/-b/-A/-e/-F/-T/--url` 等常见选项。解析后也可改 header/body 再 `parsed.execute()`，
+支持 `-X/-H/-d/--data-raw/--data-urlencode/--json/-u/-G/-k/-x/-b/-A/-e/-F/-T/--url` 等常见选项，
+短选项簇（`-kLs`、`-XPOST`）会展开。`-k` 只作用于这一次请求，不会改全局 `HttpUtils.setIgnoreSsl`。
+
+解析后也可改 header/body 再 `parsed.execute()`，
 或把 `parsed.toHttpRequest()` / `parsed` 交给 `HttpUtils.sse` / `sseMerge` / `sseReconnect`。
+
+生成其它 SDK 代码（OkHttp / Apache 5 / JDK 11+ / jkit / Kotlin / fetch / axios / requests / httpx / Go / C# / PHP）：
+
+```java
+import com.alianga.jkit.http.codegen.GeneratedCode;
+import com.alianga.jkit.http.codegen.GeneratorRegistry;
+import com.alianga.jkit.http.curl.ParsedCurlRequest;
+
+ParsedCurlRequest model = CurlParser.parseModel(curl);
+GeneratedCode okhttp = GeneratorRegistry.get().generate("java-okhttp", model);
+GeneratedCode fetch = CurlParser.generate("js-fetch", curl);
+System.out.println(okhttp.source());
+```
 
 ## 12. WebSocket（JDK 11+）
 

@@ -1,37 +1,87 @@
 package com.alianga.jkit.http;
 
-import java.io.File;
+import com.alianga.jkit.http.codegen.GeneratedCode;
+import com.alianga.jkit.http.codegen.GeneratorRegistry;
+import com.alianga.jkit.http.curl.CurlTokenizer;
+import com.alianga.jkit.http.curl.ParsedCurlRequest;
+import com.alianga.jkit.http.curl.ParsedCurlRequest.Auth;
+import com.alianga.jkit.http.curl.ParsedCurlRequest.Body;
+import com.alianga.jkit.http.curl.ParsedCurlRequest.FormPart;
+import com.alianga.jkit.http.curl.ParsedCurlRequest.ProxySpec;
+
+import java.io.UnsupportedEncodingException;
+import java.net.URLEncoder;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
- * 解析 curl 命令行为 {@link CurlRequest}，可再交给 {@link com.alianga.jkit.HttpUtils} 执行。
+ * 解析 curl 命令。{@link #parse(String)} 仍返回 {@link CurlRequest} 以保持兼容；
+ * 新代码请用 {@link #parseModel(String)} 拿到不可变模型再交给生成器。
  *
  * @author 郑明亮
  */
 public final class CurlParser {
+    private static final Set<String> SKIP_FLAGS = new HashSet<String>(Arrays.asList(
+            "-s", "--silent", "-S", "--show-error", "-v", "--verbose", "-i", "--include",
+            "-f", "--fail", "-#", "--progress-bar", "-N", "--no-buffer", "--no-progress-meter",
+            "--http1.0", "--http1.1", "--http2", "--http2-prior-knowledge", "--http3",
+            "--raw", "--globoff", "-g", "--path-as-is", "--location-trusted",
+            "--compressed-ssh", "--fail-with-body", "--no-keep-alive"));
+
+    private static final Set<String> SKIP_VALUE = new HashSet<String>(Arrays.asList(
+            "-o", "--output", "-O", "--remote-name", "-D", "--dump-header", "-w", "--write-out",
+            "--retry", "--retry-delay", "--retry-max-time", "--max-redirs", "--limit-rate",
+            "--cert", "--cacert", "--capath", "--key", "--pass", "--unix-socket",
+            "--connect-to", "--resolve", "--interface", "--dns-servers", "--output-dir",
+            "--range", "-r", "--max-filesize", "--keepalive-time", "--speed-limit", "--speed-time"));
+
+    private static final Pattern HOST_NAME = Pattern.compile(
+            "^[a-z0-9-]+(\\.[a-z0-9-]+)+(:\\d+)?(/|$)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern LOCALHOST = Pattern.compile(
+            "^localhost(:\\d+)?(/|$)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern IPV4 = Pattern.compile(
+            "^\\d{1,3}(\\.\\d{1,3}){3}(:\\d+)?(/|$)");
+    private static final Pattern SCHEME = Pattern.compile("^[a-z][a-z0-9+.-]*://", Pattern.CASE_INSENSITIVE);
+
     private CurlParser() {
     }
 
     /**
-     * 解析 curl 文本（支持换行续写、单双引号）。
+     * 兼容入口：解析为可执行的 {@link CurlRequest}。
      *
      * @param curl 完整命令
      * @return 请求模型
      */
     public static CurlRequest parse(String curl) {
-        if (curl == null) {
-            throw new IllegalArgumentException("curl is required");
-        }
-        String normalized = curl.trim();
-        if (normalized.startsWith("curl")) {
-            normalized = normalized.substring(4).trim();
-        }
-        normalized = normalized.replace("\\\r\n", " ").replace("\\\n", " ").replace("^\r\n", " ")
-                .replace("^\n", " ");
-        List<String> args = tokenize(normalized);
-        return parseArgs(args);
+        return CurlRequest.from(parseModel(curl));
+    }
+
+    /**
+     * 解析为不可变模型，供代码生成使用。
+     *
+     * @param curl 完整命令
+     * @return 不可变模型
+     * @since 2.0.1
+     */
+    public static ParsedCurlRequest parseModel(String curl) {
+        return parseBuilder(curl).build();
+    }
+
+    /**
+     * 按生成器 id 把 curl 转成源码。
+     *
+     * @param generatorId 如 {@code java-okhttp}、{@code js-fetch}
+     * @param curl 完整命令
+     * @return 生成结果
+     * @since 2.0.1
+     */
+    public static GeneratedCode generate(String generatorId, String curl) {
+        return GeneratorRegistry.get().generate(generatorId, parseModel(curl));
     }
 
     /**
@@ -41,88 +91,45 @@ public final class CurlParser {
      * @return 参数列表
      */
     static List<String> tokenize(String input) {
-        List<String> tokens = new ArrayList<String>();
-        StringBuilder current = new StringBuilder();
-        int i = 0;
-        int n = input.length();
-        while (i < n) {
-            char c = input.charAt(i);
-            if (c == ' ' || c == '\t' || c == '\r' || c == '\n') {
-                if (current.length() > 0) {
-                    tokens.add(current.toString());
-                    current.setLength(0);
-                }
-                i++;
-                continue;
-            }
-            if (c == '\'') {
-                i++;
-                while (i < n) {
-                    char q = input.charAt(i);
-                    if (q == '\'') {
-                        i++;
-                        break;
-                    }
-                    current.append(q);
-                    i++;
-                }
-                continue;
-            }
-            if (c == '"') {
-                i++;
-                while (i < n) {
-                    char q = input.charAt(i);
-                    if (q == '"') {
-                        i++;
-                        break;
-                    }
-                    if (q == '\\' && i + 1 < n) {
-                        i++;
-                        current.append(input.charAt(i));
-                        i++;
-                        continue;
-                    }
-                    current.append(q);
-                    i++;
-                }
-                continue;
-            }
-            if (c == '\\' && i + 1 < n) {
-                current.append(input.charAt(i + 1));
-                i += 2;
-                continue;
-            }
-            current.append(c);
-            i++;
-        }
-        if (current.length() > 0) {
-            tokens.add(current.toString());
-        }
-        return tokens;
+        return CurlTokenizer.tokenize(input);
     }
 
-    /**
-     * 解析已分词的 curl 参数。
-     *
-     * @param args 参数列表
-     * @return 请求模型
-     */
-    private static CurlRequest parseArgs(List<String> args) {
-        CurlRequest request = new CurlRequest();
+    static ParsedCurlRequest.Builder parseBuilder(String curl) {
+        if (curl == null) {
+            throw new IllegalArgumentException("curl is required");
+        }
+        String normalized = stripPrefix(CurlTokenizer.normalize(curl).trim());
+        ParsedCurlRequest.Builder builder = ParsedCurlRequest.builder();
+        if (normalized.isEmpty()) {
+            return builder;
+        }
+        List<String> args = CurlTokenizer.expandArgs(CurlTokenizer.tokenize(normalized));
+        return parseArgs(args, builder);
+    }
+
+    private static ParsedCurlRequest.Builder parseArgs(List<String> args, ParsedCurlRequest.Builder b) {
         boolean dataAsQuery = false;
-        StringBuilder data = new StringBuilder();
+        boolean jsonFlag = false;
+        String methodExplicit = null;
         boolean hasData = false;
-        String method = null;
-        int i = 0;
-        while (i < args.size()) {
+        boolean dataBinary = false;
+        List<String> dataParts = new ArrayList<String>();
+        List<FormPart> formParts = new ArrayList<FormPart>();
+
+        for (int i = 0; i < args.size(); i++) {
             String arg = args.get(i);
-            if (!arg.startsWith("-")) {
-                if (looksLikeUrl(arg)) {
-                    request.setUrl(arg);
-                }
-                i++;
+            if (arg == null) {
                 continue;
             }
+            if (!arg.startsWith("-") || "-".equals(arg)) {
+                if (looksLikeUrl(arg) || (b.url() == null && looksLikeHost(arg))) {
+                    b.url(ensureScheme(arg));
+                } else if (!arg.isEmpty() && !"curl".equals(arg)) {
+                    b.warn("未识别的位置参数：" + truncate(arg));
+                }
+                continue;
+            }
+
             String opt = arg;
             String inline = null;
             if (opt.startsWith("--")) {
@@ -132,188 +139,448 @@ public final class CurlParser {
                     opt = opt.substring(0, eq);
                 }
             }
+
+            Take take = new Take(inline, args, i);
+
             if ("-X".equals(opt) || "--request".equals(opt)) {
-                method = inline != null ? inline : next(args, ++i);
+                methodExplicit = take.value();
             } else if ("-H".equals(opt) || "--header".equals(opt)) {
-                addHeader(request, inline != null ? inline : next(args, ++i));
+                addHeader(b, take.value());
             } else if ("-d".equals(opt) || "--data".equals(opt) || "--data-raw".equals(opt)
-                    || "--data-binary".equals(opt) || "--data-ascii".equals(opt)) {
-                String piece = stripFilePrefix(inline != null ? inline : next(args, ++i));
-                if (hasData) {
-                    data.append('&');
-                }
-                data.append(piece);
+                    || "--data-ascii".equals(opt)) {
+                dataParts.add(readDataPiece(take.value(), false, b));
                 hasData = true;
+            } else if ("--data-binary".equals(opt)) {
+                dataParts.add(readDataPiece(take.value(), true, b));
+                hasData = true;
+                dataBinary = true;
             } else if ("--data-urlencode".equals(opt)) {
-                String piece = inline != null ? inline : next(args, ++i);
-                if (hasData) {
-                    data.append('&');
-                }
-                data.append(piece);
+                dataParts.add(encodeDataUrl(take.value(), b));
                 hasData = true;
+            } else if ("--json".equals(opt)) {
+                dataParts.add(readDataPiece(take.value(), false, b));
+                hasData = true;
+                jsonFlag = true;
+            } else if ("--url-query".equals(opt)) {
+                parseQueryPiece(take.value(), b);
             } else if ("-G".equals(opt) || "--get".equals(opt)) {
                 dataAsQuery = true;
             } else if ("-I".equals(opt) || "--head".equals(opt)) {
-                method = "HEAD";
+                if (methodExplicit == null) {
+                    methodExplicit = "HEAD";
+                }
             } else if ("-u".equals(opt) || "--user".equals(opt)) {
-                parseUser(request, inline != null ? inline : next(args, ++i));
+                parseUser(b, take.value());
+            } else if ("--oauth2-bearer".equals(opt)) {
+                b.auth(Auth.bearer(take.value()));
             } else if ("-A".equals(opt) || "--user-agent".equals(opt)) {
-                request.getHeaders().put("User-Agent", inline != null ? inline : next(args, ++i));
+                b.upsertHeader("User-Agent", take.value());
             } else if ("-e".equals(opt) || "--referer".equals(opt)) {
-                request.getHeaders().put("Referer", inline != null ? inline : next(args, ++i));
+                b.upsertHeader("Referer", take.value());
             } else if ("-x".equals(opt) || "--proxy".equals(opt)) {
-                parseProxy(request, inline != null ? inline : next(args, ++i));
+                b.proxy(parseProxy(take.value(), b));
             } else if ("-b".equals(opt) || "--cookie".equals(opt)) {
-                request.getHeaders().put("Cookie", inline != null ? inline : next(args, ++i));
+                String cookie = take.value();
+                if (cookie.indexOf('=') >= 0) {
+                    b.upsertHeader("Cookie", cookie);
+                } else {
+                    b.warn("-b 指向 cookie 文件 " + cookie + "，未读入内容");
+                }
             } else if ("--url".equals(opt)) {
-                request.setUrl(inline != null ? inline : next(args, ++i));
-            } else if ("-F".equals(opt) || "--form".equals(opt)) {
-                parseForm(request, inline != null ? inline : next(args, ++i));
+                b.url(ensureScheme(take.value()));
+            } else if ("-F".equals(opt) || "--form".equals(opt) || "--form-string".equals(opt)) {
+                FormPart part = parseForm(take.value(), "--form-string".equals(opt), b);
+                if (part != null) {
+                    formParts.add(part);
+                }
             } else if ("-T".equals(opt) || "--upload-file".equals(opt)) {
-                request.setUpload(new File(inline != null ? inline : next(args, ++i)), "file");
-                if (method == null) {
-                    method = "PUT";
+                b.body(Body.file(take.value(), true));
+                if (methodExplicit == null) {
+                    methodExplicit = "PUT";
                 }
             } else if ("-k".equals(opt) || "--insecure".equals(opt)) {
-                request.setInsecure(true);
+                b.insecure(true);
             } else if ("-L".equals(opt) || "--location".equals(opt)) {
-                request.setFollowRedirects(true);
-            } else if ("--compressed".equals(opt) || "-s".equals(opt) || "--silent".equals(opt)
-                    || "-v".equals(opt) || "--verbose".equals(opt) || "-i".equals(opt)
-                    || "--include".equals(opt)) {
-                // ignore
-            } else if ("-o".equals(opt) || "--output".equals(opt) || "-m".equals(opt)
-                    || "--max-time".equals(opt) || "--connect-timeout".equals(opt)) {
+                b.followRedirects(true);
+            } else if ("--compressed".equals(opt)) {
+                b.compressed(true);
+                if (!b.hasHeader("Accept-Encoding")) {
+                    b.upsertHeader("Accept-Encoding", "gzip, deflate, br");
+                }
+            } else if ("-m".equals(opt) || "--max-time".equals(opt)) {
+                b.timeoutSec(parseInt(take.value()));
+            } else if ("--connect-timeout".equals(opt)) {
+                b.connectTimeoutSec(parseInt(take.value()));
+            } else if ("--create-dirs".equals(opt)) {
+                // no-op
+            } else if (SKIP_FLAGS.contains(opt)) {
+                // ignored
+            } else if (SKIP_VALUE.contains(opt)) {
                 if (inline == null) {
-                    i++;
+                    take.skipValueIfPresent();
                 }
-            }
-            i++;
-        }
-        if (hasData) {
-            String body = data.toString();
-            if (dataAsQuery) {
-                String url = request.getUrl();
-                if (url != null) {
-                    request.setUrl(url + (url.indexOf('?') >= 0 ? '&' : '?') + body);
-                }
+                b.warn("已忽略不参与请求构造的选项 " + opt);
             } else {
-                request.setBody(body);
-                if (request.getContentType() == null && request.getHeaders().get("Content-Type") == null) {
-                    request.setContentType("application/x-www-form-urlencoded");
+                b.unknown(opt);
+                b.warn("未支持的选项 " + opt + "，已跳过");
+                if (inline == null) {
+                    take.skipValueIfPresent();
                 }
-                if (method == null) {
-                    method = "POST";
+            }
+            i = take.index();
+        }
+
+        if (!formParts.isEmpty()) {
+            b.body(Body.multipart(formParts));
+            if (hasData) {
+                b.warn("-F 与 -d 同时出现时按 multipart 处理，-d 正文被忽略");
+            }
+        } else if (hasData) {
+            String joined = join(dataParts, "&");
+            if (dataAsQuery) {
+                b.url(appendQuery(b.url(), joined));
+            } else if (dataParts.size() == 1 && dataParts.get(0).startsWith("@")
+                    && dataParts.get(0).length() > 1) {
+                b.body(Body.file(dataParts.get(0).substring(1), dataBinary));
+            } else {
+                Body.Kind kind;
+                if (jsonFlag) {
+                    kind = Body.Kind.JSON;
+                } else if (dataParts.size() > 1) {
+                    kind = Body.Kind.URLENCODED;
+                } else {
+                    kind = guessBodyKind(joined, dataBinary);
+                }
+                if (kind == Body.Kind.JSON) {
+                    b.body(Body.json(joined));
+                } else if (kind == Body.Kind.URLENCODED) {
+                    b.body(Body.urlencoded(joined));
+                } else {
+                    b.body(Body.raw(joined, dataBinary));
+                }
+                if (jsonFlag) {
+                    b.upsertHeader("Content-Type", "application/json");
+                    if (!b.hasHeader("Accept")) {
+                        b.upsertHeader("Accept", "application/json");
+                    }
+                } else if (!b.hasHeader("Content-Type") && kind == Body.Kind.URLENCODED) {
+                    b.upsertHeader("Content-Type", "application/x-www-form-urlencoded");
                 }
             }
         }
-        if (method != null) {
-            request.setMethod(method.toUpperCase(Locale.ROOT));
+
+        String inferred;
+        if (methodExplicit != null) {
+            inferred = methodExplicit.toUpperCase(Locale.ROOT);
+        } else if ((!formParts.isEmpty() || hasData) && !dataAsQuery) {
+            inferred = "POST";
+        } else {
+            inferred = "GET";
         }
-        inferContentType(request);
-        return request;
+        b.method(inferred);
+        return b;
     }
 
-    private static void inferContentType(CurlRequest request) {
-        String ct = request.getHeaders().get("Content-Type");
-        if (ct == null) {
-            for (String key : request.getHeaders().keySet()) {
-                if ("Content-Type".equalsIgnoreCase(key)) {
-                    ct = request.getHeaders().get(key);
-                    break;
-                }
-            }
+    private static String stripPrefix(String input) {
+        String s = input.trim();
+        while (s.toLowerCase(Locale.ROOT).startsWith("sudo ")) {
+            s = s.substring(5).trim();
         }
-        if (ct != null) {
-            request.setContentType(ct);
+        if (s.toLowerCase(Locale.ROOT).startsWith("curl.exe")) {
+            s = "curl" + s.substring(8);
         }
+        if (s.toLowerCase(Locale.ROOT).startsWith("curl")) {
+            s = s.substring(4).trim();
+        }
+        return s;
     }
 
-    private static void addHeader(CurlRequest request, String raw) {
-        if (raw == null) {
+    private static void addHeader(ParsedCurlRequest.Builder b, String raw) {
+        if (raw == null || raw.isEmpty()) {
             return;
         }
         int colon = raw.indexOf(':');
         if (colon <= 0) {
+            if (raw.endsWith(";") && raw.length() > 1) {
+                b.header(raw.substring(0, raw.length() - 1).trim(), "");
+            }
             return;
         }
-        String name = raw.substring(0, colon).trim();
-        String value = raw.substring(colon + 1).trim();
-        request.getHeaders().put(name, value);
+        b.header(raw.substring(0, colon).trim(), raw.substring(colon + 1).trim());
     }
 
-    private static void parseUser(CurlRequest request, String raw) {
-        if (raw == null) {
+    private static void parseUser(ParsedCurlRequest.Builder b, String raw) {
+        if (raw == null || raw.isEmpty()) {
             return;
         }
         int colon = raw.indexOf(':');
         if (colon < 0) {
-            request.setBasicUser(raw, "");
+            b.auth(Auth.basic(raw, ""));
         } else {
-            request.setBasicUser(raw.substring(0, colon), raw.substring(colon + 1));
+            b.auth(Auth.basic(raw.substring(0, colon), raw.substring(colon + 1)));
         }
     }
 
-    private static void parseProxy(CurlRequest request, String raw) {
-        if (raw == null) {
-            return;
+    private static ProxySpec parseProxy(String raw, ParsedCurlRequest.Builder b) {
+        if (raw == null || raw.isEmpty()) {
+            return null;
         }
+        String scheme = "http";
         String value = raw;
-        if (value.startsWith("http://") || value.startsWith("https://")) {
-            int slash = value.indexOf("://");
-            value = value.substring(slash + 3);
+        int schemeAt = value.indexOf("://");
+        if (schemeAt > 0) {
+            String s = value.substring(0, schemeAt).toLowerCase(Locale.ROOT);
+            if ("https".equals(s) || "socks5".equals(s) || "http".equals(s)) {
+                scheme = s;
+            }
+            value = value.substring(schemeAt + 3);
+        }
+        String user = null;
+        String password = null;
+        int at = value.lastIndexOf('@');
+        if (at > 0) {
+            String cred = value.substring(0, at);
+            value = value.substring(at + 1);
+            int c = cred.indexOf(':');
+            if (c >= 0) {
+                user = cred.substring(0, c);
+                password = cred.substring(c + 1);
+            } else {
+                user = cred;
+            }
         }
         int colon = value.lastIndexOf(':');
         if (colon < 0) {
-            request.setProxy(value, 80);
-        } else {
-            try {
-                request.setProxy(value.substring(0, colon), Integer.parseInt(value.substring(colon + 1)));
-            } catch (NumberFormatException e) {
-                request.setProxy(value, 80);
-            }
+            return new ProxySpec(value, "https".equals(scheme) ? 443 : 80, user, password, scheme);
+        }
+        try {
+            int port = Integer.parseInt(value.substring(colon + 1));
+            return new ProxySpec(value.substring(0, colon), port, user, password, scheme);
+        } catch (NumberFormatException e) {
+            b.warn("代理端口无法解析：" + raw + "，回退 80");
+            return new ProxySpec(value, 80, user, password, scheme);
         }
     }
 
-    private static void parseForm(CurlRequest request, String raw) {
-        if (raw == null) {
-            return;
+    private static FormPart parseForm(String raw, boolean asString, ParsedCurlRequest.Builder b) {
+        if (raw == null || raw.isEmpty()) {
+            return null;
         }
         int eq = raw.indexOf('=');
         if (eq < 0) {
-            return;
+            b.warn("无法解析 -F 字段：" + raw);
+            return null;
         }
         String name = raw.substring(0, eq);
-        String value = raw.substring(eq + 1);
-        if (value.startsWith("@")) {
-            request.setUpload(new File(value.substring(1)), name);
-        } else {
-            String body = request.getBody();
-            String piece = name + "=" + value;
-            request.setBody(body == null || body.isEmpty() ? piece : body + "&" + piece);
-            if (request.getContentType() == null) {
-                request.setContentType("application/x-www-form-urlencoded");
+        String rest = raw.substring(eq + 1);
+        String contentType = null;
+        String filename = null;
+        String[] extras = rest.split(";");
+        rest = extras[0];
+        for (int i = 1; i < extras.length; i++) {
+            String piece = extras[i].trim();
+            int ke = piece.indexOf('=');
+            if (ke <= 0) {
+                continue;
+            }
+            String key = piece.substring(0, ke).trim().toLowerCase(Locale.ROOT);
+            String val = piece.substring(ke + 1);
+            if ("type".equals(key)) {
+                contentType = val;
+            } else if ("filename".equals(key)) {
+                filename = val;
             }
         }
+        if (!asString && rest.startsWith("@")) {
+            String path = rest.substring(1);
+            return FormPart.file(name, path, filename != null ? filename : fileNameOf(path), contentType);
+        }
+        if (!asString && rest.startsWith("<")) {
+            b.warn("字段 " + name + " 使用 <file 读取文本文件，按路径处理");
+            return FormPart.file(name, rest.substring(1), filename, contentType);
+        }
+        return FormPart.field(name, rest);
     }
 
-    private static String stripFilePrefix(String value) {
+    private static String readDataPiece(String value, boolean binary, ParsedCurlRequest.Builder b) {
         if (value != null && value.startsWith("@") && value.length() > 1 && !value.startsWith("@-")) {
+            b.warn((binary ? "--data-binary" : "--data") + " 引用文件 " + value.substring(1));
             return value;
+        }
+        if ("@-".equals(value)) {
+            b.warn("从 stdin 读取正文（@-）");
         }
         return value == null ? "" : value;
     }
 
-    private static String next(List<String> args, int index) {
-        if (index < 0 || index >= args.size()) {
+    private static String encodeDataUrl(String raw, ParsedCurlRequest.Builder b) {
+        if (raw == null || raw.isEmpty()) {
             return "";
         }
-        return args.get(index);
+        if (raw.startsWith("@")) {
+            b.warn("--data-urlencode 引用文件 " + raw);
+            return raw;
+        }
+        int eq = raw.indexOf('=');
+        if (eq < 0) {
+            return urlEncode(raw);
+        }
+        String name = raw.substring(0, eq);
+        String value = raw.substring(eq + 1);
+        if (name.isEmpty()) {
+            return urlEncode(value);
+        }
+        return name + "=" + urlEncode(value);
     }
 
-    private static boolean looksLikeUrl(String arg) {
+    private static void parseQueryPiece(String raw, ParsedCurlRequest.Builder b) {
+        int eq = raw.indexOf('=');
+        if (eq < 0) {
+            b.query(raw, "");
+            b.url(appendQuery(b.url(), urlEncode(raw)));
+        } else {
+            String n = raw.substring(0, eq);
+            String v = raw.substring(eq + 1);
+            b.query(n, v);
+            b.url(appendQuery(b.url(), urlEncode(n) + "=" + urlEncode(v)));
+        }
+    }
+
+    private static String appendQuery(String url, String qs) {
+        if (qs == null || qs.isEmpty() || url == null) {
+            return url;
+        }
+        return url + (url.indexOf('?') >= 0 ? '&' : '?') + qs;
+    }
+
+    private static Body.Kind guessBodyKind(String text, boolean binary) {
+        if (binary) {
+            return Body.Kind.RAW;
+        }
+        if (looksLikeJson(text)) {
+            return Body.Kind.JSON;
+        }
+        String t = text == null ? "" : text.trim();
+        if (t.indexOf('=') >= 0 && !t.startsWith("{") && !t.startsWith("[")) {
+            return Body.Kind.URLENCODED;
+        }
+        return Body.Kind.RAW;
+    }
+
+    private static boolean looksLikeJson(String text) {
+        if (text == null) {
+            return false;
+        }
+        String t = text.trim();
+        if (t.indexOf("}&") >= 0 || t.indexOf("]&") >= 0) {
+            return false;
+        }
+        return (t.startsWith("{") && t.endsWith("}")) || (t.startsWith("[") && t.endsWith("]"));
+    }
+
+    static boolean looksLikeUrl(String arg) {
+        if (arg == null) {
+            return false;
+        }
         String lower = arg.toLowerCase(Locale.ROOT);
-        return lower.startsWith("http://") || lower.startsWith("https://") || lower.startsWith("ws://")
-                || lower.startsWith("wss://");
+        return lower.startsWith("http://") || lower.startsWith("https://")
+                || lower.startsWith("ws://") || lower.startsWith("wss://");
+    }
+
+    private static boolean looksLikeHost(String arg) {
+        if (arg == null || arg.isEmpty() || arg.startsWith("-")) {
+            return false;
+        }
+        if (arg.contains("://")) {
+            return looksLikeUrl(arg);
+        }
+        return LOCALHOST.matcher(arg).find() || IPV4.matcher(arg).find() || HOST_NAME.matcher(arg).find();
+    }
+
+    private static String ensureScheme(String url) {
+        if (url != null && SCHEME.matcher(url).find()) {
+            return url;
+        }
+        return "http://" + url;
+    }
+
+    private static Integer parseInt(String s) {
+        try {
+            return Integer.valueOf(s);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static String fileNameOf(String path) {
+        String p = path.replace('\\', '/');
+        int slash = p.lastIndexOf('/');
+        return slash < 0 ? p : p.substring(slash + 1);
+    }
+
+    private static String truncate(String s) {
+        return s.length() > 48 ? s.substring(0, 45) + "..." : s;
+    }
+
+    private static String join(List<String> parts, String sep) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < parts.size(); i++) {
+            if (i > 0) {
+                sb.append(sep);
+            }
+            sb.append(parts.get(i));
+        }
+        return sb.toString();
+    }
+
+    static String urlEncode(String s) {
+        try {
+            return URLEncoder.encode(s, "UTF-8").replace("+", "%20");
+        } catch (UnsupportedEncodingException e) {
+            return s;
+        }
+    }
+
+    /**
+     * 消费选项参数；支持 {@code --header=value} 内联和 {@code -H value} 下一个 token。
+     */
+    private static final class Take {
+        private final String inline;
+        private final List<String> args;
+        private int i;
+
+        Take(String inline, List<String> args, int i) {
+            this.inline = inline;
+            this.args = args;
+            this.i = i;
+        }
+
+        String value() {
+            if (inline != null) {
+                return inline;
+            }
+            if (i + 1 >= args.size()) {
+                return "";
+            }
+            String v = args.get(i + 1);
+            if (v.startsWith("-") && v.length() > 1 && !v.matches("-?\\d+(\\.\\d+)?")) {
+                return "";
+            }
+            i++;
+            return v;
+        }
+
+        void skipValueIfPresent() {
+            if (i + 1 < args.size()) {
+                String peek = args.get(i + 1);
+                if (peek != null && !peek.startsWith("-") && !looksLikeUrl(peek) && !looksLikeHost(peek)) {
+                    i++;
+                }
+            }
+        }
+
+        int index() {
+            return i;
+        }
     }
 }

@@ -56,6 +56,8 @@
 - `getIdCardCheckNum` 复用 `IdCardUtils.calcTrailingNumber`，避免 17 次 `Integer.parseInt`。
 - `getUUID` 去 `-` 不再走正则；`decoding` 改为整数幂避免 `Math.pow` 精度问题；`randomOne` 可取到数组最后一个元素。
 - `IdCardUtils` 随机生日按当月实际天数生成，避免 Calendar 宽松模式下的日期滚动。
+- curl 解析：展开 `-kLs`/`-XPOST`，`--json` / `--data-urlencode` 按 curl 语义处理，`@file` 不再当字面正文，`-F` 保持 multipart；`toCurl` 代理输出 `host:port`；`-k` 只作用于单次请求。
+- 新增 curl 代码生成：OkHttp / Apache 5 / JDK 11+ / jkit / Kotlin / fetch / axios / requests / httpx / Go / C# / PHP。
 
 ### 构建
 

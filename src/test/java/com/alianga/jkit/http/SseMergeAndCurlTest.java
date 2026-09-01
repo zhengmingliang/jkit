@@ -240,6 +240,7 @@ public class SseMergeAndCurlTest {
         assertTrue(curl.contains("X-Trace: a'\\''b"));
         assertTrue(curl.contains("--data-binary '{\"message\":\"hello '\\''world'\\''\"}'"));
         assertTrue(curl.contains("127.0.0.1:8080"));
+        assertFalse(curl.contains("/127.0.0.1:8080"));
         assertFalse(curl.contains(" -k"));
         CurlRequest parsed = CurlParser.parse(curl);
         assertEquals("POST", parsed.getMethod());
