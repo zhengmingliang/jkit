@@ -292,6 +292,7 @@ public class DateUtils {
      *
      * @param date 日期字符串
      * @return 解析得到的日期；无法识别时返回 {@code null}
+     * @since 2.0.1
      */
     public static Date parse(String date) {
         if (date == null) {
@@ -305,6 +306,7 @@ public class DateUtils {
      *
      * @param epoch 10 位秒或其它位数的毫秒时间戳
      * @return 对应的日期
+     * @since 2.0.1
      */
     public static Date fromEpochNumber(long epoch) {
         return DateTimes.fromEpochNumber(epoch);
@@ -315,6 +317,7 @@ public class DateUtils {
      *
      * @param temporal 时间对象
      * @return 转换后的日期；无法提取日期时间字段时返回 {@code null}
+     * @since 2.0.1
      */
     public static Date fromTemporal(TemporalAccessor temporal) {
         if (temporal == null) {

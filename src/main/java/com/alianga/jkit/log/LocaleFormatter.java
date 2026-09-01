@@ -7,6 +7,12 @@ import java.time.format.DateTimeFormatter;
 import java.util.Locale;
 import java.util.logging.*;
 
+/**
+ * 固定 Locale 的 JUL 格式化器，日志时间使用手写 {@code yyyy-MM-dd HH:mm:ss.SSS}，
+ * 级别名不受 JVM 默认语言环境影响。
+ *
+ * @since 2.0.1
+ */
 public class LocaleFormatter extends Formatter {
 
     private final Locale locale;

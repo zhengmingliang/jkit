@@ -5,7 +5,7 @@
 jkit 由 [ZmlTools](https://github.com/wuyongshi/ZmlTools) 迁移而来，在保留原有工具能力的同时，**移除了全部第三方依赖**（Gson、Fastjson、OkHttp、Guava、Apache Commons CSV、Jsoup、SLF4J、Logback、Lombok 等），仅使用 JDK 标准库（含 `java.util.logging`、`javax.crypto`、`java.awt`、`java.net` 等）。
 
 > 坐标：`com.alianga:jkit`
-> 版本：`2.0.0`
+> 版本：`2.0.1`（[版本更新说明](CHANGELOG.md)）
 > 编译目标：JDK 8+
 > License：Apache License 2.0
 
@@ -21,13 +21,13 @@ jkit 由 [ZmlTools](https://github.com/wuyongshi/ZmlTools) 迁移而来，在保
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit</artifactId>
-    <version>2.0.0</version>
+    <version>2.0.1</version>
 </dependency>
 ```
 
 本库接替 [ZmlTools](https://github.com/wuyongshi/ZmlTools)（`top.wuyongshi:ZmlTools`）。**新项目请只用上面的坐标。** 已经依赖 ZmlTools 的工程有两种迁法：
 
-1. **直接改 POM**（推荐）把 `groupId` / `artifactId` 换成 `com.alianga:jkit:2.0.0`，并按本文档把 `top.wys.utils.*` 改为 `com.alianga.jkit.*`。
+1. **直接改 POM**（推荐）把 `groupId` / `artifactId` 换成 `com.alianga:jkit:2.0.1`，并按本文档把 `top.wys.utils.*` 改为 `com.alianga.jkit.*`。
 2. **Maven relocation**：发布 `relocated/zmltools/pom.xml`（`cd relocated/zmltools && mvn clean deploy -Ppublish`）。之后依赖 `top.wuyongshi:ZmlTools:2.0.0` 的构建会被 Maven 自动解析到 `com.alianga:jkit:2.0.0`，日志里会出现 relocation 提示。relocation POM 必须用**旧坐标的 Central 账号**发布；包名不会自动改写，源码仍要自己换 import。
 
 ## 快速开始

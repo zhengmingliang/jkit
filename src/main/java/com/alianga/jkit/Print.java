@@ -11,7 +11,9 @@ import java.util.function.Supplier;
 public class Print {
     private static final Log log = Log.get(Print.class);
     /**
-     * 启用日志打印
+     * 启用日志打印。为 {@code false} 时只输出到控制台，不再写入 JUL。
+     *
+     * @since 2.0.1
      */
     public static boolean enableLog = true;
 

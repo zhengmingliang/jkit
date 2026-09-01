@@ -519,6 +519,8 @@ public class ConvertUtils {
      * 转换为Date类型，支持 {@link Date}、{@link Calendar}、{@link LocalDate}、
      * {@link LocalDateTime}、{@link Instant}、{@link OffsetDateTime}、{@link ZonedDateTime}、
      * 10 位或 13 位时间戳，以及常见的日期时间字符串（自动推断格式，不经过 SimpleDateFormat）。
+     * 2.0.1 起额外支持 {@link Instant}、{@link OffsetDateTime}、{@link ZonedDateTime}，
+     * 字符串路径改为数字字段抽取。
      *
      * @param obj          要转换类型的对象
      * @param defaultValue 当 obj 为 {@code null} 时返回的默认值

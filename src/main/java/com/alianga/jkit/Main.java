@@ -10,6 +10,6 @@ public class Main {
      * @param args 命令行参数，当前实现未使用
      */
     public static void main(String[] args) {
-        System.out.println("jkit 2.0.0");
+        System.out.println("jkit 2.0.1");
     }
 }
