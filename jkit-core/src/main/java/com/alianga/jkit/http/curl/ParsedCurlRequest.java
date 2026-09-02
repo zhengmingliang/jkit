@@ -5,7 +5,7 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * 不可变的 curl 解析结果。代码生成器和执行器都只依赖这一份模型。
+ * 不可变的 curl 解析结果。执行器和 {@code jkit-curl-codegen} 都只依赖这一份模型。
  *
  * @author 郑明亮
  * @since 2.0.1

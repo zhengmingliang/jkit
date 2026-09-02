@@ -376,4 +376,4 @@ JSON.parse(json, ReadOption.AllowComment,
         ReadOption.AllowLastEndComma);
 ```
 
-完整测试用例见 `src/test/java/com/alianga/jkit/json/JSONTest.java`、`JSONNodeTest.java` 与 `JSONSchemaTest.java`。
+完整测试用例见 `jkit-core/src/test/java/com/alianga/jkit/json/JSONTest.java`、`JSONNodeTest.java` 与 `JSONSchemaTest.java`。

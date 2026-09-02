@@ -6,7 +6,7 @@
 
 发布（或准备发布）新版本时按下面做：
 
-1. 把 `pom.xml` 的 `<version>` 改成新版本号，同步 `README.md` 页头与依赖示例、`Main.java` 打印的版本。
+1. 把根 `pom.xml`（`jkit-parent`）的 `<version>` 改成新版本号，子模块继承该版本；同步 `README.md` 页头与依赖示例、`Main.java` 打印的版本。
 2. 在本文「版本记录」**最上方**插入新版本小节，日期用当天（`YYYY-MM-DD`）。
 3. 按「新增 / 变更 / 修复 / 构建」分类写清调用方能感知的变化，不要只贴 git 标题。
 4. 本次新增的公开 API 在 javadoc 里补 `@since x.y.z`。
@@ -62,6 +62,7 @@
 ### 构建
 
 - `git-commit-id-plugin`、`buildnumber-maven-plugin`、`maven-source-plugin` 从 `publish` profile 挪到默认构建，`package` 即可产出带构建信息的 sources jar。
+- 仓库改为多模块：父 POM `com.alianga:jkit-parent`（packaging pom），运行时库在模块 `jkit-core`（发布坐标仍是 `com.alianga:jkit`，沿用原根 POM 的编译 / Checkstyle / MRJAR / 发布配置）。
 
 ## 2.0.0
 

@@ -1,7 +1,5 @@
 package com.alianga.jkit.http;
 
-import com.alianga.jkit.http.codegen.GeneratedCode;
-import com.alianga.jkit.http.codegen.GeneratorRegistry;
 import com.alianga.jkit.http.curl.CurlTokenizer;
 import com.alianga.jkit.http.curl.ParsedCurlRequest;
 import com.alianga.jkit.http.curl.ParsedCurlRequest.Auth;
@@ -20,8 +18,8 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * 解析 curl 命令。{@link #parse(String)} 仍返回 {@link CurlRequest} 以保持兼容；
- * 新代码请用 {@link #parseModel(String)} 拿到不可变模型再交给生成器。
+ * 解析 curl 命令。{@link #parse(String)} 返回可执行的 {@link CurlRequest}；
+ * {@link #parseModel(String)} 返回不可变模型，供执行器或外部代码生成使用。
  *
  * @author 郑明亮
  */
@@ -62,7 +60,8 @@ public final class CurlParser {
     }
 
     /**
-     * 解析为不可变模型，供代码生成使用。
+     * 解析为不可变模型。执行路径用 {@link CurlRequest#from(ParsedCurlRequest)}；
+     * 多语言源码生成请用独立模块 {@code jkit-curl-codegen}。
      *
      * @param curl 完整命令
      * @return 不可变模型
@@ -70,18 +69,6 @@ public final class CurlParser {
      */
     public static ParsedCurlRequest parseModel(String curl) {
         return parseBuilder(curl).build();
-    }
-
-    /**
-     * 按生成器 id 把 curl 转成源码。
-     *
-     * @param generatorId 如 {@code java-okhttp}、{@code js-fetch}
-     * @param curl 完整命令
-     * @return 生成结果
-     * @since 2.0.1
-     */
-    public static GeneratedCode generate(String generatorId, String curl) {
-        return GeneratorRegistry.get().generate(generatorId, parseModel(curl));
     }
 
     /**

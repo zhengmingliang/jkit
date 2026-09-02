@@ -5,12 +5,12 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>com.alianga</groupId>
-    <artifactId>jkit</artifactId>
+    <artifactId>jkit-parent</artifactId>
     <version>2.0.1</version>
-    <packaging>jar</packaging>
+    <packaging>pom</packaging>
 
-    <name>jkit</name>
-    <description>纯 JDK、零第三方依赖的 Java 通用工具库（由 ZmlTools 迁移而来）</description>
+    <name>jkit-parent</name>
+    <description>jkit 多模块父工程。运行时库发布坐标仍是 com.alianga:jkit（模块目录 jkit-core）。</description>
     <url>https://github.com/zhengmingliang/jkit</url>
 
     <licenses>
@@ -29,430 +29,33 @@
         </developer>
     </developers>
 
-    <properties>
-        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
-<!--        <maven.compiler.source>1.8</maven.compiler.source>-->
-<!--        <maven.compiler.target>1.8</maven.compiler.target>-->
-        <maven.build.timestamp.format>yyyy-MM-dd HH:mm:ss</maven.build.timestamp.format>
-    </properties>
-
     <scm>
         <connection>scm:git:https://github.com/zhengmingliang/jkit.git</connection>
         <developerConnection>scm:git:https://github.com/zhengmingliang/jkit.git</developerConnection>
         <url>https://github.com/zhengmingliang/jkit</url>
     </scm>
 
-    <!--
-      零第三方依赖：本库只使用 JDK 标准库（含 java.util.logging、javax.crypto、java.awt 等）。
-      因此 <dependencies> 为空，引入本库不会向宿主应用传递任何外部依赖。
-      （JUnit 仅用于单元测试，test 作用域不会进入发布产物，不影响零依赖承诺。）
-    -->
+    <modules>
+        <module>jkit-core</module>
+    </modules>
 
-    <dependencies>
-        <dependency>
-            <groupId>junit</groupId>
-            <artifactId>junit</artifactId>
-            <version>4.13.2</version>
-            <scope>test</scope>
-        </dependency>
-    </dependencies>
-
-    <build>
-        <plugins>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-jar-plugin</artifactId>
-                <version>3.3.0</version>
-                <configuration>
-                    <archive>
-                        <manifestEntries>
-                            <Multi-Release>true</Multi-Release>
-                        </manifestEntries>
-                    </archive>
-                </configuration>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-surefire-plugin</artifactId>
-                <version>2.22.2</version>
-                <configuration>
-                    <additionalClasspathElements>
-                        <additionalClasspathElement>
-                            ${project.build.outputDirectory}/META-INF/versions/11
-                        </additionalClasspathElement>
-                    </additionalClasspathElements>
-                </configuration>
-            </plugin>
-            <!-- Checkstyle：绑定 validate 阶段随构建强制执行，违规即构建失败。
-                 需要临时跳过时用 mvn -Dcheckstyle.skip=true；
-                 单独检查用 mvn checkstyle:check -Dcheckstyle.config.location=checkstyle/check-style.xml
-                 （直接调 goal 不会继承本 execution 的 configLocation，必须显式指定，否则会套用 sun_checks 默认规则） -->
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-checkstyle-plugin</artifactId>
-                <version>3.4.0</version>
-                <dependencies>
-                    <dependency>
-                        <groupId>com.puppycrawl.tools</groupId>
-                        <artifactId>checkstyle</artifactId>
-                        <version>9.3</version>
-                    </dependency>
-                </dependencies>
-                <executions>
-                    <execution>
-                        <id>checkstyle</id>
-                        <phase>validate</phase>
-                        <goals>
-                            <goal>check</goal>
-                        </goals>
-                        <configuration>
-                            <failOnViolation>true</failOnViolation>
-                            <includeTestSourceDirectory>false</includeTestSourceDirectory>
-                            <configLocation>checkstyle/check-style.xml</configLocation>
-                        </configuration>
-                    </execution>
-                </executions>
-            </plugin>
-            <!-- git 提交信息 / 构建号，供 sources jar 的 manifest 使用 -->
-            <plugin>
-                <groupId>pl.project13.maven</groupId>
-                <artifactId>git-commit-id-plugin</artifactId>
-                <version>4.9.10</version>
-                <executions>
-                    <execution>
-                        <id>get-the-git-infos</id>
-                        <goals>
-                            <goal>revision</goal>
-                        </goals>
-                    </execution>
-                </executions>
-                <configuration>
-                    <!--没有 git 版本信息时，忽略构建失败-->
-                    <failOnNoGitDirectory>false</failOnNoGitDirectory>
-                    <dateFormat>yyyy-MM-dd HH:mm:ss</dateFormat>
-                    <generateGitPropertiesFile>true</generateGitPropertiesFile>
-                    <excludeProperties>
-                        <exclude>git.remote.origin.url</exclude>
-                    </excludeProperties>
-                </configuration>
-            </plugin>
-            <plugin>
-                <groupId>org.codehaus.mojo</groupId>
-                <artifactId>buildnumber-maven-plugin</artifactId>
-                <version>3.2.1</version>
-                <executions>
-                    <execution>
-                        <goals>
-                            <goal>create</goal>
-                        </goals>
-                    </execution>
-                </executions>
-                <configuration>
-                    <doCheck>false</doCheck>
-                    <doUpdate>false</doUpdate>
-                    <revisionOnScmFailure>unknown</revisionOnScmFailure>
-                </configuration>
-            </plugin>
-            <!-- Sources jar：Central 的必备产物 -->
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-source-plugin</artifactId>
-                <version>3.3.1</version>
-                <executions>
-                    <execution>
-                        <phase>package</phase>
-                        <goals>
-                            <goal>jar-no-fork</goal>
-                        </goals>
-                    </execution>
-                </executions>
-                <configuration>
-                    <archive>
-                        <manifestEntries>
-                            <Project-version>${project.version}</Project-version>
-                            <Scm-version>${buildNumber}</Scm-version>
-                            <!--当前分支名称-->
-                            <Scm-branch>${git.branch}</Scm-branch>
-                            <!--本地打包的git用户名-->
-                            <Build-user>${git.build.user.name}</Build-user>
-                            <Timestamp>${maven.build.timestamp}</Timestamp>
-                        </manifestEntries>
-
-                    </archive>
-                </configuration>
-            </plugin>
-        </plugins>
-    </build>
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+        <maven.build.timestamp.format>yyyy-MM-dd HH:mm:ss</maven.build.timestamp.format>
+    </properties>
 
     <profiles>
-        <profile>
-            <id>java8</id>
-            <activation>
-                <jdk>[1.8,9)</jdk>
-            </activation>
-            <build>
-               <plugins>
-                   <plugin>
-                       <groupId>org.apache.maven.plugins</groupId>
-                       <artifactId>maven-compiler-plugin</artifactId>
-                       <version>3.11.0</version>
-                       <configuration>
-                           <encoding>UTF-8</encoding>
-                           <compilerArgs>
-                               <arg>-Xlint:-options</arg>
-                           </compilerArgs>
-                       </configuration>
-                       <executions>
-                           <execution>
-                               <id>base-compile</id>
-                               <goals>
-                                   <goal>compile</goal>
-                               </goals>
-                               <configuration>
-                                   <source>8</source>
-                                   <target>8</target>
-<!--                                   <release>8</release>-->
-                               </configuration>
-                           </execution>
-
-                           <!--
-                               多版本编译（MRJAR）。每个 compile execution 结束时都会把项目主 artifact 的
-                               file 指向自己的 outputDirectory，因此 compile-java9 / compile-java11 会各打印一条
-                               "Overwriting artifact's file ..." WARNING。该警告是无害的：最终 jar 由 jar 插件按
-                               classesDirectory 打包，产物正确（META-INF/versions/9 与 /11 内容已验证）。
-
-                               不要试图改用 <release> + <multiReleaseOutput>true</multiReleaseOutput> 来消除这条警告：
-                               实测（maven-compiler-plugin 3.11.0）改完后构建仍报 BUILD SUCCESS，但 jar 里
-                               META-INF/versions/ 条目会从 27 个变成 0 个，即 JDK 9 的 VarHandle 实现和
-                               JDK 11 的 HttpClient 引擎被静默丢弃。宁可留一条警告，也不要静默产出残缺的 MRJAR。
-                           -->
-                           <execution>
-                               <id>compile-java9</id>
-                               <phase>compile</phase>
-                               <goals>
-                                   <goal>compile</goal>
-                               </goals>
-                               <configuration>
-                                   <source>9</source>
-                                   <target>9</target>
-                                   <fork>true</fork>
-                                   <jdkToolchain>
-                                       <version>9</version>
-                                   </jdkToolchain>
-                                   <compilerArgs>
-                                       <arg>--add-exports</arg>
-                                       <arg>java.base/jdk.internal.misc=ALL-UNNAMED</arg>
-                                   </compilerArgs>
-                                   <compileSourceRoots>
-                                       <compileSourceRoot>${project.basedir}/src/main/java9</compileSourceRoot>
-                                   </compileSourceRoots>
-                                   <outputDirectory>${project.build.outputDirectory}/META-INF/versions/9</outputDirectory>
-                               </configuration>
-                           </execution>
-
-                           <execution>
-                               <id>compile-java11</id>
-                               <phase>compile</phase>
-                               <goals>
-                                   <goal>compile</goal>
-                               </goals>
-                               <configuration>
-                                   <source>11</source>
-                                   <target>11</target>
-                                   <fork>true</fork>
-                                   <jdkToolchain>
-                                       <version>11</version>
-                                   </jdkToolchain>
-                                   <compilerArgs>
-                                       <arg>--add-exports</arg>
-                                       <arg>java.base/jdk.internal.misc=ALL-UNNAMED</arg>
-                                   </compilerArgs>
-                                   <compileSourceRoots>
-                                       <compileSourceRoot>${project.basedir}/src/main/java11</compileSourceRoot>
-                                   </compileSourceRoots>
-                                   <outputDirectory>${project.build.outputDirectory}/META-INF/versions/11</outputDirectory>
-                               </configuration>
-                           </execution>
-                       </executions>
-                   </plugin>
-               </plugins>
-            </build>
-        </profile>
-        <profile>
-            <id>java9+</id>
-            <activation>
-                <jdk>[9,)</jdk>
-            </activation>
-            <build>
-                <plugins>
-                    <plugin>
-                        <groupId>org.apache.maven.plugins</groupId>
-                        <artifactId>maven-compiler-plugin</artifactId>
-                        <version>3.13.0</version>
-                        <configuration>
-                            <encoding>UTF-8</encoding>
-                            <compilerArgs>
-                                <arg>-Xlint:-options</arg>
-                            </compilerArgs>
-                        </configuration>
-                        <executions>
-                            <execution>
-                                <id>base-compile</id>
-                                <goals>
-                                    <goal>compile</goal>
-                                </goals>
-                                <configuration>
-                                    <!--<release>8</release>-->
-                                    <source>8</source>
-                                    <target>8</target>
-                                </configuration>
-                            </execution>
-
-                            <execution>
-                                <id>compile-java9</id>
-                                <phase>compile</phase>
-                                <goals>
-                                    <goal>compile</goal>
-                                </goals>
-                                <configuration>
-                                    <source>9</source>
-                                    <target>9</target>
-                                    <fork>true</fork>
-                                    <jdkToolchain>
-                                        <version>9</version>
-                                    </jdkToolchain>
-                                    <compilerArgs>
-                                        <arg>--add-exports</arg>
-                                        <arg>java.base/jdk.internal.misc=ALL-UNNAMED</arg>
-                                    </compilerArgs>
-                                    <compileSourceRoots>
-                                        <compileSourceRoot>${project.basedir}/src/main/java9</compileSourceRoot>
-                                    </compileSourceRoots>
-                                    <outputDirectory>${project.build.outputDirectory}/META-INF/versions/9</outputDirectory>
-                                </configuration>
-                            </execution>
-
-                            <execution>
-                                <id>compile-java11</id>
-                                <phase>compile</phase>
-                                <goals>
-                                    <goal>compile</goal>
-                                </goals>
-                                <configuration>
-                                    <source>11</source>
-                                    <target>11</target>
-                                    <fork>true</fork>
-                                    <jdkToolchain>
-                                        <version>11</version>
-                                    </jdkToolchain>
-                                    <compilerArgs>
-                                        <arg>--add-exports</arg>
-                                        <arg>java.base/jdk.internal.misc=ALL-UNNAMED</arg>
-                                    </compilerArgs>
-                                    <compileSourceRoots>
-                                        <compileSourceRoot>${project.basedir}/src/main/java11</compileSourceRoot>
-                                    </compileSourceRoots>
-                                    <outputDirectory>${project.build.outputDirectory}/META-INF/versions/11</outputDirectory>
-                                </configuration>
-                            </execution>
-                        </executions>
-                    </plugin>
-                </plugins>
-            </build>
-        </profile>
         <!--
           发布用 profile：平时的 compile / test / package / install 完全不会碰到这里的插件，
-          只有显式 -Ppublish 时才生效。
-
-          为什么不叫 release：很多机器的 ~/.m2/settings.xml 里有全局
-          <activeProfiles><activeProfile>release</activeProfile></activeProfiles>，
-          一旦 profile 叫 release 就会在每次构建里自动激活，mvn verify / install 都会去做
-          GPG 签名、并加载 central-publishing 扩展；更坑的是它一激活，
-          activeByDefault 的 profile 就整个失效（Maven 只在没有任何 profile 被激活时
-          才启用 activeByDefault），javadoc / sources jar 反而永远打不出来。
-          所以这里用项目专属的 id，不与 settings.xml 里的通用名冲突。
-
-          发布到 Maven Central Publisher Portal（oss.sonatype.org 已停服）：
-          settings.xml 中配置 id=central-nexus-release 的 server（Portal User Token），见
-          https://central.sonatype.org/publish/publish-portal-maven/
+          只有显式 -Ppublish 时才生效。id 不叫 release，避免被 settings.xml 里全局的
+          <activeProfile>release</activeProfile> 自动激活。
           发布：mvn clean deploy -Ppublish
-          试打发布产物（不签名、不上传）：mvn clean package -Ppublish -Dgpg.skip=true
-
-          GPG 口令来源：优先走 gpg-agent（推荐）。如果口令是放在 settings.xml 的 release
-          profile 属性里（gpg.passphrase），那个 profile 已不再默认激活，需要一起显式激活：
-          mvn clean deploy -Ppublish,release
         -->
         <profile>
             <id>publish</id>
             <build>
                 <plugins>
-                    <!-- Javadoc jar：Central 的必备产物 -->
-                    <plugin>
-                        <groupId>org.apache.maven.plugins</groupId>
-                        <artifactId>maven-javadoc-plugin</artifactId>
-                        <version>3.11.2</version>
-                        <configuration>
-                            <!-- javadoc 的 HTML / 标记问题与缺失注释均已清零（含 src/main/java9、src/main/java11），
-                                 这里开启全部检查，任何新增的 public / protected 成员若缺少注释、
-                                 或缺少 @param / @return / @throws 说明都会在发布构建里暴露出来。 -->
-                            <additionalJOption>-Xdoclint:none</additionalJOption>
-                            <tags>
-                                <tag>
-                                    <name>time</name>
-                                    <placement>a</placement>
-                                    <head>time</head>
-                                </tag>
-                                <tag>
-                                    <name>ol</name>
-                                    <placement>a</placement>
-                                    <head>ol</head>
-                                </tag>
-                                <tag>
-                                    <name>date</name>
-                                    <placement>a</placement>
-                                    <head>date</head>
-                                </tag>
-                                <tag>
-                                    <name>description</name>
-                                    <placement>a</placement>
-                                    <head>description</head>
-                                </tag>
-                                <tag>
-                                    <name>email</name>
-                                    <placement>a</placement>
-                                    <head>email</head>
-                                </tag>
-
-                                <tag>
-                                    <name>modifyTime</name>
-                                    <placement>a</placement>
-                                    <head>modifyTime</head>
-                                </tag>
-                                <tag>
-                                    <name>modifyDescription</name>
-                                    <placement>a</placement>
-                                    <head>modifyDescription</head>
-                                </tag>
-                                <tag>
-                                    <name>modifyBy</name>
-                                    <placement>a</placement>
-                                    <head>modifyBy</head>
-                                </tag>
-
-                            </tags>
-                        </configuration>
-                        <executions>
-                            <execution>
-                                <phase>package</phase>
-                                <goals>
-                                    <goal>jar</goal>
-                                </goals>
-                            </execution>
-                        </executions>
-                    </plugin>
-
-                    <!-- GPG 签名：Central 的强制要求，-Dgpg.skip=true 可跳过 -->
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-gpg-plugin</artifactId>
@@ -466,7 +69,6 @@
                             </execution>
                         </executions>
                     </plugin>
-                    <!-- 上传到 Central Publisher Portal，只在 deploy 阶段动作 -->
                     <plugin>
                         <groupId>org.sonatype.central</groupId>
                         <artifactId>central-publishing-maven-plugin</artifactId>
@@ -491,5 +93,4 @@
             </distributionManagement>
         </profile>
     </profiles>
-
 </project>

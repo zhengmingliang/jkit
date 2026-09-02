@@ -384,7 +384,7 @@ mvn clean package -Ppublish -Dgpg.skip=true
 `release`**：很多机器的 `~/.m2/settings.xml` 里有全局 `<activeProfile>release</activeProfile>`，
 那样会每次构建都去签名，而且它一激活就会让 `activeByDefault` 的 profile 整体失效。
 
-单元测试位于 `src/test/java`，覆盖：字符串/转换/类型映射（`StringUtilsTest`、`ConvertUtilsTest`、`TypeUtilsTest`）、CSV 读写往返与流式读写（`csv/CSVUtilsTest`、`csv/CSVReadTest`、`csv/CSVStreamTest`、`csv/CSVTableStreamTest`，含引号、多行字段、空字段、空行、块边界与百万行流式）、Base64 与 FNV-1a（`Base64CompareTest`、`Hash64Test`）、表达式（`ExpressionTest`）、雪花 ID（`SnowFlakeIdWorkerTest`）、日志门面（`LogTest`）、`DataUtils`/`ValidList`，JSON/YAML 模块核心能力：`json/JSONTest`、`json/JSONNodeTest`、`json/JSONSchemaTest`、`yaml/YamlDocumentTest`、`yaml/YamlBindingTest`（嵌套对象/对象列表绑定、tab 缩进拒绝、注释丢弃），以及配置读取：`config/ConfigPropertyResolverTest`（Spring Boot 优先级、profile 覆盖、前缀绑定到对象、自定义配置名、占位符）。
+单元测试位于 `jkit-core/src/test/java`，覆盖：字符串/转换/类型映射（`StringUtilsTest`、`ConvertUtilsTest`、`TypeUtilsTest`）、CSV 读写往返与流式读写（`csv/CSVUtilsTest`、`csv/CSVReadTest`、`csv/CSVStreamTest`、`csv/CSVTableStreamTest`，含引号、多行字段、空字段、空行、块边界与百万行流式）、Base64 与 FNV-1a（`Base64CompareTest`、`Hash64Test`）、表达式（`ExpressionTest`）、雪花 ID（`SnowFlakeIdWorkerTest`）、日志门面（`LogTest`）、`DataUtils`/`ValidList`，JSON/YAML 模块核心能力：`json/JSONTest`、`json/JSONNodeTest`、`json/JSONSchemaTest`、`yaml/YamlDocumentTest`、`yaml/YamlBindingTest`（嵌套对象/对象列表绑定、tab 缩进拒绝、注释丢弃），以及配置读取：`config/ConfigPropertyResolverTest`（Spring Boot 优先级、profile 覆盖、前缀绑定到对象、自定义配置名、占位符）。
 
 > JUnit 仅以 `test` 作用域引入，不会进入发布的 jar/pom，零依赖承诺不受影响。
 
