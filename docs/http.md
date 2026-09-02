@@ -465,18 +465,9 @@ String body = HttpUtils.curlString(curl);
 解析后也可改 header/body 再 `parsed.execute()`，
 或把 `parsed.toHttpRequest()` / `parsed` 交给 `HttpUtils.sse` / `sseMerge` / `sseReconnect`。
 
-生成其它 SDK 代码（OkHttp / Apache 5 / JDK 11+ / jkit / Kotlin / fetch / axios / requests / httpx / Go / C# / PHP）：
-
-```java
-import com.alianga.jkit.http.codegen.GeneratedCode;
-import com.alianga.jkit.http.codegen.GeneratorRegistry;
-import com.alianga.jkit.http.curl.ParsedCurlRequest;
-
-ParsedCurlRequest model = CurlParser.parseModel(curl);
-GeneratedCode okhttp = GeneratorRegistry.get().generate("java-okhttp", model);
-GeneratedCode fetch = CurlParser.generate("js-fetch", curl);
-System.out.println(okhttp.source());
-```
+需要把 curl 转成 OkHttp / fetch / requests 等其它语言源码时，请用独立模块
+`com.alianga:jkit-curl-codegen`（见 [jkit-curl-codegen/README.md](../jkit-curl-codegen/README.md)）。
+jkit 本身只做解析和执行：`parseModel` 给出的 `ParsedCurlRequest` 就是生成器的输入。
 
 ## 12. WebSocket（JDK 11+）
 

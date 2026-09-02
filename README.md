@@ -25,6 +25,20 @@ jkit 由 [ZmlTools](https://github.com/wuyongshi/ZmlTools) 迁移而来，在保
 </dependency>
 ```
 
+把 curl 转成 OkHttp / fetch / requests 等其它语言源码时，另加：
+
+```xml
+<dependency>
+    <groupId>com.alianga</groupId>
+    <artifactId>jkit-curl-codegen</artifactId>
+    <version>2.0.1</version>
+</dependency>
+```
+
+jkit 只解析和执行 curl；代码生成见 [jkit-curl-codegen/README.md](jkit-curl-codegen/README.md)。
+
+本仓库是多模块工程：根 POM 为 `jkit-parent`，运行时库在 `jkit-core`（发布坐标仍是 `com.alianga:jkit`），代码生成在 `jkit-curl-codegen`。根目录 `mvn test` 会构建两个模块。
+
 本库接替 [ZmlTools](https://github.com/wuyongshi/ZmlTools)（`top.wuyongshi:ZmlTools`）。**新项目请只用上面的坐标。** 已经依赖 ZmlTools 的工程有两种迁法：
 
 1. **直接改 POM**（推荐）把 `groupId` / `artifactId` 换成 `com.alianga:jkit:2.0.1`，并按本文档把 `top.wys.utils.*` 改为 `com.alianga.jkit.*`。
@@ -170,7 +184,8 @@ response.elapsedMs();   // 端到端耗时
 response.attempts();    // 实际发出的请求次数
 ```
 
-完整用法（表单、上传、断点续传、SSE 自动合并、curl 解析、WebSocket、代理）见 [docs/http.md](docs/http.md)。
+完整用法（表单、上传、断点续传、SSE 自动合并、curl 解析与执行、WebSocket、代理）见 [docs/http.md](docs/http.md)。
+curl 转其它语言源码见 [jkit-curl-codegen](jkit-curl-codegen/README.md)。
 
 ### 负载均衡与服务发现
 

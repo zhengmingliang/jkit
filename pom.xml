@@ -37,6 +37,7 @@
 
     <modules>
         <module>jkit-core</module>
+        <module>jkit-curl-codegen</module>
     </modules>
 
     <properties>
