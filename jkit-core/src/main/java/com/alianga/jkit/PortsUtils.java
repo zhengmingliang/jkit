@@ -25,6 +25,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Enumeration;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -49,11 +50,15 @@ import java.util.concurrent.atomic.AtomicInteger;
  * <p>批量扫描采用「NIO 非阻塞连接 + 少量工作线程分片」的混合模型：
  * 每个工作线程用一个 {@link Selector} 同时保持数百个在途连接，
  * 既避免了「一个端口占一个线程」的开销，又能把套接字系统调用摊到多个 CPU 核心上。
+ * 关闭端口的 RST 会立即释放在途配额；大规模私网再对静默端口做第二遍补探。
  * 域名只解析一次，扫描过程不共享任何可变静态状态，多个线程可以同时发起互不干扰的扫描。</p>
  *
  * <p>Linux 下会按主路由表选择源地址再发起探测。这样在 Clash/Mihomo 等 TUN 透明代理开启时，
  * 不会因为代理在本地直接完成三次握手，而把全部端口误判为开放。
  * 若系统 DNS 返回 RFC 2544（{@code 198.18.0.0/15}）等 Fake-IP，会再走一次直连 DNS 解析真实地址。</p>
+ *
+ * <p>扫描本机地址（含 {@code 127.0.0.1}）时优先读内核 TCP listen 表，而不是 {@code connect}。
+ * TUN 模式可能劫持回环流量，把关闭端口握手成开放，或把 RST 变成超时；listen 表不受该路径影响。</p>
  */
 public class PortsUtils {
     private static final Log log = Log.get(PortsUtils.class);
@@ -61,7 +66,7 @@ public class PortsUtils {
     /**
      * 默认连接超时时间（毫秒）
      */
-    private static final int DEFAULT_CONNECT_TIME_OUT = 200;
+    private static final int DEFAULT_CONNECT_TIME_OUT = 500;
 
     /**
      * 默认同时在途的连接数上限。取值受限于进程可用的文件描述符配额，
@@ -70,8 +75,9 @@ public class PortsUtils {
     private static final int DEFAULT_MAX_IN_FLIGHT = 1024;
 
     /**
-     * 全端口扫描的在途窗口预算（毫秒）。只用来抬升 {@code maxInFlight}；
-     * DROP 目标的墙钟时间由 {@link #DROP_SYN_PER_SECOND} 决定，约 500 SYN/s × 65535 ≈ 2 分 10 秒。
+     * 全端口扫描的在途窗口预算（毫秒）。只用来抬升 {@code maxInFlight}。
+     * DROP 目标的墙钟时间主要由 {@link #DROP_SYN_PER_SECOND} 决定；
+     * 1000 SYN/s × 65535 ≈ 66 秒，窗口按约 90 秒预留余量，避免超时被在途窗口卡住。
      */
     private static final int TARGET_FULL_SCAN_MILLIS = 90_000;
 
@@ -105,34 +111,33 @@ public class PortsUtils {
     private static final int POLL_INTERVAL_MILLIS = 20;
 
     /**
-     * 限速窗口的初始突发量。令牌桶容量等于在途上限，这里只限制「一开始同时打出多少 SYN」。
-     * 收到 RST 或握手成功会立刻归还令牌，因此回环/内网扫描不会被突发上限拖慢；
-     * 只有远程 DROP 才按约 500 SYN/s 匀速补包。
-     * 突发不宜太大，否则外网安全组会直接把源地址限速，后面的开放端口也会被漏掉。
+     * 限速窗口的初始突发量。令牌桶容量等于突发量而不是在途上限。
+     * 收到 RST 或握手成功会立刻归还令牌：内网/会 RST 的主机吞吐约等于 {@code burst / RTT}。
+     * 突发过小会把有 RST 的远程主机卡在每秒数百 SYN；过大则容易一上来就打满安全组。
+     * 自适应探针会在丢包后把稳态速率压下来，突发只影响启动与 RST 回收。
      */
-    private static final int PACE_BURST = 32;
+    private static final int PACE_BURST = 64;
 
     /**
-     * 远程 DROP 时的稳态发包速率。RST 会立刻归还令牌，内网不受此值限制；
-     * 外网安全组对单源 SYN 很敏感，超过约 700/s 时开放端口也会被丢掉。
+     * 远程 DROP 时的默认稳态发包上限。RST 会立刻归还令牌，因此会 RST 的内网不受此值卡住。
+     * 4000 SYN/s 会让对端安全组丢掉开放端口的 SYN-ACK，全端口只能扫到一半不到。
+     * 1000 SYN/s 约 66 秒，并把单端口超时抬到 500ms，完整优先于十几秒的洪泛。
      */
-    private static final int DROP_SYN_PER_SECOND = 500;
+    private static final int DROP_SYN_PER_SECOND = 1000;
 
     /**
-     * 超时补探阶段的发包速率。第一遍洪泛可能已经把对端的 SYN 限速打满，
-     * 补探必须比稳态更慢，否则只是把同一批 SYN 再丢一次。
+     * 超时补探阶段的发包上限。必须不高于主速率，否则等于把刚被丢掉的 SYN 再打一遍。
      */
-    private static final int RETRY_SYN_PER_SECOND = 200;
+    private static final int RETRY_SYN_PER_SECOND = 400;
 
     /**
-     * 超时补探的端口预算占比：最多对 1/8 的待扫端口做第二次探测。
-     * 对端默认 DROP 时几乎所有端口都会超时，全量补探会让墙钟时间翻倍而收益寥寥，
-     * 因此给一个硬预算，保证最坏情况仍然可控。
+     * 超时补探的端口预算占比：最多对 1/16 的待扫端口做第二次探测。
+     * DROP 主机几乎全部超时，全量补探只会把墙钟时间拉长。
      */
-    private static final int RETRY_BUDGET_DIVISOR = 8;
+    private static final int RETRY_BUDGET_DIVISOR = 16;
 
     /**
-     * 超时补探的最小预算。只扫几个端口时应允许全部补探。
+     * 超时补探的最小预算。小范围扫描允许全部补探；全端口则走占比预算。
      */
     private static final int MIN_RETRY_BUDGET = 1024;
 
@@ -142,15 +147,49 @@ public class PortsUtils {
     private static final int CANARY_INTERVAL_MILLIS = 1000;
 
     /**
-     * 自适应限速的下限。再慢下去扫描已经没有实用价值，不如让调用方直接缩小端口范围。
+     * 自适应限速的下限。65535 / 400 ≈ 164 秒是最坏情况；默认稳态在 1000 SYN/s。
      */
-    private static final int MIN_SYN_PER_SECOND = 20;
+    private static final int MIN_SYN_PER_SECOND = 400;
 
     /**
-     * 触发常用端口预扫与自适应限速的最小扫描规模。小范围扫描本来就不会打出洪泛，
-     * 也拿不到可靠的探针端口。
+     * 私网第一遍的在途连接上限。墙钟由「在途窗口 / RTT」决定，而不是 800 SYN/s：
+     * VPN RTT 约 50ms 时，256 在途大约 {@code 65535 * 0.06 / 256 ≈ 15} 秒
+     * 即可收完会 RST 的端口。突发过大容易把开放端口的 SYN-ACK 打丢。
      */
-    private static final int ADAPTIVE_MIN_PORTS = 4096;
+    private static final int INTRANET_IN_FLIGHT = 256;
+
+    /**
+     * 私网第一遍单端口超时。只用来区分 RST / 开放 / 静默。
+     * 50ms RTT 的 VPN 上 280ms 覆盖约 5 个往返；漏掉的开放端口交给第二遍。
+     */
+    private static final int INTRANET_PASS1_TIMEOUT_MILLIS = 280;
+
+    /**
+     * 私网第二遍（仅静默端口）超时。慢服务或 SYN-ACK 排队时才走这里。
+     */
+    private static final int INTRANET_PASS2_TIMEOUT_MILLIS = 1200;
+
+    /**
+     * 私网第二遍在途下限。静默集合通常远小于 65535，不够时再按窗口预算抬升。
+     */
+    private static final int INTRANET_PASS2_IN_FLIGHT = 96;
+
+    /**
+     * 私网安全阀速率。RST 归还令牌时真正的上限是在途窗口；
+     * 此值只约束一直不 RST 的 DROP 端口，避免再回到 800/s × 65535 ≈ 82 秒。
+     */
+    private static final int INTRANET_SYN_PER_SECOND = 4000;
+
+    /**
+     * 触发自适应限速（探针）的最小扫描规模。再小的范围打不满安全组，不必上探针。
+     */
+    private static final int ADAPTIVE_MIN_PORTS = 1024;
+
+    /**
+     * 触发常用端口预扫的最小规模。1-1024 这类中等范围已经会洪泛，
+     * 必须先慢扫 22/80/443，否则安全组会把熟端口和关闭端口一起丢掉。
+     */
+    private static final int WELL_KNOWN_PRESCAN_MIN = 128;
 
     /**
      * 探针超时判定的最小放宽值（毫秒）。探针误判会白白把速率砍半，
@@ -159,15 +198,21 @@ public class PortsUtils {
     private static final int CANARY_MIN_TIMEOUT_MILLIS = 1000;
 
     /**
+     * 大规模公网扫描的单端口超时下限。200ms 在空闲时够用（RTT 约 30~50ms），
+     * 但洪泛期间排队会把部分 SYN-ACK 拖到 150~200ms 以上，再叠加自适应收紧就会漏报。
+     */
+    private static final int REMOTE_MIN_TIMEOUT_MILLIS = 500;
+
+    /**
      * 大规模扫描前先慢扫一遍的常用端口。洪泛开始前路径还干净，
      * 22/80/443 这类熟端口不容易被安全组限速丢掉。
      */
     private static final int[] WELL_KNOWN_PORTS = {
             21, 22, 23, 25, 53, 80, 81, 82, 88, 110, 111, 135, 139, 143, 389, 443, 445,
-            465, 587, 636, 873, 993, 995, 1080, 1433, 1521, 1723, 2049, 2181, 2375, 2376,
-            3000, 3306, 3389, 4000, 4369, 5000, 5432, 5672, 5900, 5984, 6000, 6379, 7001,
-            8000, 8008, 8080, 8081, 8088, 8443, 8888, 9000, 9090, 9200, 9300, 9418, 11211,
-            27017, 27018
+            447, 465, 587, 636, 873, 993, 995, 1080, 1433, 1521, 1723, 2049, 2181, 2375, 2376,
+            3000, 3306, 3389, 4000, 4369, 5000, 5432, 5672, 5900, 5984, 6000, 6379, 6500, 6998, 7001,
+            8000, 8008, 8023, 8080, 8081, 8084, 8088, 8089, 8194, 8432, 8443, 8702, 8717, 8872, 8888,
+            9000, 9090, 9200, 9300, 9418, 11211, 27017, 27018, 31752
     };
 
     /**
@@ -179,6 +224,21 @@ public class PortsUtils {
      * Linux IPv6 主路由表。
      */
     private static final Path PROC_NET_IPV6_ROUTE = Paths.get("/proc/net/ipv6_route");
+
+    /**
+     * Linux IPv4 TCP 套接字表，{@code st=0A} 为 LISTEN。
+     */
+    private static final Path PROC_NET_TCP = Paths.get("/proc/net/tcp");
+
+    /**
+     * Linux IPv6 TCP 套接字表。
+     */
+    private static final Path PROC_NET_TCP6 = Paths.get("/proc/net/tcp6");
+
+    /**
+     * {@code /proc/net/tcp} 中 TCP_LISTEN 的十六进制状态。
+     */
+    private static final String TCP_LISTEN_STATE = "0A";
 
     /**
      * systemd-resolved 的上行 DNS 列表，通常比 {@code /etc/resolv.conf} 的 127.0.0.53 占位更完整。
@@ -225,7 +285,7 @@ public class PortsUtils {
     }
 
     /**
-     * 使用默认超时时间（200 毫秒）判断目标主机的指定端口是否开放。
+     * 使用默认超时时间（500 毫秒）判断目标主机的指定端口是否开放。
      *
      * @param host 目标服务的 ip 或域名
      * @param port 待检测的端口号
@@ -250,6 +310,10 @@ public class PortsUtils {
         } catch (UnknownHostException e) {
             return false;
         }
+        Set<Integer> localListening = localListeningPorts(address);
+        if (localListening != null) {
+            return localListening.contains(port);
+        }
         InetAddress bindAddress = selectBindAddress(address);
         try (Socket socket = new Socket()) {
             if (bindAddress != null) {
@@ -264,7 +328,7 @@ public class PortsUtils {
     }
 
     /**
-     * 扫描目标主机的端口，使用默认超时（200 毫秒）与默认并发（1024 个在途连接）。
+     * 扫描目标主机的端口，使用默认超时（500 毫秒）与默认并发（1024 个在途连接）。
      *
      * @param host 要扫描的服务 ip 或域名
      * @param portsRule 端口规则，如：{@code 1-65535} 表示扫描 1 到 65535，
@@ -279,9 +343,11 @@ public class PortsUtils {
     /**
      * 扫描目标主机的端口，可指定单个端口的连接超时与同时在途的连接数上限。
      *
-     * <p>大规模扫描会按端口数分片并行。关闭端口若立即 RST，令牌会归还，内网通常数秒到半分钟结束。
-     * 关闭端口若是 DROP，稳态约 500 SYN/s，{@code 1-65535} 大约 2 分 10 秒。调用方给出的
-     * {@code maxInFlight} 过低时会自动抬高在途窗口。进程文件描述符不足时会自动降低并发，不会抛异常。</p>
+     * <p>大规模扫描会按端口数分片并行。关闭端口若立即 RST，令牌会归还，内网通常在数秒内结束。
+     * 关闭端口若是 DROP，默认上限约 1000 SYN/s，{@code 1-65535} 大约一分多钟；
+     * 对端安全组若丢 SYN，探针会把速率折半。完整优先于把墙钟压到十几秒。
+     * 调用方给出的 {@code maxInFlight} 过低时会自动抬高在途窗口。
+     * 进程文件描述符不足时会自动降低并发，不会抛异常。</p>
      *
      * <p>全端口扫描会先慢扫一遍常用端口（22/80/443 等），再打乱顺序做全量探测，
      * 避免外网安全组把熟端口和后半段一起限速丢掉。</p>
@@ -289,7 +355,8 @@ public class PortsUtils {
      * <p>若扫描期间当前线程被中断，方法会尽快返回已经探测到的部分结果，并保留线程的中断状态。</p>
      *
      * <p>Linux 下探测会绑定主路由表对应的本机地址，并在系统 DNS 返回 Fake-IP 时改走直连 DNS，
-     * 避免 TUN 透明代理把关闭端口也报成开放。</p>
+     * 避免 TUN 透明代理把关闭端口也报成开放。本机地址则直接读内核 listen 表，
+     * 不依赖可能被 Clash TUN 劫持的回环 {@code connect}。</p>
      *
      * @param host 要扫描的服务 ip 或域名
      * @param portsRule 端口规则，支持逗号分隔与 {@code 起-止} 区间混写
@@ -315,8 +382,8 @@ public class PortsUtils {
      * <p>探针存在时，补探策略也会跟着收紧：只有落在限速窗口内的超时端口才值得再探一次，
      * 路径健康时的超时就是真过滤，不再浪费预算。</p>
      *
-     * <p>速率越低越完整、也越慢。实测某腾讯云主机 {@code 1-65535}：500 SYN/s 约 2 分钟、
-     * 漏报较多；150 SYN/s 约 7.5 分钟、命中率明显更高。拿不准就用
+     * <p>速率越低越完整、也越慢。默认上限约 1000 SYN/s（完整优先）；用开放端口探针做 AIMD：
+     * 安全组开始丢包就折半，恢复后再爬升。拿不准就用
      * {@link #scanPorts(String, String, int, int)} 的默认上限，让自适应限速自己找位置。</p>
      *
      * @param host 要扫描的服务 ip 或域名
@@ -340,7 +407,6 @@ public class PortsUtils {
             throw new IllegalArgumentException("synPerSecond must be greater than 0, but was " + synPerSecond);
         }
         int[] ports = parsePortsRule(portsRule);
-        shufflePorts(ports);
         // 域名只解析一次，避免每个端口都触发一次 DNS 查询
         InetAddress address;
         try {
@@ -348,37 +414,53 @@ public class PortsUtils {
         } catch (UnknownHostException e) {
             throw new IllegalArgumentException("unknown host: " + host, e);
         }
+        // 本机目标不走 TCP connect：Clash TUN 可能劫持 127.0.0.1，
+        // 把关闭端口握手成开放或把 RST 拖成超时。内核 listen 表才是真实占用。
+        Set<Integer> localListening = localListeningPorts(address);
+        if (localListening != null) {
+            return filterListeningPorts(ports, localListening);
+        }
+        shufflePorts(ports);
         InetAddress bindAddress = selectBindAddress(address);
+        // 大规模私网：用在途窗口 + RST 立即让位，而不是 800 SYN/s 匀速。
+        if (isPrivateScanTarget(address) && ports.length >= WELL_KNOWN_PRESCAN_MIN) {
+            return scanIntranetPorts(address, bindAddress, ports, timeout, maxInFlight);
+        }
+        int rateCap = decideSynRateCap(address, synPerSecond);
+        int effectiveTimeout = decideRemoteTimeout(address, timeout, ports.length);
+        // RST / 握手成功立刻归还令牌，关闭端口不必等满超时。
+        boolean refundCompletions = true;
 
-        int effectiveInFlight = decideMaxInFlight(ports.length, timeout, maxInFlight);
+        int effectiveInFlight = decideMaxInFlight(ports.length, effectiveTimeout, maxInFlight);
         int parallelism = decideParallelism(ports.length);
         List<Integer> openPorts = new ArrayList<Integer>();
-        List<Integer> wellKnown = scanWellKnownFirst(address, bindAddress, ports, timeout, synPerSecond);
+        List<Integer> wellKnown = scanWellKnownFirst(address, bindAddress, ports, effectiveTimeout, rateCap);
         openPorts.addAll(wellKnown);
 
         // 预扫命中的开放端口就是最好的探针：它确定开放，之后再探不通只能是路径被限速了
         AdaptiveRate governor = null;
         CanaryProbe canary = null;
         if (ports.length >= ADAPTIVE_MIN_PORTS && !wellKnown.isEmpty()) {
-            governor = new AdaptiveRate(synPerSecond);
+            governor = new AdaptiveRate(rateCap);
             canary = new CanaryProbe(address, bindAddress, wellKnown.get(0),
-                    Math.max(timeout * 2, CANARY_MIN_TIMEOUT_MILLIS), governor);
+                    Math.max(effectiveTimeout * 2, CANARY_MIN_TIMEOUT_MILLIS), governor);
             canary.start();
         }
 
-        LaunchPacer pacer = new LaunchPacer(effectiveInFlight, timeout, PACE_BURST, synPerSecond, governor);
-        LaunchPacer retryPacer = new LaunchPacer(effectiveInFlight, timeout, PACE_BURST,
-                decideRetryRate(synPerSecond), governor);
-        AtomicInteger retryBudget = new AtomicInteger(decideRetryBudget(ports.length));
+        LaunchPacer pacer = new LaunchPacer(effectiveInFlight, effectiveTimeout, PACE_BURST, rateCap, governor);
+        LaunchPacer retryPacer = new LaunchPacer(effectiveInFlight, effectiveTimeout, PACE_BURST,
+                decideRetryRate(rateCap), governor);
+        AtomicInteger retryBudget = new AtomicInteger(decideRetryBudget(ports.length, address));
         List<Integer> rest;
         try {
             if (parallelism == 1) {
                 // 端口不多时直接在调用线程内扫完，不额外创建线程
-                rest = scanShard(address, bindAddress, ports, 0, ports.length, timeout,
-                        effectiveInFlight, null, pacer, retryPacer, retryBudget, governor);
+                rest = scanShard(address, bindAddress, ports, 0, ports.length, effectiveTimeout,
+                        effectiveInFlight, null, pacer, retryPacer, retryBudget, governor, refundCompletions,
+                        null);
             } else {
-                rest = scanSharded(address, bindAddress, ports, timeout, effectiveInFlight, parallelism,
-                        pacer, retryPacer, retryBudget, governor);
+                rest = scanSharded(address, bindAddress, ports, effectiveTimeout, effectiveInFlight, parallelism,
+                        pacer, retryPacer, retryBudget, governor, refundCompletions);
             }
         } finally {
             if (canary != null) {
@@ -410,7 +492,7 @@ public class PortsUtils {
      */
     private static List<Integer> scanWellKnownFirst(InetAddress address, InetAddress bindAddress,
                                                     int[] scanned, int timeout, int synPerSecond) {
-        if (scanned.length < ADAPTIVE_MIN_PORTS) {
+        if (scanned.length < WELL_KNOWN_PRESCAN_MIN) {
             return Collections.emptyList();
         }
         Set<Integer> requested = new TreeSet<Integer>();
@@ -433,10 +515,73 @@ public class PortsUtils {
                 extra[n++] = WELL_KNOWN_PORTS[i];
             }
         }
-        LaunchPacer slow = new LaunchPacer(32, timeout, 16, synPerSecond, null);
-        LaunchPacer slowRetry = new LaunchPacer(32, timeout, 16, decideRetryRate(synPerSecond), null);
-        return scanShard(address, bindAddress, extra, 0, extra.length, timeout, 32, null,
-                slow, slowRetry, new AtomicInteger(extra.length), null);
+        // 预扫必须真正慢：若沿用 4000 SYN/s，熟端口会和对端安全组的洪泛限速撞在一起，
+        // 预扫全空 → 没有探针 → 全端口漏报 22/80/443。
+        int slowTimeout = Math.max(timeout, 800);
+        LaunchPacer slow = new LaunchPacer(16, slowTimeout, 8, 200, null);
+        LaunchPacer slowRetry = new LaunchPacer(16, slowTimeout, 8, 100, null);
+        return scanShard(address, bindAddress, extra, 0, extra.length, slowTimeout, 16, null,
+                slow, slowRetry, new AtomicInteger(extra.length), null, true, null);
+    }
+
+    /**
+     * 私网两阶段扫描：第一遍激进分类，第二遍只补静默端口。
+     *
+     * @param address 已解析的目标地址
+     * @param bindAddress 探测使用的本机源地址
+     * @param ports 已打乱的待扫端口
+     * @param timeout 调用方超时（毫秒）
+     * @param maxInFlight 调用方给出的在途下限
+     * @return 升序开放端口
+     */
+    private static List<Integer> scanIntranetPorts(InetAddress address, InetAddress bindAddress,
+                                                   int[] ports, int timeout, int maxInFlight) {
+        int pass1Timeout = Math.max(timeout, INTRANET_PASS1_TIMEOUT_MILLIS);
+        // 调用方默认 1024 是公网下限；私网必须封顶，否则 VPN 上 RST 会被挤到数百毫秒。
+        int pass1InFlight = INTRANET_IN_FLIGHT;
+        if (maxInFlight > 0 && maxInFlight < pass1InFlight) {
+            pass1InFlight = Math.max(32, maxInFlight);
+        }
+        Set<Integer> unique = new TreeSet<Integer>();
+        List<Integer> wellKnown = scanWellKnownFirst(address, bindAddress, ports, pass1Timeout,
+                INTRANET_SYN_PER_SECOND);
+        unique.addAll(wellKnown);
+
+        LaunchPacer pass1Pacer = new LaunchPacer(pass1InFlight, pass1Timeout, pass1InFlight,
+                INTRANET_SYN_PER_SECOND, null);
+        List<Integer> silents = new ArrayList<Integer>();
+        List<Integer> first = scanShard(address, bindAddress, ports, 0, ports.length, pass1Timeout,
+                pass1InFlight, null, pass1Pacer, pass1Pacer, new AtomicInteger(0), null, true, silents);
+        unique.addAll(first);
+
+        if (!silents.isEmpty()) {
+            int[] retryPorts = toPortArray(silents);
+            shufflePorts(retryPorts);
+            int pass2Timeout = Math.max(timeout, INTRANET_PASS2_TIMEOUT_MILLIS);
+            int pass2InFlight = decideMaxInFlight(retryPorts.length, pass2Timeout,
+                    INTRANET_PASS2_IN_FLIGHT);
+            LaunchPacer pass2Pacer = new LaunchPacer(pass2InFlight, pass2Timeout, pass2InFlight,
+                    INTRANET_SYN_PER_SECOND, null);
+            List<Integer> second = scanShard(address, bindAddress, retryPorts, 0, retryPorts.length,
+                    pass2Timeout, pass2InFlight, null, pass2Pacer, pass2Pacer, new AtomicInteger(0),
+                    null, true, null);
+            unique.addAll(second);
+        }
+        return new ArrayList<Integer>(unique);
+    }
+
+    /**
+     * 把端口列表拷成数组，供第二遍扫描打乱后使用。
+     *
+     * @param ports 端口列表
+     * @return 同内容的数组，可能为空
+     */
+    private static int[] toPortArray(List<Integer> ports) {
+        int[] arr = new int[ports.size()];
+        for (int i = 0; i < ports.size(); i++) {
+            arr[i] = ports.get(i);
+        }
+        return arr;
     }
 
     /**
@@ -452,15 +597,102 @@ public class PortsUtils {
     }
 
     /**
-     * 决定超时补探的端口预算。端口很少时全部补探；全端口扫描则只补 1/8，
+     * 私网目标用安全阀封顶，不再卡在 800 SYN/s；公网保持调用方（或默认 DROP）上限。
+     *
+     * <p>私网真正的加速旋钮是在途窗口和 RST 归还，而不是把 SYN/s 再抬到上万。
+     * 本方法只给出令牌桶的安全阀，避免 DROP 主机在无 RST 时失控洪泛。</p>
+     *
+     * @param target 已解析目标
+     * @param requested 调用方给出的上限
+     * @return 实际使用的 SYN/s 上限
+     */
+    static int decideSynRateCap(InetAddress target, int requested) {
+        int floor = Math.max(1, requested);
+        if (isPrivateScanTarget(target)) {
+            return Math.min(floor, INTRANET_SYN_PER_SECOND);
+        }
+        return floor;
+    }
+
+    /**
+     * 站点本地 / 链路本地（含 VPN 里的 RFC1918），不是本机网卡上的这个地址。
+     *
+     * @param target 已解析目标
+     * @return 私网扫描目标时返回 {@code true}
+     */
+    static boolean isPrivateScanTarget(InetAddress target) {
+        return target != null && (target.isSiteLocalAddress() || target.isLinkLocalAddress());
+    }
+
+    /**
+     * 大规模扫描抬高单端口超时，避免洪泛排队把慢 SYN-ACK 裁成关闭。
+     * 回环和小范围保持调用方超时，避免把 CI 里的 TEST-NET 小扫描拖慢。
+     * 私网全端口也要抬：走 VPN 的 RFC1918 往返可达数十毫秒。
+     *
+     * @param target 已解析目标
+     * @param timeout 调用方超时（毫秒）
+     * @param portCount 待扫描端口数
+     * @return 实际用于探测的超时
+     */
+    static int decideRemoteTimeout(InetAddress target, int timeout, int portCount) {
+        if (timeout <= 0) {
+            return timeout;
+        }
+        if (target != null && target.isLoopbackAddress()) {
+            return timeout;
+        }
+        if (portCount >= WELL_KNOWN_PRESCAN_MIN) {
+            int floor = isPrivateScanTarget(target)
+                    ? INTRANET_PASS1_TIMEOUT_MILLIS : REMOTE_MIN_TIMEOUT_MILLIS;
+            return Math.max(timeout, floor);
+        }
+        return timeout;
+    }
+
+    /**
+     * 按已观测 RTT 收紧单次探测超时，但不超过调用方给出的上限。
+     * 没有样本时保持原超时，避免把高延迟公网的 SYN-ACK 裁掉。
+     *
+     * @param requested 调用方超时（毫秒）
+     * @param avgRttMillis 已完成探测（成功或 RST）的平均往返
+     * @return 实际用于新探测的超时
+     */
+    static int decideAdaptiveTimeout(int requested, int avgRttMillis) {
+        if (requested <= 0) {
+            return requested;
+        }
+        if (avgRttMillis <= 0) {
+            return requested;
+        }
+        int adapted = avgRttMillis * 4 + 20;
+        if (adapted < 40) {
+            adapted = 40;
+        }
+        return Math.min(requested, adapted);
+    }
+
+    /**
+     * 决定超时补探的端口预算。端口很少时全部补探；全端口扫描则只补 1/16，
      * 避免对端默认 DROP 时把墙钟时间翻倍。
      *
      * @param portCount 待扫描端口数
      * @return 允许发起第二次探测的端口数上限
      */
     private static int decideRetryBudget(int portCount) {
+        return decideRetryBudget(portCount, null);
+    }
+
+    /**
+     * 公网 DROP 主机几乎全部超时，补探预算按 1/16 封顶。
+     * 大规模私网走 {@link #scanIntranetPorts}，静默集合本身就是补探预算，不再走这里。
+     *
+     * @param portCount 待扫描端口数
+     * @param target 已解析目标，保留参数以兼容调用方
+     * @return 允许发起第二次探测的端口数上限
+     */
+    static int decideRetryBudget(int portCount, InetAddress target) {
         if (portCount <= MIN_RETRY_BUDGET) {
-            return portCount;
+            return Math.max(0, portCount);
         }
         return Math.max(MIN_RETRY_BUDGET, portCount / RETRY_BUDGET_DIVISOR);
     }
@@ -543,12 +775,14 @@ public class PortsUtils {
      * @param retryPacer 超时补探阶段使用的慢速令牌桶
      * @param retryBudget 全扫描共享的补探端口预算
      * @param governor 自适应限速控制器，{@code null} 表示固定速率
+     * @param refundCompletions 握手成功或 RST 时是否归还令牌
      * @return 各分片合并后的开放端口列表（未排序）
      */
     private static List<Integer> scanSharded(InetAddress address, InetAddress bindAddress, int[] ports,
                                              int timeout, int maxInFlight, int parallelism,
                                              LaunchPacer pacer, LaunchPacer retryPacer,
-                                             AtomicInteger retryBudget, AdaptiveRate governor) {
+                                             AtomicInteger retryBudget, AdaptiveRate governor,
+                                             boolean refundCompletions) {
         AtomicInteger globalInFlight = new AtomicInteger();
         int perShardInFlight = Math.max(1, maxInFlight);
         int chunk = (ports.length + parallelism - 1) / parallelism;
@@ -566,7 +800,8 @@ public class PortsUtils {
                     @Override
                     public List<Integer> call() {
                         return scanShard(address, bindAddress, ports, from, to, timeout,
-                                perShardInFlight, globalInFlight, pacer, retryPacer, retryBudget, governor);
+                                perShardInFlight, globalInFlight, pacer, retryPacer, retryBudget, governor,
+                                refundCompletions, null);
                     }
                 }));
             }
@@ -605,6 +840,8 @@ public class PortsUtils {
      * @param retryPacer 超时补探阶段使用的慢速令牌桶
      * @param retryBudget 各分片共享的补探端口预算
      * @param governor 自适应限速控制器，{@code null} 表示固定速率
+     * @param refundCompletions 握手成功或 RST 时是否归还令牌
+     * @param silentOut 第一遍超时且未补探的端口；{@code null} 表示不收集
      * @return 本分片探测到的开放端口（按发现顺序）
      * @throws IllegalStateException 选择器创建失败或无法创建任何套接字通道时抛出
      */
@@ -612,9 +849,10 @@ public class PortsUtils {
                                            int from, int to, int timeout, int maxInFlight,
                                            AtomicInteger globalInFlight, LaunchPacer pacer,
                                            LaunchPacer retryPacer, AtomicInteger retryBudget,
-                                           AdaptiveRate governor) {
+                                           AdaptiveRate governor, boolean refundCompletions,
+                                           List<Integer> silentOut) {
         ScanState state = new ScanState(ports, from, to, globalInFlight, pacer, retryPacer,
-                retryBudget, governor);
+                retryBudget, governor, timeout, refundCompletions);
         Selector selector = null;
         try {
             selector = Selector.open();
@@ -637,6 +875,9 @@ public class PortsUtils {
             throw new IllegalStateException("scan ports failed: " + address.getHostAddress(), e);
         } finally {
             closeSelector(selector);
+        }
+        if (silentOut != null && !state.silentPorts.isEmpty()) {
+            silentOut.addAll(state.silentPorts);
         }
         return state.openPorts;
     }
@@ -728,6 +969,11 @@ public class PortsUtils {
                 } catch (IOException ignored) {
                     // 未连接套接字上不是所有平台都允许，忽略后仍可继续探测
                 }
+                try {
+                    channel.socket().setSoLinger(true, 0);
+                } catch (IOException ignored) {
+                    // 部分平台未连接时不允许 linger，不影响探测
+                }
                 if (bindAddress != null) {
                     try {
                         channel.bind(new InetSocketAddress(bindAddress, 0));
@@ -747,10 +993,14 @@ public class PortsUtils {
                 }
                 // 先注册再 connect，避免 SYN-ACK 落在 register 之前时 epoll 边沿触发漏掉就绪事件
                 long start = System.currentTimeMillis();
+                int wait = state.currentTimeout();
+                if (wait <= 0) {
+                    wait = timeout;
+                }
                 key = channel.register(selector, SelectionKey.OP_CONNECT,
-                        new Probe(pending.port, start, start + timeout, pending.attempt));
+                        new Probe(pending.port, start, start + wait, pending.attempt));
                 if (channel.connect(new InetSocketAddress(address, pending.port))) {
-                    markOpen(key, channel, state, pending.port);
+                    markOpen(key, channel, state, pending.port, start);
                 }
             } catch (IOException e) {
                 if (key != null) {
@@ -776,8 +1026,10 @@ public class PortsUtils {
      * @param state 本次扫描的状态
      * @param port 开放端口
      */
-    private static void markOpen(SelectionKey key, SocketChannel channel, ScanState state, int port) {
+    private static void markOpen(SelectionKey key, SocketChannel channel, ScanState state, int port,
+                                 long startMillis) {
         state.openPorts.add(port);
+        state.noteSample(startMillis);
         if (key != null) {
             key.cancel();
         }
@@ -815,6 +1067,7 @@ public class PortsUtils {
             if (open) {
                 state.openPorts.add(probe.port);
             }
+            state.noteSample(probe.startMillis);
             key.cancel();
             closeQuietly(channel);
             state.release();
@@ -1056,6 +1309,232 @@ public class PortsUtils {
             return selectIpv6BindAddress((Inet6Address) target);
         }
         return null;
+    }
+
+    /**
+     * 目标是否是本机地址。回环、未指定地址以及当前网卡上的地址都算。
+     *
+     * @param address 已解析的目标
+     * @return 本机地址时返回 {@code true}
+     */
+    static boolean isLocalScanTarget(InetAddress address) {
+        if (address == null) {
+            return false;
+        }
+        if (address.isLoopbackAddress() || address.isAnyLocalAddress()) {
+            return true;
+        }
+        try {
+            return NetworkInterface.getByInetAddress(address) != null;
+        } catch (SocketException e) {
+            return false;
+        }
+    }
+
+    /**
+     * 读取本机当前处于 LISTEN 的端口。仅 Linux 内核表可用时返回集合（可能为空）；
+     * 其它系统返回 {@code null}，调用方应回退到 TCP 探测。
+     *
+     * @param target 扫描目标，用于匹配绑定地址（含 0.0.0.0 / :: 通配）
+     * @return 监听端口集合；内核表不可用时返回 {@code null}
+     */
+    static Set<Integer> localListeningPorts(InetAddress target) {
+        if (target == null || !isLocalScanTarget(target)) {
+            return null;
+        }
+        boolean hasTcp = Files.isRegularFile(PROC_NET_TCP);
+        boolean hasTcp6 = Files.isRegularFile(PROC_NET_TCP6);
+        if (!hasTcp && !hasTcp6) {
+            return null;
+        }
+        Set<Integer> ports = new HashSet<Integer>();
+        if (hasTcp) {
+            collectLinuxTcpListeners(readLinesQuietly(PROC_NET_TCP), target, false, ports);
+        }
+        if (hasTcp6) {
+            collectLinuxTcpListeners(readLinesQuietly(PROC_NET_TCP6), target, true, ports);
+        }
+        return ports;
+    }
+
+    /**
+     * 从请求列表中留下内核正在监听的端口，并升序返回。
+     *
+     * @param requested 调用方解析出的端口
+     * @param listening 内核 listen 表
+     * @return 升序开放端口
+     */
+    static List<Integer> filterListeningPorts(int[] requested, Set<Integer> listening) {
+        List<Integer> open = new ArrayList<Integer>();
+        if (requested == null || listening == null) {
+            return open;
+        }
+        for (int i = 0; i < requested.length; i++) {
+            if (listening.contains(requested[i])) {
+                open.add(requested[i]);
+            }
+        }
+        Collections.sort(open);
+        return open;
+    }
+
+    /**
+     * 解析 {@code /proc/net/tcp} 或 {@code /proc/net/tcp6} 中的 LISTEN 行。
+     *
+     * @param lines 表文本
+     * @param target 扫描目标
+     * @param ipv6 是否为 tcp6
+     * @param into 结果集合
+     */
+    static void collectLinuxTcpListeners(List<String> lines, InetAddress target, boolean ipv6,
+                                         Set<Integer> into) {
+        if (lines == null || target == null || into == null) {
+            return;
+        }
+        for (int i = 0; i < lines.size(); i++) {
+            String line = lines.get(i).trim();
+            if (line.isEmpty() || line.startsWith("sl")) {
+                continue;
+            }
+            String[] cols = splitAsciiColumns(line);
+            if (cols.length < 4) {
+                continue;
+            }
+            if (!TCP_LISTEN_STATE.equalsIgnoreCase(cols[3])) {
+                continue;
+            }
+            int colon = cols[1].indexOf(':');
+            if (colon <= 0) {
+                continue;
+            }
+            String addrHex = cols[1].substring(0, colon);
+            String portHex = cols[1].substring(colon + 1);
+            int port;
+            try {
+                port = Integer.parseInt(portHex, 16);
+            } catch (NumberFormatException e) {
+                continue;
+            }
+            if (port < 1 || port > MAX_PORT) {
+                continue;
+            }
+            byte[] local = ipv6 ? parseProcIpv6Address(addrHex) : parseProcIpv4Address(addrHex);
+            if (listenAddressMatches(local, target)) {
+                into.add(port);
+            }
+        }
+    }
+
+    /**
+     * {@code /proc/net/tcp} 的 IPv4 地址是小端十六进制。
+     *
+     * @param hex 8 位十六进制
+     * @return 网络序 4 字节；格式错误时返回 {@code null}
+     */
+    static byte[] parseProcIpv4Address(String hex) {
+        if (hex == null || hex.length() != 8) {
+            return null;
+        }
+        try {
+            int le = (int) Long.parseLong(hex, 16);
+            return new byte[]{
+                    (byte) le,
+                    (byte) (le >>> 8),
+                    (byte) (le >>> 16),
+                    (byte) (le >>> 24)
+            };
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /**
+     * {@code /proc/net/tcp6} 的 IPv6 地址按 4 个小端 32 位字存放。
+     *
+     * @param hex 32 位十六进制
+     * @return 16 字节地址；格式错误时返回 {@code null}
+     */
+    static byte[] parseProcIpv6Address(String hex) {
+        if (hex == null || hex.length() != 32) {
+            return null;
+        }
+        byte[] bytes = new byte[16];
+        try {
+            for (int w = 0; w < 4; w++) {
+                int word = (int) Long.parseLong(hex.substring(w * 8, w * 8 + 8), 16);
+                bytes[w * 4] = (byte) word;
+                bytes[w * 4 + 1] = (byte) (word >>> 8);
+                bytes[w * 4 + 2] = (byte) (word >>> 16);
+                bytes[w * 4 + 3] = (byte) (word >>> 24);
+            }
+        } catch (NumberFormatException e) {
+            return null;
+        }
+        return bytes;
+    }
+
+    /**
+     * 套接字本地地址是否对扫描目标可见：精确匹配、IPv4 映射，或同族通配（0.0.0.0 / ::）。
+     *
+     * @param local 内核表里的本地地址
+     * @param target 扫描目标
+     * @return 该监听应对本次扫描可见时返回 {@code true}
+     */
+    static boolean listenAddressMatches(byte[] local, InetAddress target) {
+        if (local == null || target == null) {
+            return false;
+        }
+        byte[] dest = target.getAddress();
+        if (dest == null) {
+            return false;
+        }
+        if (local.length == dest.length && addressBytesEqual(local, dest)) {
+            return true;
+        }
+        if (isUnspecifiedAddress(local) && local.length == dest.length) {
+            return true;
+        }
+        if (local.length == 16 && dest.length == 4 && isIpv4MappedAddress(local)) {
+            return local[12] == dest[0] && local[13] == dest[1]
+                    && local[14] == dest[2] && local[15] == dest[3];
+        }
+        return false;
+    }
+
+    static boolean isIpv4MappedAddress(byte[] v6) {
+        if (v6 == null || v6.length != 16) {
+            return false;
+        }
+        for (int i = 0; i < 10; i++) {
+            if (v6[i] != 0) {
+                return false;
+            }
+        }
+        return v6[10] == (byte) 0xff && v6[11] == (byte) 0xff;
+    }
+
+    private static boolean isUnspecifiedAddress(byte[] addr) {
+        if (addr == null || (addr.length != 4 && addr.length != 16)) {
+            return false;
+        }
+        for (int i = 0; i < addr.length; i++) {
+            if (addr[i] != 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean addressBytesEqual(byte[] a, byte[] b) {
+        if (a == null || b == null || a.length != b.length) {
+            return false;
+        }
+        for (int i = 0; i < a.length; i++) {
+            if (a[i] != b[i]) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static InetAddress selectIpv4BindAddress(Inet4Address target) {
@@ -1862,13 +2341,20 @@ public class PortsUtils {
         private final LaunchPacer retryPacer;
         private final AtomicInteger retryBudget;
         private final AdaptiveRate governor;
+        private final boolean refundCompletions;
         private final ArrayDeque<RetryPort> retries = new ArrayDeque<RetryPort>();
         private final ArrayDeque<RetryPort> timedOut = new ArrayDeque<RetryPort>();
+        private final List<Integer> silentPorts = new ArrayList<Integer>();
+        private final int requestedTimeout;
         private int next;
         private int inFlight;
+        private int probeTimeout;
+        private long rttSum;
+        private int rttCount;
 
         ScanState(int[] ports, int from, int to, AtomicInteger globalInFlight, LaunchPacer pacer,
-                  LaunchPacer retryPacer, AtomicInteger retryBudget, AdaptiveRate governor) {
+                  LaunchPacer retryPacer, AtomicInteger retryBudget, AdaptiveRate governor,
+                  int timeout, boolean refundCompletions) {
             this.ports = ports;
             this.next = from;
             this.to = to;
@@ -1877,6 +2363,27 @@ public class PortsUtils {
             this.retryPacer = retryPacer;
             this.retryBudget = retryBudget;
             this.governor = governor;
+            this.requestedTimeout = timeout;
+            this.probeTimeout = timeout;
+            this.refundCompletions = refundCompletions;
+        }
+
+        int currentTimeout() {
+            return probeTimeout;
+        }
+
+        void noteSample(long startMillis) {
+            int sample = (int) Math.max(1L, System.currentTimeMillis() - startMillis);
+            rttSum += sample;
+            rttCount++;
+            if (rttCount >= 8) {
+                int adapted = decideAdaptiveTimeout(requestedTimeout, (int) (rttSum / rttCount));
+                // 只允许放宽、不允许收紧：RST 往往比慢服务的 SYN-ACK 快，
+                // 按 RST 收紧会把 150~200ms 的开放端口裁成超时。
+                if (adapted > probeTimeout) {
+                    probeTimeout = adapted;
+                }
+            }
         }
 
         boolean hasPending() {
@@ -1929,18 +2436,15 @@ public class PortsUtils {
          */
         void requeueTimeout(int port, int attempt, long probeStart, long now) {
             if (!shouldRetryTimeout(attempt)) {
+                silentPorts.add(port);
                 return;
             }
-            boolean suspicious = true;
-            if (governor != null) {
-                suspicious = governor.wasLimitedDuring(probeStart, now);
-                if (!suspicious) {
-                    return;
-                }
-            }
+            // 带外探针只有 1 SYN/s、超时也更宽，洪泛丢包时它仍然能通，
+            // 因此不能按探针健康度跳过补探，只按预算约束。
             if (retryBudget != null && retryBudget.getAndDecrement() <= 0) {
-                // 预算已用尽，恢复计数避免长期跑负
+                // 预算已用尽，恢复计数避免长期跑负；留给两阶段扫描的静默集合。
                 retryBudget.incrementAndGet();
+                silentPorts.add(port);
                 return;
             }
             timedOut.addLast(new RetryPort(port, attempt + 1));
@@ -2003,10 +2507,10 @@ public class PortsUtils {
             if (globalInFlight != null) {
                 globalInFlight.decrementAndGet();
             }
-            // RST 或握手成功立刻归还令牌，回环/内网不会被突发上限拖慢；
-            // 超时不退：远程 DROP 按 DROP_SYN_PER_SECOND 匀速补包，避免把安全组打满后漏扫。
+            // RST / 握手成功立刻归还令牌，关闭端口不必等满超时。
+            // 超时不退：DROP 路径只靠令牌桶补发，避免静默端口把窗口冲满。
             LaunchPacer active = activePacer();
-            if (refund && active != null) {
+            if (refund && refundCompletions && active != null) {
                 active.refund();
             }
         }
@@ -2018,7 +2522,8 @@ public class PortsUtils {
      * 一路攒到数百，再一次性打出去，远超设计中的突发量。
      * <p>速率取「构造时给的固定值」与「自适应控制器当前值」的较小者，
      * 因此补探桶即使共用控制器也不会被抬到主速率上去。</p>
-     * <p>RST / 握手成功会 {@link #refund()}，回环和内网扫描不会被突发额度卡住；
+     * <p>RST / 握手成功会 {@link #refund()}。突发量等于令牌容量，
+     * 私网把突发量对齐在途窗口，公网仍用较小突发以免一上来打满安全组。
      * 亚毫秒间隔用小数累计，避免高频 refill 把额度丢掉。
      */
     static final class LaunchPacer {
