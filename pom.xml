@@ -38,6 +38,7 @@
     <modules>
         <module>jkit-core</module>
         <module>jkit-curl-codegen</module>
+        <module>jkit-notify</module>
     </modules>
 
     <properties>

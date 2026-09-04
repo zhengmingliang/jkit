@@ -37,7 +37,19 @@ jkit 由 [ZmlTools](https://github.com/wuyongshi/ZmlTools) 迁移而来，在保
 
 jkit 只解析和执行 curl；代码生成见 [jkit-curl-codegen/README.md](jkit-curl-codegen/README.md)。
 
-本仓库是多模块工程：根 POM 为 `jkit-parent`，运行时库在 `jkit-core`（发布坐标仍是 `com.alianga:jkit`），代码生成在 `jkit-curl-codegen`。根目录 `mvn test` 会构建两个模块。
+需要消息通知（钉钉 / 企微 / 飞书 / Server酱 / Bark / 通用 Webhook / SMTP 邮件）时，另加：
+
+```xml
+<dependency>
+    <groupId>com.alianga</groupId>
+    <artifactId>jkit-notify</artifactId>
+    <version>2.0.1</version>
+</dependency>
+```
+
+用法见 [docs/notify.md](docs/notify.md)。
+
+本仓库是多模块工程：根 POM 为 `jkit-parent`，运行时库在 `jkit-core`（发布坐标仍是 `com.alianga:jkit`），代码生成在 `jkit-curl-codegen`，消息通知在 `jkit-notify`。根目录 `mvn test` 会构建三个模块。
 
 本库接替 [ZmlTools](https://github.com/wuyongshi/ZmlTools)（`top.wuyongshi:ZmlTools`）。**新项目请只用上面的坐标。** 已经依赖 ZmlTools 的工程有两种迁法：
 
@@ -186,6 +198,7 @@ response.attempts();    // 实际发出的请求次数
 
 完整用法（表单、上传、断点续传、SSE 自动合并、curl 解析与执行、WebSocket、代理）见 [docs/http.md](docs/http.md)。
 curl 转其它语言源码见 [jkit-curl-codegen](jkit-curl-codegen/README.md)。
+消息通知（钉钉/企微/飞书/Server酱/Bark/通用 Webhook/SMTP）见 [jkit-notify](docs/notify.md)。
 
 ### 负载均衡与服务发现
 

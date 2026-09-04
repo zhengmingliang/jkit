@@ -40,6 +40,12 @@
 
 ### 新增
 
+- 新模块 `com.alianga:jkit-notify`：轻量消息通知（版本随 `jkit-parent` 2.0.1，不单独升版）。一套 API 发钉钉机器人（含加签）/ 企微机器人 / 飞书机器人（含签名校验）/ Server酱 / Bark / 通用 Webhook（payload 模板）/ SMTP 邮件（纯 Socket 实现，AUTH LOGIN + STARTTLS/SSL + MIME）；`NotificationChannel` SPI + `NotificationManager` 注册表支持代码 / `META-INF/services` 两种方式扩展渠道，`MessageType`（TEXT/MARKDOWN/HTML）声明式能力；零第三方依赖，HTTP/JSON/日志复用 jkit。用法见 `docs/notify.md`。
+- `jkit-notify` 失败分类：`SendResult.failureType()` / `isRetryable()` 配合 `FailureType`（RETRYABLE / THROTTLED / CONFIG_ERROR / PERMANENT），调用方据此决定重试策略；已映射钉钉 130101/300001/310000、企微 45009/-1/93000、飞书 9499/19021/19001/19003、Server酱 40001、Bark 400 及 SMTP 4xx/5xx 语义，未收录的错误码回退到 HTTP 状态码分类。自定义渠道覆写 `AbstractHttpChannel.classify` 接入。
+- `jkit-notify` 消息长度上限：按 UTF-8 **字节**做字符边界安全截断（不劈开汉字与 emoji 代理对），超限追加可见标记。钉钉 20000 字节、企微 text 2048 / markdown 4096 字节、Server酱标题 32 字符 / 正文 32KB；工具方法 `NotifyUtils.truncateUtf8` / `utf8Length`，自定义渠道覆写 `contentMaxBytes` 接入。
+- `jkit-notify` 钉钉 @人自动内联：钉钉光有 `at.atMobiles` 不触发提醒，被 @ 的手机号必须字面出现在正文；渠道会自动追加缺失的 `@手机号`，已出现的（含 markdown 装饰形式）不重复追加。
+- `jkit-notify` SMTP 新增 `ChannelConfig.sslProtocols(String)` 钉扎 TLS 协议版本（规避 JDK 大版本调整默认协议集导致的握手失败）与 `trustAllCerts(boolean)` 支持企业自建网关自签证书；配置校验前置到建立连接之前。
+- `jkit-notify` SMTP 的 MARKDOWN 不再按纯文本降级：经 `NotifyUtils.markdownToHtml` 转成 HTML 后按 `text/html` 发送。列表项可嵌套代码块和表格；识别缩进围栏（``` / ~~~）、GFM 表和 `----+----` CLI 宽表。钉钉/企微/飞书/Server酱仍走各平台原生 markdown。
 - `DateUtils.parse(String)`：自动识别常见日期字符串（时间戳、紧凑数字、`-` `/` `.`、中文/韩文、ISO-8601 含 `T`/`Z`/`+0800`/`+08:00`）。
 - `DateUtils.fromEpochNumber(long)`：10 位秒或 13 位毫秒时间戳转 `Date`。
 - `DateUtils.fromTemporal(TemporalAccessor)`：`java.time` 时间对象转 `Date`。
@@ -62,7 +68,7 @@
 ### 构建
 
 - `git-commit-id-plugin`、`buildnumber-maven-plugin`、`maven-source-plugin` 从 `publish` profile 挪到默认构建，`package` 即可产出带构建信息的 sources jar。
-- 仓库改为多模块：父 POM `com.alianga:jkit-parent`（packaging pom），运行时库在模块 `jkit-core`（发布坐标仍是 `com.alianga:jkit`，沿用原根 POM 的编译 / Checkstyle / MRJAR / 发布配置），代码生成在 `jkit-curl-codegen`。根目录 `mvn test` 同时构建两个模块。
+- 仓库改为多模块：父 POM `com.alianga:jkit-parent`（packaging pom），运行时库在模块 `jkit-core`（发布坐标仍是 `com.alianga:jkit`，沿用原根 POM 的编译 / Checkstyle / MRJAR / 发布配置），代码生成在 `jkit-curl-codegen`，消息通知在 `jkit-notify`。根目录 `mvn test` 同时构建三个模块。
 
 ### jkit-curl-codegen
 

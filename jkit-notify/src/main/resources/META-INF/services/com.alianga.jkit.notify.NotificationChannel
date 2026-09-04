@@ -1,0 +1,7 @@
+com.alianga.jkit.notify.channel.DingTalkChannel
+com.alianga.jkit.notify.channel.WecomChannel
+com.alianga.jkit.notify.channel.FeishuChannel
+com.alianga.jkit.notify.channel.ServerChanChannel
+com.alianga.jkit.notify.channel.BarkChannel
+com.alianga.jkit.notify.channel.WebhookChannel
+com.alianga.jkit.notify.channel.SmtpChannel
