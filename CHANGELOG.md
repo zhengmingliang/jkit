@@ -46,6 +46,9 @@
 - `jkit-notify` 钉钉 @人自动内联：钉钉光有 `at.atMobiles` 不触发提醒，被 @ 的手机号必须字面出现在正文；渠道会自动追加缺失的 `@手机号`，已出现的（含 markdown 装饰形式）不重复追加。
 - `jkit-notify` SMTP 新增 `ChannelConfig.sslProtocols(String)` 钉扎 TLS 协议版本（规避 JDK 大版本调整默认协议集导致的握手失败）与 `trustAllCerts(boolean)` 支持企业自建网关自签证书；配置校验前置到建立连接之前。
 - `jkit-notify` SMTP 的 MARKDOWN 不再按纯文本降级：经 `NotifyUtils.markdownToHtml` 转成 HTML 后按 `text/html` 发送。列表项可嵌套代码块和表格；识别缩进围栏（``` / ~~~）、GFM 表和 `----+----` CLI 宽表。钉钉/企微/飞书/Server酱仍走各平台原生 markdown。
+- `jkit-notify` 飞书加签改为写入 JSON 请求体（官方要求，不再拼 URL query）；`sendAll` / `unregister`；SMTP 补 `Date`/`Message-ID`/dot-stuffing/`cc`/`bcc`/附件自动拆包；钉钉 actionCard、企微 markdown_v2 与 `EXTRA_AT_USERIDS`；异步发送改用本模块独立线程池。
+- `jkit-notify` 附件自动识别 MIME（`FileType` + 常见后缀兜底）；拆包大小支持 `10MB`/`512KB`；SMTP Markdown 默认响应式 HTML；钉钉 feedCard / 企微 news 与 image。
+- `jkit-notify` 模板变量：`Message.var` / `vars`，发送前替换 `${key}` / `${a.b}`。文件附件流式读取与拆包，不再把整文件载入内存。
 - `DateUtils.parse(String)`：自动识别常见日期字符串（时间戳、紧凑数字、`-` `/` `.`、中文/韩文、ISO-8601 含 `T`/`Z`/`+0800`/`+08:00`）。
 - `DateUtils.fromEpochNumber(long)`：10 位秒或 13 位毫秒时间戳转 `Date`。
 - `DateUtils.fromTemporal(TemporalAccessor)`：`java.time` 时间对象转 `Date`。

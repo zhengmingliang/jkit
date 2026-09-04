@@ -22,9 +22,10 @@ NotificationManager.send("渠道id", message, config)      ← 门面 + 渠道�
 NotificationChannel（渠道 SPI：id / name / supports / send）
 ```
 
-- **消息**与**配置**分离：同一渠道可配多套环境，一次业务告警可同时发多个渠道。
-- **多消息类型**：`Message.text()` / `Message.markdown()` / `Message.html()`；渠道声明自己支持的类型，不支持会在发送前抛 `IllegalArgumentException`。
-- **扩展新渠道**：实现 `NotificationChannel`，代码注册 `NotificationManager.get().register(...)`，或放 `META-INF/services/com.alianga.jkit.notify.NotificationChannel` SPI 文件，零改动核心。
+- **消息**与**配置**分离：同一渠道可配多套环境，一次业务告警可同时发多个渠道。标题/正文支持 `${key}` / `${a.b}` 模板，发送前替换。
+- **多消息类型**：`Message.text()` / `Message.markdown()` / `Message.html()` / `Message.actionCard()`（钉钉） / `Message.markdownV2()`（企微）；渠道声明自己支持的类型，不支持会在发送前抛 `IllegalArgumentException`。
+- **一次多渠道**：`NotificationManager.sendAll(message, targets)` 按 Map 顺序发送，部分失败仍返回各渠道 `SendResult`；`sendAllAggregated` 给出汇总。
+- **扩展新渠道**：实现 `NotificationChannel`，代码注册 `NotificationManager.get().register(...)`，或放 `META-INF/services/com.alianga.jkit.notify.NotificationChannel` SPI 文件，零改动核心。`unregister(id)` 可摘掉渠道（测试用完记得清）。
 
 ## 2. 快速开始
 
@@ -33,7 +34,9 @@ import com.alianga.jkit.notify.*;
 
 // 钉钉机器人（安全设置选"加签"时补 .secret("SECxxx")）
 SendResult r = NotificationManager.send("dingtalk",
-        Message.text("告警", "CPU 使用率 95%"),
+        Message.text("告警 ${host}", "CPU ${value}")
+                .var("host", "web-1")
+                .var("value", "95%"),
         ChannelConfig.webhook("https://oapi.dingtalk.com/robot/send?access_token=xxx")
                 .secret("SECxxx")
                 .timeoutMs(5000));
@@ -60,14 +63,32 @@ NotificationManager.send("bark",
                 .extra(Message.EXTRA_GROUP, "ops"),
         ChannelConfig.ofToken("deviceKey"));            // 自建服务再补 .webhookUrl("https://bark.my.com")
 
-// 邮件
-NotificationManager.send("smtp", Message.html("报表", "<b>营收</b> 100 万"),
+// 邮件（附件自动识别 MIME，不必手填 application/zip；拆包可用 10MB / 512KB）
+NotificationManager.send("smtp", Message.markdown("报表", "## 营收\n- 100 万")
+                .attachment(Attachment.of(new File("report.zip"))),   // 或 Attachment.of("a.zip", bytes)
         ChannelConfig.smtp("smtp.example.com", 465)
                 .ssl(true)
                 .username("bot@example.com")
                 .password("授权码")
                 .from("bot@example.com")
-                .to("ops@example.com", "boss@example.com"));
+                .to("ops@example.com,boss@example.com")
+                .cc("archive@example.com")
+                .autoSplit(true)
+                .maxAttachmentSize("10MB")
+                .splitChunkSize("5MB"));
+
+// 钉钉卡片 / 企微图文与图片
+NotificationManager.send("dingtalk",
+        Message.actionCard("发布", "v1.2.3 已上线", "查看", "https://ci.example.com/42"), dingtalkCfg);
+NotificationManager.send("wecom",
+        Message.news("发布", "构建成功", "https://ci.example.com/42", "https://example.com/cover.png"), wecomCfg);
+NotificationManager.send("wecom", Message.image("截图", pngBytes), wecomCfg);
+
+// 同一条告警发多个渠道
+Map<String, ChannelConfig> targets = new LinkedHashMap<>();
+targets.put("dingtalk", dingtalkCfg);
+targets.put("wecom", wecomCfg);
+List<SendResult> results = NotificationManager.sendAll(Message.text("告警", "CPU 95%"), targets);
 
 // 任意"POST JSON"接口（Slack 风格、自建网关）
 NotificationManager.send("webhook", Message.text("构建失败", "job #42"),
@@ -75,7 +96,7 @@ NotificationManager.send("webhook", Message.text("构建失败", "job #42"),
                 .payloadTemplate("{\"channel\":\"#ci\",\"text\":\"${title}: ${content}\"}")
                 .header("Authorization", "Bearer token"));
 
-// 异步发送（复用 jkit HTTP 公共线程池，校验同步完成）
+// 异步发送（本模块独立守护线程池，默认 8 线程，不和 HTTP/SSE 共用；校验同步完成）
 Future<SendResult> future = NotificationManager.sendAsync("dingtalk", msg, cfg);
 ```
 
@@ -83,13 +104,13 @@ Future<SendResult> future = NotificationManager.sendAsync("dingtalk", msg, cfg);
 
 | id | 渠道 | 必填配置 | 消息类型 | 成功判定 |
 | --- | --- | --- | --- | --- |
-| `dingtalk` | 钉钉机器人 | `webhook`（含 access_token）；加签再配 `secret` | TEXT / MARKDOWN | HTTP 200 且 `errcode==0` |
-| `wecom` | 企业微信机器人 | `webhook` | TEXT / MARKDOWN | HTTP 200 且 `errcode==0` |
-| `feishu` | 飞书机器人 | `webhook`；签名校验再配 `secret` | TEXT / MARKDOWN | `code`/`StatusCode==0` |
+| `dingtalk` | 钉钉机器人 | `webhook`（含 access_token）；加签再配 `secret` | TEXT / MARKDOWN / ACTION_CARD / NEWS(feedCard) / IMAGE(公网图) | HTTP 200 且 `errcode==0` |
+| `wecom` | 企业微信机器人 | `webhook` | TEXT / MARKDOWN / MARKDOWN_V2 / NEWS / IMAGE | HTTP 200 且 `errcode==0` |
+| `feishu` | 飞书机器人 | `webhook`；签名校验再配 `secret`（进 JSON 请求体） | TEXT / MARKDOWN | `code`/`StatusCode==0` |
 | `serverchan` | Server酱 | `ofToken(SendKey)` 或 `webhook` 完整地址 | TEXT / MARKDOWN | `code==0` |
 | `bark` | Bark | `ofToken(device_key)`，`webhookUrl` 可覆盖自建地址 | TEXT / MARKDOWN | `code==200` |
 | `webhook` | 通用 Webhook | `webhook` | TEXT / MARKDOWN / HTML | HTTP 2xx |
-| `smtp` | 邮件 | `smtp(host, port)` + `username`/`password`/`to` | TEXT / HTML；MARKDOWN 转 HTML | DATA 后 `250` |
+| `smtp` | 邮件 | `smtp(host, port)` + `username`/`password`/`to`；可选 `cc`/`bcc`/`replyTo`/`autoSplit` | TEXT / HTML；MARKDOWN 转 HTML | DATA 后 `250` |
 
 注：飞书 MARKDOWN 会转成 interactive 卡片（lark_md）；SMTP 的 MARKDOWN 会转成 HTML。各平台的 @人规则、长度上限、限流与签名差异见第 5 节——这些是最容易踩的部分。
 
@@ -100,8 +121,12 @@ Future<SendResult> future = NotificationManager.sendAsync("dingtalk", msg, cfg);
 | 常量 | 渠道 | 说明 |
 | --- | --- | --- |
 | `Message.EXTRA_AT_MOBILES` | 钉钉 / 企微 | @指定手机号，逗号分隔字符串或集合 |
+| `Message.EXTRA_AT_USERIDS` | 钉钉 / 企微 | @指定 userid；企微 MARKDOWN 会把缺失的 `<@userid>` 补进正文 |
 | `Message.EXTRA_AT_ALL` | 钉钉 / 企微 | @所有人 |
-| `Message.EXTRA_SOUND` / `EXTRA_GROUP` / `EXTRA_LEVEL` / `EXTRA_URL` | Bark | 铃声 / 分组 / 时效性 / 点击跳转 |
+| `Message.EXTRA_SOUND` / `EXTRA_GROUP` / `EXTRA_LEVEL` / `EXTRA_URL` | Bark；钉钉 actionCard 用 `EXTRA_URL` | 铃声 / 分组 / 时效性 / 点击跳转 |
+| `Message.EXTRA_BTN_TITLE` | 钉钉 actionCard | 单按钮文案 |
+| `Message.EXTRA_PIC_URL` | 钉钉 IMAGE / 企微 NEWS | 封面或公网图片地址 |
+| `Message.EXTRA_BASE64` / `EXTRA_MD5` | 企微 IMAGE | 由 `Message.image(title, bytes)` 自动填充 |
 
 ## 5. 平台约束与踩坑点
 
@@ -123,7 +148,7 @@ Message.markdown("告警", "**13800000000** 请处理").extra(Message.EXTRA_AT_M
 
 ### 企微 @人：TEXT 与 MARKDOWN 行为不同
 
-TEXT 的 @ 走结构化字段 `mentioned_mobile_list` / `mentioned_list`；MARKDOWN **完全不支持这两个字段**，只能在正文内联 `<@userid>`，且要求 userid 而非手机号。因此本模块在 MARKDOWN 下忽略 `EXTRA_AT_MOBILES`——需要 @ 就用 TEXT，或自己在 markdown 正文里写 `<@userid>`。
+TEXT 的 @ 走结构化字段 `mentioned_mobile_list` / `mentioned_list`；MARKDOWN **完全不支持这两个字段**，只能在正文内联 `<@userid>`，且要求 userid 而非手机号。因此本模块在 MARKDOWN 下忽略 `EXTRA_AT_MOBILES`，但会把 `EXTRA_AT_USERIDS` 以 `<@userid>` 自动补进正文。需要 @ 手机号时请用 TEXT。
 
 ### 消息长度上限按字节计
 
@@ -135,8 +160,10 @@ TEXT 的 @ 走结构化字段 `mentioned_mobile_list` / `mentioned_list`；MARKD
 | 企微 text | 2048 字节 | `WecomChannel.MAX_TEXT_BYTES` |
 | 企微 markdown | 4096 字节 | `WecomChannel.MAX_MARKDOWN_BYTES` |
 | Server酱 标题 / 正文 | 32 **字符** / 32 KB | `ServerChanChannel.MAX_TITLE_CHARS` / `MAX_DESP_BYTES` |
+| 飞书 text / 卡片 | 20000 / 30000 字节 | `FeishuChannel.MAX_TEXT_BYTES` / `MAX_CARD_BYTES` |
+| Bark body | 4096 字节 | `BarkChannel.MAX_BODY_BYTES` |
 
-飞书、Bark、通用 Webhook、SMTP 不设上限（平台无明确硬限或足够宽松）。自定义渠道覆写 `contentMaxBytes(Message)` 即可接入同一套截断逻辑。
+钉钉截断时会为尚未出现的 `@手机号` 预留字节，避免超长正文把 @ 顶出上限。自定义渠道覆写 `contentMaxBytes(Message)` 即可接入同一套截断逻辑。通用 Webhook、SMTP 不设上限。
 
 ### 限流
 
@@ -153,7 +180,7 @@ TEXT 的 @ 走结构化字段 `mentioned_mobile_list` / `mentioned_list`；MARKD
 | 钉钉 | 毫秒 | `secret` | `timestamp + "\n" + secret` |
 | 飞书 | **秒** | `timestamp + "\n" + secret` | **空串** |
 
-两者写法互换必然签名失败。签名结果都要先 Base64 再 URL 编码（Base64 会产出 `+` `/` `=`，不编码会破坏 query）。
+两者写法互换必然签名失败。钉钉的签名放在 **URL query**；飞书的 `timestamp` / `sign` 必须放在 **JSON 请求体**（与 `msg_type` 同级），放进 query 会被当成未签名。钉钉的 Base64 还要再 URL 编码（会产出 `+` `/` `=`）。
 
 ## 6. SMTP 细节与国内邮箱实测经验
 
@@ -161,8 +188,11 @@ TEXT 的 @ 走结构化字段 `mentioned_mobile_list` / `mentioned_list`；MARKD
 - **密码是授权码**：各家邮箱都要在网页端单独生成授权码，不是登录密码。注意授权码有有效期（如阿里云 180 天），过期后表现为"密码错误"。
 - **TLS 协议钉扎**：`.sslProtocols("TLSv1.2")`。JDK 大版本会调整默认启用的协议集，握手失败时只报笼统的 `SSLHandshakeException`，显式钉扎是最快的排除手段。
 - **自签证书**：企业自建网关用 `.trustAllCerts(true)`（跳过证书与主机名校验，公网邮箱不要开）。
-- **认证**：AUTH LOGIN（用户名/密码 Base64）。`from` 缺省取 `username`。
-- **MIME**：Subject 用 `=?UTF-8?B?...?=`，正文 UTF-8 Base64 按 76 字符折行；HTML 直发 `text/html`；MARKDOWN 经 `NotifyUtils.markdownToHtml` 转成 HTML 再发。转换覆盖标题、嵌套列表（列表项里的代码块/表格）、GFM 表格、`----+----` 形式的 CLI 宽表、缩进围栏代码块（``` / ~~~）、链接与加粗等，不是完整 CommonMark。钉钉/企微/飞书/Server酱本身渲染 markdown，不会走这步转换。
+- **认证**：AUTH LOGIN（用户名/密码 Base64）。`from` 缺省取 `username`。`to("a@x.com,b@x.com")` 会按逗号/分号拆成多个收件人；`cc` / `bcc` / `replyTo` 可用。Bcc 走 `RCPT TO` 但不出现在 MIME 头。
+- **MIME**：必带 `Date` 与 `Message-ID`。Subject 用 `=?UTF-8?B?...?=`，正文 UTF-8 Base64 按 76 字符折行；DATA 阶段做 RFC 5321 dot-stuffing（行首 `.` 写成 `..`）。HTML 直发 `text/html`；MARKDOWN 经 `NotifyUtils.markdownToHtml` 转成 HTML 再发。转换覆盖标题、嵌套列表（列表项里的代码块/表格）、GFM 表格、`----+----` 形式的 CLI 宽表、缩进围栏代码块（``` / ~~~）、链接与加粗等，不是完整 CommonMark。钉钉/企微/飞书/Server酱本身渲染 markdown，不会走这步转换。
+- **附件与拆包**：`Attachment.of(file)` 只保留路径，发送/拆包时按块读，100MB 级文件不必整段进堆。`Attachment.of(name, bytes)` 仍是内存附件。MIME 按后缀和文件头自动识别。开启 `.autoSplit(true)` 后，超过 `maxAttachmentSize`（默认 10 MB）的单个附件会按 `splitChunkSize`（默认 5 MB）切成 `filename.partN` 分多封发送。大小可用 `10MB`、`512KB`、`1.5G` 或纯字节数。正文附带 SHA-256 与 `cat` 拼接说明。
+- **模板变量**：`.var("host", "web-1")` 或 `.vars(map)`。标题和正文里的 `${host}` / `${cpu.value}` 在 `send` / `sendAll` / `sendAsync` 前替换；缺键变空串。原 `Message` 不被改写。
+- **Markdown 预览**：SMTP 把 MARKDOWN 转成 HTML 时默认套响应式文档壳（viewport + 手机/桌面 `@media`）。只要片段时用 `NotifyUtils.markdownToHtml`；完整文档用 `NotifyUtils.markdownToDocument(md, true/false)`。
 
 ### 服务商实测速率与坑（来自本仓库历史项目的实测记录）
 
