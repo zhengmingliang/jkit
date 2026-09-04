@@ -117,9 +117,22 @@ public final class SendResult {
      * @return 聚合结果
      */
     public static SendResult aggregate(String channelId, List<SendResult> parts) {
+        return aggregate(channelId, parts, false);
+    }
+
+    /**
+     * 聚合多次发送。{@code succeedIfAny} 为 true 时（故障转移）有一次成功即整体成功。
+     *
+     * @param channelId 渠道 id
+     * @param parts 子结果
+     * @param succeedIfAny 是否“任一成功即成功”
+     * @return 聚合结果
+     */
+    public static SendResult aggregate(String channelId, List<SendResult> parts, boolean succeedIfAny) {
         if (parts == null || parts.isEmpty()) {
             return fail(channelId, "no send results", FailureType.PERMANENT);
         }
+        boolean anyOk = false;
         boolean allOk = true;
         long elapsed = 0L;
         FailureType worst = FailureType.NONE;
@@ -130,7 +143,9 @@ public final class SendResult {
             elapsed += part.elapsedMs();
             lastStatus = part.status();
             lastResponse = part.response();
-            if (part.isFailed()) {
+            if (part.isSuccess()) {
+                anyOk = true;
+            } else {
                 allOk = false;
                 worst = worse(worst, part.failureType());
                 if (errors.length() > 0) {
@@ -140,8 +155,10 @@ public final class SendResult {
             }
         }
         List<SendResult> copy = Collections.unmodifiableList(new ArrayList<SendResult>(parts));
-        if (allOk) {
-            return new SendResult(channelId, true, lastStatus, lastResponse, null, elapsed, FailureType.NONE, copy);
+        boolean ok = succeedIfAny ? anyOk : allOk;
+        if (ok) {
+            return new SendResult(channelId, true, lastStatus, lastResponse,
+                    allOk ? null : errors.toString(), elapsed, FailureType.NONE, copy);
         }
         return new SendResult(channelId, false, lastStatus, lastResponse, errors.toString(), elapsed, worst, copy);
     }

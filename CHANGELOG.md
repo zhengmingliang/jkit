@@ -49,6 +49,7 @@
 - `jkit-notify` 飞书加签改为写入 JSON 请求体（官方要求，不再拼 URL query）；`sendAll` / `unregister`；SMTP 补 `Date`/`Message-ID`/dot-stuffing/`cc`/`bcc`/附件自动拆包；钉钉 actionCard、企微 markdown_v2 与 `EXTRA_AT_USERIDS`；异步发送改用本模块独立线程池。
 - `jkit-notify` 附件自动识别 MIME（`FileType` + 常见后缀兜底）；拆包大小支持 `10MB`/`512KB`；SMTP Markdown 默认响应式 HTML；钉钉 feedCard / 企微 news 与 image。
 - `jkit-notify` 模板变量：`Message.var` / `vars`，发送前替换 `${key}` / `${a.b}`。文件附件流式读取与拆包，不再把整文件载入内存。
+- `jkit-notify` `NotifyPolicy`：静默时段、5 分钟去重、本地限流；`sendFailover` 同一渠道多账号顺序切换。抑制为 `FailureType.SUPPRESSED`。
 - `DateUtils.parse(String)`：自动识别常见日期字符串（时间戳、紧凑数字、`-` `/` `.`、中文/韩文、ISO-8601 含 `T`/`Z`/`+0800`/`+08:00`）。
 - `DateUtils.fromEpochNumber(long)`：10 位秒或 13 位毫秒时间戳转 `Date`。
 - `DateUtils.fromTemporal(TemporalAccessor)`：`java.time` 时间对象转 `Date`。

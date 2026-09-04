@@ -90,6 +90,15 @@ targets.put("dingtalk", dingtalkCfg);
 targets.put("wecom", wecomCfg);
 List<SendResult> results = NotificationManager.sendAll(Message.text("告警", "CPU 95%"), targets);
 
+// 静默时段 / 5 分钟去重 / 本地 20 条每分钟；同一渠道多账号故障转移
+NotifyPolicy policy = NotifyPolicy.create()
+        .quietHours("23:00", "07:00")
+        .dedupWindowMs(5 * 60_000L)
+        .rateLimit(20, 60_000L);
+NotificationManager.send("dingtalk", msg, cfg, policy);
+NotificationManager.sendFailover("dingtalk", msg,
+        Arrays.asList(primaryCfg, backupCfg), policy);
+
 // 任意"POST JSON"接口（Slack 风格、自建网关）
 NotificationManager.send("webhook", Message.text("构建失败", "job #42"),
         ChannelConfig.webhook("https://hooks.example.com/services/xxx")
@@ -167,7 +176,18 @@ TEXT 的 @ 走结构化字段 `mentioned_mobile_list` / `mentioned_list`；MARKD
 
 ### 限流
 
-钉钉机器人与企微群机器人都是 **20 条/分钟**，钉钉超限会被禁言约 10 分钟。本模块**不做本地限流**（保持轻量、不引入状态），高频场景请自行合并消息或在调用侧限速；被限流时 `failureType()` 会返回 `THROTTLED`。
+钉钉机器人与企微群机器人都是 **20 条/分钟**，钉钉超限会被禁言约 10 分钟。渠道本身仍无状态；需要本地保护时用 `NotifyPolicy`：
+
+```java
+NotifyPolicy policy = NotifyPolicy.create()
+        .quietHours("23:00", "07:00")          // 跨午夜静默
+        .dedupWindowMs(5 * 60_000L)            // 同渠道+同标题正文 5 分钟只发一次
+        .rateLimit(20, 60_000L);               // 每渠道每分钟最多 20 条
+NotificationManager.send("dingtalk", msg, cfg, policy);
+NotificationManager.sendFailover("dingtalk", msg, Arrays.asList(a, b), policy);
+```
+
+去重命中 / 静默时段返回 `FailureType.SUPPRESSED`（不重试）；本地限流返回 `THROTTLED`。平台限流仍由渠道映射。去重与限流是**进程内**内存实现，多实例不共享。
 
 ### 钉钉加签的时钟漂移
 

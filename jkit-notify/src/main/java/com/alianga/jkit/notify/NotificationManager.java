@@ -142,9 +142,88 @@ public final class NotificationManager {
      * @throws IllegalArgumentException 渠道不存在 / 参数为空 / 类型不被支持
      */
     public static SendResult send(String channelId, Message message, ChannelConfig config) {
+        return send(channelId, message, config, null);
+    }
+
+    /**
+     * 同步发送，应用 {@link NotifyPolicy}（静默时段 / 去重 / 本地限流）。
+     *
+     * @param channelId 渠道 id
+     * @param message 消息
+     * @param config 渠道配置
+     * @param policy 策略，{@code null} 表示不应用
+     * @return 发送结果
+     */
+    public static SendResult send(String channelId, Message message, ChannelConfig config, NotifyPolicy policy) {
         Message rendered = message == null ? null : message.rendered();
         NotificationChannel channel = resolve(channelId, rendered, config);
-        return channel.send(rendered, config);
+        if (policy != null) {
+            SendResult blocked = policy.beforeSend(channelId, rendered);
+            if (blocked != null) {
+                return blocked;
+            }
+        }
+        SendResult result = channel.send(rendered, config);
+        if (policy != null) {
+            policy.afterAttempt(channelId, rendered);
+        }
+        return result;
+    }
+
+    /**
+     * 同一渠道多套账号按顺序试，直到成功。可重试失败（网络 / 限流）才切下一个；
+     * 配置错误也切下一个（密钥错了换号有意义）。
+     *
+     * @param channelId 渠道 id
+     * @param message 消息
+     * @param accounts 账号配置，至少 1 个
+     * @return 最后一次结果；全部失败则聚合
+     */
+    public static SendResult sendFailover(String channelId, Message message, List<ChannelConfig> accounts) {
+        return sendFailover(channelId, message, accounts, null);
+    }
+
+    /**
+     * 带策略的故障转移。策略在第一次真正发送前检查；抑制则整组不发。
+     *
+     * @param channelId 渠道 id
+     * @param message 消息
+     * @param accounts 账号配置
+     * @param policy 策略
+     * @return 发送结果
+     */
+    public static SendResult sendFailover(String channelId, Message message, List<ChannelConfig> accounts,
+                                          NotifyPolicy policy) {
+        if (accounts == null || accounts.isEmpty()) {
+            throw new IllegalArgumentException("accounts is required");
+        }
+        Message rendered = message == null ? null : message.rendered();
+        NotificationChannel channel = resolve(channelId, rendered, accounts.get(0));
+        if (policy != null) {
+            SendResult blocked = policy.beforeSend(channelId, rendered);
+            if (blocked != null) {
+                return blocked;
+            }
+        }
+        List<SendResult> attempts = new ArrayList<SendResult>(accounts.size());
+        for (int i = 0; i < accounts.size(); i++) {
+            ChannelConfig config = accounts.get(i);
+            if (config == null) {
+                throw new IllegalArgumentException("config is required");
+            }
+            SendResult result = channel.send(rendered, config);
+            attempts.add(result);
+            if (policy != null) {
+                policy.afterAttempt(channelId, rendered);
+            }
+            if (result.isSuccess()) {
+                if (attempts.size() == 1) {
+                    return result;
+                }
+                return SendResult.aggregate(channelId, attempts, true);
+            }
+        }
+        return SendResult.aggregate(channelId, attempts, true);
     }
 
     /**
@@ -196,9 +275,36 @@ public final class NotificationManager {
      * @throws IllegalArgumentException 渠道不存在 / 参数为空 / 类型不被支持
      */
     public static Future<SendResult> sendAsync(String channelId, Message message, ChannelConfig config) {
+        return sendAsync(channelId, message, config, null);
+    }
+
+    /**
+     * 异步发送，应用策略。校验与策略检查在提交前同步完成。
+     *
+     * @param channelId 渠道 id
+     * @param message 消息
+     * @param config 配置
+     * @param policy 策略
+     * @return Future
+     */
+    public static Future<SendResult> sendAsync(String channelId, Message message, ChannelConfig config,
+                                               NotifyPolicy policy) {
         final Message rendered = message == null ? null : message.rendered();
         final NotificationChannel channel = resolve(channelId, rendered, config);
-        return asyncExecutor().submit(() -> channel.send(rendered, config));
+        if (policy != null) {
+            SendResult blocked = policy.beforeSend(channelId, rendered);
+            if (blocked != null) {
+                return java.util.concurrent.CompletableFuture.completedFuture(blocked);
+            }
+        }
+        final NotifyPolicy applied = policy;
+        return asyncExecutor().submit(() -> {
+            SendResult result = channel.send(rendered, config);
+            if (applied != null) {
+                applied.afterAttempt(channelId, rendered);
+            }
+            return result;
+        });
     }
 
     /**

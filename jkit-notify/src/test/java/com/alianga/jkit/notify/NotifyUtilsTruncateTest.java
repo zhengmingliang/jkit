@@ -111,6 +111,7 @@ public class NotifyUtilsTruncateTest {
         assertTrue(!FailureType.CONFIG_ERROR.isRetryable());
         assertTrue(!FailureType.PERMANENT.isRetryable());
         assertTrue(!FailureType.NONE.isRetryable());
+        assertTrue(!FailureType.SUPPRESSED.isRetryable());
     }
 
     /**
