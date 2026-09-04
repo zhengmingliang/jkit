@@ -1,6 +1,7 @@
 package com.alianga.jkit.notify.channel;
 
 import com.alianga.jkit.log.Log;
+import com.alianga.jkit.notify.Attachment;
 import com.alianga.jkit.notify.ChannelConfig;
 import com.alianga.jkit.notify.FailureType;
 import com.alianga.jkit.notify.Message;
@@ -19,8 +20,11 @@ import javax.net.ssl.X509TrustManager;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
+import java.io.StringWriter;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
@@ -28,9 +32,16 @@ import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.cert.X509Certificate;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
+import java.util.UUID;
 
 /**
  * SMTP 邮件渠道，纯 Socket 实现（零第三方依赖）。
@@ -44,14 +55,18 @@ import java.util.List;
  * <li>{@link ChannelConfig#username(String)} / {@link ChannelConfig#password(String)}：
  * 登录账号与<b>授权码</b>（不是网页登录密码，各家邮箱都要单独生成）；</li>
  * <li>{@link ChannelConfig#from(String)} 发件人（缺省取 username）、
- * {@link ChannelConfig#to(String...)} 收件人（必填，可多个）；</li>
- * <li>{@link ChannelConfig#sslProtocols(String)}：握手协议版本钉扎（如 {@code TLSv1.2}），
- * JDK 大版本调整默认协议集导致握手失败时用它；</li>
- * <li>{@link ChannelConfig#trustAllCerts(boolean)}：企业自建网关自签证书时开启。</li>
+ * {@link ChannelConfig#fromName(String)} 显示名、
+ * {@link ChannelConfig#to(String...)} 收件人（必填，可多个，逗号分隔）、
+ * {@link ChannelConfig#cc(String...)} / {@link ChannelConfig#bcc(String...)} /
+ * {@link ChannelConfig#replyTo(String)}；</li>
+ * <li>{@link ChannelConfig#sslProtocols(String)}：握手协议版本钉扎（如 {@code TLSv1.2}）；</li>
+ * <li>{@link ChannelConfig#trustAllCerts(boolean)}：企业自建网关自签证书时开启；</li>
+ * <li>{@link ChannelConfig#autoSplit(boolean)}：超大附件按块拆成多封发送。</li>
  * </ul>
  *
  * <p>消息：TEXT 按纯文本发送；HTML 直发；MARKDOWN 经 {@link NotifyUtils#markdownToHtml(String)}
- * 转成 HTML 后按 {@code text/html} 发送。标题作为邮件主题，正文作为邮件体，均按 UTF-8 + Base64 编码传输。
+ * 转成 HTML 后按 {@code text/html} 发送。标题作为邮件主题。附件走 {@link Message#attachment}。
+ * MIME 含 {@code Date} 与 {@code Message-ID}；DATA 阶段做 RFC 5321 dot-stuffing。
  *
  * <p>失败分类：SMTP 4xx 是临时故障（可重试，其中 421/450/451/452 归 THROTTLED），
  * 5xx 是永久拒绝，530/534/535/538 认证类归配置错误。
@@ -68,6 +83,13 @@ public class SmtpChannel implements NotificationChannel {
     public static final String ID = "smtp";
 
     private static final Log LOG = Log.get(SmtpChannel.class);
+    private static final DateTimeFormatter RFC5322_DATE =
+            DateTimeFormatter.ofPattern("EEE, dd MMM yyyy HH:mm:ss Z", Locale.US);
+    private static final String[] USED_KEYS = {
+            "smtpHost", "smtpPort", "username", "password", "from", "fromName",
+            "to", "cc", "bcc", "replyTo", "ssl", "starttls", "sslProtocols",
+            "trustAllCerts", "timeoutMs", "autoSplit", "maxAttachmentSize", "splitChunkSize"
+    };
 
     @Override
     public String id() {
@@ -81,18 +103,100 @@ public class SmtpChannel implements NotificationChannel {
 
     @Override
     public boolean supports(MessageType type) {
-        return true;
+        return type == MessageType.TEXT || type == MessageType.MARKDOWN || type == MessageType.HTML;
     }
 
     @Override
     public SendResult send(Message message, ChannelConfig config) {
-        // 配置校验前置：缺失时直接作为编程错误抛出，不发起网络连接
-        String username = required(config.username(), "smtp username is required");
-        String password = required(config.password(), "smtp password is required");
+        required(config.username(), "smtp username is required");
+        required(config.password(), "smtp password is required");
         if (config.to() == null || config.to().isEmpty()) {
             throw new IllegalArgumentException("smtp to is required (ChannelConfig.to)");
         }
+        config.logUnused(LOG, id(), USED_KEYS);
+
+        if (config.autoSplit() && message.attachments() != null && !message.attachments().isEmpty()) {
+            return sendWithSplit(message, config);
+        }
+        return sendOnce(message, config, message.attachments());
+    }
+
+    /**
+     * 超大附件按块拆成多封：未超限的附件随正文一封发出，超限的每个文件按 chunk 分多封。
+     *
+     * @param message 消息
+     * @param config 渠道配置
+     * @return 聚合结果
+     */
+    protected SendResult sendWithSplit(Message message, ChannelConfig config) {
+        long maxSize = config.resolvedMaxAttachmentSize();
+        long chunkSize = config.resolvedSplitChunkSize();
+        List<Attachment> normal = new ArrayList<Attachment>();
+        List<Attachment> oversized = new ArrayList<Attachment>();
+        for (Attachment attachment : message.attachments()) {
+            if (attachment.size() > maxSize) {
+                oversized.add(attachment);
+            } else {
+                normal.add(attachment);
+            }
+        }
+        List<SendResult> parts = new ArrayList<SendResult>();
+        if (!normal.isEmpty() || oversized.isEmpty()) {
+            parts.add(sendOnce(message, config, normal));
+        }
+        for (Attachment attachment : oversized) {
+            long size = attachment.size();
+            int total = (int) ((size + chunkSize - 1) / chunkSize);
+            if (total < 1) {
+                total = 1;
+            }
+            String sha = attachment.sha256Hex();
+            for (int i = 0; i < total; i++) {
+                String partName = attachment.filename() + ".part" + (i + 1);
+                String subject = message.title("通知") + " [" + attachment.filename()
+                        + " - Part " + (i + 1) + "/" + total + "]";
+                String partContent = message.content() + splitInstructions(
+                        attachment.filename(), i + 1, total, sha);
+                Attachment slice = attachment.slice(i * chunkSize, chunkSize, partName);
+                Message partMessage = typedCopy(message, subject, partContent).attachment(slice);
+                parts.add(sendOnce(partMessage, config, partMessage.attachments()));
+            }
+        }
+        return SendResult.aggregate(id(), parts);
+    }
+
+    private static Message typedCopy(Message source, String title, String content) {
+        if (source.type() == MessageType.HTML) {
+            return Message.html(title, content);
+        }
+        if (source.type() == MessageType.MARKDOWN) {
+            return Message.markdown(title, content);
+        }
+        return Message.text(title, content);
+    }
+
+    private static String splitInstructions(String filename, int partNum, int totalParts, String sha256) {
+        return "\n\n--- File Split Information ---\n"
+                + "Original file: " + filename + "\n"
+                + "This is part " + partNum + " of " + totalParts + "\n"
+                + "SHA-256 of original: " + sha256 + "\n"
+                + "To reassemble: cat " + filename + ".part1 " + filename + ".part2 ... > " + filename + "\n"
+                + "-----------------------------\n";
+    }
+
+    /**
+     * 发一封邮件（可带一组附件）。
+     *
+     * @param message 消息
+     * @param config 渠道配置
+     * @param attachments 附件，可为 {@code null}
+     * @return 发送结果
+     */
+    protected SendResult sendOnce(Message message, ChannelConfig config, List<Attachment> attachments) {
+        String username = required(config.username(), "smtp username is required");
+        String password = required(config.password(), "smtp password is required");
         String from = config.from() != null ? config.from() : username;
+        List<String> recipients = allRecipients(config);
 
         long start = System.currentTimeMillis();
         Socket socket = null;
@@ -103,7 +207,7 @@ public class SmtpChannel implements NotificationChannel {
                     new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8));
 
             readReply(in);
-            String ehloHost = "localhost";
+            String ehloHost = ehloHost();
             write(out, "EHLO " + ehloHost);
             readReply(in);
             if (config.starttls() && !implicitSsl(config)) {
@@ -125,13 +229,14 @@ public class SmtpChannel implements NotificationChannel {
 
             write(out, "MAIL FROM:<" + from + ">");
             readReply(in);
-            for (String to : config.to()) {
-                write(out, "RCPT TO:<" + to + ">");
+            for (String rcpt : recipients) {
+                write(out, "RCPT TO:<" + rcpt + ">");
                 readReply(in);
             }
             write(out, "DATA");
             readReply(in);
-            write(out, buildMime(message, from, config.to()));
+            writeMime(out, message, from, config, attachments == null
+                    ? Collections.<Attachment>emptyList() : attachments);
             write(out, ".");
             String finalReply = readReply(in);
             write(out, "QUIT");
@@ -150,16 +255,46 @@ public class SmtpChannel implements NotificationChannel {
             return SendResult.fail(id(), e.code(), e.reply(), e.getMessage(),
                     System.currentTimeMillis() - start, e.failureType());
         } catch (Exception e) {
-            // 网络层异常（超时、连接重置）按可重试处理
             LOG.error("[{}] send error: {}", id(), e.getMessage());
             String detail = e.getClass().getSimpleName() + ": " + e.getMessage();
             if (e instanceof SocketTimeoutException && !config.ssl() && !config.starttls()) {
                 detail += "; if the server expects SMTPS/STARTTLS, set ssl(true) or starttls(true)";
             }
-            return SendResult.fail(id(), detail, FailureType.RETRYABLE);
+            return SendResult.fail(id(), detail, System.currentTimeMillis() - start, FailureType.RETRYABLE);
         } finally {
             closeQuietly(socket);
         }
+    }
+
+    /**
+     * RFC 5321：DATA 中以 {@code .} 开头的行要写成 {@code ..}，否则服务器会当成结束。
+     *
+     * @param mime MIME 报文
+     * @return 转义后的报文
+     */
+    protected String dotStuff(String mime) {
+        if (mime == null || mime.isEmpty()) {
+            return "";
+        }
+        String normalized = mime.replace("\r\n", "\n").replace('\r', '\n');
+        StringBuilder out = new StringBuilder(normalized.length() + 16);
+        int i = 0;
+        while (i < normalized.length()) {
+            int nl = normalized.indexOf('\n', i);
+            String line = nl < 0 ? normalized.substring(i) : normalized.substring(i, nl);
+            if (line.startsWith(".")) {
+                out.append('.');
+            }
+            out.append(line).append("\r\n");
+            if (nl < 0) {
+                break;
+            }
+            i = nl + 1;
+        }
+        if (out.length() >= 2) {
+            return out.substring(0, out.length() - 2);
+        }
+        return out.toString();
     }
 
     /**
@@ -172,18 +307,15 @@ public class SmtpChannel implements NotificationChannel {
     protected FailureType classifyReply(String reply) {
         int code = replyCode(reply);
         if (code == 421 || code == 450 || code == 451 || code == 452) {
-            // 服务不可用 / 邮箱忙 / 本地错误 / 存储不足，多为限流或临时资源问题
             return FailureType.THROTTLED;
         }
         if (code >= 400 && code < 500) {
             return FailureType.RETRYABLE;
         }
         if (code == 530 || code == 534 || code == 535 || code == 538) {
-            // 需要认证 / 认证机制不支持 / 认证失败
             return FailureType.CONFIG_ERROR;
         }
         if (code == 501 && reply != null && reply.contains("修改密码")) {
-            // 腾讯企业邮：授权码能 AUTH，但未在网页完成改密前拒绝 MAIL FROM
             return FailureType.CONFIG_ERROR;
         }
         return FailureType.PERMANENT;
@@ -242,10 +374,6 @@ public class SmtpChannel implements NotificationChannel {
     /**
      * 建立初始连接：按配置选择明文 Socket 或隐式 SSL Socket。
      *
-     * <p>端口 465 是 SMTPS：即使未调用 {@link ChannelConfig#ssl(boolean) ssl(true)} 也会先
-     * TCP 再包装 TLS。否则客户端读 220、服务端等 ClientHello，双方空等到超时。
-     * 包装时带上主机名，以便 SNI 与证书主机名校验。
-     *
      * @param config 渠道配置
      * @return 已连接的 Socket
      * @throws IOException 连接失败
@@ -275,15 +403,6 @@ public class SmtpChannel implements NotificationChannel {
         return wrapTls(plain, config);
     }
 
-    /**
-     * 在已连接的 TCP Socket 上做 TLS 握手。使用 {@code createSocket(plain, host, ...)} 把
-     * 主机名传给 SNI；公网证书默认做 HTTPS 主机名校验，{@code trustAllCerts} 时跳过。
-     *
-     * @param plain 已连接的明文 Socket
-     * @param config 渠道配置
-     * @return TLS Socket
-     * @throws IOException 握手失败
-     */
     private Socket wrapTls(Socket plain, ChannelConfig config) throws IOException {
         String host = config.smtpHost();
         SSLSocket tls = (SSLSocket) sslFactory(config).createSocket(plain, host, plain.getPort(), true);
@@ -299,20 +418,12 @@ public class SmtpChannel implements NotificationChannel {
         return tls;
     }
 
-    /**
-     * 是否走隐式 SSL（SMTPS）：显式 {@code ssl(true)}，或端口为 465。
-     *
-     * @param config 渠道配置
-     * @return 是否隐式 SSL
-     */
     private static boolean implicitSsl(ChannelConfig config) {
         return config.ssl() || config.smtpPort() == 465;
     }
 
     /**
-     * 取 SSLSocketFactory：默认用 JDK 默认信任链；
-     * {@link ChannelConfig#trustAllCerts(boolean)} 为 {@code true} 时用信任所有证书的上下文
-     * （企业自建网关自签证书场景）。
+     * 取 SSLSocketFactory：默认用 JDK 默认信任链；trustAllCerts 时跳过校验。
      *
      * @param config 渠道配置
      * @return SSLSocketFactory
@@ -358,9 +469,6 @@ public class SmtpChannel implements NotificationChannel {
         return config.timeoutMs() > 0 ? config.timeoutMs() : 10000;
     }
 
-    /**
-     * 信任所有证书的 TrustManager，仅在显式开启 trustAllCerts 时使用。
-     */
     private static final class TrustAllManager implements X509TrustManager {
         @Override
         public void checkClientTrusted(X509Certificate[] chain, String authType) {
@@ -379,68 +487,169 @@ public class SmtpChannel implements NotificationChannel {
     }
 
     /**
-     * 组装完整 MIME 邮件报文（含头部与正文，Subject/正文均为 UTF-8 Base64）。
+     * 把 MIME 写入 DATA 阶段。正文仍走内存；附件按块 Base64，文件附件不整段载入。
      *
+     * @param out 输出
      * @param message 消息
      * @param from 发件人
-     * @param to 收件人列表
-     * @return MIME 报文（行以 CRLF 分隔，不含结尾句点）
+     * @param config 渠道配置
+     * @param attachments 附件
+     * @throws IOException 写入失败
      */
-    protected String buildMime(Message message, String from, List<String> to) {
+    protected void writeMime(BufferedWriter out, Message message, String from, ChannelConfig config,
+                             List<Attachment> attachments) throws IOException {
         String subject = message.title("通知");
         String body = bodyOf(message);
         boolean html = message.type() == MessageType.HTML || message.type() == MessageType.MARKDOWN;
         String contentType = html ? "text/html; charset=UTF-8" : "text/plain; charset=UTF-8";
-        String encodedSubject = "=?UTF-8?B?"
-                + Base64.getEncoder().encodeToString(subject.getBytes(StandardCharsets.UTF_8)) + "?=";
-        String encodedBody = foldBase64(
+        String encodedBody = NotifyUtils.foldBase64(
                 Base64.getEncoder().encodeToString(body.getBytes(StandardCharsets.UTF_8)));
+        String date = ZonedDateTime.now().format(RFC5322_DATE);
+        String messageId = "<" + UUID.randomUUID().toString() + "@" + ehloHost() + ">";
 
-        StringBuilder mime = new StringBuilder();
-        mime.append("From: <").append(from).append(">\r\n");
-        mime.append("To: ");
-        for (int i = 0; i < to.size(); i++) {
-            if (i > 0) {
-                mime.append(", ");
-            }
-            mime.append('<').append(to.get(i)).append('>');
+        StringBuilder headers = new StringBuilder();
+        headers.append("From: ").append(mailbox(from, config.fromName())).append("\r\n");
+        headers.append("To: ").append(mailboxList(config.to())).append("\r\n");
+        if (config.cc() != null && !config.cc().isEmpty()) {
+            headers.append("Cc: ").append(mailboxList(config.cc())).append("\r\n");
         }
-        mime.append("\r\n");
-        mime.append("Subject: ").append(encodedSubject).append("\r\n");
-        mime.append("MIME-Version: 1.0\r\n");
-        mime.append("Content-Type: ").append(contentType).append("\r\n");
-        mime.append("Content-Transfer-Encoding: base64\r\n");
-        mime.append("\r\n");
-        mime.append(encodedBody);
-        return mime.toString();
+        if (config.replyTo() != null && !config.replyTo().trim().isEmpty()) {
+            headers.append("Reply-To: <").append(config.replyTo().trim()).append(">\r\n");
+        }
+        headers.append("Subject: ").append(encodedWord(subject)).append("\r\n");
+        headers.append("Date: ").append(date).append("\r\n");
+        headers.append("Message-ID: ").append(messageId).append("\r\n");
+        headers.append("MIME-Version: 1.0\r\n");
+        if (attachments == null || attachments.isEmpty()) {
+            headers.append("Content-Type: ").append(contentType).append("\r\n");
+            headers.append("Content-Transfer-Encoding: base64\r\n");
+            headers.append("\r\n");
+            headers.append(encodedBody);
+            write(out, headers.toString());
+            return;
+        }
+        String boundary = "----=_jkit_" + UUID.randomUUID().toString().replace("-", "");
+        headers.append("Content-Type: multipart/mixed; boundary=\"").append(boundary).append("\"\r\n");
+        headers.append("\r\n");
+        headers.append("This is a multi-part message in MIME format.\r\n");
+        headers.append("--").append(boundary).append("\r\n");
+        headers.append("Content-Type: ").append(contentType).append("\r\n");
+        headers.append("Content-Transfer-Encoding: base64\r\n");
+        headers.append("\r\n");
+        headers.append(encodedBody).append("\r\n");
+        write(out, headers.toString());
+        for (Attachment attachment : attachments) {
+            StringBuilder partHead = new StringBuilder();
+            partHead.append("--").append(boundary).append("\r\n");
+            partHead.append("Content-Type: ").append(attachment.contentType())
+                    .append("; name=\"").append(asciiFilename(attachment.filename())).append("\"\r\n");
+            partHead.append("Content-Transfer-Encoding: base64\r\n");
+            partHead.append("Content-Disposition: attachment; filename=\"")
+                    .append(encodedWord(attachment.filename())).append("\"\r\n");
+            partHead.append("\r\n");
+            out.write(partHead.toString());
+            InputStream in = attachment.openStream();
+            try {
+                NotifyUtils.writeFoldedBase64(in, out);
+            } finally {
+                in.close();
+            }
+            out.write("\r\n");
+            out.flush();
+        }
+        write(out, "--" + boundary + "--");
     }
 
     /**
-     * TEXT 原样；HTML 原样；MARKDOWN 转 HTML 并套一层带 charset 的文档壳，方便邮件客户端渲染。
+     * 组装完整 MIME（测试与无附件路径）。大附件请走 {@link #writeMime}。
      *
      * @param message 消息
-     * @return 邮件正文
+     * @param from 发件人
+     * @param config 渠道配置
+     * @param attachments 附件
+     * @return MIME 报文
      */
+    protected String buildMime(Message message, String from, ChannelConfig config, List<Attachment> attachments) {
+        StringWriter buffer = new StringWriter();
+        try {
+            writeMime(new BufferedWriter(buffer), message, from, config, attachments);
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
+        return buffer.toString();
+    }
+
+    private static String mailbox(String address, String displayName) {
+        if (displayName == null || displayName.trim().isEmpty()) {
+            return "<" + address + ">";
+        }
+        return encodedWord(displayName.trim()) + " <" + address + ">";
+    }
+
+    private static String mailboxList(List<String> addresses) {
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < addresses.size(); i++) {
+            if (i > 0) {
+                out.append(", ");
+            }
+            out.append('<').append(addresses.get(i)).append('>');
+        }
+        return out.toString();
+    }
+
+    private static String encodedWord(String text) {
+        return "=?UTF-8?B?" + Base64.getEncoder().encodeToString(text.getBytes(StandardCharsets.UTF_8)) + "?=";
+    }
+
+    private static String asciiFilename(String filename) {
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < filename.length(); i++) {
+            char c = filename.charAt(i);
+            if (c == '"' || c == '\\' || c < 0x20 || c > 0x7e) {
+                out.append('_');
+            } else {
+                out.append(c);
+            }
+        }
+        return out.length() == 0 ? "attachment.bin" : out.toString();
+    }
+
+    private static List<String> allRecipients(ChannelConfig config) {
+        Set<String> recipients = new LinkedHashSet<String>();
+        addAll(recipients, config.to());
+        addAll(recipients, config.cc());
+        addAll(recipients, config.bcc());
+        return new ArrayList<String>(recipients);
+    }
+
+    private static void addAll(Set<String> target, List<String> source) {
+        if (source == null) {
+            return;
+        }
+        for (String item : source) {
+            if (item != null && !item.isEmpty()) {
+                target.add(item);
+            }
+        }
+    }
+
+    private static String ehloHost() {
+        try {
+            String host = InetAddress.getLocalHost().getCanonicalHostName();
+            if (host != null && !host.trim().isEmpty()) {
+                return host.trim();
+            }
+        } catch (Exception ignored) {
+            // 回落到 localhost
+        }
+        return "localhost";
+    }
+
     private static String bodyOf(Message message) {
         if (message.type() != MessageType.MARKDOWN) {
             return message.content();
         }
-        String fragment = NotifyUtils.markdownToHtml(message.content());
-        return "<!DOCTYPE html><html><head><meta charset=\"UTF-8\">"
-                + "<style>"
-                + "body{font-family:sans-serif;line-height:1.6;color:#222}"
-                + "pre{background:#f6f8fa;padding:12px;overflow:auto;"
-                + "border-radius:6px;font-size:13px;white-space:pre}"
-                + "code{font-family:ui-monospace,Menlo,Consolas,monospace;"
-                + "background:#f6f8fa;padding:0 .3em}"
-                + "pre code{background:none;padding:0}"
-                + "table{border-collapse:collapse;margin:12px 0;max-width:100%}"
-                + "th,td{border:1px solid #d0d7de;padding:6px 10px;text-align:left}"
-                + "th{background:#f6f8fa}"
-                + "blockquote{border-left:4px solid #d0d7de;margin:0;padding:0 12px;color:#57606a}"
-                + "</style></head><body>"
-                + fragment
-                + "</body></html>";
+        return NotifyUtils.markdownToDocument(message.content(), true);
     }
 
     /**
@@ -450,18 +659,7 @@ public class SmtpChannel implements NotificationChannel {
      * @return 折行结果
      */
     protected String foldBase64(String base64) {
-        if (base64 == null || base64.isEmpty()) {
-            return "";
-        }
-        StringBuilder out = new StringBuilder(base64.length() + base64.length() / 76 * 2 + 2);
-        for (int i = 0; i < base64.length(); i += 76) {
-            int end = Math.min(i + 76, base64.length());
-            if (i > 0) {
-                out.append("\r\n");
-            }
-            out.append(base64, i, end);
-        }
-        return out.toString();
+        return NotifyUtils.foldBase64(base64);
     }
 
     /**
@@ -488,25 +686,11 @@ public class SmtpChannel implements NotificationChannel {
         return line;
     }
 
-    /**
-     * 命令通道按 ISO-8859-1 逐字节读取，避免 UTF-8 解码器把国内邮箱的 GBK 回复吞成乱码。
-     *
-     * @param socket 已连接 Socket
-     * @return reader
-     * @throws IOException 取输入流失败
-     */
     private static BufferedReader newReader(Socket socket) throws IOException {
         return new BufferedReader(
                 new InputStreamReader(socket.getInputStream(), StandardCharsets.ISO_8859_1));
     }
 
-    /**
-     * 把命令通道上的一行解码成可读文本：纯 ASCII 原样返回；含高位字节时优先 UTF-8，
-     * 非法 UTF-8 再按 GB18030 解（163 / 腾讯企业邮等回复中文走 GBK）。
-     *
-     * @param latin1 ISO-8859-1 读出的一行（可能含 GBK 字节）
-     * @return 解码后的一行；输入为 {@code null} 时返回 {@code null}
-     */
     private static String decodeSmtpLine(String latin1) {
         if (latin1 == null) {
             return null;
@@ -535,9 +719,6 @@ public class SmtpChannel implements NotificationChannel {
 
     /**
      * 写一条 SMTP 命令或数据块（自动补 CRLF + flush）。
-     *
-     * <p>DATA 阶段的多行报文必须以 CRLF 结尾，否则结尾句点会粘连到正文最后一行，
-     * 服务器无法识别报文结束。
      *
      * @param out 输出流
      * @param command 命令或多行数据块

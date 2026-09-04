@@ -54,11 +54,13 @@ public class SmtpChannelTest {
                 @Override
                 public void run() {
                     try {
-                        Socket socket = serverSocket.accept();
-                        socket.setSoTimeout(15000);
-                        serve(socket);
+                        while (!serverSocket.isClosed()) {
+                            Socket socket = serverSocket.accept();
+                            socket.setSoTimeout(15000);
+                            serve(socket);
+                        }
                     } catch (Exception ignored) {
-                        // 客户端异常断开时安静退出
+                        // 服务关闭或客户端异常断开时安静退出
                     }
                 }
             });
@@ -142,7 +144,14 @@ public class SmtpChannelTest {
             assertTrue(result.toString(), result.isSuccess());
             assertEquals(250, result.status());
 
-            assertTrue(smtp.commands.contains("EHLO localhost"));
+            boolean ehlo = false;
+            for (String command : smtp.commands) {
+                if (command.startsWith("EHLO ")) {
+                    ehlo = true;
+                    break;
+                }
+            }
+            assertTrue("EHLO missing: " + smtp.commands, ehlo);
             assertTrue("AUTH LOGIN sequence missing: " + smtp.commands,
                     smtp.commands.contains("AUTH LOGIN"));
             int authIndex = smtp.commands.indexOf("AUTH LOGIN");
@@ -160,6 +169,8 @@ public class SmtpChannelTest {
             assertNotNull(data);
             assertTrue(data, data.contains("From: <user>"));
             assertTrue(data, data.contains("To: <ops@example.com>"));
+            assertTrue(data, data.contains("Date: "));
+            assertTrue(data, data.contains("Message-ID: "));
             assertTrue(data, data.contains("MIME-Version: 1.0"));
             assertTrue(data, data.contains("text/plain; charset=UTF-8"));
             assertTrue(data, data.contains("Content-Transfer-Encoding: base64"));
@@ -190,6 +201,8 @@ public class SmtpChannelTest {
             assertTrue(body, body.contains("<h2>本周完成</h2>"));
             assertTrue(body, body.contains("<li>模块 A</li>"));
             assertTrue(body, body.contains("<!DOCTYPE html>"));
+            assertTrue("邮件 Markdown 默认响应式", body.contains("viewport"));
+            assertTrue(body, body.contains("@media"));
         } finally {
             smtp.stop();
         }
@@ -288,6 +301,101 @@ public class SmtpChannelTest {
             assertFalse(result.isSuccess());
             assertEquals(FailureType.CONFIG_ERROR, result.failureType());
             assertFalse(result.isRetryable());
+        } finally {
+            smtp.stop();
+        }
+    }
+
+    /**
+     * {@code to("a,b")} 按逗号拆成两个收件人；Cc 进头，Bcc 只走 RCPT。
+     */
+    @Test
+    public void commaSeparatedToAndCcBcc() throws Exception {
+        smtp = new FakeSmtp();
+        smtp.start();
+        try {
+            SendResult result = NotificationManager.send(SmtpChannel.ID,
+                    Message.text("hi"),
+                    ChannelConfig.smtp("127.0.0.1", smtp.port())
+                            .username("user").password("pass")
+                            .to("a@x.com,b@x.com")
+                            .cc("cc@x.com")
+                            .bcc("bcc@x.com"));
+            assertTrue(result.toString(), result.isSuccess());
+            assertTrue(smtp.commands.contains("RCPT TO:<a@x.com>"));
+            assertTrue(smtp.commands.contains("RCPT TO:<b@x.com>"));
+            assertTrue(smtp.commands.contains("RCPT TO:<cc@x.com>"));
+            assertTrue(smtp.commands.contains("RCPT TO:<bcc@x.com>"));
+            String data = mimeData();
+            assertTrue(data, data.contains("To: <a@x.com>, <b@x.com>"));
+            assertTrue(data, data.contains("Cc: <cc@x.com>"));
+            assertTrue(data, !data.contains("bcc@x.com"));
+        } finally {
+            smtp.stop();
+        }
+    }
+
+    /**
+     * DATA 正文以点开头的行要写成 {@code ..}，否则会被当成结束。
+     */
+    @Test
+    public void leadingDotIsStuffed() {
+        String stuffed = new SmtpChannel() {
+            String apply(String mime) {
+                return dotStuff(mime);
+            }
+        }.apply("keep\r\n.secret\r\nend");
+        assertEquals("keep\r\n..secret\r\nend", stuffed);
+    }
+
+    /**
+     * 附件走 multipart，超大附件按块拆成多封。
+     */
+    @Test
+    public void attachmentAndAutoSplit() throws Exception {
+        smtp = new FakeSmtp();
+        smtp.start();
+        try {
+            byte[] small = "hello-file".getBytes(StandardCharsets.UTF_8);
+            SendResult attached = NotificationManager.send(SmtpChannel.ID,
+                    Message.text("附件", "见附件").attachment(Attachment.of("note.txt", small, "text/plain")),
+                    config());
+            assertTrue(attached.toString(), attached.isSuccess());
+            String data = mimeData();
+            assertTrue(data, data.contains("multipart/mixed"));
+            assertTrue(data, data.contains("note.txt") || data.contains("filename="));
+
+            smtp.commands.clear();
+            byte[] big = "abcdefghijkl".getBytes(StandardCharsets.UTF_8);
+            SendResult split = NotificationManager.send(SmtpChannel.ID,
+                    Message.text("拆包", "大附件")
+                            .attachment(Attachment.of("big.bin", big, "application/octet-stream")),
+                    config().autoSplit(true).maxAttachmentSize(10).splitChunkSize(6));
+            assertTrue(split.toString(), split.isSuccess());
+            int dataCount = 0;
+            for (String command : smtp.commands) {
+                if (command.startsWith("DATA:")) {
+                    dataCount++;
+                }
+            }
+            assertEquals("oversized 12 bytes / 6 => 2 parts", 2, dataCount);
+            assertEquals(2, split.parts().size());
+
+            smtp.commands.clear();
+            java.io.File tmp = java.io.File.createTempFile("jkit-notify-split", ".bin");
+            try {
+                java.nio.file.Files.write(tmp.toPath(), big);
+                Attachment fileAtt = Attachment.of(tmp);
+                assertTrue(fileAtt.fileBacked());
+                SendResult fileSplit = NotificationManager.send(SmtpChannel.ID,
+                        Message.text("文件拆包", "大附件")
+                                .attachment(fileAtt),
+                        config().autoSplit(true).maxAttachmentSize(10).splitChunkSize(6));
+                assertTrue(fileSplit.toString(), fileSplit.isSuccess());
+                assertEquals(2, fileSplit.parts().size());
+            } finally {
+                tmp.delete();
+            }
         } finally {
             smtp.stop();
         }
