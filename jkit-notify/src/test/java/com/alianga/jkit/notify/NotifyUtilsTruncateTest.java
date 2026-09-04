@@ -3,6 +3,8 @@ package com.alianga.jkit.notify;
 import org.junit.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
@@ -128,5 +130,72 @@ public class NotifyUtilsTruncateTest {
         assertTrue(!configFail.isRetryable());
         assertEquals(FailureType.CONFIG_ERROR, configFail.failureType());
         assertTrue(configFail.toString().contains("CONFIG_ERROR"));
+
+        SendResult timed = SendResult.fail("c", "timeout", 123L, FailureType.RETRYABLE);
+        assertEquals(123L, timed.elapsedMs());
+        assertTrue(timed.isRetryable());
+    }
+
+    /**
+     * 附件拆包按块切开，SHA-256 稳定。
+     */
+    @Test
+    public void splitBytesAndSha256() {
+        byte[] data = "abcdefghijkl".getBytes(StandardCharsets.UTF_8);
+        assertEquals(2, NotifyUtils.splitBytes(data, 6).size());
+        assertEquals(12, NotifyUtils.splitBytes(data, 6).get(0).length
+                + NotifyUtils.splitBytes(data, 6).get(1).length);
+        assertEquals(64, NotifyUtils.sha256Hex(data).length());
+        assertEquals(NotifyUtils.sha256Hex(data), NotifyUtils.sha256Hex(data));
+        assertEquals(32, NotifyUtils.md5Hex(data).length());
+    }
+
+    /**
+     * 按文件名后缀与 ZIP 文件头识别 MIME，无需调用方手填。
+     */
+    @Test
+    public void detectMimeTypeFromNameAndMagic() {
+        assertEquals("image/png", NotifyUtils.detectMimeType("logo.png", new byte[]{0}));
+        assertEquals("image/jpeg", NotifyUtils.detectMimeType("photo.JPG", null));
+        assertEquals("application/zip", NotifyUtils.detectMimeType("pkg.zip", null));
+        assertEquals("text/plain", NotifyUtils.detectMimeType("notes.md", null));
+        byte[] zipHeader = new byte[]{0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x00, 0x00, 0x08, 0x00};
+        assertEquals("application/zip", NotifyUtils.detectMimeType("unknown.bin", zipHeader));
+        assertEquals("application/octet-stream", NotifyUtils.detectMimeType("noext", new byte[]{1, 2, 3}));
+        Attachment png = Attachment.of("a.png", new byte[]{1});
+        assertEquals("image/png", png.contentType());
+    }
+
+    /**
+     * 响应式文档壳带 viewport 与媒体查询，非响应式只有 charset。
+     */
+    @Test
+    public void markdownDocumentResponsiveOption() {
+        String responsive = NotifyUtils.markdownToDocument("## 标题", true);
+        assertTrue(responsive.contains("viewport"));
+        assertTrue(responsive.contains("@media"));
+        assertTrue(responsive.contains("<h2>标题</h2>"));
+        String plain = NotifyUtils.markdownToDocument("## 标题", false);
+        assertTrue(plain.contains("<h2>标题</h2>"));
+        assertTrue(!plain.contains("@media"));
+    }
+
+    /**
+     * {@code ${key}} / {@code ${a.b}} 替换；缺键变空串；值内占位符不二次展开。
+     */
+    @Test
+    public void renderTemplateNestedAndMissing() {
+        Map<String, Object> nested = new LinkedHashMap<String, Object>();
+        nested.put("name", "web-1");
+        Map<String, Object> vars = new LinkedHashMap<String, Object>();
+        vars.put("host", nested);
+        vars.put("value", "95%");
+        vars.put("raw", "keep ${value}");
+        assertEquals("CPU web-1 = 95%",
+                NotifyUtils.renderTemplate("CPU ${host.name} = ${value}", vars));
+        assertEquals("x=", NotifyUtils.renderTemplate("x=${missing}", vars));
+        assertEquals("keep ${value}", NotifyUtils.renderTemplate("${raw}", vars));
+        assertEquals("plain", NotifyUtils.renderTemplate("plain", vars));
+        assertNull(NotifyUtils.renderTemplate(null, vars));
     }
 }

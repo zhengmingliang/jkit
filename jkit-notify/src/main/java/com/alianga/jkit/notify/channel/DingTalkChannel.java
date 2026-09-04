@@ -6,7 +6,9 @@ import com.alianga.jkit.notify.Message;
 import com.alianga.jkit.notify.MessageType;
 import com.alianga.jkit.notify.NotifyUtils;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 钉钉自定义机器人渠道。
@@ -14,12 +16,13 @@ import java.util.List;
  * <p>配置：{@link ChannelConfig#webhook(String)} 填机器人 webhook 地址（含 access_token），
  * 安全设置选"加签"时再 {@link ChannelConfig#secret(String)} 填 SEC 开头的密钥。
  *
- * <p>消息：TEXT / MARKDOWN。正文按 UTF-8 {@value #MAX_CONTENT_BYTES} 字节上限自动截断。
+ * <p>消息：TEXT / MARKDOWN / ACTION_CARD。正文按 UTF-8 {@value #MAX_CONTENT_BYTES} 字节上限自动截断。
  *
  * <p><b>@人的关键规则</b>：钉钉光有 {@code at.atMobiles} 数组**不会**高亮提醒，被 @ 的手机号
  * 必须以字面文本出现在正文里，否则静默失效。本渠道会自动把缺失的 {@code @手机号} 追加到正文末尾
- * （已出现的不重复追加）。钉钉按子串匹配，手机号外面套 markdown 装饰（如 {@code **138...**}）
- * 也能生效。@所有人走 {@link Message#EXTRA_AT_ALL}，默认关闭。
+ * （已出现的不重复追加），截断时会为这些后缀预留字节。钉钉按子串匹配，手机号外面套 markdown
+ * 装饰（如 {@code **138...**}）也能生效。userid 走 {@link Message#EXTRA_AT_USERIDS}。
+ * @所有人走 {@link Message#EXTRA_AT_ALL}，默认关闭。
  *
  * <p><b>其它平台约束</b>：单个机器人 20 条/分钟，超限会被禁言约 10 分钟（本渠道不做本地限流，
  * 高频场景请自行合并消息）；加签的 timestamp 与钉钉服务器相差超过 1 小时即失败——容器时区或
@@ -53,7 +56,13 @@ public class DingTalkChannel extends AbstractHttpChannel {
 
     @Override
     public boolean supports(MessageType type) {
-        return type == MessageType.TEXT || type == MessageType.MARKDOWN;
+        return type == MessageType.TEXT || type == MessageType.MARKDOWN
+                || type == MessageType.ACTION_CARD || type == MessageType.NEWS || type == MessageType.IMAGE;
+    }
+
+    @Override
+    protected String[] usedConfigKeys() {
+        return new String[]{"webhook", "secret", "timeoutMs"};
     }
 
     @Override
@@ -77,62 +86,127 @@ public class DingTalkChannel extends AbstractHttpChannel {
     @Override
     protected String buildPayload(Message message, ChannelConfig config) {
         List<String> atMobiles = message.extraStrings(Message.EXTRA_AT_MOBILES);
+        List<String> atUserIds = message.extraStrings(Message.EXTRA_AT_USERIDS);
         boolean atAll = message.extraBoolean(Message.EXTRA_AT_ALL, false);
-        StringBuilder at = new StringBuilder();
-        boolean hasAt = (atMobiles != null && !atMobiles.isEmpty()) || atAll;
-        if (hasAt) {
-            at.append(",\"at\":{");
-            if (atMobiles != null && !atMobiles.isEmpty()) {
-                at.append("\"atMobiles\":[");
-                for (int i = 0; i < atMobiles.size(); i++) {
-                    if (i > 0) {
-                        at.append(',');
-                    }
-                    at.append('"').append(NotifyUtils.jsonEscape(atMobiles.get(i))).append('"');
-                }
-                at.append(']');
+        String content = withInlineAt(message.content(), atMobiles);
+
+        Map<String, Object> root = NotifyUtils.map();
+        if (message.type() == MessageType.ACTION_CARD) {
+            Map<String, Object> card = NotifyUtils.map();
+            card.put("title", message.title("通知"));
+            card.put("text", content);
+            card.put("btnOrientation", message.extraBoolean(Message.EXTRA_BTN_VERTICAL, false) ? "0" : "1");
+            String btnTitle = message.extraString(Message.EXTRA_BTN_TITLE);
+            String btnUrl = message.extraString(Message.EXTRA_URL);
+            if (btnTitle != null && !btnTitle.isEmpty() && btnUrl != null && !btnUrl.isEmpty()) {
+                card.put("singleTitle", btnTitle);
+                card.put("singleURL", btnUrl);
             }
-            if (atAll) {
-                if (at.charAt(at.length() - 1) != '{') {
-                    at.append(',');
-                }
-                at.append("\"isAtAll\":true");
+            root.put("msgtype", "actionCard");
+            root.put("actionCard", card);
+        } else if (message.type() == MessageType.NEWS) {
+            String jump = message.extraString(Message.EXTRA_URL);
+            if (jump == null || jump.isEmpty()) {
+                throw new IllegalArgumentException("dingtalk news url is required (Message.EXTRA_URL)");
             }
-            at.append('}');
+            Map<String, Object> link = NotifyUtils.map();
+            link.put("title", message.title("通知"));
+            link.put("messageURL", jump);
+            String pic = message.extraString(Message.EXTRA_PIC_URL);
+            if (pic != null && !pic.isEmpty()) {
+                link.put("picURL", pic);
+            }
+            List<Map<String, Object>> links = new ArrayList<Map<String, Object>>();
+            links.add(link);
+            Map<String, Object> feed = NotifyUtils.map();
+            feed.put("links", links);
+            root.put("msgtype", "feedCard");
+            root.put("feedCard", feed);
+        } else if (message.type() == MessageType.IMAGE) {
+            String pic = message.extraString(Message.EXTRA_PIC_URL);
+            if (pic == null || pic.isEmpty()) {
+                throw new IllegalArgumentException(
+                        "dingtalk image requires a public picUrl (group bot cannot upload files)");
+            }
+            Map<String, Object> markdown = NotifyUtils.map();
+            markdown.put("title", message.title("图片"));
+            markdown.put("text", "![" + message.title("图片") + "](" + pic + ")\n" + pic);
+            root.put("msgtype", "markdown");
+            root.put("markdown", markdown);
+        } else if (message.type() == MessageType.MARKDOWN) {
+            Map<String, Object> markdown = NotifyUtils.map();
+            markdown.put("title", message.title("通知"));
+            markdown.put("text", content);
+            root.put("msgtype", "markdown");
+            root.put("markdown", markdown);
+        } else {
+            Map<String, Object> text = NotifyUtils.map();
+            text.put("content", content);
+            root.put("msgtype", "text");
+            root.put("text", text);
         }
-        String escaped = NotifyUtils.jsonEscape(inlineAtMobiles(limitedContent(message), atMobiles));
-        if (message.type() == MessageType.MARKDOWN) {
-            return "{\"msgtype\":\"markdown\",\"markdown\":{\"title\":\""
-                    + NotifyUtils.jsonEscape(message.title("通知")) + "\",\"text\":\"" + escaped + "\"}"
-                    + at + "}";
+        Map<String, Object> at = NotifyUtils.map();
+        if (atMobiles != null && !atMobiles.isEmpty()) {
+            at.put("atMobiles", atMobiles);
         }
-        return "{\"msgtype\":\"text\",\"text\":{\"content\":\"" + escaped + "\"}" + at + "}";
+        if (atUserIds != null && !atUserIds.isEmpty()) {
+            at.put("atUserIds", atUserIds);
+        }
+        if (atAll) {
+            at.put("isAtAll", Boolean.TRUE);
+        }
+        if (!at.isEmpty()) {
+            root.put("at", at);
+        }
+        return NotifyUtils.toJson(root);
+    }
+
+    /**
+     * 先为尚未出现的 {@code @手机号} 预留字节再截断，避免超长正文把 @ 顶出上限。
+     *
+     * @param content 原文
+     * @param atMobiles 要 @ 的手机号
+     * @return 截断并补齐 @ 之后的正文
+     */
+    protected String withInlineAt(String content, List<String> atMobiles) {
+        String suffix = missingAtSuffix(content, atMobiles);
+        String truncated = limitedContent(content, MAX_CONTENT_BYTES, NotifyUtils.utf8Length(suffix));
+        if (suffix.isEmpty()) {
+            return truncated;
+        }
+        return truncated + suffix;
     }
 
     /**
      * 把 {@code atMobiles} 里尚未出现在正文中的手机号以 {@code @手机号} 形式追加到正文末尾。
-     *
-     * <p>钉钉的 at 数组只是"谁被 @"的声明，真正触发提醒靠正文里的字面手机号；已出现的号码
-     * 不重复追加，避免正文里出现两次 @。
      *
      * @param content 正文
      * @param atMobiles 要 @ 的手机号，可为 {@code null}
      * @return 补齐 @ 之后的正文
      */
     protected String inlineAtMobiles(String content, List<String> atMobiles) {
-        if (atMobiles == null || atMobiles.isEmpty()) {
+        String suffix = missingAtSuffix(content, atMobiles);
+        if (suffix.isEmpty()) {
             return content;
         }
-        StringBuilder out = new StringBuilder(content == null ? "" : content);
+        return (content == null ? "" : content) + suffix;
+    }
+
+    private static String missingAtSuffix(String content, List<String> atMobiles) {
+        if (atMobiles == null || atMobiles.isEmpty()) {
+            return "";
+        }
+        String haystack = content == null ? "" : content;
+        StringBuilder suffix = new StringBuilder();
         for (String mobile : atMobiles) {
             if (mobile == null || mobile.isEmpty()) {
                 continue;
             }
-            if (out.indexOf(mobile) < 0) {
-                out.append(" @").append(mobile);
+            if (haystack.indexOf(mobile) < 0) {
+                suffix.append(" @").append(mobile);
             }
         }
-        return out.toString();
+        return suffix.toString();
     }
 
     @Override

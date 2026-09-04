@@ -149,7 +149,47 @@ public class DingTalkChannelTest extends AbstractHttpChannelTest {
         NotificationManager.send(DingTalkChannel.ID,
                 Message.text("a\"b\nc\\d"), ChannelConfig.webhook(baseUrl()));
         Captured request = take();
-        assertEquals("{\"msgtype\":\"text\",\"text\":{\"content\":\"a\\\"b\\nc\\\\d\"}}",
+        assertJsonEquals("{\"msgtype\":\"text\",\"text\":{\"content\":\"a\\\"b\\nc\\\\d\"}}",
                 request.body());
+    }
+
+    /**
+     * actionCard 单按钮卡片。
+     */
+    @Test
+    public void actionCardPayload() {
+        respond(200, "{\"errcode\":0}");
+        SendResult result = NotificationManager.send(DingTalkChannel.ID,
+                Message.actionCard("发布", "v1.2.3 已上线", "查看详情", "https://ci.example.com/42"),
+                ChannelConfig.webhook(baseUrl()));
+        assertTrue(result.isSuccess());
+        Captured request = take();
+        assertJsonEquals("{\"msgtype\":\"actionCard\",\"actionCard\":{\"title\":\"发布\","
+                + "\"text\":\"v1.2.3 已上线\",\"btnOrientation\":\"1\","
+                + "\"singleTitle\":\"查看详情\",\"singleURL\":\"https://ci.example.com/42\"}}",
+                request.body());
+    }
+
+    /**
+     * 图文卡片走 feedCard；图片走 markdown 内嵌公网 picUrl。
+     */
+    @Test
+    public void newsAndImagePayload() {
+        respond(200, "{\"errcode\":0}");
+        NotificationManager.send(DingTalkChannel.ID,
+                Message.news("发布", "v1.2.3", "https://ci.example.com/42", "https://example.com/cover.png"),
+                ChannelConfig.webhook(baseUrl()));
+        assertJsonEquals("{\"msgtype\":\"feedCard\",\"feedCard\":{\"links\":[{\"title\":\"发布\","
+                + "\"messageURL\":\"https://ci.example.com/42\",\"picURL\":\"https://example.com/cover.png\"}]}}",
+                take().body());
+
+        respond(200, "{\"errcode\":0}");
+        NotificationManager.send(DingTalkChannel.ID,
+                Message.image("截图", new byte[]{1, 2, 3})
+                        .extra(Message.EXTRA_PIC_URL, "https://example.com/shot.png"),
+                ChannelConfig.webhook(baseUrl()));
+        assertJsonEquals("{\"msgtype\":\"markdown\",\"markdown\":{\"title\":\"截图\","
+                + "\"text\":\"![截图](https://example.com/shot.png)\\nhttps://example.com/shot.png\"}}",
+                take().body());
     }
 }

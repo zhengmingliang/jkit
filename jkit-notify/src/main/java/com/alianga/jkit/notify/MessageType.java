@@ -24,5 +24,25 @@ public enum MessageType {
     /**
      * HTML 富文本。
      */
-    HTML
+    HTML,
+
+    /**
+     * 钉钉独立跳转 ActionCard（带按钮的卡片）。
+     */
+    ACTION_CARD,
+
+    /**
+     * 企业微信 markdown_v2（比 markdown 支持更多语法）。
+     */
+    MARKDOWN_V2,
+
+    /**
+     * 图片消息（钉钉 / 企微群机器人：需先拿到平台 media_id 或图的 md5+base64）。
+     */
+    IMAGE,
+
+    /**
+     * 企业微信图文 / 钉钉 FeedCard 风格的链接卡片。
+     */
+    NEWS
 }
