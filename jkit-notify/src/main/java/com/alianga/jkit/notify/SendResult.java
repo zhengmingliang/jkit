@@ -1,5 +1,9 @@
 package com.alianga.jkit.notify;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
 /**
  * 发送结果：一次 {@link NotificationChannel#send(Message, ChannelConfig)} 的统一返回。
  *
@@ -26,9 +30,10 @@ public final class SendResult {
     private final String error;
     private final long elapsedMs;
     private final FailureType failureType;
+    private final List<SendResult> parts;
 
     private SendResult(String channelId, boolean success, int status, String response,
-                       String error, long elapsedMs, FailureType failureType) {
+                       String error, long elapsedMs, FailureType failureType, List<SendResult> parts) {
         this.channelId = channelId;
         this.success = success;
         this.status = status;
@@ -36,6 +41,7 @@ public final class SendResult {
         this.error = error;
         this.elapsedMs = elapsedMs;
         this.failureType = failureType == null ? FailureType.PERMANENT : failureType;
+        this.parts = parts == null ? Collections.<SendResult>emptyList() : parts;
     }
 
     /**
@@ -48,7 +54,7 @@ public final class SendResult {
      * @return 成功结果
      */
     public static SendResult ok(String channelId, int status, String response, long elapsedMs) {
-        return new SendResult(channelId, true, status, response, null, elapsedMs, FailureType.NONE);
+        return new SendResult(channelId, true, status, response, null, elapsedMs, FailureType.NONE, null);
     }
 
     /**
@@ -59,7 +65,7 @@ public final class SendResult {
      * @return 失败结果
      */
     public static SendResult fail(String channelId, String error) {
-        return new SendResult(channelId, false, 0, null, error, 0L, FailureType.RETRYABLE);
+        return new SendResult(channelId, false, 0, null, error, 0L, FailureType.RETRYABLE, null);
     }
 
     /**
@@ -71,7 +77,20 @@ public final class SendResult {
      * @return 失败结果
      */
     public static SendResult fail(String channelId, String error, FailureType failureType) {
-        return new SendResult(channelId, false, 0, null, error, 0L, failureType);
+        return new SendResult(channelId, false, 0, null, error, 0L, failureType, null);
+    }
+
+    /**
+     * 构造失败结果（未拿到响应），带耗时。
+     *
+     * @param channelId 渠道 id
+     * @param error 失败原因
+     * @param elapsedMs 耗时毫秒
+     * @param failureType 失败类别
+     * @return 失败结果
+     */
+    public static SendResult fail(String channelId, String error, long elapsedMs, FailureType failureType) {
+        return new SendResult(channelId, false, 0, null, error, elapsedMs, failureType, null);
     }
 
     /**
@@ -87,7 +106,67 @@ public final class SendResult {
      */
     public static SendResult fail(String channelId, int status, String response, String error,
                                   long elapsedMs, FailureType failureType) {
-        return new SendResult(channelId, false, status, response, error, elapsedMs, failureType);
+        return new SendResult(channelId, false, status, response, error, elapsedMs, failureType, null);
+    }
+
+    /**
+     * 把多次发送（附件拆包、多渠道 fan-out）聚合成一条结果：全部成功才算成功。
+     *
+     * @param channelId 渠道 id；多渠道聚合时可传 {@code all}
+     * @param parts 各次发送结果，顺序保留
+     * @return 聚合结果
+     */
+    public static SendResult aggregate(String channelId, List<SendResult> parts) {
+        if (parts == null || parts.isEmpty()) {
+            return fail(channelId, "no send results", FailureType.PERMANENT);
+        }
+        boolean allOk = true;
+        long elapsed = 0L;
+        FailureType worst = FailureType.NONE;
+        StringBuilder errors = new StringBuilder();
+        String lastResponse = null;
+        int lastStatus = 0;
+        for (SendResult part : parts) {
+            elapsed += part.elapsedMs();
+            lastStatus = part.status();
+            lastResponse = part.response();
+            if (part.isFailed()) {
+                allOk = false;
+                worst = worse(worst, part.failureType());
+                if (errors.length() > 0) {
+                    errors.append("; ");
+                }
+                errors.append(part.channelId()).append(": ").append(part.error());
+            }
+        }
+        List<SendResult> copy = Collections.unmodifiableList(new ArrayList<SendResult>(parts));
+        if (allOk) {
+            return new SendResult(channelId, true, lastStatus, lastResponse, null, elapsed, FailureType.NONE, copy);
+        }
+        return new SendResult(channelId, false, lastStatus, lastResponse, errors.toString(), elapsed, worst, copy);
+    }
+
+    private static FailureType worse(FailureType current, FailureType next) {
+        if (rank(next) > rank(current)) {
+            return next;
+        }
+        return current;
+    }
+
+    private static int rank(FailureType type) {
+        if (type == null || type == FailureType.NONE) {
+            return 0;
+        }
+        if (type == FailureType.RETRYABLE) {
+            return 1;
+        }
+        if (type == FailureType.THROTTLED) {
+            return 2;
+        }
+        if (type == FailureType.CONFIG_ERROR) {
+            return 3;
+        }
+        return 4;
     }
 
     /**
@@ -144,6 +223,15 @@ public final class SendResult {
      */
     public FailureType failureType() {
         return failureType;
+    }
+
+    /**
+     * 拆包或 fan-out 的各次发送结果；单次发送时为空列表。
+     *
+     * @return 子结果（只读）
+     */
+    public List<SendResult> parts() {
+        return parts;
     }
 
     /**

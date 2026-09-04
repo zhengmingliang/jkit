@@ -48,6 +48,11 @@ public class WebhookChannel extends AbstractHttpChannel {
     }
 
     @Override
+    protected String[] usedConfigKeys() {
+        return new String[]{"webhook", "payloadTemplate", "headers", "timeoutMs"};
+    }
+
+    @Override
     protected String buildUrl(Message message, ChannelConfig config) {
         String webhook = config.webhook();
         if (webhook == null || webhook.isEmpty()) {

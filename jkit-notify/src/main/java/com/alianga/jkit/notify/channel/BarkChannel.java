@@ -6,6 +6,8 @@ import com.alianga.jkit.notify.Message;
 import com.alianga.jkit.notify.MessageType;
 import com.alianga.jkit.notify.NotifyUtils;
 
+import java.util.Map;
+
 /**
  * Bark 渠道（iOS 推送）。
  *
@@ -15,6 +17,7 @@ import com.alianga.jkit.notify.NotifyUtils;
  * <p>消息：TEXT / MARKDOWN（Bark 不区分富文本，均按通知正文发送）。
  * 铃声/分组/时效性/跳转地址走 {@link Message#EXTRA_SOUND}、{@link Message#EXTRA_GROUP}、
  * {@link Message#EXTRA_LEVEL}、{@link Message#EXTRA_URL}。
+ * 正文按 UTF-8 {@value #MAX_BODY_BYTES} 字节上限自动截断。
  *
  * <p>响应判定：HTTP 200 且 JSON {@code code == 200}。
  *
@@ -26,6 +29,11 @@ public class BarkChannel extends AbstractHttpChannel {
      * 渠道 id。
      */
     public static final String ID = "bark";
+
+    /**
+     * 正文 UTF-8 字节上限。
+     */
+    public static final int MAX_BODY_BYTES = 4096;
 
     private static final String DEFAULT_ENDPOINT = "https://api.day.app";
 
@@ -42,6 +50,16 @@ public class BarkChannel extends AbstractHttpChannel {
     @Override
     public boolean supports(MessageType type) {
         return type == MessageType.TEXT || type == MessageType.MARKDOWN;
+    }
+
+    @Override
+    protected String[] usedConfigKeys() {
+        return new String[]{"token", "webhook", "timeoutMs"};
+    }
+
+    @Override
+    protected int contentMaxBytes(Message message) {
+        return MAX_BODY_BYTES;
     }
 
     @Override
@@ -62,22 +80,20 @@ public class BarkChannel extends AbstractHttpChannel {
         if (deviceKey == null || deviceKey.isEmpty()) {
             throw new IllegalArgumentException("bark device_key is required (ChannelConfig.token)");
         }
-        StringBuilder payload = new StringBuilder();
-        payload.append("{\"device_key\":\"").append(NotifyUtils.jsonEscape(deviceKey)).append('"');
-        payload.append(",\"title\":\"").append(NotifyUtils.jsonEscape(message.title("通知"))).append('"');
-        payload.append(",\"body\":\"").append(NotifyUtils.jsonEscape(limitedContent(message))).append('"');
-        appendIfPresent(payload, "sound", message.extraString(Message.EXTRA_SOUND));
-        appendIfPresent(payload, "group", message.extraString(Message.EXTRA_GROUP));
-        appendIfPresent(payload, "level", message.extraString(Message.EXTRA_LEVEL));
-        appendIfPresent(payload, "url", message.extraString(Message.EXTRA_URL));
-        payload.append('}');
-        return payload.toString();
+        Map<String, Object> payload = NotifyUtils.map();
+        payload.put("device_key", deviceKey);
+        payload.put("title", message.title("通知"));
+        payload.put("body", limitedContent(message));
+        putIfPresent(payload, "sound", message.extraString(Message.EXTRA_SOUND));
+        putIfPresent(payload, "group", message.extraString(Message.EXTRA_GROUP));
+        putIfPresent(payload, "level", message.extraString(Message.EXTRA_LEVEL));
+        putIfPresent(payload, "url", message.extraString(Message.EXTRA_URL));
+        return NotifyUtils.toJson(payload);
     }
 
-    private static void appendIfPresent(StringBuilder payload, String key, String value) {
+    private static void putIfPresent(Map<String, Object> payload, String key, String value) {
         if (value != null && !value.isEmpty()) {
-            payload.append(",\"").append(key).append("\":\"")
-                    .append(NotifyUtils.jsonEscape(value)).append('"');
+            payload.put(key, value);
         }
     }
 

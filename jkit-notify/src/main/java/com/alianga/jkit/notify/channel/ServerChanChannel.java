@@ -7,6 +7,7 @@ import com.alianga.jkit.notify.MessageType;
 import com.alianga.jkit.notify.NotifyUtils;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
 
 /**
  * Server酱（Turbo 版）渠道，把消息推送到个人微信。
@@ -56,6 +57,11 @@ public class ServerChanChannel extends AbstractHttpChannel {
     }
 
     @Override
+    protected String[] usedConfigKeys() {
+        return new String[]{"token", "webhook", "timeoutMs"};
+    }
+
+    @Override
     protected String buildUrl(Message message, ChannelConfig config) {
         String sendKey = config.token();
         String base = config.webhook();
@@ -84,8 +90,10 @@ public class ServerChanChannel extends AbstractHttpChannel {
         if (desp.getBytes(StandardCharsets.UTF_8).length < 5) {
             desp = desp + "     ";
         }
-        return "{\"title\":\"" + NotifyUtils.jsonEscape(title)
-                + "\",\"desp\":\"" + NotifyUtils.jsonEscape(desp) + "\"}";
+        Map<String, Object> root = NotifyUtils.map();
+        root.put("title", title);
+        root.put("desp", desp);
+        return NotifyUtils.toJson(root);
     }
 
     @Override

@@ -49,18 +49,35 @@ public class FeishuChannelTest extends AbstractHttpChannelTest {
     }
 
     /**
-     * 配置 secret 时 URL 带 timestamp 与 sign。
+     * 配置 secret 时 timestamp / sign 进 JSON 请求体，不进 URL query。
      */
     @Test
-    public void signedUrlHasTimestampAndSign() {
+    public void signatureGoesInJsonBodyNotQuery() throws Exception {
         respond(200, "{\"code\":0}");
+        long before = System.currentTimeMillis() / 1000L;
         SendResult result = NotificationManager.send(FeishuChannel.ID,
                 Message.text("hi"),
                 ChannelConfig.webhook(baseUrl()).secret("feishusecret"));
+        long after = System.currentTimeMillis() / 1000L;
         assertTrue(result.isSuccess());
         Captured request = take();
-        assertTrue(request.query(), request.query().contains("timestamp="));
-        assertTrue(request.query(), request.query().contains("sign="));
+        assertTrue(request.query() == null || request.query().isEmpty()
+                || (!request.query().contains("sign=") && !request.query().contains("timestamp=")));
+        java.util.Map<?, ?> body = com.alianga.jkit.json.JSON.parseObject(request.body());
+        assertEquals("text", body.get("msg_type"));
+        String timestamp = String.valueOf(body.get("timestamp"));
+        long ts = Long.parseLong(timestamp);
+        assertTrue(ts >= before && ts <= after);
+        String expected = java.util.Base64.getEncoder().encodeToString(
+                expectedSign("feishusecret", timestamp));
+        assertEquals(expected, body.get("sign"));
+    }
+
+    private static byte[] expectedSign(String secret, String timestamp) throws Exception {
+        javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA256");
+        mac.init(new javax.crypto.spec.SecretKeySpec(
+                (timestamp + "\n" + secret).getBytes("UTF-8"), "HmacSHA256"));
+        return mac.doFinal(new byte[0]);
     }
 
     /**

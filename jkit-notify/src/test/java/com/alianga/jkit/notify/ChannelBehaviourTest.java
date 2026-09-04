@@ -77,7 +77,7 @@ public class ChannelBehaviourTest extends AbstractHttpChannelTest {
     }
 
     /**
-     * 网络不可达归 RETRYABLE。
+     * 网络不可达归 RETRYABLE，且带上耗时（不再恒为 0）。
      */
     @Test
     public void networkErrorIsRetryable() {
@@ -85,6 +85,7 @@ public class ChannelBehaviourTest extends AbstractHttpChannelTest {
                 ChannelConfig.webhook("http://127.0.0.1:1/x").timeoutMs(2000));
         assertEquals(FailureType.RETRYABLE, r.failureType());
         assertTrue(r.isRetryable());
+        assertTrue("elapsedMs should be recorded, got " + r.elapsedMs(), r.elapsedMs() >= 0);
     }
 
     /**
@@ -190,6 +191,25 @@ public class ChannelBehaviourTest extends AbstractHttpChannelTest {
 
         // markdown 允许的字节数更多，所以保留的内容更长
         assertTrue(mdContent.length() > textContent.length());
+    }
+
+    /**
+     * 钉钉截断时为尚未出现的 {@code @手机号} 预留字节，超长正文仍带 @ 且总长不超上限。
+     */
+    @Test
+    public void dingtalkReservesBytesForAtSuffix() {
+        respond(200, "{\"errcode\":0}");
+        StringBuilder longText = new StringBuilder();
+        for (int i = 0; i < 10000; i++) {
+            longText.append("汉字");
+        }
+        NotificationManager.send(DingTalkChannel.ID,
+                Message.text(longText.toString()).extra(Message.EXTRA_AT_MOBILES, "13800000000"),
+                ChannelConfig.webhook(baseUrl()));
+        String content = contentOf(take().body(), "text", "content");
+        assertTrue(content, content.endsWith(" @13800000000"));
+        assertTrue("含 @ 后缀仍应不超上限: " + NotifyUtils.utf8Length(content),
+                NotifyUtils.utf8Length(content) <= DingTalkChannel.MAX_CONTENT_BYTES);
     }
 
     private static String contentOf(String json, String outer, String inner) {

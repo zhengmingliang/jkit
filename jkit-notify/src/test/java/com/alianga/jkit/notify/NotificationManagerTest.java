@@ -2,6 +2,9 @@ package com.alianga.jkit.notify;
 
 import org.junit.Test;
 
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
@@ -32,6 +35,46 @@ public class NotificationManagerTest {
             assertNotNull("channel missing: " + id, NotificationManager.get().get(id));
         }
         assertTrue(NotificationManager.get().list().size() >= ids.length);
+    }
+
+    /**
+     * 发送前渲染 {@code ${key}}，原消息正文保持未替换。
+     */
+    @Test
+    public void sendRendersTemplateVars() {
+        NotificationChannel custom = new NotificationChannel() {
+            @Override
+            public String id() {
+                return "tpl-test";
+            }
+
+            @Override
+            public String name() {
+                return "tpl";
+            }
+
+            @Override
+            public boolean supports(MessageType type) {
+                return true;
+            }
+
+            @Override
+            public SendResult send(Message message, ChannelConfig config) {
+                return SendResult.ok(id(), 200, message.title() + "|" + message.content(), 1L);
+            }
+        };
+        NotificationManager.get().register(custom);
+        try {
+            Message template = Message.text("告警 ${host}", "CPU ${value}")
+                    .var("host", "web-1")
+                    .var("value", "95%");
+            SendResult result = NotificationManager.send("tpl-test", template, ChannelConfig.webhook("x"));
+            assertEquals("告警 web-1|CPU 95%", result.response());
+            assertEquals("告警 ${host}", template.title());
+            assertEquals("CPU ${value}", template.content());
+        } finally {
+            NotificationManager.get().unregister("tpl-test");
+        }
     }
 
     /**
@@ -119,32 +162,79 @@ public class NotificationManagerTest {
                 assertTrue(expected.getMessage().contains("does not support"));
             }
         } finally {
-            NotificationManager.get().register(replacementFor("custom-test"));
+            NotificationManager.get().unregister("custom-test");
         }
+        assertNull(NotificationManager.get().get("custom-test"));
     }
 
-    private static NotificationChannel replacementFor(final String id) {
-        return new NotificationChannel() {
+    /**
+     * sendAll 按 Map 顺序返回各渠道结果；其中一个失败不影响另一个。
+     */
+    @Test
+    public void sendAllKeepsOrderAndPartialFailure() {
+        NotificationChannel ok = new NotificationChannel() {
             @Override
             public String id() {
-                return id;
+                return "fanout-ok";
             }
 
             @Override
             public String name() {
-                return id;
+                return "ok";
             }
 
             @Override
             public boolean supports(MessageType type) {
-                return false;
+                return true;
             }
 
             @Override
             public SendResult send(Message message, ChannelConfig config) {
-                return SendResult.fail(id(), "placeholder");
+                return SendResult.ok(id(), 200, "ok", 1L);
             }
         };
+        NotificationChannel fail = new NotificationChannel() {
+            @Override
+            public String id() {
+                return "fanout-fail";
+            }
+
+            @Override
+            public String name() {
+                return "fail";
+            }
+
+            @Override
+            public boolean supports(MessageType type) {
+                return true;
+            }
+
+            @Override
+            public SendResult send(Message message, ChannelConfig config) {
+                return SendResult.fail(id(), "boom", FailureType.RETRYABLE);
+            }
+        };
+        NotificationManager.get().register(ok);
+        NotificationManager.get().register(fail);
+        try {
+            Map<String, ChannelConfig> targets = new LinkedHashMap<String, ChannelConfig>();
+            targets.put("fanout-ok", ChannelConfig.webhook("x"));
+            targets.put("fanout-fail", ChannelConfig.webhook("y"));
+            List<SendResult> results = NotificationManager.sendAll(Message.text("hi"), targets);
+            assertEquals(2, results.size());
+            assertEquals("fanout-ok", results.get(0).channelId());
+            assertTrue(results.get(0).isSuccess());
+            assertEquals("fanout-fail", results.get(1).channelId());
+            assertTrue(results.get(1).isFailed());
+
+            SendResult aggregated = NotificationManager.sendAllAggregated(Message.text("hi"), targets);
+            assertTrue(aggregated.isFailed());
+            assertTrue(aggregated.isRetryable());
+            assertEquals(2, aggregated.parts().size());
+        } finally {
+            NotificationManager.get().unregister("fanout-ok");
+            NotificationManager.get().unregister("fanout-fail");
+        }
     }
 
     /**
@@ -175,11 +265,15 @@ public class NotificationManagerTest {
             }
         };
         NotificationManager.get().register(custom);
-        Future<SendResult> future = NotificationManager.sendAsync("custom-async",
-                Message.text("hi"), ChannelConfig.webhook("ignored"));
-        SendResult result = future.get(10, TimeUnit.SECONDS);
-        assertTrue(result.isSuccess());
-        assertEquals(marker, result.response());
+        try {
+            Future<SendResult> future = NotificationManager.sendAsync("custom-async",
+                    Message.text("hi"), ChannelConfig.webhook("ignored"));
+            SendResult result = future.get(10, TimeUnit.SECONDS);
+            assertTrue(result.isSuccess());
+            assertEquals(marker, result.response());
+        } finally {
+            NotificationManager.get().unregister("custom-async");
+        }
 
         // 非法参数在提交前同步抛出，Future 不会产生
         try {

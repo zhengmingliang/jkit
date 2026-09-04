@@ -35,6 +35,8 @@ public abstract class AbstractHttpChannel implements NotificationChannel {
     @Override
     public SendResult send(Message message, ChannelConfig config) {
         long start = System.currentTimeMillis();
+        config.logUnused(log, id(), usedConfigKeys());
+        HttpResponse response = null;
         try {
             String url = buildUrl(message, config);
             String payload = buildPayload(message, config);
@@ -45,7 +47,7 @@ public abstract class AbstractHttpChannel implements NotificationChannel {
                 request.totalTimeoutMs(config.timeoutMs());
             }
             applyHeaders(request, config);
-            HttpResponse response = HttpUtils.execute(request);
+            response = HttpUtils.execute(request);
             long elapsed = System.currentTimeMillis() - start;
             String body = readBody(response);
             int status = response.code();
@@ -60,10 +62,24 @@ public abstract class AbstractHttpChannel implements NotificationChannel {
             // 配置缺失等编程错误直接暴露给调用方，不吞成发送失败
             throw e;
         } catch (Exception e) {
+            long elapsed = System.currentTimeMillis() - start;
             log.error("[{}] send error: {}", id(), e.getMessage());
             return SendResult.fail(id(), e.getClass().getSimpleName() + ": " + e.getMessage(),
-                    FailureType.RETRYABLE);
+                    elapsed, FailureType.RETRYABLE);
+        } finally {
+            if (response != null) {
+                response.close();
+            }
         }
+    }
+
+    /**
+     * 本渠道会读取的 {@link ChannelConfig} 字段。配了但不在此列的字段会打 debug 日志。
+     *
+     * @return 字段名
+     */
+    protected String[] usedConfigKeys() {
+        return new String[]{"timeoutMs"};
     }
 
     /**
@@ -156,6 +172,25 @@ public abstract class AbstractHttpChannel implements NotificationChannel {
     }
 
     /**
+     * 按上限截断，并预留 {@code reservedBytes} 给稍后追加的后缀（如钉钉 @手机号）。
+     *
+     * @param content 原文
+     * @param maxBytes 总上限
+     * @param reservedBytes 需要预留的后缀字节数
+     * @return 截断后的正文（不含后缀）
+     */
+    protected String limitedContent(String content, int maxBytes, int reservedBytes) {
+        if (maxBytes <= 0) {
+            return content;
+        }
+        int budget = maxBytes - Math.max(0, reservedBytes);
+        if (budget < 1) {
+            budget = maxBytes;
+        }
+        return NotifyUtils.truncateUtf8(content, budget);
+    }
+
+    /**
      * 应用配置里的自定义请求头（通用 Webhook 等渠道使用）。
      *
      * @param request 请求
@@ -168,6 +203,13 @@ public abstract class AbstractHttpChannel implements NotificationChannel {
                 request.header(entry.getKey(), entry.getValue());
             }
         }
+    }
+
+    /**
+     * @return 渠道日志
+     */
+    protected Log log() {
+        return log;
     }
 
     private static String readBody(HttpResponse response) throws IOException {

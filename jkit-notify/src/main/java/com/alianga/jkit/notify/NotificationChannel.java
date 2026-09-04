@@ -6,7 +6,7 @@ package com.alianga.jkit.notify;
  * <ol>
  * <li>代码注册：{@code NotificationManager.get().register(new MyChannel());}</li>
  * <li>SPI 注册：在 jar 的 {@code META-INF/services/com.alianga.jkit.notify.NotificationChannel}
- * 文件里写上实现类全限定名（内置渠道即采用该方式）。</li>
+ * 文件里写上实现类全限定名。</li>
  * </ol>
  *
  * <p>实现约定：
