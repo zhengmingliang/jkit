@@ -309,6 +309,11 @@ HttpUtils.setProxy(null);
 
 HttpUtils.fakeIp = true;
 
+// 本地排查：发送前打印请求摘要 / 可复制的 curl。会带出 Authorization 等敏感头，不要在生产打开。
+// debug 打方法、URL、头和正文预览（二进制只打字节数，长正文截断）；printCurl 打等价 curl。
+HttpUtils.debug = true;
+HttpUtils.printCurl = true;
+
 // 兼容旧版：忽略证书（仅测试使用）
 HttpUtils.supportHttps();
 // 生产推荐：使用默认证书链和主机名校验

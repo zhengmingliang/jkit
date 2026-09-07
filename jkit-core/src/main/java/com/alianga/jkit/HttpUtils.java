@@ -123,6 +123,31 @@ public class HttpUtils {
     }
 
     /**
+     * 调试开关：发送前把请求摘要打到标准输出（方法、URL、头、正文预览）。
+     *
+     * <p>仅本地排查用。摘要里会带出 {@code Authorization} 等敏感头，不要在生产打开。
+     * 正文按 UTF-8 预览并截断，二进制只打字节数，避免把 {@code byte[]} 序列化成数字数组。
+     * 打印失败不会影响实际发送。
+     *
+     * @since 2.0.1
+     */
+    public static volatile boolean debug;
+
+    /**
+     * 调试开关：发送前打印等价 curl 命令，便于复制到终端复现。
+     *
+     * <p>仅本地排查用。命令含完整 URL、头和 body。打印失败不会影响实际发送。
+     *
+     * @since 2.0.1
+     */
+    public static volatile boolean printCurl;
+
+    /**
+     * 调试摘要里正文预览的最大字符数。
+     */
+    private static final int DEBUG_BODY_PREVIEW_CHARS = 4096;
+
+    /**
      * 是否伪造 IP 头（X-REAL-IP / X-FORWARDED-FOR）
      */
     public static volatile boolean fakeIp;
@@ -2376,6 +2401,7 @@ public class HttpUtils {
     }
 
     static HttpResponse send(HttpRequest request) throws IOException {
+        dumpRequestIfNeeded(request);
         long startNanos = System.nanoTime();
         List<HttpInterceptor> interceptors = config().getInterceptors();
         HttpResponse response;
@@ -2388,6 +2414,112 @@ public class HttpUtils {
             response.elapsedMs((System.nanoTime() - startNanos) / 1_000_000L);
         }
         return response;
+    }
+
+    /**
+     * 按 {@link #debug} / {@link #printCurl} 把请求打到标准输出。任何异常都吞掉，
+     * 避免调试开关把一次正常请求打挂。
+     *
+     * @param request 即将发出的请求
+     */
+    private static void dumpRequestIfNeeded(HttpRequest request) {
+        if ((!debug && !printCurl) || request == null) {
+            return;
+        }
+        try {
+            if (debug) {
+                System.out.println("======= request =======");
+                System.out.println(describeRequest(request));
+            }
+            if (printCurl) {
+                System.out.println("======= CURL =======");
+                System.out.println(requestToCurl(request));
+            }
+        } catch (RuntimeException e) {
+            log.warn("failed to dump HTTP request", e);
+        }
+    }
+
+    /**
+     * 可读的请求摘要：方法 + URL + 头 + 正文预览。不序列化 SSL / 连接池等内部对象。
+     *
+     * @param request 请求
+     * @return 多行摘要
+     */
+    static String describeRequest(HttpRequest request) {
+        StringBuilder out = new StringBuilder(256);
+        out.append(request.getMethod()).append(' ').append(request.getUrl());
+        Map<String, String> headers = request.getHeaders();
+        if (headers != null && !headers.isEmpty()) {
+            for (Map.Entry<String, String> header : headers.entrySet()) {
+                out.append('\n').append(header.getKey()).append(": ").append(header.getValue());
+            }
+        }
+        String contentType = request.getContentType();
+        if (contentType != null && !contentType.isEmpty()
+                && (headers == null || request.getHeader("Content-Type") == null)) {
+            out.append("\nContent-Type: ").append(contentType);
+        }
+        String body = describeBody(request);
+        if (body != null) {
+            out.append('\n').append(body);
+        }
+        return out.toString();
+    }
+
+    private static String describeBody(HttpRequest request) {
+        File bodyFile = request.getBodyFile();
+        if (bodyFile != null) {
+            String extra = bodyFile.isFile() ? " (" + bodyFile.length() + " bytes)" : "";
+            return "bodyFile=" + bodyFile.getAbsolutePath() + extra;
+        }
+        byte[] body = request.getBody();
+        if (body == null || body.length == 0) {
+            return null;
+        }
+        if (!looksLikeText(request.getContentType(), body)) {
+            return "body: <binary " + body.length + " bytes>";
+        }
+        String text = new String(body, StandardCharsets.UTF_8);
+        if (text.length() > DEBUG_BODY_PREVIEW_CHARS) {
+            text = text.substring(0, DEBUG_BODY_PREVIEW_CHARS)
+                    + "...(" + body.length + " bytes)";
+        }
+        return "body (" + body.length + " bytes):\n" + text;
+    }
+
+    private static boolean looksLikeText(String contentType, byte[] body) {
+        if (contentType != null) {
+            String type = contentType.toLowerCase();
+            int sc = type.indexOf(';');
+            if (sc >= 0) {
+                type = type.substring(0, sc);
+            }
+            type = type.trim();
+            if (type.startsWith("text/")
+                    || type.endsWith("/json")
+                    || type.endsWith("+json")
+                    || type.endsWith("/xml")
+                    || type.endsWith("+xml")
+                    || type.endsWith("/javascript")
+                    || "application/x-www-form-urlencoded".equals(type)) {
+                return true;
+            }
+            if (type.startsWith("application/octet-stream")
+                    || type.startsWith("image/")
+                    || type.startsWith("audio/")
+                    || type.startsWith("video/")
+                    || type.startsWith("multipart/")) {
+                return false;
+            }
+        }
+        int n = Math.min(body.length, 512);
+        for (int i = 0; i < n; i++) {
+            if (body[i] == 0) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

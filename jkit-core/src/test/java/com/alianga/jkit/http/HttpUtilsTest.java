@@ -16,6 +16,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.PrintStream;
 import java.net.InetSocketAddress;
 import java.net.Proxy;
 import java.nio.charset.StandardCharsets;
@@ -99,6 +100,8 @@ public class HttpUtilsTest {
 
     @Before
     public void reset() {
+        HttpUtils.debug = false;
+        HttpUtils.printCurl = false;
         HttpUtils.fakeIp = false;
         HttpUtils.setProxy(null);
         HttpUtils.setCookieJar(new CookieJarImpl());
@@ -305,6 +308,50 @@ public class HttpUtilsTest {
         } finally {
             response.close();
         }
+    }
+
+    @Test
+    public void debugAndPrintCurlDumpReadableRequest() throws Exception {
+        PrintStream original = System.out;
+        ByteArrayOutputStream buf = new ByteArrayOutputStream();
+        HttpUtils.debug = true;
+        HttpUtils.printCurl = true;
+        try {
+            System.setOut(new PrintStream(buf, true, "UTF-8"));
+            HttpUtils.postJson(baseUrl + "/json", java.util.Collections.singletonMap("id", 1));
+        } finally {
+            System.setOut(original);
+            HttpUtils.debug = false;
+            HttpUtils.printCurl = false;
+        }
+        String dump = buf.toString("UTF-8");
+        assertTrue(dump.contains("======= request ======="));
+        assertTrue(dump.contains("======= CURL ======="));
+        assertTrue(dump.contains("POST "));
+        assertTrue(dump.contains("/json"));
+        assertTrue(dump.contains("\"id\":1") || dump.contains("\"id\": 1"));
+        assertTrue(dump.toLowerCase().contains("curl"));
+        assertFalse(dump.contains("[123,"));
+    }
+
+    @Test
+    public void debugDumpsBinaryBodyAsLengthNotByteArray() throws Exception {
+        PrintStream original = System.out;
+        ByteArrayOutputStream buf = new ByteArrayOutputStream();
+        HttpUtils.debug = true;
+        try {
+            System.setOut(new PrintStream(buf, true, "UTF-8"));
+            HttpResponse response = HttpUtils.execute(HttpRequest.post(baseUrl + "/json")
+                    .contentType("application/octet-stream")
+                    .body(new byte[]{0, 1, 2, 127, (byte) 255}));
+            response.close();
+        } finally {
+            System.setOut(original);
+            HttpUtils.debug = false;
+        }
+        String dump = buf.toString("UTF-8");
+        assertTrue(dump.contains("<binary 5 bytes>"));
+        assertFalse(dump.contains("[0, 1, 2"));
     }
 
     @Test
