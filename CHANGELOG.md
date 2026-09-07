@@ -61,6 +61,7 @@
 
 ### 变更
 
+- `jkit-notify` `NotifyUtils` 编解码复用 jkit-core（Base64、URL 编码、SHA-256、hex）；新增 `strMap` / `parseJson` / `formEncode` / `parseReceivers` / `uuid`。
 - `DateUtils` 去掉 `SimpleDateFormat`。`yyyy-MM-dd HH:mm:ss` 走 `char[]` + 秒级缓存，`yyyy-MM-dd` / `yyyyMMdd` / `yyyy-MM-dd HH:mm:ss.SSS` 走手写拼接，其余 pattern 复用 `DateTimeFormatter`。
 - `ConvertUtils.toDate(Object)` 改为按数字字段抽取，不再推断 SimpleDateFormat pattern。常见字符串解析约快一个数量级，结果与 ZmlTools 对齐。
 - JUL 默认格式改为英文级别名（`WARNING`/`SEVERE`），不再随 JVM 默认语言变化。

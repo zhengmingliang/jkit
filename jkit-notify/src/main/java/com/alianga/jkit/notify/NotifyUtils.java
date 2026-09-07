@@ -1,5 +1,14 @@
 package com.alianga.jkit.notify;
 
+import com.alianga.jkit.Base64Utils;
+import com.alianga.jkit.EncryptUtils;
+import com.alianga.jkit.HttpUtils;
+import com.alianga.jkit.IOUtils;
+import com.alianga.jkit.RandomUtils;
+import com.alianga.jkit.StringUtils;
+import com.alianga.jkit.collection.Collections;
+import com.alianga.jkit.collection.Maps;
+import com.alianga.jkit.io.ByteUtils;
 import com.alianga.jkit.io.FileType;
 import com.alianga.jkit.json.JSON;
 
@@ -11,13 +20,9 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.UnsupportedEncodingException;
-import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
-import java.util.Base64;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -66,7 +71,7 @@ public final class NotifyUtils {
      * @return Base64 字符串
      */
     public static String base64(byte[] bytes) {
-        return Base64.getEncoder().encodeToString(bytes);
+        return Base64Utils.encodeToString(bytes);
     }
 
     /**
@@ -76,11 +81,7 @@ public final class NotifyUtils {
      * @return 编码结果
      */
     public static String urlEncode(String value) {
-        try {
-            return URLEncoder.encode(value, "UTF-8");
-        } catch (UnsupportedEncodingException e) {
-            throw new IllegalStateException("UTF-8 unavailable", e);
-        }
+        return HttpUtils.encodeValue(value);
     }
 
     /**
@@ -112,7 +113,17 @@ public final class NotifyUtils {
      * @return 空的 LinkedHashMap
      */
     public static Map<String, Object> map() {
-        return new LinkedHashMap<String, Object>();
+        return Maps.newLinkedHashMap();
+    }
+
+    /**
+     * 有序字符串 Map（表单编码等场景使用）。
+     *
+     * @return 空的 LinkedHashMap
+     * @since 2.0.1
+     */
+    public static Map<String, String> strMap() {
+        return Maps.newLinkedHashMap();
     }
 
     /**
@@ -126,41 +137,9 @@ public final class NotifyUtils {
         if (value == null) {
             return "";
         }
-        StringBuilder out = new StringBuilder(value.length() + 16);
-        for (int i = 0; i < value.length(); i++) {
-            char c = value.charAt(i);
-            switch (c) {
-                case '"':
-                    out.append("\\\"");
-                    break;
-                case '\\':
-                    out.append("\\\\");
-                    break;
-                case '\n':
-                    out.append("\\n");
-                    break;
-                case '\r':
-                    out.append("\\r");
-                    break;
-                case '\t':
-                    out.append("\\t");
-                    break;
-                case '\b':
-                    out.append("\\b");
-                    break;
-                case '\f':
-                    out.append("\\f");
-                    break;
-                default:
-                    if (c < 0x20) {
-                        out.append(String.format("\\u%04x", (int) c));
-                    } else {
-                        out.append(c);
-                    }
-                    break;
-            }
-        }
-        return out.toString();
+        // 复用 jkit-core JSON 字符串转义，再去掉外侧引号
+        String json = JSON.toJsonString(value);
+        return json.substring(1, json.length() - 1);
     }
 
     /**
@@ -222,7 +201,7 @@ public final class NotifyUtils {
      */
     public static String markdownToDocument(String markdown, boolean responsive) {
         String fragment = markdownToHtml(markdown);
-        if (fragment.isEmpty()) {
+        if (StringUtils.isEmpty(fragment)) {
             return "";
         }
         return wrapHtmlDocument(fragment, responsive);
@@ -236,7 +215,7 @@ public final class NotifyUtils {
      * @return 完整 HTML 文档
      */
     public static String wrapHtmlDocument(String fragment, boolean responsive) {
-        String body = fragment == null ? "" : fragment;
+        String body = StringUtils.defaultString(fragment);
         if (!responsive) {
             return "<!DOCTYPE html><html><head><meta charset=\"UTF-8\"></head><body>"
                     + body + "</body></html>";
@@ -319,7 +298,7 @@ public final class NotifyUtils {
             unit = 1024L * 1024 * 1024;
             number = upper.substring(0, upper.length() - 1);
         }
-        if (number.isEmpty()) {
+        if (StringUtils.isEmpty(number)) {
             throw new IllegalArgumentException("invalid data size: " + spec);
         }
         try {
@@ -344,7 +323,9 @@ public final class NotifyUtils {
      * @return 渲染结果
      */
     public static String renderTemplate(String template, Map<String, ?> vars) {
-        if (template == null || vars == null || vars.isEmpty() || template.indexOf('$') < 0) {
+        // Keep local implementation: StringUtils.replaceGroupRegex is NOT equivalent
+        // (backslash escape, hyphen/unicode keys, empty ${} differ). See NotifyUtilsCoreEquivTest.
+        if (template == null || Collections.isEmpty(vars) || template.indexOf('$') < 0) {
             return template;
         }
         StringBuilder out = new StringBuilder(template.length() + 16);
@@ -421,7 +402,7 @@ public final class NotifyUtils {
                 out.append("\r\n");
             }
             first = false;
-            out.append(foldBase64(Base64.getEncoder().encodeToString(chunk)));
+            out.append(foldBase64(Base64Utils.encodeToString(chunk)));
             read = in.read(raw);
         }
     }
@@ -433,7 +414,7 @@ public final class NotifyUtils {
      * @return 折行结果
      */
     public static String foldBase64(String base64) {
-        if (base64 == null || base64.isEmpty()) {
+        if (StringUtils.isEmpty(base64)) {
             return "";
         }
         StringBuilder out = new StringBuilder(base64.length() + base64.length() / 76 * 2 + 2);
@@ -476,14 +457,9 @@ public final class NotifyUtils {
                     remain -= read;
                 }
             } finally {
-                in.close();
+                IOUtils.close(in);
             }
-            byte[] hash = digest.digest();
-            StringBuilder hex = new StringBuilder(hash.length * 2);
-            for (byte b : hash) {
-                hex.append(String.format("%02x", b & 0xff));
-            }
-            return hex.toString();
+            return ByteUtils.toHexStringLower(digest.digest());
         } catch (Exception e) {
             throw new IllegalStateException("SHA-256 unavailable", e);
         }
@@ -494,7 +470,14 @@ public final class NotifyUtils {
      * @return SHA-256 hex
      */
     public static String sha256Hex(File file) {
-        return file == null ? sha256Hex(new byte[0]) : sha256Hex(file, 0L, file.length());
+        if (file == null) {
+            return sha256Hex(new byte[0]);
+        }
+        try {
+            return EncryptUtils.sha256(file);
+        } catch (IOException e) {
+            throw new IllegalStateException("SHA-256 unavailable", e);
+        }
     }
 
     static void skipFully(InputStream in, long count) throws IOException {
@@ -576,7 +559,7 @@ public final class NotifyUtils {
             key = key.substring(1);
         }
         String mapped = FileType.getMimeTypeBySuffix(key);
-        if (mapped != null && !mapped.isEmpty()) {
+        if (StringUtils.isNotEmpty(mapped)) {
             return mapped;
         }
         if ("zip".equals(key) || "jar".equals(key) || "war".equals(key) || "ear".equals(key)
@@ -692,11 +675,7 @@ public final class NotifyUtils {
         try {
             MessageDigest digest = MessageDigest.getInstance(algorithm);
             byte[] hash = digest.digest(data == null ? new byte[0] : data);
-            StringBuilder hex = new StringBuilder(hash.length * 2);
-            for (byte b : hash) {
-                hex.append(String.format("%02x", b & 0xff));
-            }
-            return hex.toString();
+            return ByteUtils.toHexStringLower(hash);
         } catch (Exception e) {
             throw new IllegalStateException(algorithm + " unavailable", e);
         }
@@ -730,7 +709,7 @@ public final class NotifyUtils {
     }
 
     private static Object jsonValue(String json, String key) {
-        if (json == null || json.isEmpty()) {
+        if (StringUtils.isEmpty(json)) {
             return null;
         }
         try {
@@ -739,5 +718,95 @@ public final class NotifyUtils {
         } catch (RuntimeException e) {
             return null;
         }
+    }
+
+    /**
+     * 容错 JSON 解析：失败返回 {@code null}，不抛异常。
+     *
+     * <p>给非标准 JSON 响应（如 Telegram 混排 HTML 错误页）做兜底。
+     *
+     * @param json JSON 字符串，可为 {@code null}
+     * @return 解析结果；失败为 {@code null}
+     * @since 2.0.1
+     */
+    public static Object parseJson(String json) {
+        if (StringUtils.isEmpty(json)) {
+            return null;
+        }
+        try {
+            return JSON.parse(json);
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    /**
+     * 把键值对编成 {@code application/x-www-form-urlencoded} 请求体。
+     *
+     * <p>华为云短信等只收表单编码的渠道使用；值为 {@code null} 的键跳过。
+     *
+     * @param params 键值对，可为 {@code null}
+     * @return 编码后的请求体；无有效参数时为空串
+     * @since 2.0.1
+     */
+    public static String formEncode(Map<String, String> params) {
+        if (Collections.isEmpty(params)) {
+            return "";
+        }
+        Map<String, Object> asObject = Maps.newLinkedHashMap();
+        asObject.putAll(params);
+        return HttpUtils.getRequestParamString(asObject);
+    }
+
+    /**
+     * 解析收件人参数：逗号 / 分号 / 空白分隔的多个手机号拆成列表。
+     *
+     * @param raw 收件人，可以是单个号码、逗号分隔串或集合
+     * @return 手机号列表；{@code null} 或全空白时为空列表
+     * @since 2.0.1
+     */
+    public static List<String> parseReceivers(Object raw) {
+        List<String> out = new ArrayList<String>();
+        if (raw == null) {
+            return out;
+        }
+        if (raw instanceof Iterable) {
+            for (Object item : (Iterable<?>) raw) {
+                if (item != null) {
+                    addReceiver(out, String.valueOf(item));
+                }
+            }
+        } else if (raw instanceof Object[]) {
+            for (Object item : (Object[]) raw) {
+                if (item != null) {
+                    addReceiver(out, String.valueOf(item));
+                }
+            }
+        } else {
+            addReceiver(out, String.valueOf(raw));
+        }
+        return out;
+    }
+
+    private static void addReceiver(List<String> out, String text) {
+        if (text == null) {
+            return;
+        }
+        for (String part : text.split("[,;\\s]+")) {
+            String trimmed = part.trim();
+            if (StringUtils.isNotBlank(trimmed)) {
+                out.add(trimmed);
+            }
+        }
+    }
+
+    /**
+     * 随机 UUID（去掉连字符），短信签名 nonce 用。
+     *
+     * @return 32 位十六进制串
+     * @since 2.0.1
+     */
+    public static String uuid() {
+        return RandomUtils.getUUID();
     }
 }

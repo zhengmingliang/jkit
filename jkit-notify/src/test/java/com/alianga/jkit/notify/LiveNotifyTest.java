@@ -1,5 +1,6 @@
 package com.alianga.jkit.notify;
 
+import com.alianga.jkit.EncryptUtils;
 import com.alianga.jkit.json.JSON;
 import com.alianga.jkit.notify.channel.DingTalkChannel;
 import com.alianga.jkit.notify.channel.SmtpChannel;
@@ -182,6 +183,14 @@ public class LiveNotifyTest {
         for (SendResult part : result.parts()) {
             assertTrue(part.toString(), part.isSuccess());
         }
+    }
+
+    @Test
+    public void sha256Hex() {
+        assertEquals("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+                EncryptUtils.sha256("hello"));
+        assertEquals("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+                NotifyUtils.sha256Hex("hello".getBytes(StandardCharsets.UTF_8)));
     }
 
     /**
