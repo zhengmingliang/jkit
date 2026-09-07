@@ -1,7 +1,7 @@
 package com.alianga.jkit.config;
 
+import java.io.File;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
@@ -28,7 +28,7 @@ public final class ConfigLoadOptions {
 
     private String[] extensions = DEFAULT_EXTENSIONS.clone();
 
-    private List<String> locations = new ArrayList<String>(Arrays.asList(DEFAULT_LOCATIONS));
+    private List<String> locations;
 
     private boolean enableProfiles = true;
 
@@ -43,6 +43,7 @@ public final class ConfigLoadOptions {
     private String[] activeProfiles;
 
     private ConfigLoadOptions() {
+        this.locations = copyLocations(DEFAULT_LOCATIONS);
     }
 
     /**
@@ -97,17 +98,55 @@ public final class ConfigLoadOptions {
     }
 
     /**
-     * 替换默认搜索路径。路径以 {@code classpath:} 或 {@code file:} 开头。
+     * 替换默认搜索路径。
      *
-     * @param locations 搜索路径，后者优先级更高
+     * <p>路径以 {@code classpath:} 或 {@code file:} 开头；不带前缀的按文件系统目录处理
+     * （内部规范成 {@code file:}）。{@code ~} / {@code ~/...} 展开为 {@code user.home}。
+     * 后者优先级更高。
+     *
+     * @param locations 搜索路径
      * @return this
      */
     public ConfigLoadOptions locations(String... locations) {
-        if (locations == null || locations.length == 0) {
+        this.locations = copyLocations(locations);
+        return this;
+    }
+
+    /**
+     * 追加搜索路径（不替换默认路径），后者优先级更高。
+     *
+     * <p>适合在 Spring 默认搜索之上再加本机目录，例如 {@code ~/jkit}。
+     * {@code ~} 会展开；空白项跳过；与已有路径重复的不加。
+     *
+     * @param locations 搜索路径，{@code classpath:} / {@code file:} / 裸文件系统目录
+     * @return this
+     * @since 2.0.1
+     */
+    public ConfigLoadOptions addLocation(String... locations) {
+        for (String location : copyLocations(locations)) {
+            if (!this.locations.contains(location)) {
+                this.locations.add(location);
+            }
+        }
+        return this;
+    }
+
+    /**
+     * 追加一个文件系统目录作为搜索路径。若 {@code path} 是已存在的文件，则用其父目录。
+     *
+     * @param path 目录，或该目录下某个配置文件
+     * @return this
+     * @since 2.0.1
+     */
+    public ConfigLoadOptions addLocation(File path) {
+        if (path == null) {
             throw new IllegalArgumentException("locations must not be empty");
         }
-        this.locations = new ArrayList<String>(Arrays.asList(locations));
-        return this;
+        File dir = path.isFile() ? path.getParentFile() : path;
+        if (dir == null) {
+            throw new IllegalArgumentException("locations must not be empty");
+        }
+        return addLocation(dir.getAbsolutePath());
     }
 
     /**
@@ -210,5 +249,64 @@ public final class ConfigLoadOptions {
 
     String[] getActiveProfiles() {
         return activeProfiles;
+    }
+
+    private static List<String> copyLocations(String... locations) {
+        if (locations == null || locations.length == 0) {
+            throw new IllegalArgumentException("locations must not be empty");
+        }
+        List<String> out = new ArrayList<String>(locations.length);
+        for (String location : locations) {
+            String normalized = normalizeLocation(location);
+            if (normalized != null && !out.contains(normalized)) {
+                out.add(normalized);
+            }
+        }
+        if (out.isEmpty()) {
+            throw new IllegalArgumentException("locations must not be empty");
+        }
+        return out;
+    }
+
+    /**
+     * 规范化搜索路径：去空白、展开 {@code ~}、裸路径补 {@code file:} 前缀。
+     *
+     * @param location 原始路径
+     * @return 规范化结果；空白或 {@code null} 返回 {@code null}
+     */
+    static String normalizeLocation(String location) {
+        if (location == null) {
+            return null;
+        }
+        String value = location.trim();
+        if (value.isEmpty()) {
+            return null;
+        }
+        boolean classpath = startsWithIgnoreCase(value, "classpath:");
+        boolean filePrefix = startsWithIgnoreCase(value, "file:");
+        String path = classpath ? value.substring("classpath:".length())
+                : (filePrefix ? value.substring("file:".length()) : value);
+        path = expandUserHome(path);
+        if (classpath) {
+            return "classpath:" + path;
+        }
+        return "file:" + path;
+    }
+
+    private static String expandUserHome(String path) {
+        if (path == null || path.isEmpty()) {
+            return path;
+        }
+        if ("~".equals(path)) {
+            return System.getProperty("user.home");
+        }
+        if (path.startsWith("~/") || path.startsWith("~\\")) {
+            return System.getProperty("user.home") + path.substring(1);
+        }
+        return path;
+    }
+
+    private static boolean startsWithIgnoreCase(String value, String prefix) {
+        return value.regionMatches(true, 0, prefix, 0, prefix.length());
     }
 }

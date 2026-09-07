@@ -90,6 +90,15 @@ ConfigPropertyResolver resolver = ConfigPropertyResolver.load(
                 .enableSystemProperties(false));
 ```
 
+在默认搜索路径上再追加目录（后者覆盖前者），不必整表重写。`~` / `~/...` 会展开为 `user.home`；不带 `classpath:` / `file:` 前缀的按文件系统目录处理：
+
+```java
+ConfigPropertyResolver local = ConfigPropertyResolver.load(
+        ConfigLoadOptions.defaults()
+                .addLocation("~/jkit")                 // -> file:${user.home}/jkit
+                .addLocation(new File("/etc/myapp"))); // 若传入已存在的文件，用其父目录
+```
+
 ## 3. 占位符
 
 支持 `${key}` 与 `${key:default}`，可嵌套，循环引用会抛 `IllegalStateException`：

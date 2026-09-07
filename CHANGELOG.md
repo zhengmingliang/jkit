@@ -41,6 +41,7 @@
 ### 新增
 
 - `HttpUtils.debug` / `HttpUtils.printCurl`：发送前把请求摘要或等价 curl 打到标准输出，便于本地复现。摘要只打方法/URL/头/正文预览（二进制按字节数、长正文截断），打印失败不影响实际发送。不要在生产打开。
+- `ConfigLoadOptions.addLocation`：在默认搜索路径上追加目录（后者覆盖前者）。支持 `classpath:` / `file:` / 裸文件系统路径，`~` 展开为 `user.home`；也可传入 `File`（文件则取其父目录）。
 - 新模块 `com.alianga:jkit-notify`：轻量消息通知（版本随 `jkit-parent` 2.0.1，不单独升版）。一套 API 发钉钉机器人（含加签）/ 企微机器人 / 飞书机器人（含签名校验）/ Server酱 / Bark / 通用 Webhook（payload 模板）/ SMTP 邮件（纯 Socket 实现，AUTH LOGIN + STARTTLS/SSL + MIME）；`NotificationChannel` SPI + `NotificationManager` 注册表支持代码 / `META-INF/services` 两种方式扩展渠道，`MessageType`（TEXT/MARKDOWN/HTML）声明式能力；零第三方依赖，HTTP/JSON/日志复用 jkit。用法见 `docs/notify.md`。
 - `jkit-notify` 失败分类：`SendResult.failureType()` / `isRetryable()` 配合 `FailureType`（RETRYABLE / THROTTLED / CONFIG_ERROR / PERMANENT），调用方据此决定重试策略；已映射钉钉 130101/300001/310000、企微 45009/-1/93000、飞书 9499/19021/19001/19003、Server酱 40001、Bark 400 及 SMTP 4xx/5xx 语义，未收录的错误码回退到 HTTP 状态码分类。自定义渠道覆写 `AbstractHttpChannel.classify` 接入。
 - `jkit-notify` 消息长度上限：按 UTF-8 **字节**做字符边界安全截断（不劈开汉字与 emoji 代理对），超限追加可见标记。钉钉 20000 字节、企微 text 2048 / markdown 4096 字节、Server酱标题 32 字符 / 正文 32KB；工具方法 `NotifyUtils.truncateUtf8` / `utf8Length`，自定义渠道覆写 `contentMaxBytes` 接入。

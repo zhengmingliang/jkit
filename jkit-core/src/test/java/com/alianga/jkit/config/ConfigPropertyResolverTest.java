@@ -196,6 +196,59 @@ public class ConfigPropertyResolverTest {
     }
 
     @Test
+    public void addLocationAppendsExpandsHomeAndSkipsDuplicates() {
+        String home = System.getProperty("user.home");
+        ConfigLoadOptions options = ConfigLoadOptions.defaults()
+                .addLocation("~/jkit-extra-loc")
+                .addLocation("  ", "~/jkit-extra-loc");
+        List<String> locations = options.getLocations();
+        assertTrue(locations.contains("classpath:/"));
+        assertTrue(locations.contains("file:./"));
+        String expected = "file:" + home + "/jkit-extra-loc";
+        String expectedWin = "file:" + home + "\\jkit-extra-loc";
+        assertTrue(locations.contains(expected) || locations.contains(expectedWin));
+        int count = 0;
+        for (String location : locations) {
+            if (location.endsWith("jkit-extra-loc")) {
+                count++;
+            }
+        }
+        assertEquals(1, count);
+    }
+
+    @Test
+    public void addLocationFileDirectoryOverridesClasspath() throws Exception {
+        File dir = Files.createTempDirectory("jkit-config-").toFile();
+        dir.deleteOnExit();
+        File yml = new File(dir, "jkit-prio.yml");
+        Files.write(yml.toPath(), "jkit:\n  source: added-dir\n".getBytes(StandardCharsets.UTF_8));
+        yml.deleteOnExit();
+
+        ConfigPropertyResolver resolver = ConfigPropertyResolver.load(
+                isolated("jkit-prio").addLocation(dir));
+        assertEquals("added-dir", resolver.getString("jkit.source"));
+        assertEquals("from-root", resolver.getString("jkit.shared"));
+    }
+
+    @Test
+    public void addLocationFileUsesParentWhenPathIsFile() throws Exception {
+        File dir = Files.createTempDirectory("jkit-config-").toFile();
+        dir.deleteOnExit();
+        File yml = new File(dir, "jkit-prio.yml");
+        Files.write(yml.toPath(), "jkit:\n  source: parent-of-file\n".getBytes(StandardCharsets.UTF_8));
+        yml.deleteOnExit();
+
+        ConfigPropertyResolver resolver = ConfigPropertyResolver.load(
+                isolated("jkit-prio").addLocation(yml));
+        assertEquals("parent-of-file", resolver.getString("jkit.source"));
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void addLocationRejectsEmpty() {
+        ConfigLoadOptions.defaults().addLocation();
+    }
+
+    @Test
     public void testFileLocationOverridesClasspath() throws Exception {
         File dir = Files.createTempDirectory("jkit-config-").toFile();
         dir.deleteOnExit();
