@@ -10,3 +10,12 @@ target/
 .settings/
 .DS_Store
 .freebuff/
+
+# Notify live-test credentials — never commit real tokens.
+# Canonical path is ~/jkit/application.yml (outside the repo).
+# If a filled copy is placed under the module for local runs, ignore it.
+jkit-notify/src/test/resources/jkit-application.yml
+jkit-notify/src/test/resources/application-local.yml
+**/application-secrets.yml
+jkit-notify-extra/src/test/resources/jkit-application.yml
+jkit-notify-extra/src/test/resources/application-local.yml

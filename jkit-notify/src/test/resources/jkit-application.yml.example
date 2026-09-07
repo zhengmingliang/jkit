@@ -1,0 +1,36 @@
+# jkit-notify 实发探测凭证模板
+#
+# 用法：
+#   1. 复制本文件到本机： ~/jkit/application.yml
+#      mkdir -p ~/jkit && cp jkit-application.yml.example ~/jkit/application.yml
+#   2. 填入真实 sendKey / botToken 等（切勿把填好的文件提交进 git）
+#   3. 去掉对应测试上的 @Ignore 后本地运行
+#
+# 相关测试：
+#   - ServerChanBarkChannelTest#serverChanSend      -> serverChan.sendKey
+#   - SlackTelegramChannelTest#telegramMarkdownParseMode2 (jkit-notify-extra) -> telegram.botToken / telegram.chatId
+#
+# 真实配置路径在仓库外（~/jkit/），仓库内仅保留本 *.example。
+
+serverChan:
+  # Server酱 SendKey，形如 SCTxxxx
+  sendKey: SCTxxxx
+
+telegram:
+  # BotFather 下发的 bot token，形如 123456:AA...
+  botToken: "123456:AAReplaceWithYourBotToken"
+  # 目标 chat_id（私聊用户 id 或群 -100...）
+  chatId: "123456789"
+
+bark:
+  # Bark device_key（可选，预留）
+  deviceKey: your-device-key
+
+# slack:
+#   botToken: xoxb-...
+#   webhookUrl: https://hooks.slack.com/services/T0/B0/XXX
+
+# ntfy:
+#   token: tk_...
+#   topic: mytopic
+#   webhookUrl: https://ntfy.sh

@@ -1,0 +1,7 @@
+com.alianga.jkit.notify.channel.NtfyChannel
+com.alianga.jkit.notify.channel.SlackChannel
+com.alianga.jkit.notify.channel.TelegramChannel
+com.alianga.jkit.notify.channel.AliyunSmsChannel
+com.alianga.jkit.notify.channel.TencentSmsChannel
+com.alianga.jkit.notify.channel.YunpianSmsChannel
+com.alianga.jkit.notify.channel.HuaweiSmsChannel

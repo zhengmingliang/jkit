@@ -3,6 +3,8 @@ package com.alianga.jkit.notify;
 import com.alianga.jkit.notify.channel.BarkChannel;
 import com.alianga.jkit.notify.channel.ServerChanChannel;
 
+import org.junit.Assume;
+import org.junit.Ignore;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
@@ -30,6 +32,29 @@ public class ServerChanBarkChannelTest extends AbstractHttpChannelTest {
         Captured request = take();
         assertJsonEquals("{\"title\":\"晚餐提醒\",\"desp\":\"今天吃火锅\"}", request.body());
         assertTrue(isEmpty());
+    }
+    /**
+     * Server酱：SendKey 拼到 URL，title/desp 进 payload。（需配置 serverChan.sendKey；
+     * 测试用的脚本引擎 markdown 内容与本次要验证的正文一致。）
+     */
+    @Ignore("需要配置 serverChan.sendKey")
+    @Test
+    public void serverChanSend() {
+        String sendKey = NotifyTestConfig.requiredString("serverChan.sendKey");
+        Assume.assumeTrue("缺少 serverChan.sendKey，见 ~/jkit/application.yml", sendKey != null);
+        SendResult result = NotificationManager.send(ServerChanChannel.ID,
+                Message.markdown("脚本引擎", "### 脚本引擎部分\n"
+                        + "- [x] 修改加载配置文件方式改为使用sorinResourePattenResolver类加载，配置文件加载顺序同springboot，优先加载jar包同级目录，其次加载iar包内的\n"
+                        + "- [x] 脚本引警增加统一资源释放逻辑：关闭可能遗漏的数据库连接，删除python临时脚本文件、清除内存 (Redis) 变量的值等\n"
+                        + "- [x] 代码库、系统函数 添加 语言类型隔离，eg: 例如封装的python函数getconnection，只能够在python脚本使用，SOL脚本下不应该展示\n"
+                        + "- [ ] Java类型与python类型互转问题，涉及到将python数据存储到内存变量，内存变量容器用的Java的HashMap，需要转为Java对象才能存入，py4j\n"
+                        + "- [ ] hive、gbase数据库造两个千万级大表，测试大表数据python脚本处理情况以及内存溢出可能导致的一些情况\n"
+                        + "- [ ] 添加 使用指定的普通用户 执行 脚本的功能（处理中行部署执行可能出现的问题）\n"
+                        + "- [ ] 添加文件写出到指定位置，并将数据存储到数据库的逻辑\n"
+                        + "- [ ] 添加访问文件的接口（python等生成的图片文件等）\n"
+                        + "- [x] python控制执行的内存大小\n"),
+                ChannelConfig.ofToken(sendKey));
+        System.out.println(result);
     }
 
     /**

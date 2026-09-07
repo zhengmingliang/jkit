@@ -1,6 +1,6 @@
 # 消息通知模块使用指南
 
-`jkit-notify` 是轻量消息通知模块：一套 API 适配多个消息渠道，零第三方依赖（HTTP 复用 jkit 自研客户端，JSON 用 jkit 自研库，SMTP 为纯 Socket 实现）。
+`jkit-notify` 是轻量消息通知模块：一套 API 适配多个消息渠道，零第三方依赖（HTTP 复用 jkit 自研客户端，JSON 用 jkit 自研库，SMTP 为纯 Socket 实现，短信签名 HMAC/SHA-256 用 JDK `javax.crypto` 自实现）。
 
 ```xml
 <dependency>
@@ -9,6 +9,17 @@
     <version>2.0.1</version>
 </dependency>
 ```
+
+> Slack / Telegram / ntfy / 短信（阿里云、腾讯云、云片、华为云）已拆到可选模块 **`jkit-notify-extra`**。只依赖 `jkit-notify` 时不会带上这些渠道；需要时额外引入：
+>
+> ```xml
+> <dependency>
+>     <groupId>com.alianga</groupId>
+>     <artifactId>jkit-notify-extra</artifactId>
+>     <version>2.0.1</version>
+> </dependency>
+> ```
+
 
 ## 1. 三层模型
 
@@ -31,6 +42,7 @@ NotificationChannel（渠道 SPI：id / name / supports / send）
 
 ```java
 import com.alianga.jkit.notify.*;
+import com.alianga.jkit.notify.channel.*;
 
 // 钉钉机器人（安全设置选"加签"时补 .secret("SECxxx")）
 SendResult r = NotificationManager.send("dingtalk",
@@ -62,6 +74,16 @@ NotificationManager.send("bark",
                 .extra(Message.EXTRA_SOUND, "minuet")
                 .extra(Message.EXTRA_GROUP, "ops"),
         ChannelConfig.ofToken("deviceKey"));            // 自建服务再补 .webhookUrl("https://bark.my.com")
+
+// ntfy（https://ntfy.sh 或自建；webhook 路径即主题；私有主题用 token(tk_ 开头) 或用户名密码鉴权）
+NotificationManager.send("ntfy",
+        Message.text("磁盘告警", "使用率 95%")
+                .extra(NtfyChannel.EXTRA_TAGS, "warning,rotating_light")
+                .extra(NtfyChannel.EXTRA_PRIORITY, "high")
+                .extra(Message.EXTRA_URL, "https://grafana.example.com/dash"),
+        ChannelConfig.webhook("https://ntfy.sh/mytopic"));
+// 自建服务换完整地址；或 ofToken("tk_xxx").to("mytopic").webhookUrl("https://ntfy.example.com")
+// 按条覆盖主题：.extra(Message.EXTRA_GROUP, "other-topic")
 
 // 邮件（附件自动识别 MIME，不必手填 application/zip；拆包可用 10MB / 512KB）
 NotificationManager.send("smtp", Message.markdown("报表", "## 营收\n- 100 万")
@@ -105,6 +127,58 @@ NotificationManager.send("webhook", Message.text("构建失败", "job #42"),
                 .payloadTemplate("{\"channel\":\"#ci\",\"text\":\"${title}: ${content}\"}")
                 .header("Authorization", "Bearer token"));
 
+// Slack（Incoming Webhook；频道用 EXTRA_GROUP，机器人名/颜色/跳转按钮走 extras）
+NotificationManager.send("slack",
+        Message.text("告警", "CPU 95%")
+                .extra(Message.EXTRA_GROUP, "#ops")
+                .extra(SlackChannel.EXTRA_COLOR, "danger")
+                .extra(Message.EXTRA_URL, "https://dash.example.com/42"),
+        ChannelConfig.webhook("https://hooks.slack.com/services/T000/B000/XXX"));
+
+// Slack 官方 API（chat.postMessage）：token 填 xoxb- 开头的 bot token
+NotificationManager.send("slack", Message.text("hi", "内容"),
+        ChannelConfig.ofToken("xoxb-...").name("发布机器人"));
+
+// Telegram Bot（chat_id 配在 ChannelConfig.to，或按消息用 TelegramChannel.EXTRA_CHAT_ID 覆盖）
+// MARKDOWN 会转成 Telegram HTML 子集发送：标题/加粗→<b>，列表→• 行，表格→竖线分隔
+NotificationManager.send("telegram", Message.markdown("发布", "## v1.2.3 上线\n- 构建\n- 部署"),
+        ChannelConfig.ofToken("123456:ABC-xxx").to("@ops_channel"));
+// 国内网络可把 webhookUrl 指到自建反代：.webhookUrl("https://tg.example.com")
+
+// 短信：阿里云（命名参数 code=min=5 风格见下）
+NotificationManager.send("sms-aliyun", Message.text("验证码短信")
+                .extra(AbstractSmsChannel.EXTRA_SMS_PARAMS, "code=9527,min=5"),
+        ChannelConfig.ofToken("AccessKeyId")              // token = AccessKeyId
+                .secret("AccessKeySecret")
+                .name("短信签名")                           // name = 签名名称
+                .template("SMS_123456789")
+                .to("13800000001,13800000002"));
+
+// 短信：腾讯云（有序参数，按模板 {1}{2} 顺序）
+NotificationManager.send("sms-tencent", Message.text("验证码短信")
+                .extra(AbstractSmsChannel.EXTRA_SMS_PARAMS, "9527,5"),
+        ChannelConfig.ofToken("SecretId")
+                .secret("SecretKey")
+                .appId("1400006666")                        // SdkAppId
+                .name("短信签名")
+                .template("1234567")
+                .to("13800000001"));
+
+// 短信：云片（全文短信，不是模板 + 参数；签名在云片后台配置或写进正文）
+NotificationManager.send("sms-yunpian", Message.text("【签名】您的验证码是9527"),
+        ChannelConfig.ofToken("APIKEY").to("13800000001"));
+
+// 短信：华为云（webhook 填 APP 接入地址；appId 填通道号；有序参数）
+NotificationManager.send("sms-huawei", Message.text("验证码短信")
+                .extra(AbstractSmsChannel.EXTRA_SMS_PARAMS, "9527,5"),
+        ChannelConfig.ofToken("AppKey")
+                .secret("AppSecret")
+                .appId("8823120512345")                     // 短信通道号 sender
+                .name("签名名称")
+                .template("12345678")
+                .webhookUrl("https://smsapi.cn-north-4.myhuaweicloud.com:443/sms/batchSendSmsV1")
+                .to("13800000001"));
+
 // 异步发送（本模块独立守护线程池，默认 8 线程，不和 HTTP/SSE 共用；校验同步完成）
 Future<SendResult> future = NotificationManager.sendAsync("dingtalk", msg, cfg);
 ```
@@ -118,14 +192,21 @@ Future<SendResult> future = NotificationManager.sendAsync("dingtalk", msg, cfg);
 | `feishu` | 飞书机器人 | `webhook`；签名校验再配 `secret`（进 JSON 请求体） | TEXT / MARKDOWN | `code`/`StatusCode==0` |
 | `serverchan` | Server酱 | `ofToken(SendKey)` 或 `webhook` 完整地址 | TEXT / MARKDOWN | `code==0` |
 | `bark` | Bark | `ofToken(device_key)`，`webhookUrl` 可覆盖自建地址 | TEXT / MARKDOWN | `code==200` |
+| `ntfy`（`jkit-notify-extra`） | ntfy 推送 | `webhook` 完整地址（路径即主题）或 `to(主题)`（服务地址缺省 `https://ntfy.sh`）；鉴权可选 `token(tk_...)`(Bearer) 或 `username`+`password`(Basic) | TEXT / MARKDOWN | HTTP 2xx |
 | `webhook` | 通用 Webhook | `webhook` | TEXT / MARKDOWN / HTML | HTTP 2xx |
+| `slack`（`jkit-notify-extra`） | Slack | `webhook`（Incoming Webhook）或 `ofToken(bot token)`（chat.postMessage） | TEXT / MARKDOWN / HTML | 2xx 且（JSON 时）`ok==true` |
+| `telegram`（`jkit-notify-extra`） | Telegram Bot | `ofToken(bot token)` + `to(chat_id)` 或消息 `TelegramChannel.EXTRA_CHAT_ID` | TEXT / MARKDOWN / HTML；MARKDOWN 转 HTML 子集 | 2xx 且 `ok==true` |
+| `sms-aliyun`（`jkit-notify-extra`） | 阿里云短信 | `ofToken(AccessKeyId)` + `secret` + `name(签名)` + `template` + `to` | TEXT | `Code=="OK"` |
+| `sms-tencent`（`jkit-notify-extra`） | 腾讯云短信 | `ofToken(SecretId)` + `secret` + `appId(SdkAppId)` + `name(签名)` + `template` + `to` | TEXT | `SendStatusSet[0].Code=="Ok"` |
+| `sms-yunpian`（`jkit-notify-extra`） | 云片短信 | `ofToken(APIKEY)` + `to` | TEXT | `code==0` |
+| `sms-huawei`（`jkit-notify-extra`） | 华为云短信 | `ofToken(AppKey)` + `secret` + `appId(通道号)` + `template` + `webhook(接入地址)` + `to` | TEXT | `code=="000000"` |
 | `smtp` | 邮件 | `smtp(host, port)` + `username`/`password`/`to`；可选 `cc`/`bcc`/`replyTo`/`autoSplit` | TEXT / HTML；MARKDOWN 转 HTML | DATA 后 `250` |
 
 注：飞书 MARKDOWN 会转成 interactive 卡片（lark_md）；SMTP 的 MARKDOWN 会转成 HTML。各平台的 @人规则、长度上限、限流与签名差异见第 5 节——这些是最容易踩的部分。
 
 ## 4. 消息 extras（渠道参数）
 
-`Message.extra(k, v)` 携带渠道相关参数，各渠道只取自己认识的键：
+`Message.extra(k, v)` 携带渠道相关参数，各渠道只取自己认识的键。核心渠道常量在 `Message` 上；`jkit-notify-extra` 的渠道 extras 在各自渠道类上（如 `SlackChannel.EXTRA_COLOR`、`TelegramChannel.EXTRA_CHAT_ID`）：
 
 | 常量 | 渠道 | 说明 |
 | --- | --- | --- |
@@ -133,6 +214,10 @@ Future<SendResult> future = NotificationManager.sendAsync("dingtalk", msg, cfg);
 | `Message.EXTRA_AT_USERIDS` | 钉钉 / 企微 | @指定 userid；企微 MARKDOWN 会把缺失的 `<@userid>` 补进正文 |
 | `Message.EXTRA_AT_ALL` | 钉钉 / 企微 | @所有人 |
 | `Message.EXTRA_SOUND` / `EXTRA_GROUP` / `EXTRA_LEVEL` / `EXTRA_URL` | Bark；钉钉 actionCard 用 `EXTRA_URL` | 铃声 / 分组 / 时效性 / 点击跳转 |
+| `SlackChannel.EXTRA_USERNAME` / `EXTRA_COLOR` | Slack | 机器人显示名 / 消息侧边条颜色（good/warning/danger/#RRGGBB） |
+| `NtfyChannel.EXTRA_TAGS` / `EXTRA_PRIORITY`；`Message.EXTRA_URL` | ntfy | 标签（emoji 短代码，逗号分隔或集合）/ 优先级（1-5 或 min/low/default/high/max/urgent）/ 点击跳转；`Message.EXTRA_GROUP` 可按条覆盖主题 |
+| `TelegramChannel.EXTRA_CHAT_ID` / `EXTRA_SILENT` / `EXTRA_THREAD_ID` | Telegram | 聊天目标 / 静默发送 / 话题 ID |
+| `AbstractSmsChannel.EXTRA_SMS_PARAMS` | 短信渠道 | 模板参数：有序渠道（腾讯/华为）填逗号分隔值；命名渠道（阿里云）填 `name=value` 对 |
 | `Message.EXTRA_BTN_TITLE` | 钉钉 actionCard | 单按钮文案 |
 | `Message.EXTRA_PIC_URL` | 钉钉 IMAGE / 企微 NEWS | 封面或公网图片地址 |
 | `Message.EXTRA_BASE64` / `EXTRA_MD5` | 企微 IMAGE | 由 `Message.image(title, bytes)` 自动填充 |
@@ -171,6 +256,7 @@ TEXT 的 @ 走结构化字段 `mentioned_mobile_list` / `mentioned_list`；MARKD
 | Server酱 标题 / 正文 | 32 **字符** / 32 KB | `ServerChanChannel.MAX_TITLE_CHARS` / `MAX_DESP_BYTES` |
 | 飞书 text / 卡片 | 20000 / 30000 字节 | `FeishuChannel.MAX_TEXT_BYTES` / `MAX_CARD_BYTES` |
 | Bark body | 4096 字节 | `BarkChannel.MAX_BODY_BYTES` |
+| ntfy message / title | 4096 / 512 字节 | `NtfyChannel.MAX_MESSAGE_BYTES` / `MAX_TITLE_BYTES` |
 
 钉钉截断时会为尚未出现的 `@手机号` 预留字节，避免超长正文把 @ 顶出上限。自定义渠道覆写 `contentMaxBytes(Message)` 即可接入同一套截断逻辑。通用 Webhook、SMTP 不设上限。
 

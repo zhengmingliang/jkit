@@ -31,7 +31,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  * }</pre>
  *
  * <p>渠道来源有三：内置注册（钉钉/企微/飞书/Server酱/Bark/通用 Webhook/SMTP）、
- * classpath 上 {@code META-INF/services} SPI、代码 {@link #register(NotificationChannel)}。
+ * classpath 上 {@code META-INF/services} SPI（可选模块 {@code jkit-notify-extra} 提供
+ * Slack/Telegram/ntfy/短信）、代码 {@link #register(NotificationChannel)}。
  * 相同 id 后注册的覆盖先注册的，因此调用方可以替换任意内置渠道。
  *
  * <p>同步 {@link #send(String, Message, ChannelConfig)} 不会因网络失败抛异常；

@@ -39,6 +39,7 @@
         <module>jkit-core</module>
         <module>jkit-curl-codegen</module>
         <module>jkit-notify</module>
+        <module>jkit-notify-extra</module>
     </modules>
 
     <properties>

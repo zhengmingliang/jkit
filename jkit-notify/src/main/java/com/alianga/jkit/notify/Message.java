@@ -18,7 +18,8 @@ import java.util.Map;
  * }</pre>
  *
  * <p>{@code extras} 是渠道相关的附加参数（如钉钉/企微的 @手机号、Bark 的铃声），
- * 各渠道只取自己认识的键，互不干扰。内置的常用键见 {@link #EXTRA_AT_MOBILES} 等常量。
+ * 各渠道只取自己认识的键，互不干扰。核心渠道常用键见 {@link #EXTRA_AT_MOBILES} 等常量；
+ * Slack / Telegram / ntfy / 短信等可选模块的键在对应渠道类上。
  *
  * @author 郑明亮
  * @since 2.0.1
@@ -211,7 +212,7 @@ public final class Message {
     /**
      * 追加一个渠道扩展参数，链式调用。
      *
-     * @param key 参数名，常用键见本类常量
+     * @param key 参数名，核心渠道常用键见本类常量；可选模块渠道的键在对应渠道类上
      * @param value 参数值
      * @return this
      */

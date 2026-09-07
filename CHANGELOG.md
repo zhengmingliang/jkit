@@ -40,6 +40,7 @@
 
 ### 新增
 
+- 可选模块 `com.alianga:jkit-notify-extra`：将 Slack / Telegram / ntfy / 短信（阿里云/腾讯云/云片/华为云）从 `jkit-notify` 拆出，按需依赖；核心模块保留钉钉/企微/飞书/Server酱/Bark/Webhook/SMTP。SPI 自动注册。
 - `HttpUtils.debug` / `HttpUtils.printCurl`：发送前把请求摘要或等价 curl 打到标准输出，便于本地复现。摘要只打方法/URL/头/正文预览（二进制按字节数、长正文截断），打印失败不影响实际发送。不要在生产打开。
 - `ConfigLoadOptions.addLocation`：在默认搜索路径上追加目录（后者覆盖前者）。支持 `classpath:` / `file:` / 裸文件系统路径，`~` 展开为 `user.home`；也可传入 `File`（文件则取其父目录）。
 - 新模块 `com.alianga:jkit-notify`：轻量消息通知（版本随 `jkit-parent` 2.0.1，不单独升版）。一套 API 发钉钉机器人（含加签）/ 企微机器人 / 飞书机器人（含签名校验）/ Server酱 / Bark / 通用 Webhook（payload 模板）/ SMTP 邮件（纯 Socket 实现，AUTH LOGIN + STARTTLS/SSL + MIME）；`NotificationChannel` SPI + `NotificationManager` 注册表支持代码 / `META-INF/services` 两种方式扩展渠道，`MessageType`（TEXT/MARKDOWN/HTML）声明式能力；零第三方依赖，HTTP/JSON/日志复用 jkit。用法见 `docs/notify.md`。
@@ -53,6 +54,7 @@
 - `jkit-notify` 模板变量：`Message.var` / `vars`，发送前替换 `${key}` / `${a.b}`。文件附件流式读取与拆包，不再把整文件载入内存。
 - `jkit-notify` `NotifyPolicy`：静默时段、5 分钟去重、本地限流；`sendFailover` 同一渠道多账号顺序切换。抑制为 `FailureType.SUPPRESSED`。
 - `jkit-notify` `AbstractHttpChannel` 新增 `contentType` 扩展点与 payload 感知的 `applyHeaders`；`ChannelConfig` 补 `name` / `template` / `appId` / `region`（Slack 显示名与短信渠道使用）。
+- `jkit-notify-extra` 渠道：Slack（Incoming Webhook / chat.postMessage）、Telegram Bot（chat_id 支持 `@channel`，话题群与静默；MARKDOWN 转 Telegram HTML 子集发送）、ntfy（tags / 优先级 / markdown 与 Bearer / Basic 鉴权），以及阿里云 / 腾讯云 / 云片 / 华为云短信。渠道 extras 在各自实现类上（`SlackChannel.EXTRA_COLOR`、`TelegramChannel.EXTRA_CHAT_ID`、`NtfyChannel.EXTRA_TAGS`、`AbstractSmsChannel.EXTRA_SMS_PARAMS`），不放进核心 `Message`。
 - `DateUtils.parse(String)`：自动识别常见日期字符串（时间戳、紧凑数字、`-` `/` `.`、中文/韩文、ISO-8601 含 `T`/`Z`/`+0800`/`+08:00`）。
 - `DateUtils.fromEpochNumber(long)`：10 位秒或 13 位毫秒时间戳转 `Date`。
 - `DateUtils.fromTemporal(TemporalAccessor)`：`java.time` 时间对象转 `Date`。
@@ -76,7 +78,7 @@
 ### 构建
 
 - `git-commit-id-plugin`、`buildnumber-maven-plugin`、`maven-source-plugin` 从 `publish` profile 挪到默认构建，`package` 即可产出带构建信息的 sources jar。
-- 仓库改为多模块：父 POM `com.alianga:jkit-parent`（packaging pom），运行时库在模块 `jkit-core`（发布坐标仍是 `com.alianga:jkit`，沿用原根 POM 的编译 / Checkstyle / MRJAR / 发布配置），代码生成在 `jkit-curl-codegen`，消息通知在 `jkit-notify`。根目录 `mvn test` 同时构建三个模块。
+- 仓库改为多模块：父 POM `com.alianga:jkit-parent`（packaging pom），运行时库在模块 `jkit-core`（发布坐标仍是 `com.alianga:jkit`，沿用原根 POM 的编译 / Checkstyle / MRJAR / 发布配置），代码生成在 `jkit-curl-codegen`，消息通知在 `jkit-notify`，可选扩展渠道在 `jkit-notify-extra`。根目录 `mvn test` 同时构建全部模块。
 
 ### jkit-curl-codegen
 

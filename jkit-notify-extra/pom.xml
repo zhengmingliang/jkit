@@ -11,11 +11,11 @@
         <relativePath>../pom.xml</relativePath>
     </parent>
 
-    <artifactId>jkit-notify</artifactId>
+    <artifactId>jkit-notify-extra</artifactId>
     <packaging>jar</packaging>
 
-    <name>jkit-notify</name>
-    <description>轻量消息通知核心模块。基于 jkit 自研 HTTP 与 JSON 实现钉钉/企微/飞书/Server酱/Bark/通用Webhook/SMTP 等常用渠道，零第三方依赖。Slack/Telegram/ntfy/短信见可选模块 jkit-notify-extra。</description>
+    <name>jkit-notify-extra</name>
+    <description>jkit-notify 可选扩展渠道：Slack、Telegram、ntfy 与短信（阿里云/腾讯云/云片/华为云）。依赖 jkit-notify 核心；按需引入，避免核心模块拉取低频渠道。</description>
 
     <properties>
         <maven.compiler.source>8</maven.compiler.source>
@@ -30,9 +30,22 @@
             <version>${jkit.version}</version>
         </dependency>
         <dependency>
+            <groupId>com.alianga</groupId>
+            <artifactId>jkit-notify</artifactId>
+            <version>${jkit.version}</version>
+        </dependency>
+        <dependency>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
             <version>4.13.2</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- AbstractHttpChannelTest / NotifyTestConfig 等测试基类 -->
+        <dependency>
+            <groupId>com.alianga</groupId>
+            <artifactId>jkit-notify</artifactId>
+            <version>${jkit.version}</version>
+            <type>test-jar</type>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -92,20 +105,6 @@
                         <phase>package</phase>
                         <goals>
                             <goal>jar-no-fork</goal>
-                        </goals>
-                    </execution>
-                </executions>
-            </plugin>
-
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-jar-plugin</artifactId>
-                <version>3.3.0</version>
-                <executions>
-                    <execution>
-                        <id>test-jar</id>
-                        <goals>
-                            <goal>test-jar</goal>
                         </goals>
                     </execution>
                 </executions>
