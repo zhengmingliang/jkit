@@ -42,11 +42,11 @@ public abstract class AbstractHttpChannel implements NotificationChannel {
             String payload = buildPayload(message, config);
             HttpRequest request = HttpRequest.post(url)
                     .body(payload)
-                    .contentType(JSON_CONTENT_TYPE);
+                    .contentType(contentType(message, config));
             if (config.timeoutMs() > 0) {
                 request.totalTimeoutMs(config.timeoutMs());
             }
-            applyHeaders(request, config);
+            applyHeaders(request, config, payload);
             response = HttpUtils.execute(request);
             long elapsed = System.currentTimeMillis() - start;
             String body = readBody(response);
@@ -92,13 +92,26 @@ public abstract class AbstractHttpChannel implements NotificationChannel {
     protected abstract String buildUrl(Message message, ChannelConfig config);
 
     /**
-     * 构造 JSON 请求体。
+     * 构造请求体。
      *
      * @param message 消息
      * @param config 渠道配置
-     * @return JSON 字符串
+     * @return JSON / 表单编码等请求体字符串
      */
     protected abstract String buildPayload(Message message, ChannelConfig config);
+
+    /**
+     * 请求 Content-Type。默认 JSON（与 {@link #JSON_CONTENT_TYPE} 一致）；
+     * 表单编码的渠道（如华为云短信）覆盖为 {@code application/x-www-form-urlencoded}。
+     *
+     * @param message 消息
+     * @param config 渠道配置
+     * @return Content-Type 请求头值
+     * @since 2.0.1
+     */
+    protected String contentType(Message message, ChannelConfig config) {
+        return JSON_CONTENT_TYPE;
+    }
 
     /**
      * HTTP 2xx 之外的业务级成功判定（默认恒成功，即只看 HTTP 状态码）。
@@ -191,12 +204,14 @@ public abstract class AbstractHttpChannel implements NotificationChannel {
     }
 
     /**
-     * 应用配置里的自定义请求头（通用 Webhook 等渠道使用）。
+     * 应用配置里的自定义请求头（通用 Webhook 等渠道使用），同名键覆盖默认头。
      *
      * @param request 请求
      * @param config 渠道配置
+     * @param payload 已构造好的请求体（签名请求等需要基于正文计算请求头的渠道使用）
+     * @since 2.0.1
      */
-    protected void applyHeaders(HttpRequest request, ChannelConfig config) {
+    protected void applyHeaders(HttpRequest request, ChannelConfig config, String payload) {
         Map<String, String> headers = config.headers();
         if (headers != null) {
             for (Map.Entry<String, String> entry : headers.entrySet()) {

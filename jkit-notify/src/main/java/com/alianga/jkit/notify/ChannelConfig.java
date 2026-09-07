@@ -68,6 +68,10 @@ public final class ChannelConfig {
     private boolean autoSplit;
     private long maxAttachmentSize;
     private long splitChunkSize;
+    private String template;
+    private String appId;
+    private String region;
+    private String senderName;
 
     private ChannelConfig() {
     }
@@ -578,6 +582,86 @@ public final class ChannelConfig {
     }
 
     /**
+     * 机器人/账号展示名（Slack {@code username} 等可选用）。
+     *
+     * @param name 显示名
+     * @return this
+     * @since 2.0.1
+     */
+    public ChannelConfig name(String name) {
+        this.senderName = name;
+        return this;
+    }
+
+    /**
+     * 设置短信模板 ID（阿里云/腾讯云/华为云/云片等模板短信渠道必填）。
+     *
+     * @param template 模板 ID，如 {@code SMS_123456789}
+     * @return this
+     * @since 2.0.1
+     */
+    public ChannelConfig template(String template) {
+        this.template = template;
+        return this;
+    }
+
+    /**
+     * 设置应用 ID（腾讯云 SdkAppId、华为云通道号等）。
+     *
+     * @param appId 应用 ID
+     * @return this
+     * @since 2.0.1
+     */
+    public ChannelConfig appId(String appId) {
+        this.appId = appId;
+        return this;
+    }
+
+    /**
+     * 设置地域（腾讯云 {@code ap-guangzhou} 等），缺省用各渠道内置默认值。
+     *
+     * @param region 地域
+     * @return this
+     * @since 2.0.1
+     */
+    public ChannelConfig region(String region) {
+        this.region = region;
+        return this;
+    }
+
+    /**
+     * @return 短信模板 ID，未设置时为 {@code null}
+     * @since 2.0.1
+     */
+    public String template() {
+        return template;
+    }
+
+    /**
+     * @return 应用 ID，未设置时为 {@code null}
+     * @since 2.0.1
+     */
+    public String appId() {
+        return appId;
+    }
+
+    /**
+     * @return 地域，未设置时为 {@code null}
+     * @since 2.0.1
+     */
+    public String region() {
+        return region;
+    }
+
+    /**
+     * @return 机器人/账号展示名，未设置时为 {@code null}
+     * @since 2.0.1
+     */
+    public String name() {
+        return senderName;
+    }
+
+    /**
      * @return 是否自动拆分超大附件
      */
     public boolean autoSplit() {
@@ -654,6 +738,10 @@ public final class ChannelConfig {
         addIfUnused(unused, used, "autoSplit", autoSplit);
         addIfUnused(unused, used, "maxAttachmentSize", maxAttachmentSize > 0);
         addIfUnused(unused, used, "splitChunkSize", splitChunkSize > 0);
+        addIfUnused(unused, used, "template", template != null && !template.isEmpty());
+        addIfUnused(unused, used, "appId", appId != null && !appId.isEmpty());
+        addIfUnused(unused, used, "region", region != null && !region.isEmpty());
+        addIfUnused(unused, used, "name", senderName != null && !senderName.isEmpty());
         if (!unused.isEmpty()) {
             log.debug("[{}] ignoring config fields: {}", channelId, unused);
         }
