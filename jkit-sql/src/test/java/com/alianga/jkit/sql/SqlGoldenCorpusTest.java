@@ -172,6 +172,21 @@ public class SqlGoldenCorpusTest {
                 {"postgres", "SELECT * FROM t WHERE x <> ALL(arr)"},
                 {"postgres", "SELECT INTERVAL '1 day', X'FF'"},
                 {"mysql", "SELECT INTERVAL 1 DAY, 0xFF, X'AB'"},
+                {"oracle", "INSERT ALL INTO t1 (id) VALUES (id) INTO t2 (id) VALUES (id) SELECT id FROM src"},
+                {"oracle", "INSERT FIRST WHEN id > 0 THEN INTO t (id) VALUES (id) ELSE INTO t0 (id) VALUES (id) SELECT id FROM src"},
+                {"postgres", "INSERT INTO t (id, name) SELECT id, name FROM s ON CONFLICT (id) DO NOTHING"},
+                {"postgres", "INSERT INTO t (id) SELECT id FROM s ON CONFLICT ON CONSTRAINT t_pkey DO UPDATE SET id = EXCLUDED.id"},
+                {"postgres", "UPDATE t SET a = s.a FROM s WHERE t.id = s.id"},
+                {"postgres", "UPDATE t SET a = s.a FROM s JOIN u ON s.uid = u.id WHERE t.id = s.id"},
+                {"postgres", "DELETE FROM t USING s WHERE t.id = s.id"},
+                {"postgres", "DELETE FROM t USING s, u WHERE t.id = s.id AND s.uid = u.id"},
+                {"mysql", "DELETE t USING t JOIN s ON t.id = s.id WHERE s.flag = 1"},
+                {"ansi", "MERGE INTO t USING s ON t.id = s.id WHEN MATCHED AND t.flag = 1 THEN UPDATE SET t.a = s.a WHEN NOT MATCHED THEN INSERT (id, a) VALUES (s.id, s.a)"},
+                {"ansi", "MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN UPDATE SET t.a = s.a WHEN NOT MATCHED BY SOURCE THEN DELETE"},
+                {"sqlserver", "INSERT INTO t (id) OUTPUT INSERTED.id VALUES (1)"},
+                {"sqlserver", "UPDATE t SET name = 'x' OUTPUT INSERTED.name, DELETED.name WHERE id = 1"},
+                {"sqlserver", "DELETE FROM t OUTPUT DELETED.* WHERE id = 1"},
+                {"sqlserver", "MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN UPDATE SET t.a = s.a WHEN NOT MATCHED THEN INSERT (id, a) VALUES (s.id, s.a) OUTPUT INSERTED.*, DELETED.*"},
         });
     }
 

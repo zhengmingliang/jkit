@@ -17,7 +17,9 @@ public final class SqlUpdate extends SqlStatement {
     private SqlExpr where;
     private SqlLimit limit;
     private final List<SqlOrderByItem> orderBy = new ArrayList<SqlOrderByItem>(2);
+    private SqlTableSource from;
     private SqlExpr returning;
+    private final List<SqlExpr> output = new ArrayList<SqlExpr>(2);
 
     /**
      * {@inheritDoc}
@@ -106,6 +108,27 @@ public final class SqlUpdate extends SqlStatement {
     }
 
     /**
+     * @return PG UPDATE … FROM
+     */
+    public SqlTableSource from() {
+        return from;
+    }
+
+    /**
+     * @param from FROM 表源
+     */
+    public void setFrom(SqlTableSource from) {
+        this.from = from;
+    }
+
+    /**
+     * @return SQL Server OUTPUT
+     */
+    public List<SqlExpr> output() {
+        return output;
+    }
+
+    /**
      * {@inheritDoc}
      */
     @Override
@@ -116,6 +139,8 @@ public final class SqlUpdate extends SqlStatement {
         child(visitor, where);
         children(visitor, orderBy);
         child(visitor, limit);
+        child(visitor, from);
         child(visitor, returning);
+        children(visitor, output);
     }
 }

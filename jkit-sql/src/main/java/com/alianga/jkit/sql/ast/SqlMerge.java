@@ -2,8 +2,11 @@ package com.alianga.jkit.sql.ast;
 
 import com.alianga.jkit.sql.visitor.SqlVisitor;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
- * MERGE INTO ... USING ... ON ... WHEN MATCHED / NOT MATCHED。
+ * MERGE INTO ... USING ... ON ... WHEN MATCHED / NOT MATCHED [BY SOURCE|TARGET]。
  *
  * @author 郑明亮
  * @since 2.1.0
@@ -12,9 +15,8 @@ public final class SqlMerge extends SqlStatement {
     private SqlTableSource into;
     private SqlTableSource using;
     private SqlExpr on;
-    private SqlUpdate update;
-    private SqlInsert insert;
-    private SqlExpr deleteWhere;
+    private final List<SqlMergeWhen> whens = new ArrayList<SqlMergeWhen>(2);
+    private final List<SqlExpr> output = new ArrayList<SqlExpr>(2);
 
     /**
      * {@inheritDoc}
@@ -75,45 +77,49 @@ public final class SqlMerge extends SqlStatement {
     }
 
     /**
-     * @return WHEN MATCHED THEN UPDATE
+     * @return WHEN 子句列表
+     */
+    public List<SqlMergeWhen> whens() {
+        return whens;
+    }
+
+    /**
+     * @return SQL Server OUTPUT
+     */
+    public List<SqlExpr> output() {
+        return output;
+    }
+
+    /**
+     * 兼容：首个 MATCHED 的 UPDATE。
+     *
+     * @return UPDATE，可能为 null
      */
     public SqlUpdate update() {
-        return update;
+        for (int i = 0; i < whens.size(); i++) {
+            SqlMergeWhen w = whens.get(i);
+            if (w.kind() == SqlMergeWhen.MatchKind.MATCHED && w.update() != null) {
+                return w.update();
+            }
+        }
+        return null;
     }
 
     /**
-     * @param update UPDATE
-     */
-    public void setUpdate(SqlUpdate update) {
-        this.update = update;
-    }
-
-    /**
-     * @return WHEN NOT MATCHED THEN INSERT
+     * 兼容：首个 NOT MATCHED 的 INSERT。
+     *
+     * @return INSERT，可能为 null
      */
     public SqlInsert insert() {
-        return insert;
-    }
-
-    /**
-     * @param insert INSERT
-     */
-    public void setInsert(SqlInsert insert) {
-        this.insert = insert;
-    }
-
-    /**
-     * @return MATCHED 时 DELETE 条件
-     */
-    public SqlExpr deleteWhere() {
-        return deleteWhere;
-    }
-
-    /**
-     * @param deleteWhere DELETE 条件
-     */
-    public void setDeleteWhere(SqlExpr deleteWhere) {
-        this.deleteWhere = deleteWhere;
+        for (int i = 0; i < whens.size(); i++) {
+            SqlMergeWhen w = whens.get(i);
+            if (w.kind() != SqlMergeWhen.MatchKind.MATCHED
+                    && w.kind() != SqlMergeWhen.MatchKind.NOT_MATCHED_BY_SOURCE
+                    && w.insert() != null) {
+                return w.insert();
+            }
+        }
+        return null;
     }
 
     /**
@@ -125,8 +131,7 @@ public final class SqlMerge extends SqlStatement {
         child(visitor, into);
         child(visitor, using);
         child(visitor, on);
-        child(visitor, update);
-        child(visitor, insert);
-        child(visitor, deleteWhere);
+        children(visitor, whens);
+        children(visitor, output);
     }
 }

@@ -22,7 +22,12 @@ public final class SqlInsert extends SqlStatement {
     private final List<SqlIdentifier> conflictTarget = new ArrayList<SqlIdentifier>(2);
     private boolean onConflict;
     private boolean conflictDoNothing;
+    private SqlIdentifier conflictConstraint;
+    private boolean insertAll;
+    private boolean insertFirst;
+    private final List<SqlInsertBranch> branches = new ArrayList<SqlInsertBranch>(2);
     private SqlExpr returning;
+    private final List<SqlExpr> output = new ArrayList<SqlExpr>(2);
 
     /**
      * {@inheritDoc}
@@ -160,6 +165,62 @@ public final class SqlInsert extends SqlStatement {
     }
 
     /**
+     * @return ON CONFLICT ON CONSTRAINT 约束名
+     */
+    public SqlIdentifier conflictConstraint() {
+        return conflictConstraint;
+    }
+
+    /**
+     * @param conflictConstraint 约束名
+     */
+    public void setConflictConstraint(SqlIdentifier conflictConstraint) {
+        this.conflictConstraint = conflictConstraint;
+    }
+
+    /**
+     * @return Oracle INSERT ALL
+     */
+    public boolean insertAll() {
+        return insertAll;
+    }
+
+    /**
+     * @param insertAll INSERT ALL
+     */
+    public void setInsertAll(boolean insertAll) {
+        this.insertAll = insertAll;
+    }
+
+    /**
+     * @return Oracle INSERT FIRST
+     */
+    public boolean insertFirst() {
+        return insertFirst;
+    }
+
+    /**
+     * @param insertFirst INSERT FIRST
+     */
+    public void setInsertFirst(boolean insertFirst) {
+        this.insertFirst = insertFirst;
+    }
+
+    /**
+     * @return INSERT ALL/FIRST 分支
+     */
+    public List<SqlInsertBranch> branches() {
+        return branches;
+    }
+
+    /**
+     * @return SQL Server OUTPUT 列表
+     */
+    public List<SqlExpr> output() {
+        return output;
+    }
+
+    /**
      * {@inheritDoc}
      */
     @Override
@@ -174,6 +235,9 @@ public final class SqlInsert extends SqlStatement {
         children(visitor, setList);
         children(visitor, duplicateUpdates);
         children(visitor, conflictTarget);
+        child(visitor, conflictConstraint);
+        children(visitor, branches);
         child(visitor, returning);
+        children(visitor, output);
     }
 }

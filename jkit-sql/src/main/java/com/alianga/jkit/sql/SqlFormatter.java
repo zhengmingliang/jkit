@@ -14,11 +14,13 @@ import com.alianga.jkit.sql.ast.SqlFunctionTable;
 import com.alianga.jkit.sql.ast.SqlIdentifier;
 import com.alianga.jkit.sql.ast.SqlInExpr;
 import com.alianga.jkit.sql.ast.SqlInsert;
+import com.alianga.jkit.sql.ast.SqlInsertBranch;
 import com.alianga.jkit.sql.ast.SqlJoin;
 import com.alianga.jkit.sql.ast.SqlLimit;
 import com.alianga.jkit.sql.ast.SqlListExpr;
 import com.alianga.jkit.sql.ast.SqlLiteral;
 import com.alianga.jkit.sql.ast.SqlMerge;
+import com.alianga.jkit.sql.ast.SqlMergeWhen;
 import com.alianga.jkit.sql.ast.SqlNode;
 import com.alianga.jkit.sql.ast.SqlOrderByItem;
 import com.alianga.jkit.sql.ast.SqlOverExpr;
@@ -322,15 +324,31 @@ public final class SqlFormatter {
     private void writeInsert(SqlInsert insert) {
         writeWith(insert);
         kw(insert.replace() ? "REPLACE" : "INSERT");
-        sp();
-        kw("INTO");
-        sp();
-        writeFrom(insert.table());
+        if (insert.insertAll() || insert.insertFirst()) {
+            sp();
+            kw(insert.insertFirst() ? "FIRST" : "ALL");
+            for (int i = 0; i < insert.branches().size(); i++) {
+                sp();
+                writeInsertBranch(insert.branches().get(i));
+            }
+            if (insert.query() != null) {
+                sp();
+                writeNode(insert.query());
+            }
+            return;
+        }
+        if (insert.table() != null) {
+            sp();
+            kw("INTO");
+            sp();
+            writeFrom(insert.table());
+        }
         if (!insert.columns().isEmpty()) {
             out.append('(');
             commaIdents(insert.columns());
             out.append(')');
         }
+        writeOutput(insert.output());
         if (!insert.setList().isEmpty()) {
             sp();
             kw("SET");
@@ -358,7 +376,14 @@ public final class SqlFormatter {
             kw("ON");
             sp();
             kw("CONFLICT");
-            if (!insert.conflictTarget().isEmpty()) {
+            if (insert.conflictConstraint() != null) {
+                sp();
+                kw("ON");
+                sp();
+                kw("CONSTRAINT");
+                sp();
+                writeExpr(insert.conflictConstraint());
+            } else if (!insert.conflictTarget().isEmpty()) {
                 sp();
                 out.append('(');
                 commaIdents(insert.conflictTarget());
@@ -396,15 +421,62 @@ public final class SqlFormatter {
         }
     }
 
+    private void writeInsertBranch(SqlInsertBranch branch) {
+        if (branch.elseBranch()) {
+            kw("ELSE");
+            sp();
+        } else if (branch.when() != null) {
+            kw("WHEN");
+            sp();
+            writeExpr(branch.when());
+            sp();
+            kw("THEN");
+            sp();
+        }
+        kw("INTO");
+        sp();
+        writeFrom(branch.table());
+        if (!branch.columns().isEmpty()) {
+            out.append('(');
+            commaIdents(branch.columns());
+            out.append(')');
+        }
+        sp();
+        kw("VALUES");
+        sp();
+        out.append('(');
+        commaExprs(branch.values());
+        out.append(')');
+    }
+
+    private void writeOutput(List<SqlExpr> output) {
+        if (output == null || output.isEmpty()) {
+            return;
+        }
+        sp();
+        kw("OUTPUT");
+        sp();
+        commaExprs(output);
+    }
+
     private void writeUpdate(SqlUpdate update) {
         writeWith(update);
         kw("UPDATE");
-        sp();
-        writeFrom(update.table());
+        if (update.table() != null) {
+            sp();
+            writeFrom(update.table());
+        }
         sp();
         kw("SET");
         sp();
         commaBinaries(update.setList());
+        writeOutput(update.output());
+        if (update.from() != null) {
+            sp();
+            kw("FROM");
+            sp();
+            writeFrom(update.from());
+        }
         if (update.where() != null) {
             nl();
             kw("WHERE");
@@ -435,15 +507,23 @@ public final class SqlFormatter {
         writeWith(delete);
         kw("DELETE");
         if (delete.table() != null) {
-            sp();
+            // PG DELETE FROM t USING …；MySQL DELETE t FROM …
+            if (delete.from() == null || delete.usingKeyword()) {
+                sp();
+                kw("FROM");
+                sp();
+            } else {
+                sp();
+            }
             writeFrom(delete.table());
         }
         if (delete.from() != null) {
             sp();
-            kw("FROM");
+            kw(delete.usingKeyword() ? "USING" : "FROM");
             sp();
             writeFrom(delete.from());
         }
+        writeOutput(delete.output());
         if (delete.where() != null) {
             nl();
             kw("WHERE");
@@ -476,27 +556,54 @@ public final class SqlFormatter {
         kw("ON");
         sp();
         writeExpr(merge.on());
-        if (merge.update() != null) {
+        for (int i = 0; i < merge.whens().size(); i++) {
             sp();
-            kw("WHEN");
-            sp();
-            kw("MATCHED");
-            sp();
-            kw("THEN");
-            sp();
-            writeUpdate(merge.update());
+            writeMergeWhen(merge.whens().get(i));
         }
-        if (merge.insert() != null) {
-            sp();
-            kw("WHEN");
-            sp();
+        writeOutput(merge.output());
+    }
+
+    private void writeMergeWhen(SqlMergeWhen when) {
+        kw("WHEN");
+        sp();
+        if (when.kind() == SqlMergeWhen.MatchKind.MATCHED) {
+            kw("MATCHED");
+        } else if (when.kind() == SqlMergeWhen.MatchKind.NOT_MATCHED_BY_SOURCE) {
             kw("NOT");
             sp();
             kw("MATCHED");
             sp();
-            kw("THEN");
+            kw("BY");
             sp();
-            writeInsert(merge.insert());
+            kw("SOURCE");
+        } else if (when.kind() == SqlMergeWhen.MatchKind.NOT_MATCHED_BY_TARGET) {
+            kw("NOT");
+            sp();
+            kw("MATCHED");
+            sp();
+            kw("BY");
+            sp();
+            kw("TARGET");
+        } else {
+            kw("NOT");
+            sp();
+            kw("MATCHED");
+        }
+        if (when.andPredicate() != null) {
+            sp();
+            kw("AND");
+            sp();
+            writeExpr(when.andPredicate());
+        }
+        sp();
+        kw("THEN");
+        sp();
+        if (when.update() != null) {
+            writeUpdate(when.update());
+        } else if (when.insert() != null) {
+            writeInsert(when.insert());
+        } else if (when.delete()) {
+            kw("DELETE");
         }
     }
 

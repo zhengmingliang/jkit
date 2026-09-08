@@ -14,11 +14,13 @@ import com.alianga.jkit.sql.ast.SqlFunctionTable;
 import com.alianga.jkit.sql.ast.SqlIdentifier;
 import com.alianga.jkit.sql.ast.SqlInExpr;
 import com.alianga.jkit.sql.ast.SqlInsert;
+import com.alianga.jkit.sql.ast.SqlInsertBranch;
 import com.alianga.jkit.sql.ast.SqlJoin;
 import com.alianga.jkit.sql.ast.SqlLimit;
 import com.alianga.jkit.sql.ast.SqlListExpr;
 import com.alianga.jkit.sql.ast.SqlLiteral;
 import com.alianga.jkit.sql.ast.SqlMerge;
+import com.alianga.jkit.sql.ast.SqlMergeWhen;
 import com.alianga.jkit.sql.ast.SqlOrderByItem;
 import com.alianga.jkit.sql.ast.SqlOverExpr;
 import com.alianga.jkit.sql.ast.SqlQueryExpr;
@@ -328,6 +330,9 @@ public final class SqlParser {
     private SqlInsert parseInsert(boolean replace) {
         next();
         match(SqlTokenType.IGNORE);
+        if (!replace && (is(SqlTokenType.ALL) || is(SqlTokenType.FIRST))) {
+            return parseMultiInsert();
+        }
         match(SqlTokenType.INTO);
         // Hive / 部分引擎：INSERT INTO TABLE t
         match(SqlTokenType.TABLE);
@@ -343,6 +348,7 @@ public final class SqlParser {
             }
             expect(SqlTokenType.RPAREN);
         }
+        parseOutputClause(insert.output());
         if (match(SqlTokenType.SET)) {
             parseAssignList(insert.setList());
         } else if (is(SqlTokenType.SELECT) || is(SqlTokenType.WITH) || is(SqlTokenType.LPAREN)) {
@@ -350,35 +356,115 @@ public final class SqlParser {
         } else if (match(SqlTokenType.VALUES) || match(SqlTokenType.VALUE)) {
             parseValuesRows(insert);
         }
-        if (match(SqlTokenType.ON)) {
-            if (match(SqlTokenType.DUPLICATE)) {
-                expect(SqlTokenType.KEY);
-                expect(SqlTokenType.UPDATE);
-                parseAssignList(insert.duplicateUpdates());
-            } else if (match(SqlTokenType.CONFLICT)) {
-                insert.setOnConflict(true);
-                if (match(SqlTokenType.LPAREN)) {
-                    do {
-                        insert.conflictTarget().add(parseName());
-                    } while (match(SqlTokenType.COMMA));
-                    expect(SqlTokenType.RPAREN);
-                }
-                expect(SqlTokenType.DO);
-                if (match(SqlTokenType.NOTHING)) {
-                    insert.setConflictDoNothing(true);
-                } else {
-                    expect(SqlTokenType.UPDATE);
-                    expect(SqlTokenType.SET);
-                    parseAssignList(insert.duplicateUpdates());
-                }
-            } else {
-                throw error("expected DUPLICATE KEY or CONFLICT after ON");
-            }
-        }
+        parseOnConflictOrDuplicate(insert);
         if (match(SqlTokenType.RETURNING)) {
             insert.setReturning(parseExpr());
         }
+        if (insert.output().isEmpty()) {
+            parseOutputClause(insert.output());
+        }
         return insert;
+    }
+
+    /**
+     * Oracle INSERT ALL / INSERT FIRST … SELECT。
+     */
+    private SqlInsert parseMultiInsert() {
+        SqlInsert insert = new SqlInsert();
+        if (match(SqlTokenType.ALL)) {
+            insert.setInsertAll(true);
+        } else {
+            expect(SqlTokenType.FIRST);
+            insert.setInsertFirst(true);
+        }
+        while (is(SqlTokenType.WHEN) || is(SqlTokenType.INTO) || is(SqlTokenType.ELSE)) {
+            SqlInsertBranch branch = new SqlInsertBranch();
+            if (match(SqlTokenType.ELSE)) {
+                branch.setElseBranch(true);
+            } else if (match(SqlTokenType.WHEN)) {
+                branch.setWhen(parseExpr());
+                expect(SqlTokenType.THEN);
+            }
+            expect(SqlTokenType.INTO);
+            match(SqlTokenType.TABLE);
+            branch.setTable(SqlTable.of(parseName()));
+            if (match(SqlTokenType.LPAREN) && !isQueryStart()) {
+                if (!is(SqlTokenType.RPAREN)) {
+                    do {
+                        branch.columns().add(parseName());
+                    } while (match(SqlTokenType.COMMA));
+                }
+                expect(SqlTokenType.RPAREN);
+            }
+            expect(SqlTokenType.VALUES);
+            expect(SqlTokenType.LPAREN);
+            if (!is(SqlTokenType.RPAREN)) {
+                do {
+                    branch.values().add(parseExpr());
+                } while (match(SqlTokenType.COMMA));
+            }
+            expect(SqlTokenType.RPAREN);
+            insert.branches().add(branch);
+            if (branch.elseBranch()) {
+                break;
+            }
+        }
+        if (insert.branches().isEmpty()) {
+            throw error("expected INTO after INSERT ALL/FIRST");
+        }
+        if (is(SqlTokenType.SELECT) || is(SqlTokenType.WITH) || is(SqlTokenType.LPAREN)) {
+            insert.setQuery(parseStatement());
+        } else {
+            throw error("expected SELECT after INSERT ALL/FIRST branches");
+        }
+        return insert;
+    }
+
+    private void parseOnConflictOrDuplicate(SqlInsert insert) {
+        if (!match(SqlTokenType.ON)) {
+            return;
+        }
+        if (match(SqlTokenType.DUPLICATE)) {
+            expect(SqlTokenType.KEY);
+            expect(SqlTokenType.UPDATE);
+            parseAssignList(insert.duplicateUpdates());
+            return;
+        }
+        if (match(SqlTokenType.CONFLICT)) {
+            insert.setOnConflict(true);
+            if (match(SqlTokenType.LPAREN)) {
+                do {
+                    insert.conflictTarget().add(parseName());
+                } while (match(SqlTokenType.COMMA));
+                expect(SqlTokenType.RPAREN);
+            } else if (match(SqlTokenType.ON)) {
+                expect(SqlTokenType.CONSTRAINT);
+                insert.setConflictConstraint(parseName());
+            }
+            expect(SqlTokenType.DO);
+            if (match(SqlTokenType.NOTHING)) {
+                insert.setConflictDoNothing(true);
+            } else {
+                expect(SqlTokenType.UPDATE);
+                expect(SqlTokenType.SET);
+                parseAssignList(insert.duplicateUpdates());
+            }
+            return;
+        }
+        throw error("expected DUPLICATE KEY or CONFLICT after ON");
+    }
+
+    private void parseOutputClause(List<SqlExpr> target) {
+        if (!match(SqlTokenType.OUTPUT)) {
+            return;
+        }
+        do {
+            target.add(parseExpr());
+        } while (match(SqlTokenType.COMMA));
+        // OUTPUT … INTO @table / table — 暂不结构化，跳过 INTO 后的简单表名
+        if (match(SqlTokenType.INTO)) {
+            parseName();
+        }
     }
 
     private void parseValuesRows(SqlInsert insert) {
@@ -402,6 +488,10 @@ public final class SqlParser {
         update.setTable(parseJoinedTable());
         expect(SqlTokenType.SET);
         parseAssignList(update.setList());
+        parseOutputClause(update.output());
+        if (match(SqlTokenType.FROM)) {
+            update.setFrom(parseJoinedTable());
+        }
         if (match(SqlTokenType.WHERE)) {
             update.setWhere(parseExpr());
         }
@@ -415,6 +505,9 @@ public final class SqlParser {
         if (match(SqlTokenType.RETURNING)) {
             update.setReturning(parseExpr());
         }
+        if (update.output().isEmpty()) {
+            parseOutputClause(update.output());
+        }
         return update;
     }
 
@@ -424,12 +517,21 @@ public final class SqlParser {
         SqlDelete delete = new SqlDelete();
         if (match(SqlTokenType.FROM)) {
             delete.setTable(parseJoinedTable());
+            // PG: DELETE FROM t USING s WHERE …
+            if (match(SqlTokenType.USING)) {
+                delete.setFrom(parseJoinedTable());
+                delete.setUsingKeyword(true);
+            }
         } else if (identLike()) {
             delete.setTable(parseJoinedTable());
-            if (match(SqlTokenType.FROM) || match(SqlTokenType.USING)) {
+            if (match(SqlTokenType.USING)) {
+                delete.setFrom(parseJoinedTable());
+                delete.setUsingKeyword(true);
+            } else if (match(SqlTokenType.FROM)) {
                 delete.setFrom(parseJoinedTable());
             }
         }
+        parseOutputClause(delete.output());
         if (match(SqlTokenType.WHERE)) {
             delete.setWhere(parseExpr());
         }
@@ -442,6 +544,9 @@ public final class SqlParser {
         }
         if (match(SqlTokenType.RETURNING)) {
             delete.setReturning(parseExpr());
+        }
+        if (delete.output().isEmpty()) {
+            parseOutputClause(delete.output());
         }
         return delete;
     }
@@ -456,16 +561,40 @@ public final class SqlParser {
         expect(SqlTokenType.ON);
         merge.setOn(parseExpr());
         while (match(SqlTokenType.WHEN)) {
+            SqlMergeWhen when = new SqlMergeWhen();
             boolean not = match(SqlTokenType.NOT);
             expect(SqlTokenType.MATCHED);
+            if (not) {
+                if (match(SqlTokenType.BY)) {
+                    if (match(SqlTokenType.SOURCE)) {
+                        when.setKind(SqlMergeWhen.MatchKind.NOT_MATCHED_BY_SOURCE);
+                    } else {
+                        expect(SqlTokenType.TARGET);
+                        when.setKind(SqlMergeWhen.MatchKind.NOT_MATCHED_BY_TARGET);
+                    }
+                } else {
+                    when.setKind(SqlMergeWhen.MatchKind.NOT_MATCHED);
+                }
+            } else {
+                when.setKind(SqlMergeWhen.MatchKind.MATCHED);
+                if (match(SqlTokenType.BY)) {
+                    // WHEN MATCHED BY TARGET — 罕见，按 MATCHED 处理
+                    match(SqlTokenType.TARGET);
+                    match(SqlTokenType.SOURCE);
+                }
+            }
+            if (match(SqlTokenType.AND)) {
+                when.setAndPredicate(parseExpr());
+            }
             expect(SqlTokenType.THEN);
-            if (!not && match(SqlTokenType.UPDATE)) {
+            if (match(SqlTokenType.UPDATE)) {
                 SqlUpdate upd = new SqlUpdate();
                 expect(SqlTokenType.SET);
                 parseAssignList(upd.setList());
-                merge.setUpdate(upd);
-            } else if ((not || is(SqlTokenType.INSERT)) && match(SqlTokenType.INSERT)) {
+                when.setUpdate(upd);
+            } else if (match(SqlTokenType.INSERT)) {
                 SqlInsert ins = new SqlInsert();
+                match(SqlTokenType.INTO);
                 if (match(SqlTokenType.LPAREN)) {
                     do {
                         ins.columns().add(parseName());
@@ -474,11 +603,15 @@ public final class SqlParser {
                 }
                 expect(SqlTokenType.VALUES);
                 parseValuesRows(ins);
-                merge.setInsert(ins);
+                when.setInsert(ins);
             } else if (match(SqlTokenType.DELETE)) {
-                merge.setDeleteWhere(SqlLiteral.of(SqlLiteral.Kind.BOOLEAN, "true"));
+                when.setDelete(true);
+            } else {
+                throw error("expected UPDATE, INSERT or DELETE after THEN");
             }
+            merge.whens().add(when);
         }
+        parseOutputClause(merge.output());
         return merge;
     }
 
@@ -1089,6 +1222,9 @@ public final class SqlParser {
             case FROM:
             case WINDOW:
             case APPLY:
+            case OUTPUT:
+            case WHEN:
+            case MATCHED:
                 return true;
             default:
                 return false;

@@ -1,5 +1,9 @@
 package com.alianga.jkit.sql;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 import com.alianga.jkit.sql.ast.SqlBinaryExpr;
 import com.alianga.jkit.sql.ast.SqlBinaryOp;
 import com.alianga.jkit.sql.ast.SqlDdlStatement;
@@ -8,6 +12,8 @@ import com.alianga.jkit.sql.ast.SqlFunctionExpr;
 import com.alianga.jkit.sql.ast.SqlFunctionTable;
 import com.alianga.jkit.sql.ast.SqlInsert;
 import com.alianga.jkit.sql.ast.SqlJoin;
+import com.alianga.jkit.sql.ast.SqlMerge;
+import com.alianga.jkit.sql.ast.SqlMergeWhen;
 import com.alianga.jkit.sql.ast.SqlOverExpr;
 import com.alianga.jkit.sql.ast.SqlSelect;
 import com.alianga.jkit.sql.ast.SqlSelectItem;
@@ -20,11 +26,6 @@ import com.alianga.jkit.sql.ast.SqlWindowDefinition;
 import org.junit.Test;
 
 import java.util.List;
-
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
 
 /**
  * SQL 解析器功能与兼容性测试。
@@ -338,8 +339,6 @@ public class SqlParserTest {
         assertEquals("t", stat.tableNames().get(0));
     }
 
-
-
     /**
      * P0.3：同一表 INSERT…SELECT 同时记写与读。
      */
@@ -528,8 +527,6 @@ public class SqlParserTest {
         assertEquals(SqlJoin.Type.OUTER_APPLY, ((SqlJoin) again2.from()).joinType());
     }
 
-
-
     /**
      * WINDOW 继承另一窗口名：{@code w2 AS (w ORDER BY b)} / {@code w3 AS (w)}。
      */
@@ -628,7 +625,6 @@ public class SqlParserTest {
         SqlSelect again2 = (SqlSelect) SQL.parse(f2, SqlDialect.POSTGRES);
         assertEquals(2, ((SqlValuesTable) again2.from()).columnAliases().size());
     }
-
 
     /**
      * P1.3：GROUP_CONCAT / STRING_AGG 的 ORDER BY、SEPARATOR、WITHIN GROUP。
@@ -812,5 +808,186 @@ public class SqlParserTest {
         SQL.parse(f3);
     }
 
+    /**
+     * P1.4：Oracle INSERT ALL / INSERT FIRST。
+     */
+    @Test
+    public void parseOracleInsertAllFirst() {
+        SqlInsert all = (SqlInsert) SQL.parse(
+                "INSERT ALL INTO t1 (id, name) VALUES (s.id, s.name) "
+                        + "INTO t2 (id) VALUES (s.id) SELECT id, name FROM src s",
+                SqlDialect.ORACLE);
+        assertTrue(all.insertAll());
+        assertEquals(2, all.branches().size());
+        assertEquals("t1", all.branches().get(0).table().name().simpleName());
+        assertNotNull(all.query());
+        String f1 = SQL.toSqlString(all, SqlDialect.ORACLE);
+        assertTrue(f1, f1.contains("INSERT ALL"));
+        assertTrue(f1, f1.contains("INTO t1"));
+        SQL.parse(f1, SqlDialect.ORACLE);
+
+        SqlInsert first = (SqlInsert) SQL.parse(
+                "INSERT FIRST WHEN id > 10 THEN INTO hi (id) VALUES (id) "
+                        + "WHEN id > 0 THEN INTO mid (id) VALUES (id) "
+                        + "ELSE INTO lo (id) VALUES (id) SELECT id FROM src",
+                SqlDialect.ORACLE);
+        assertTrue(first.insertFirst());
+        assertEquals(3, first.branches().size());
+        assertTrue(first.branches().get(2).elseBranch());
+        assertNotNull(first.branches().get(0).when());
+        String f2 = SQL.toSqlString(first, SqlDialect.ORACLE);
+        assertTrue(f2, f2.contains("INSERT FIRST"));
+        assertTrue(f2, f2.contains("ELSE"));
+        SQL.parse(f2, SqlDialect.ORACLE);
+    }
+
+    /**
+     * P1.4：PG INSERT … SELECT … ON CONFLICT（含 ON CONSTRAINT）。
+     */
+    @Test
+    public void parsePgInsertSelectOnConflict() {
+        SqlInsert nothing = (SqlInsert) SQL.parse(
+                "INSERT INTO t (id, name) SELECT id, name FROM s ON CONFLICT (id) DO NOTHING",
+                SqlDialect.POSTGRES);
+        assertNotNull(nothing.query());
+        assertTrue(nothing.onConflict());
+        assertTrue(nothing.conflictDoNothing());
+        String f1 = SQL.toSqlString(nothing, SqlDialect.POSTGRES);
+        assertTrue(f1, f1.contains("ON CONFLICT"));
+        assertTrue(f1, f1.contains("DO NOTHING"));
+        SQL.parse(f1, SqlDialect.POSTGRES);
+
+        SqlInsert upd = (SqlInsert) SQL.parse(
+                "INSERT INTO t (id, name) SELECT id, name FROM s "
+                        + "ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name",
+                SqlDialect.POSTGRES);
+        assertFalse(upd.conflictDoNothing());
+        assertEquals(1, upd.duplicateUpdates().size());
+        SQL.parse(SQL.toSqlString(upd, SqlDialect.POSTGRES), SqlDialect.POSTGRES);
+
+        SqlInsert cons = (SqlInsert) SQL.parse(
+                "INSERT INTO t (id) VALUES (1) ON CONFLICT ON CONSTRAINT t_pkey DO NOTHING",
+                SqlDialect.POSTGRES);
+        assertNotNull(cons.conflictConstraint());
+        assertEquals("t_pkey", cons.conflictConstraint().simpleName());
+        String f3 = SQL.toSqlString(cons, SqlDialect.POSTGRES);
+        assertTrue(f3, f3.contains("ON CONSTRAINT"));
+        SQL.parse(f3, SqlDialect.POSTGRES);
+    }
+
+    /**
+     * P1.4：PG UPDATE … FROM；DELETE … USING。
+     */
+    @Test
+    public void parsePgUpdateFromAndDeleteUsing() {
+        SqlUpdate upd = (SqlUpdate) SQL.parse(
+                "UPDATE t SET a = s.a FROM s WHERE t.id = s.id",
+                SqlDialect.POSTGRES);
+        assertNotNull(upd.from());
+        String f1 = SQL.toSqlString(upd, SqlDialect.POSTGRES);
+        assertTrue(f1, f1.contains("FROM"));
+        SQL.parse(f1, SqlDialect.POSTGRES);
+
+        SqlUpdate upd2 = (SqlUpdate) SQL.parse(
+                "UPDATE t SET a = s.a FROM s JOIN u ON s.uid = u.id WHERE t.id = s.id",
+                SqlDialect.POSTGRES);
+        assertNotNull(upd2.from());
+        SQL.parse(SQL.toSqlString(upd2, SqlDialect.POSTGRES), SqlDialect.POSTGRES);
+
+        SqlDelete del = (SqlDelete) SQL.parse(
+                "DELETE FROM t USING s WHERE t.id = s.id",
+                SqlDialect.POSTGRES);
+        assertTrue(del.usingKeyword());
+        assertNotNull(del.from());
+        String f2 = SQL.toSqlString(del, SqlDialect.POSTGRES);
+        assertTrue(f2, f2.contains("USING"));
+        assertTrue(f2, f2.contains("DELETE FROM"));
+        SQL.parse(f2, SqlDialect.POSTGRES);
+
+        SqlDelete del2 = (SqlDelete) SQL.parse(
+                "DELETE FROM t USING s, u WHERE t.id = s.id AND s.uid = u.id",
+                SqlDialect.POSTGRES);
+        assertTrue(del2.usingKeyword());
+        SQL.parse(SQL.toSqlString(del2, SqlDialect.POSTGRES), SqlDialect.POSTGRES);
+
+        // MySQL USING 多表删除仍可用
+        SqlDelete mysql = (SqlDelete) SQL.parse(
+                "DELETE t USING t JOIN s ON t.id = s.id WHERE s.flag = 1");
+        assertTrue(mysql.usingKeyword());
+        String f3 = SQL.toSqlString(mysql);
+        assertTrue(f3, f3.contains("USING"));
+        SQL.parse(f3);
+    }
+
+    /**
+     * P1.4：MERGE 多 WHEN MATCHED AND、NOT MATCHED BY SOURCE。
+     */
+    @Test
+    public void parseMergeMultipleWhenAndBySource() {
+        SqlMerge merge = (SqlMerge) SQL.parse(
+                "MERGE INTO t USING s ON t.id = s.id "
+                        + "WHEN MATCHED AND t.flag = 1 THEN UPDATE SET t.a = s.a "
+                        + "WHEN MATCHED AND t.flag = 0 THEN DELETE "
+                        + "WHEN NOT MATCHED THEN INSERT (id, a) VALUES (s.id, s.a) "
+                        + "WHEN NOT MATCHED BY SOURCE THEN DELETE");
+        assertEquals(4, merge.whens().size());
+        assertEquals(SqlMergeWhen.MatchKind.MATCHED, merge.whens().get(0).kind());
+        assertNotNull(merge.whens().get(0).andPredicate());
+        assertTrue(merge.whens().get(1).delete());
+        assertEquals(SqlMergeWhen.MatchKind.NOT_MATCHED, merge.whens().get(2).kind());
+        assertEquals(SqlMergeWhen.MatchKind.NOT_MATCHED_BY_SOURCE, merge.whens().get(3).kind());
+        String f = SQL.toSqlString(merge);
+        assertTrue(f, f.contains("AND"));
+        assertTrue(f, f.contains("BY SOURCE"));
+        assertFalse(f, f.contains("INSERT INTO ("));
+        SQL.parse(f);
+
+        SqlMerge m2 = (SqlMerge) SQL.parse(
+                "MERGE INTO tgt USING src ON tgt.id = src.id "
+                        + "WHEN NOT MATCHED BY TARGET THEN INSERT (id) VALUES (src.id) "
+                        + "WHEN MATCHED THEN UPDATE SET tgt.n = src.n");
+        assertEquals(SqlMergeWhen.MatchKind.NOT_MATCHED_BY_TARGET, m2.whens().get(0).kind());
+        SQL.parse(SQL.toSqlString(m2));
+    }
+
+    /**
+     * P1.4：SQL Server OUTPUT INSERTED.* / DELETED.*。
+     */
+    @Test
+    public void parseSqlServerOutputClause() {
+        SqlInsert ins = (SqlInsert) SQL.parse(
+                "INSERT INTO t (id, name) OUTPUT INSERTED.id, INSERTED.name VALUES (1, 'a')",
+                SqlDialect.SQLSERVER);
+        assertEquals(2, ins.output().size());
+        String f1 = SQL.toSqlString(ins, SqlDialect.SQLSERVER);
+        assertTrue(f1, f1.contains("OUTPUT"));
+        assertTrue(f1, f1.contains("INSERTED"));
+        SQL.parse(f1, SqlDialect.SQLSERVER);
+
+        SqlUpdate upd = (SqlUpdate) SQL.parse(
+                "UPDATE t SET name = 'x' OUTPUT INSERTED.name, DELETED.name WHERE id = 1",
+                SqlDialect.SQLSERVER);
+        assertEquals(2, upd.output().size());
+        SQL.parse(SQL.toSqlString(upd, SqlDialect.SQLSERVER), SqlDialect.SQLSERVER);
+
+        SqlDelete del = (SqlDelete) SQL.parse(
+                "DELETE FROM t OUTPUT DELETED.* WHERE id = 1",
+                SqlDialect.SQLSERVER);
+        assertEquals(1, del.output().size());
+        String f3 = SQL.toSqlString(del, SqlDialect.SQLSERVER);
+        assertTrue(f3, f3.contains("DELETED"));
+        SQL.parse(f3, SqlDialect.SQLSERVER);
+
+        SqlMerge merge = (SqlMerge) SQL.parse(
+                "MERGE INTO t USING s ON t.id = s.id "
+                        + "WHEN MATCHED THEN UPDATE SET t.a = s.a "
+                        + "WHEN NOT MATCHED THEN INSERT (id, a) VALUES (s.id, s.a) "
+                        + "OUTPUT INSERTED.*, DELETED.*",
+                SqlDialect.SQLSERVER);
+        assertEquals(2, merge.output().size());
+        String f4 = SQL.toSqlString(merge, SqlDialect.SQLSERVER);
+        assertTrue(f4, f4.contains("OUTPUT"));
+        SQL.parse(f4, SqlDialect.SQLSERVER);
+    }
 
 }

@@ -14,10 +14,12 @@ import java.util.List;
 public final class SqlDelete extends SqlStatement {
     private SqlTableSource table;
     private SqlTableSource from;
+    private boolean usingKeyword;
     private SqlExpr where;
     private SqlLimit limit;
     private final List<SqlOrderByItem> orderBy = new ArrayList<SqlOrderByItem>(2);
     private SqlExpr returning;
+    private final List<SqlExpr> output = new ArrayList<SqlExpr>(2);
 
     /**
      * {@inheritDoc}
@@ -50,7 +52,7 @@ public final class SqlDelete extends SqlStatement {
     }
 
     /**
-     * @return DELETE ... FROM / USING
+     * @return DELETE ... FROM / USING 附加表源
      */
     public SqlTableSource from() {
         return from;
@@ -113,6 +115,27 @@ public final class SqlDelete extends SqlStatement {
     }
 
     /**
+     * @return 附加表源是否用 USING 关键字（PG）；false 时回写 FROM（MySQL 多表删除）
+     */
+    public boolean usingKeyword() {
+        return usingKeyword;
+    }
+
+    /**
+     * @param usingKeyword USING
+     */
+    public void setUsingKeyword(boolean usingKeyword) {
+        this.usingKeyword = usingKeyword;
+    }
+
+    /**
+     * @return SQL Server OUTPUT
+     */
+    public List<SqlExpr> output() {
+        return output;
+    }
+
+    /**
      * {@inheritDoc}
      */
     @Override
@@ -124,5 +147,6 @@ public final class SqlDelete extends SqlStatement {
         children(visitor, orderBy);
         child(visitor, limit);
         child(visitor, returning);
+        children(visitor, output);
     }
 }
