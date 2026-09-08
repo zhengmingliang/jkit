@@ -115,10 +115,10 @@ HTTP（含 SSE merge、curl 执行、负载均衡、Nacos）、JSON、YAML、配
 | CREATE TABLE ENGINE / CHARSET / COLLATE / COMMENT | ✅ 结构化；PARTITION 等仍 `tail` |
 | ALTER ADD/DROP INDEX、RENAME TO | ✅ 结构化并可 format；ADD UNIQUE INDEX 亦支持 |
 | FOR UPDATE OF … NOWAIT / SKIP LOCKED | ✅ `forUpdateOf` + `forUpdateWait`；未知残余仍可 `forUpdateTail` |
-| ALTER CHANGE 全列定义 / ADD CONSTRAINT | 未做（仍 tail / 列名） |
-| GRANT / SHOW CREATE VIEW/DATABASE | 未做（本 pass 未扩） |
-| WITHIN GROUP order-by | 可选，本 pass 未做（仍 `aggOption` 字符串） |
-| CREATE TABLE 表级 FOREIGN KEY 引用表 | 未做 |
+| ALTER CHANGE 全列定义 / ADD CONSTRAINT | ✅ CHANGE/MODIFY → columns + columnDefinition；ADD CONSTRAINT/FK/PK/UNIQUE/CHECK |
+| GRANT / SHOW CREATE VIEW/DATABASE | ✅ GRANT 抽 privileges + 对象名；SHOW CREATE VIEW/DATABASE 仍未扩 |
+| WITHIN GROUP order-by | 可选，仍 `aggOption` 字符串（STRING_AGG 结构化已有） |
+| CREATE TABLE 表级 FOREIGN KEY 引用表 | ✅ `referencedTables`（format 仍主要回写列名） |
 
 验收三条（ADD INDEX + ENGINE + SKIP LOCKED）✅。
 
@@ -311,6 +311,6 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 6. 把失败 SQL 追加进 `SqlGoldenCorpusTest` 和 `SqlParserCompareTest` 的 CORPUS。
 7. P0.1 拆 Parser（行为稳定后再拆，避免和语法扩展搅在一起）。
 8. P2/P3.2 与后 P3（toString/Dialect/分页/SqlBuilder）已完成；lexer 短 ident intern 仍延期。
-9. 余量：P0.1 拆 Parser；P0.4 余量；tools-test 表名集合对比。
+9. 余量：P0.1 拆 Parser；SHOW CREATE VIEW/DATABASE；WITHIN GROUP 余量；tools-test 表名集合对比；CREATE TABLE 完整列定义回写。
 
 每完成一块：补 `@since 2.1.0`、更新 `docs/sql.md` 覆盖表、在 `CHANGELOG.md` 的 `2.1.0 - unreleased` 追加条目。不要把父 POM 版本改成 2.1.0，除非用户明确说要发版。

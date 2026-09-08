@@ -798,7 +798,7 @@ public final class SqlParser {
             if (is(SqlTokenType.PRIMARY) || is(SqlTokenType.UNIQUE) || is(SqlTokenType.KEY)
                     || is(SqlTokenType.CONSTRAINT) || is(SqlTokenType.INDEX)
                     || is(SqlTokenType.FOREIGN) || is(SqlTokenType.CHECK)) {
-                skipBalancedComma(depth);
+                extractForeignKeyReferences(ddl, depth);
             } else if (identLike()) {
                 ddl.columns().add(parseName());
                 skipBalancedComma(depth);
@@ -806,6 +806,33 @@ public final class SqlParser {
                 skipBalancedComma(depth);
             }
         } while (match(SqlTokenType.COMMA));
+    }
+
+    /**
+     * 表级约束段：若含 {@code REFERENCES tbl} 则抽引用表，其余仍跳到同层逗号。
+     */
+    private void extractForeignKeyReferences(SqlDdlStatement ddl, int depth) {
+        while (!is(SqlTokenType.EOF) && !is(SqlTokenType.SEMICOLON)) {
+            if (is(SqlTokenType.LPAREN)) {
+                depth++;
+                next();
+            } else if (is(SqlTokenType.RPAREN)) {
+                depth--;
+                if (depth == 0) {
+                    return;
+                }
+                next();
+            } else if (is(SqlTokenType.COMMA) && depth == 1) {
+                return;
+            } else if (is(SqlTokenType.REFERENCES) && depth == 1) {
+                next();
+                if (identLike() || (token.type() != null && token.type().keyword())) {
+                    ddl.referencedTables().add(parseName());
+                }
+            } else {
+                next();
+            }
+        }
     }
 
     private void skipBalancedComma(int depth) {
@@ -873,6 +900,9 @@ public final class SqlParser {
             if (parseAlterIndexAction(ddl, action)) {
                 return ddl;
             }
+            if ("ADD".equals(action) && parseAlterConstraintAction(ddl)) {
+                return ddl;
+            }
             boolean columnKw = false;
             if (isIdent("COLUMN")) {
                 next();
@@ -881,10 +911,19 @@ public final class SqlParser {
             if (identLike()) {
                 ddl.columns().add(parseName());
             }
+            // CHANGE old_col new_col <definition…>
+            if ("CHANGE".equals(action) && identLike()) {
+                ddl.columns().add(parseName());
+            }
             ddl.setAlterAction(columnKw ? action + " COLUMN" : action);
             String rest = consumeRawUntilSemi();
             if (rest != null && !rest.isEmpty()) {
-                ddl.setTail(rest);
+                if ("CHANGE".equals(action) || "MODIFY".equals(action)
+                        || ("ADD".equals(action) && !ddl.columns().isEmpty())) {
+                    ddl.setColumnDefinition(rest);
+                } else {
+                    ddl.setTail(rest);
+                }
             }
         } else if (!is(SqlTokenType.SEMICOLON) && !is(SqlTokenType.EOF)) {
             ddl.setTail(consumeRawUntilSemi());
@@ -926,6 +965,84 @@ public final class SqlParser {
             String rest = consumeRawUntilSemi();
             if (rest != null && !rest.isEmpty()) {
                 ddl.setTail(rest);
+            }
+        }
+        return true;
+    }
+
+    /**
+     * 解析 ADD CONSTRAINT / ADD FOREIGN KEY / ADD PRIMARY KEY / ADD UNIQUE / ADD CHECK。
+     *
+     * @return 是否成功识别为约束动作
+     */
+    private boolean parseAlterConstraintAction(SqlDdlStatement ddl) {
+        boolean constraintKw = false;
+        if (is(SqlTokenType.CONSTRAINT)) {
+            next();
+            constraintKw = true;
+            if (identLike()) {
+                ddl.setConstraintName(parseName());
+            }
+        }
+        String ctype = null;
+        if (is(SqlTokenType.FOREIGN)) {
+            next();
+            expect(SqlTokenType.KEY);
+            ctype = "FOREIGN KEY";
+        } else if (is(SqlTokenType.PRIMARY)) {
+            next();
+            expect(SqlTokenType.KEY);
+            ctype = "PRIMARY KEY";
+        } else if (is(SqlTokenType.UNIQUE)) {
+            next();
+            if (is(SqlTokenType.KEY) || is(SqlTokenType.INDEX)) {
+                next();
+            }
+            ctype = "UNIQUE";
+        } else if (is(SqlTokenType.CHECK)) {
+            next();
+            ctype = "CHECK";
+        } else if (constraintKw) {
+            ddl.setAlterAction("ADD CONSTRAINT");
+            String rest = consumeRawUntilSemi();
+            if (rest != null && !rest.isEmpty()) {
+                ddl.setTail(rest);
+            }
+            return true;
+        } else {
+            return false;
+        }
+        ddl.setConstraintType(ctype);
+        ddl.setAlterAction(constraintKw ? "ADD CONSTRAINT" : "ADD " + ctype);
+        if (match(SqlTokenType.LPAREN)) {
+            if ("CHECK".equals(ctype)) {
+                String inner = skipBalancedParensContent();
+                ddl.setTail("(" + inner + ")");
+            } else {
+                do {
+                    ddl.indexColumns().add(parseName());
+                    while (!is(SqlTokenType.COMMA) && !is(SqlTokenType.RPAREN)
+                            && !is(SqlTokenType.SEMICOLON) && !is(SqlTokenType.EOF)) {
+                        next();
+                    }
+                } while (match(SqlTokenType.COMMA));
+                expect(SqlTokenType.RPAREN);
+            }
+        }
+        if (is(SqlTokenType.REFERENCES)) {
+            next();
+            if (identLike() || (token.type() != null && token.type().keyword())) {
+                ddl.referencedTables().add(parseName());
+            }
+        }
+        if (!is(SqlTokenType.SEMICOLON) && !is(SqlTokenType.EOF)) {
+            String rest = consumeRawUntilSemi();
+            if (rest != null && !rest.isEmpty()) {
+                if (ddl.tail() == null || ddl.tail().isEmpty()) {
+                    ddl.setTail(rest);
+                } else {
+                    ddl.setTail(ddl.tail() + " " + rest);
+                }
             }
         }
         return true;
@@ -1281,10 +1398,51 @@ public final class SqlParser {
     }
 
     private SqlStatement parseGrant() {
+        expect(SqlTokenType.GRANT);
         SqlSimpleStatement stmt = new SqlSimpleStatement();
         stmt.setStatementType(SqlStatementType.GRANT);
-        stmt.setText(token.text() + " " + consumeRawUntilSemi());
+        StringBuilder priv = new StringBuilder();
+        while (!is(SqlTokenType.ON) && !is(SqlTokenType.TO) && !is(SqlTokenType.EOF)
+                && !is(SqlTokenType.SEMICOLON) && !is(SqlTokenType.GO)) {
+            if (priv.length() > 0) {
+                priv.append(' ');
+            }
+            priv.append(token.text());
+            next();
+        }
+        stmt.setPrivileges(priv.toString().trim());
+        if (match(SqlTokenType.ON)) {
+            stmt.setName(parseGrantObject());
+        }
+        if (!is(SqlTokenType.SEMICOLON) && !is(SqlTokenType.EOF) && !is(SqlTokenType.GO)) {
+            String rest = consumeRawUntilSemi();
+            if (rest != null && !rest.isEmpty()) {
+                stmt.setText(rest);
+            }
+        }
         return stmt;
+    }
+
+    /**
+     * GRANT 对象：{@code *.*} / {@code db.*} / {@code db.table} / 普通名。
+     */
+    private SqlIdentifier parseGrantObject() {
+        if (match(SqlTokenType.STAR)) {
+            SqlIdentifier id = SqlIdentifier.of("*");
+            if (match(SqlTokenType.DOT)) {
+                if (match(SqlTokenType.STAR)) {
+                    id.addName("*");
+                } else if (identLike() || (token.type() != null && token.type().keyword())) {
+                    id.addName(unquote(consumeIdentRaw()));
+                }
+            }
+            return id;
+        }
+        SqlIdentifier id = parseName();
+        if (match(SqlTokenType.DOT) && match(SqlTokenType.STAR)) {
+            id.addName("*");
+        }
+        return id;
     }
 
     private SqlTableSource parseJoinedTable() {

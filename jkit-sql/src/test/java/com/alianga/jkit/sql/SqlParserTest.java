@@ -1677,4 +1677,90 @@ public class SqlParserTest {
         assertTrue(((SqlSimpleStatement) all.get(2)).text().toUpperCase().contains("DEALLOCATE"));
     }
 
+
+    /**
+     * P0.4 余量：ALTER CHANGE 抽旧/新列名与列定义。
+     */
+    @Test
+    public void alterChangeColumnDefinition() {
+        SqlDdlStatement ddl = (SqlDdlStatement) SQL.parse(
+                "ALTER TABLE t CHANGE COLUMN old_c new_c INT NOT NULL DEFAULT 0");
+        assertEquals("CHANGE COLUMN", ddl.alterAction());
+        assertEquals(2, ddl.columns().size());
+        assertEquals("old_c", ddl.columns().get(0).qualifiedName());
+        assertEquals("new_c", ddl.columns().get(1).qualifiedName());
+        assertNotNull(ddl.columnDefinition());
+        assertTrue(ddl.columnDefinition(), ddl.columnDefinition().toUpperCase().contains("INT"));
+        String out = SQL.toSqlString(ddl);
+        assertTrue(out, out.contains("CHANGE"));
+        assertTrue(out, out.contains("old_c") && out.contains("new_c"));
+        SqlDdlStatement again = (SqlDdlStatement) SQL.parse(out);
+        assertEquals("old_c", again.columns().get(0).qualifiedName());
+        assertEquals("new_c", again.columns().get(1).qualifiedName());
+        assertNotNull(again.columnDefinition());
+    }
+
+    /**
+     * P0.4 余量：ALTER ADD CONSTRAINT FOREIGN KEY + 引用表。
+     */
+    @Test
+    public void alterAddConstraintForeignKey() {
+        SqlDdlStatement ddl = (SqlDdlStatement) SQL.parse(
+                "ALTER TABLE child ADD CONSTRAINT fk_parent FOREIGN KEY (pid) REFERENCES parent (id)");
+        assertEquals("ADD CONSTRAINT", ddl.alterAction());
+        assertEquals("fk_parent", ddl.constraintName().qualifiedName());
+        assertEquals("FOREIGN KEY", ddl.constraintType());
+        assertEquals(1, ddl.indexColumns().size());
+        assertEquals("pid", ddl.indexColumns().get(0).qualifiedName());
+        assertEquals(1, ddl.referencedTables().size());
+        assertEquals("parent", ddl.referencedTables().get(0).qualifiedName());
+        String out = SQL.toSqlString(ddl);
+        assertTrue(out, out.contains("FOREIGN KEY"));
+        assertTrue(out, out.contains("REFERENCES"));
+        SqlDdlStatement again = (SqlDdlStatement) SQL.parse(out);
+        assertEquals("parent", again.referencedTables().get(0).qualifiedName());
+        assertTrue(SQL.tables(ddl).toString(), SQL.tables(ddl).contains("parent"));
+    }
+
+    /**
+     * P0.4 余量：CREATE TABLE 表级 FOREIGN KEY 抽引用表。
+     */
+    @Test
+    public void createTableForeignKeyReferencedTable() {
+        SqlDdlStatement ddl = (SqlDdlStatement) SQL.parse(
+                "CREATE TABLE child (id INT, pid INT, FOREIGN KEY (pid) REFERENCES parent(id))");
+        assertEquals(2, ddl.columns().size());
+        assertEquals(1, ddl.referencedTables().size());
+        assertEquals("parent", ddl.referencedTables().get(0).qualifiedName());
+        assertTrue(SQL.tables(ddl).toString().toLowerCase(),
+                SQL.tables(ddl).toString().toLowerCase().contains("parent"));
+    }
+
+    /**
+     * P0.4 余量：GRANT 抽权限与对象名。
+     */
+    @Test
+    public void grantPrivilegesAndObject() {
+        SqlSimpleStatement g = (SqlSimpleStatement) SQL.parse(
+                "GRANT SELECT, INSERT ON db.t TO 'u'@'%'");
+        assertEquals(com.alianga.jkit.sql.ast.SqlStatementType.GRANT, g.type());
+        assertNotNull(g.privileges());
+        assertTrue(g.privileges(), g.privileges().toUpperCase().contains("SELECT"));
+        assertTrue(g.privileges(), g.privileges().toUpperCase().contains("INSERT"));
+        assertEquals("db.t", g.name().qualifiedName());
+        assertNotNull(g.text());
+        assertTrue(g.text(), g.text().toUpperCase().contains("TO"));
+        String out = SQL.toSqlString(g);
+        assertTrue(out, out.toUpperCase().startsWith("GRANT"));
+        assertTrue(out, out.toUpperCase().contains("ON"));
+        SqlSimpleStatement again = (SqlSimpleStatement) SQL.parse(out);
+        assertEquals("db.t", again.name().qualifiedName());
+        assertTrue(again.privileges().toUpperCase().contains("SELECT"));
+
+        SqlSimpleStatement all = (SqlSimpleStatement) SQL.parse(
+                "GRANT ALL PRIVILEGES ON *.* TO admin");
+        assertTrue(all.privileges().toUpperCase(), all.privileges().toUpperCase().contains("ALL"));
+        assertEquals("*.*", all.name().qualifiedName());
+    }
+
 }

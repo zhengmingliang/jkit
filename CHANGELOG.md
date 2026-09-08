@@ -44,6 +44,12 @@
 
 - `jkit-sql`：MySQL 表分区限定 `FROM t PARTITION (p0, p1)`（`SqlTable.partitions`，format 往返；不再误当别名）。
 
+### 新增
+
+- `jkit-sql` P0.4 余量：`ALTER … CHANGE/MODIFY` 抽旧/新列名 + `columnDefinition`；`ALTER ADD CONSTRAINT`（FOREIGN/PRIMARY/UNIQUE/CHECK）与引用表；`CREATE TABLE` 表级 `FOREIGN KEY … REFERENCES` 抽引用表（`referencedTables`）；`GRANT` 抽 `privileges` + 对象名（`*.*`/`db.*`/`db.t`）。
+- `jkit-sql`：`SqlBuilder.leftJoin`/`join`/`groupBy`/`having`。
+
+
 ### 修复
 
 - `jkit-sql`：仅注释/空白输入不再抛 `empty SQL`，归为 `SqlSimpleStatement.OTHER`（空 text）。

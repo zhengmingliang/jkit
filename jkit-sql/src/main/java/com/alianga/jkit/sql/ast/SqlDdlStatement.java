@@ -7,7 +7,8 @@ import java.util.List;
 
 /**
  * CREATE / DROP / ALTER 等 DDL。抽取对象名；支持 {@code OR REPLACE}、VIEW / PROCEDURE 等；
- * CREATE TABLE 解析 ENGINE/CHARSET/COMMENT，ALTER 解析 ADD/DROP INDEX 与 RENAME TO，
+ * CREATE TABLE 解析 ENGINE/CHARSET/COMMENT 与表级 FOREIGN KEY 引用表；
+ * ALTER 解析 ADD/DROP INDEX、RENAME TO、CHANGE/MODIFY 列定义、ADD CONSTRAINT；
  * 过程体等可留在 {@link #tail()}。
  *
  * @author 郑明亮
@@ -30,6 +31,10 @@ public final class SqlDdlStatement extends SqlStatement {
     private SqlIdentifier indexName;
     private final List<SqlIdentifier> indexColumns = new ArrayList<SqlIdentifier>(4);
     private SqlIdentifier renameTo;
+    private String columnDefinition;
+    private SqlIdentifier constraintName;
+    private String constraintType;
+    private final List<SqlIdentifier> referencedTables = new ArrayList<SqlIdentifier>(1);
     private String tail;
 
     /**
@@ -262,6 +267,62 @@ public final class SqlDdlStatement extends SqlStatement {
     }
 
     /**
+     * @return CHANGE/MODIFY/ADD COLUMN 的类型与列属性原文（不含列名）
+     * @since 2.1.0
+     */
+    public String columnDefinition() {
+        return columnDefinition;
+    }
+
+    /**
+     * @param columnDefinition 列定义原文
+     * @since 2.1.0
+     */
+    public void setColumnDefinition(String columnDefinition) {
+        this.columnDefinition = columnDefinition;
+    }
+
+    /**
+     * @return ADD CONSTRAINT 约束名，可空
+     * @since 2.1.0
+     */
+    public SqlIdentifier constraintName() {
+        return constraintName;
+    }
+
+    /**
+     * @param constraintName 约束名
+     * @since 2.1.0
+     */
+    public void setConstraintName(SqlIdentifier constraintName) {
+        this.constraintName = constraintName;
+    }
+
+    /**
+     * @return 约束类型，如 {@code FOREIGN KEY} / {@code PRIMARY KEY} / {@code UNIQUE} / {@code CHECK}
+     * @since 2.1.0
+     */
+    public String constraintType() {
+        return constraintType;
+    }
+
+    /**
+     * @param constraintType 约束类型
+     * @since 2.1.0
+     */
+    public void setConstraintType(String constraintType) {
+        this.constraintType = constraintType;
+    }
+
+    /**
+     * @return 表级 / ALTER FOREIGN KEY 引用的外表名
+     * @since 2.1.0
+     */
+    public List<SqlIdentifier> referencedTables() {
+        return referencedTables;
+    }
+
+    /**
      * @return 未建模的尾部原文
      */
     public String tail() {
@@ -286,6 +347,8 @@ public final class SqlDdlStatement extends SqlStatement {
         child(visitor, indexName);
         children(visitor, indexColumns);
         child(visitor, renameTo);
+        child(visitor, constraintName);
+        children(visitor, referencedTables);
         child(visitor, query);
     }
 }

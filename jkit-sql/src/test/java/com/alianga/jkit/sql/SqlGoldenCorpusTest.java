@@ -46,6 +46,10 @@ public class SqlGoldenCorpusTest {
                 {"mysql", "SELECT 1 FROM dual"},
                 {"mysql", "SELECT * FROM t"},
                 {"mysql", "SELECT * FROM t PARTITION (p0, p1) WHERE id > 0"},
+                {"mysql", "ALTER TABLE t CHANGE COLUMN old_c new_c INT NOT NULL"},
+                {"mysql", "ALTER TABLE child ADD CONSTRAINT fk_p FOREIGN KEY (pid) REFERENCES parent (id)"},
+                {"mysql", "GRANT SELECT, INSERT ON db.t TO u"},
+
                 {"mysql", "SELECT a FROM emp PARTITION (p2020) e WHERE e.id = 1"},
                 
                 {"mysql", "SELECT t.* FROM t"},

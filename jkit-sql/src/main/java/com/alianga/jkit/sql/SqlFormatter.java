@@ -762,6 +762,16 @@ public final class SqlFormatter {
             writeExpr(ddl.renameTo());
             return;
         }
+        if (ddl.constraintName() != null) {
+            sp();
+            writeExpr(ddl.constraintName());
+        }
+        if (ddl.constraintType() != null
+                && ddl.alterAction() != null
+                && ddl.alterAction().toUpperCase().contains("CONSTRAINT")) {
+            sp();
+            out.append(ddl.constraintType());
+        }
         if (ddl.indexName() != null) {
             sp();
             writeExpr(ddl.indexName());
@@ -772,9 +782,23 @@ public final class SqlFormatter {
             commaIdents(ddl.indexColumns());
             out.append(')');
         }
-        if (!ddl.columns().isEmpty() && ddl.indexName() == null) {
+        if (!ddl.columns().isEmpty() && ddl.indexName() == null
+                && ddl.constraintType() == null) {
+            // CHANGE old new … 用空格分隔；其余 ADD/DROP/MODIFY 列清单亦按空格（单列常见）
+            for (int i = 0; i < ddl.columns().size(); i++) {
+                sp();
+                writeExpr(ddl.columns().get(i));
+            }
+        }
+        if (!ddl.referencedTables().isEmpty()) {
             sp();
-            commaIdents(ddl.columns());
+            kw("REFERENCES");
+            sp();
+            writeExpr(ddl.referencedTables().get(0));
+        }
+        if (ddl.columnDefinition() != null) {
+            sp();
+            out.append(ddl.columnDefinition());
         }
         if (ddl.tail() != null) {
             sp();
@@ -825,6 +849,23 @@ public final class SqlFormatter {
                 out.append('(');
                 commaExprs(stmt.arguments());
                 out.append(')');
+            }
+            return;
+        }
+        if (stmt.type() == SqlStatementType.GRANT) {
+            if (stmt.privileges() != null && !stmt.privileges().isEmpty()) {
+                sp();
+                out.append(stmt.privileges());
+            }
+            if (stmt.name() != null) {
+                sp();
+                kw("ON");
+                sp();
+                writeExpr(stmt.name());
+            }
+            if (stmt.text() != null) {
+                sp();
+                out.append(stmt.text());
             }
             return;
         }

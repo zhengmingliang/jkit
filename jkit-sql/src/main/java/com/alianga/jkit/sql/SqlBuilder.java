@@ -7,6 +7,7 @@ import com.alianga.jkit.sql.ast.SqlDelete;
 import com.alianga.jkit.sql.ast.SqlExpr;
 import com.alianga.jkit.sql.ast.SqlIdentifier;
 import com.alianga.jkit.sql.ast.SqlInsert;
+import com.alianga.jkit.sql.ast.SqlJoin;
 import com.alianga.jkit.sql.ast.SqlLimit;
 import com.alianga.jkit.sql.ast.SqlLiteral;
 import com.alianga.jkit.sql.ast.SqlOrderByItem;
@@ -14,6 +15,7 @@ import com.alianga.jkit.sql.ast.SqlSelect;
 import com.alianga.jkit.sql.ast.SqlSelectItem;
 import com.alianga.jkit.sql.ast.SqlStatement;
 import com.alianga.jkit.sql.ast.SqlTable;
+import com.alianga.jkit.sql.ast.SqlTableSource;
 import com.alianga.jkit.sql.ast.SqlUpdate;
 
 import java.util.ArrayList;
@@ -29,6 +31,9 @@ import java.util.List;
  *         .from("users")
  *         .where("status = 1")
  *         .and("age > 18")
+ *         .leftJoin("orders", "users.id = orders.uid")
+ *         .groupBy("users.id")
+ *         .having("count(1) > 1")
  *         .orderBy("id")
  *         .limit(10)
  *         .toSql();
@@ -52,6 +57,9 @@ public final class SqlBuilder {
     private SqlTable table;
     private String tableAlias;
     private SqlExpr where;
+    private final List<SqlExpr> groupBy = new ArrayList<SqlExpr>(2);
+    private SqlExpr having;
+    private SqlTableSource fromSource;
     private final List<SqlOrderByItem> orderBy = new ArrayList<SqlOrderByItem>(2);
     private Long limitRows;
     private Long offsetRows;
@@ -150,6 +158,7 @@ public final class SqlBuilder {
      */
     public SqlBuilder from(String table) {
         this.table = SqlTable.of(ident(table));
+        this.fromSource = this.table;
         return this;
     }
 
@@ -202,6 +211,83 @@ public final class SqlBuilder {
             return this;
         }
         this.where = this.where == null ? predicate : andAll(this.where, predicate);
+        return this;
+    }
+
+    /**
+     * LEFT JOIN。
+     *
+     * @param table 右表
+     * @param onSql ON 谓词，如 {@code a.id = b.aid}
+     * @return this
+     * @since 2.1.0
+     */
+    public SqlBuilder leftJoin(String table, String onSql) {
+        return join(SqlJoin.Type.LEFT, table, null, onSql);
+    }
+
+    /**
+     * INNER JOIN。
+     *
+     * @param table 右表
+     * @param onSql ON 谓词
+     * @return this
+     * @since 2.1.0
+     */
+    public SqlBuilder join(String table, String onSql) {
+        return join(SqlJoin.Type.INNER, table, null, onSql);
+    }
+
+    /**
+     * JOIN（可指定类型与别名）。
+     *
+     * @param type 连接类型
+     * @param table 右表
+     * @param alias 右表别名，可空
+     * @param onSql ON 谓词
+     * @return this
+     * @since 2.1.0
+     */
+    public SqlBuilder join(SqlJoin.Type type, String table, String alias, String onSql) {
+        SqlTable right = SqlTable.of(ident(table));
+        if (alias != null && !alias.isEmpty()) {
+            right.setAlias(alias);
+        }
+        SqlJoin join = new SqlJoin();
+        join.setJoinType(type == null ? SqlJoin.Type.INNER : type);
+        join.setLeft(fromSource != null ? fromSource : this.table);
+        join.setRight(right);
+        join.setCondition(parsePredicate(onSql));
+        this.fromSource = join;
+        return this;
+    }
+
+    /**
+     * GROUP BY 列。
+     *
+     * @param columns 列名
+     * @return this
+     * @since 2.1.0
+     */
+    public SqlBuilder groupBy(String... columns) {
+        if (columns == null) {
+            return this;
+        }
+        for (int i = 0; i < columns.length; i++) {
+            this.groupBy.add(columnExpr(columns[i]));
+        }
+        return this;
+    }
+
+    /**
+     * HAVING 谓词。
+     *
+     * @param predicateSql 谓词片段
+     * @return this
+     * @since 2.1.0
+     */
+    public SqlBuilder having(String predicateSql) {
+        this.having = parsePredicate(predicateSql);
         return this;
     }
 
@@ -338,13 +424,19 @@ public final class SqlBuilder {
         for (int i = 0; i < selectItems.size(); i++) {
             select.addSelectItem(selectItems.get(i));
         }
-        if (table != null) {
-            if (tableAlias != null) {
-                table.setAlias(tableAlias);
-            }
+        if (tableAlias != null && table != null) {
+            table.setAlias(tableAlias);
+        }
+        if (fromSource != null) {
+            select.setFrom(fromSource);
+        } else if (table != null) {
             select.setFrom(table);
         }
         select.setWhere(where);
+        for (int i = 0; i < groupBy.size(); i++) {
+            select.groupBy().add(groupBy.get(i));
+        }
+        select.setHaving(having);
         for (int i = 0; i < orderBy.size(); i++) {
             select.orderBy().add(orderBy.get(i));
         }

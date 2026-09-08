@@ -21,6 +21,7 @@ public final class SqlSimpleStatement extends SqlStatement {
     private final List<SqlExpr> arguments = new ArrayList<SqlExpr>(2);
     private boolean withArguments;
     private String parseError;
+    private String privileges;
 
     /**
      * {@inheritDoc}
@@ -151,6 +152,22 @@ public final class SqlSimpleStatement extends SqlStatement {
      */
     public boolean hasParseError() {
         return parseError != null;
+    }
+
+    /**
+     * @return GRANT 权限列表原文，如 {@code SELECT, INSERT} / {@code ALL PRIVILEGES}
+     * @since 2.1.0
+     */
+    public String privileges() {
+        return privileges;
+    }
+
+    /**
+     * @param privileges 权限原文
+     * @since 2.1.0
+     */
+    public void setPrivileges(String privileges) {
+        this.privileges = privileges;
     }
 
     /**

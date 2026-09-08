@@ -166,6 +166,9 @@ public final class SqlSchemaStat {
                 for (int i = 0; i < ddl.names().size(); i++) {
                     addTable(ddl.names().get(i), ddl.type());
                 }
+                for (int i = 0; i < ddl.referencedTables().size(); i++) {
+                    addTable(ddl.referencedTables().get(i), SqlStatementType.SELECT);
+                }
                 return true;
             }
             if (node instanceof SqlSimpleStatement) {

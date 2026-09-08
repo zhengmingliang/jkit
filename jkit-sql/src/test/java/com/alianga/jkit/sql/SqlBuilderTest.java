@@ -110,4 +110,20 @@ public class SqlBuilderTest {
                 .toSql(SqlDialect.SQLSERVER);
         assertTrue(ss.toUpperCase(), ss.toUpperCase().contains("TOP"));
     }
+
+    @Test
+    public void leftJoinGroupByHaving() {
+        String sql = SqlBuilder.select("u.id", "count(1)")
+                .from("users", "u")
+                .leftJoin("orders", "u.id = orders.uid")
+                .groupBy("u.id")
+                .having("count(1) > 1")
+                .toSql();
+        String upper = sql.toUpperCase();
+        assertTrue(sql, upper.contains("LEFT"));
+        assertTrue(sql, upper.contains("JOIN"));
+        assertTrue(sql, upper.contains("GROUP BY"));
+        assertTrue(sql, upper.contains("HAVING"));
+        SQL.parse(sql);
+    }
 }
