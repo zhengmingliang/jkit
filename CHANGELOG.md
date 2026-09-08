@@ -34,6 +34,20 @@
 
 ## 版本记录
 
+## 2.1.0 - unreleased
+
+### 变更
+
+- `jkit-sql` P0.2：`parse → format → parse` 语义往返。修 `CREATE INDEX … ON t (cols)`、`SHOW COLUMNS/INDEX/CREATE TABLE`、`SET NAMES`（无等号）、`EXTRACT`/`TRIM`/`SUBSTRING`/`POSITION` 的 FROM/FOR/IN 回写；`SqlGoldenCorpusTest` 每条断言 type / tables（忽略大小写）/ isReadOnly。
+- `jkit-sql` P0.3：`SqlSchemaStat.getConditions()` / `getOrderByColumns()` / `getGroupByColumns()` 从 WHERE、JOIN ON、HAVING、ORDER BY、GROUP BY 收集紧凑 SQL；`getTables()` 改为 `Map<String, SqlTableAccess>`，同表可合并多种访问类型（`INSERT INTO t SELECT * FROM t` → `INSERT+SELECT`；嵌套 SELECT 记读）。
+- `jkit-sql` P0.4（验收最小集）：`FOR UPDATE OF … NOWAIT/SKIP LOCKED` 结构化（`forUpdateOf` + `forUpdateWait`）；CREATE TABLE `ENGINE` / `CHARSET` / `COLLATE` / `COMMENT` 进 AST（PARTITION 等仍 tail）；ALTER `ADD/DROP INDEX`、`RENAME TO` 结构化并可 format 回写。
+- 解析增强：`SELECT` 字符串别名（MySQL 下 `"别名"` / `'x'`）、`INSERT INTO TABLE t`（Hive 风格）。
+
+### 新增
+
+- `jkit-sql`：从 `icell/common-model` 测试收获语料 `common-model-sql-corpus.txt`（87 条可解析）+ `CommonModelSqlCorpusTest`；已知缺口见 `CommonModelSqlKnownGapsTest`（数字开头裸标识符、`<sheet>` 占位表名）。
+- 新模块 `com.alianga:jkit-sql`：零依赖手写 SQL 解析器（词法 `char[]` + 关键字开地址哈希，递归下降 AST）。入口 `SQL.parse` / `parseAll` / `format` / `toSqlString` / `tables` / `stat` / `addLimit` / `andWhere` / `replaceTable` / `parameters`。方言 MYSQL（默认，含 GBase/MariaDB）、POSTGRES、ORACLE、SQLSERVER、ANSI、H2。覆盖 DML（含 JOIN/UNION/CTE/ON DUPLICATE/ON CONFLICT）、窗口函数 `OVER`/`FILTER`、EXTRACT/TRIM/SUBSTRING、SHOW CREATE/COLUMNS 抽表名、常见 DDL。非法 SQL 抛 `SqlParseException`。模块内黄金集；与 Druid / JSqlParser 的对比在上级 `tools-test` 的 `SqlParserCompareTest`（不进本库依赖）。用法见 `docs/sql.md`。
+
 ## 2.0.1 - 2026-09-01
 
 日期格式化与 `ConvertUtils.toDate` 性能版本。常用日期路径不再每次 `new SimpleDateFormat`。
