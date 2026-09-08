@@ -36,7 +36,7 @@ NotificationChannel（渠道 SPI：id / name / supports / send）
 - **消息**与**配置**分离：同一渠道可配多套环境，一次业务告警可同时发多个渠道。标题/正文支持 `${key}` / `${a.b}` 模板，发送前替换。
 - **多消息类型**：`Message.text()` / `Message.markdown()` / `Message.html()` / `Message.actionCard()`（钉钉） / `Message.markdownV2()`（企微）；渠道声明自己支持的类型，不支持会在发送前抛 `IllegalArgumentException`。
 - **一次多渠道**：`NotificationManager.sendAll(message, targets)` 按 Map 顺序发送，部分失败仍返回各渠道 `SendResult`；`sendAllAggregated` 给出汇总。
-- **扩展新渠道**：实现 `NotificationChannel`，代码注册 `NotificationManager.get().register(...)`，或放 `META-INF/services/com.alianga.jkit.notify.NotificationChannel` SPI 文件，零改动核心。`unregister(id)` 可摘掉渠道（测试用完记得清）。
+- **扩展新渠道**：核心内置渠道由 `NotificationManager.defaults()` 代码注册；可选模块用 `META-INF/services/com.alianga.jkit.notify.NotificationChannel` SPI（如 `jkit-notify-extra`）。也可代码 `NotificationManager.get().register(...)`。同 id 后注册覆盖先注册。`unregister(id)` 可摘掉渠道（测试用完记得清）。
 
 ## 2. 快速开始
 
@@ -127,10 +127,10 @@ NotificationManager.send("webhook", Message.text("构建失败", "job #42"),
                 .payloadTemplate("{\"channel\":\"#ci\",\"text\":\"${title}: ${content}\"}")
                 .header("Authorization", "Bearer token"));
 
-// Slack（Incoming Webhook；频道用 EXTRA_GROUP，机器人名/颜色/跳转按钮走 extras）
+// Slack（Incoming Webhook；频道用 SlackChannel.EXTRA_CHANNEL；勿与 Bark EXTRA_GROUP 混用）
 NotificationManager.send("slack",
         Message.text("告警", "CPU 95%")
-                .extra(Message.EXTRA_GROUP, "#ops")
+                .extra(SlackChannel.EXTRA_CHANNEL, "#ops")
                 .extra(SlackChannel.EXTRA_COLOR, "danger")
                 .extra(Message.EXTRA_URL, "https://dash.example.com/42"),
         ChannelConfig.webhook("https://hooks.slack.com/services/T000/B000/XXX"));
@@ -151,7 +151,7 @@ NotificationManager.send("sms-aliyun", Message.text("验证码短信")
         ChannelConfig.ofToken("AccessKeyId")              // token = AccessKeyId
                 .secret("AccessKeySecret")
                 .name("短信签名")                           // name = 签名名称
-                .template("SMS_123456789")
+                .extra(AbstractSmsChannel.CFG_TEMPLATE, "SMS_123456789")
                 .to("13800000001,13800000002"));
 
 // 短信：腾讯云（有序参数，按模板 {1}{2} 顺序）
@@ -159,9 +159,9 @@ NotificationManager.send("sms-tencent", Message.text("验证码短信")
                 .extra(AbstractSmsChannel.EXTRA_SMS_PARAMS, "9527,5"),
         ChannelConfig.ofToken("SecretId")
                 .secret("SecretKey")
-                .appId("1400006666")                        // SdkAppId
+                .extra(AbstractSmsChannel.CFG_APP_ID, "1400006666")  // SdkAppId
                 .name("短信签名")
-                .template("1234567")
+                .extra(AbstractSmsChannel.CFG_TEMPLATE, "1234567")
                 .to("13800000001"));
 
 // 短信：云片（全文短信，不是模板 + 参数；签名在云片后台配置或写进正文）
@@ -173,9 +173,9 @@ NotificationManager.send("sms-huawei", Message.text("验证码短信")
                 .extra(AbstractSmsChannel.EXTRA_SMS_PARAMS, "9527,5"),
         ChannelConfig.ofToken("AppKey")
                 .secret("AppSecret")
-                .appId("8823120512345")                     // 短信通道号 sender
+                .extra(AbstractSmsChannel.CFG_APP_ID, "8823120512345")  // 通道号 sender
                 .name("签名名称")
-                .template("12345678")
+                .extra(AbstractSmsChannel.CFG_TEMPLATE, "12345678")
                 .webhookUrl("https://smsapi.cn-north-4.myhuaweicloud.com:443/sms/batchSendSmsV1")
                 .to("13800000001"));
 
@@ -196,13 +196,25 @@ Future<SendResult> future = NotificationManager.sendAsync("dingtalk", msg, cfg);
 | `webhook` | 通用 Webhook | `webhook` | TEXT / MARKDOWN / HTML | HTTP 2xx |
 | `slack`（`jkit-notify-extra`） | Slack | `webhook`（Incoming Webhook）或 `ofToken(bot token)`（chat.postMessage） | TEXT / MARKDOWN / HTML | 2xx 且（JSON 时）`ok==true` |
 | `telegram`（`jkit-notify-extra`） | Telegram Bot | `ofToken(bot token)` + `to(chat_id)` 或消息 `TelegramChannel.EXTRA_CHAT_ID` | TEXT / MARKDOWN / HTML；MARKDOWN 转 HTML 子集 | 2xx 且 `ok==true` |
-| `sms-aliyun`（`jkit-notify-extra`） | 阿里云短信 | `ofToken(AccessKeyId)` + `secret` + `name(签名)` + `template` + `to` | TEXT | `Code=="OK"` |
-| `sms-tencent`（`jkit-notify-extra`） | 腾讯云短信 | `ofToken(SecretId)` + `secret` + `appId(SdkAppId)` + `name(签名)` + `template` + `to` | TEXT | `SendStatusSet[0].Code=="Ok"` |
+| `sms-aliyun`（`jkit-notify-extra`） | 阿里云短信 | `ofToken(AccessKeyId)` + `secret` + `name(签名)` + `extra(CFG_TEMPLATE)` + `to` | TEXT | `Code=="OK"` |
+| `sms-tencent`（`jkit-notify-extra`） | 腾讯云短信 | `ofToken(SecretId)` + `secret` + `extra(CFG_APP_ID)` + `name(签名)` + `extra(CFG_TEMPLATE)` + `to` | TEXT | `SendStatusSet[0].Code=="Ok"` |
 | `sms-yunpian`（`jkit-notify-extra`） | 云片短信 | `ofToken(APIKEY)` + `to` | TEXT | `code==0` |
-| `sms-huawei`（`jkit-notify-extra`） | 华为云短信 | `ofToken(AppKey)` + `secret` + `appId(通道号)` + `template` + `webhook(接入地址)` + `to` | TEXT | `code=="000000"` |
+| `sms-huawei`（`jkit-notify-extra`） | 华为云短信 | `ofToken(AppKey)` + `secret` + `extra(CFG_APP_ID)` + `extra(CFG_TEMPLATE)` + `webhook(接入地址)` + `to` | TEXT | `code=="000000"` |
 | `smtp` | 邮件 | `smtp(host, port)` + `username`/`password`/`to`；可选 `cc`/`bcc`/`replyTo`/`autoSplit` | TEXT / HTML；MARKDOWN 转 HTML | DATA 后 `250` |
 
 注：飞书 MARKDOWN 会转成 interactive 卡片（lark_md）；SMTP 的 MARKDOWN 会转成 HTML。各平台的 @人规则、长度上限、限流与签名差异见第 5 节——这些是最容易踩的部分。
+
+## 4a. ChannelConfig.extra（短信等扩展配置）
+
+核心 `ChannelConfig` 不再暴露 SMS 专用字段（`template` / `appId` / `region`）。短信渠道通过 `ChannelConfig.extra(key, value)` 传入，键定义在 `AbstractSmsChannel`：
+
+| 键 | 说明 |
+| --- | --- |
+| `AbstractSmsChannel.CFG_TEMPLATE` | 模板 ID（阿里云 TemplateCode / 腾讯 TemplateId / 华为 templateId） |
+| `AbstractSmsChannel.CFG_APP_ID` | 腾讯 SdkAppId / 华为通道号 |
+| `AbstractSmsChannel.CFG_REGION` | 地域（腾讯默认 `ap-guangzhou`；阿里云可选） |
+
+短信**签名**仍用通用 `ChannelConfig.name(...)`（与 Slack 机器人显示名共用该字段，语义由渠道解释）。
 
 ## 4. 消息 extras（渠道参数）
 
@@ -214,7 +226,7 @@ Future<SendResult> future = NotificationManager.sendAsync("dingtalk", msg, cfg);
 | `Message.EXTRA_AT_USERIDS` | 钉钉 / 企微 | @指定 userid；企微 MARKDOWN 会把缺失的 `<@userid>` 补进正文 |
 | `Message.EXTRA_AT_ALL` | 钉钉 / 企微 | @所有人 |
 | `Message.EXTRA_SOUND` / `EXTRA_GROUP` / `EXTRA_LEVEL` / `EXTRA_URL` | Bark；钉钉 actionCard 用 `EXTRA_URL` | 铃声 / 分组 / 时效性 / 点击跳转 |
-| `SlackChannel.EXTRA_USERNAME` / `EXTRA_COLOR` | Slack | 机器人显示名 / 消息侧边条颜色（good/warning/danger/#RRGGBB） |
+| `SlackChannel.EXTRA_CHANNEL` / `EXTRA_USERNAME` / `EXTRA_COLOR` | Slack | 频道（#ops / C…；优先于临时兼容的 `Message.EXTRA_GROUP`）/ 机器人显示名 / 侧边条颜色 |
 | `NtfyChannel.EXTRA_TAGS` / `EXTRA_PRIORITY`；`Message.EXTRA_URL` | ntfy | 标签（emoji 短代码，逗号分隔或集合）/ 优先级（1-5 或 min/low/default/high/max/urgent）/ 点击跳转；`Message.EXTRA_GROUP` 可按条覆盖主题 |
 | `TelegramChannel.EXTRA_CHAT_ID` / `EXTRA_SILENT` / `EXTRA_THREAD_ID` | Telegram | 聊天目标 / 静默发送 / 话题 ID |
 | `AbstractSmsChannel.EXTRA_SMS_PARAMS` | 短信渠道 | 模板参数：有序渠道（腾讯/华为）填逗号分隔值；命名渠道（阿里云）填 `name=value` 对 |
@@ -344,8 +356,9 @@ public class MySmsChannel implements NotificationChannel {
 // 方式一：代码注册
 NotificationManager.get().register(new MySmsChannel());
 
-// 方式二：SPI（jar 内放 META-INF/services/com.alianga.jkit.notify.NotificationChannel）
-//        写上实现类全限定名，后注册的同 id 覆盖先注册的
+// 方式二：SPI（可选/extra 模块 jar 内放 META-INF/services/...NotificationChannel）
+//        写上实现类全限定名；核心内置由 defaults() 注册，不要再写进核心 SPI
+//        后注册的同 id 覆盖先注册的
 ```
 
 "POST JSON" 型渠道建议继承 `AbstractHttpChannel`，只实现 `buildUrl` / `buildPayload` / `isAccepted` 三个模板方法，超时、自定义 header、异常兜底由骨架统一处理。另有两个可选模板点：`classify(status, body)` 把平台错误码映射到 `FailureType`，`contentMaxBytes(message)` 声明长度上限。
@@ -379,3 +392,26 @@ if (r.isFailed() && r.isRetryable()) {
 
 - **网络/协议/业务失败**返回 `SendResult.fail`，不抛异常，适合重试与聚合。
 - **编程错误**直接抛 `IllegalArgumentException`：未知渠道、消息或配置为 `null`、正文为空、类型不被渠道支持、渠道必填配置缺失。这类错误在 SMTP 渠道也**前置到发起连接之前**，不会先连服务器再报错。
+
+## 9. 本机实发探测（可选）
+
+凭证与收件人/样例路径放在仓库外的 `~/jkit/application.yml`（模板：`jkit-notify/src/test/resources/jkit-application.yml.example`），**不要**把真实密钥提交进 git。
+
+**默认 `mvn test` 始终离线**：即使 yml 里已有 Server酱 / Telegram / 钉钉等密钥，也不会打到真实第三方。所有实发测试统一门控：
+
+1. 显式打开 `-Djkit.notify.live=true`（canonical；缺省关闭）
+2. 对应凭证齐全（缺 key 时 JUnit `Assume` 跳过，勿让 CI 因缺密钥失败）
+
+缺任一条件即跳过，不会实发。已去掉 `@Ignore`；yml 有密钥不够。
+
+涉及用例：`ServerChanBarkChannelTest#serverChanSend`、`SlackTelegramChannelTest#telegramMarkdownParseMode2`、`LiveNotifyTest`（钉钉/企微/飞书/SMTP 等，配置键 `dingtalk.*` / `wecom.*` / `feishu.*` / `smtp.*` / `live.recipientEmail` 等）。Ntfy / SMS 当前无实发用例（仅 mock）。
+
+```bash
+# 默认：离线单测（即使 ~/jkit/application.yml 有密钥也不实发）
+mvn -pl jkit-notify,jkit-notify-extra test
+
+# 手动实发：开关 + yml 凭证
+mvn -pl jkit-notify,jkit-notify-extra test -Djkit.notify.live=true
+# 或只跑 LiveNotifyTest
+mvn -pl jkit-notify test -Dtest=LiveNotifyTest -Djkit.notify.live=true
+```

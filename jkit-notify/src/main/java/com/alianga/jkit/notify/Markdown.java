@@ -105,9 +105,9 @@ final class Markdown {
         }
         html.append("<pre><code");
         if (!lang.isEmpty()) {
-            html.append(" class=\"language-").append(escapeHtml(lang)).append('"');
+            html.append(" class=\"language-").append(NotifyUtils.escapeHtml(lang)).append('"');
         }
-        html.append('>').append(escapeHtml(code.toString())).append("</code></pre>");
+        html.append('>').append(NotifyUtils.escapeHtml(code.toString())).append("</code></pre>");
         return i;
     }
 
@@ -307,7 +307,7 @@ final class Markdown {
             stripped.append(text.charAt(i));
             i++;
         }
-        String html = escapeHtml(stripped.toString());
+        String html = NotifyUtils.escapeHtml(stripped.toString());
         html = applyLinksAndImages(html);
         html = applyDelimited(html, "***", "<strong><em>", "</em></strong>");
         html = applyDelimited(html, "**", "<strong>", "</strong>");
@@ -316,7 +316,7 @@ final class Markdown {
         html = applyDelimited(html, "*", "<em>", "</em>");
         for (int n = codes.size() - 1; n >= 0; n--) {
             html = html.replace("\u0001" + n + "\u0001",
-                    "<code>" + escapeHtml(codes.get(n)) + "</code>");
+                    "<code>" + NotifyUtils.escapeHtml(codes.get(n)) + "</code>");
         }
         return html;
     }
@@ -407,34 +407,6 @@ final class Markdown {
             return "#";
         }
         return url;
-    }
-
-    private static String escapeHtml(String text) {
-        if (text == null || text.isEmpty()) {
-            return "";
-        }
-        StringBuilder out = new StringBuilder(text.length());
-        for (int i = 0; i < text.length(); i++) {
-            char c = text.charAt(i);
-            switch (c) {
-                case '&':
-                    out.append("&amp;");
-                    break;
-                case '<':
-                    out.append("&lt;");
-                    break;
-                case '>':
-                    out.append("&gt;");
-                    break;
-                case '"':
-                    out.append("&quot;");
-                    break;
-                default:
-                    out.append(c);
-                    break;
-            }
-        }
-        return out.toString();
     }
 
     private static boolean looksLikeTable(String[] lines, int i, int to) {

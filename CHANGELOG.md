@@ -38,9 +38,16 @@
 
 日期格式化与 `ConvertUtils.toDate` 性能版本。常用日期路径不再每次 `new SimpleDateFormat`。
 
+### 变更
+
+- `jkit-notify` 测试与渠道小优化：`AbstractHttpChannel` 抽出 `jsonOk` / `jsonIntEquals` / `jsonStringField` / `jsonCodeMessage`；`NotifyUtils.firstNonEmpty` / `escapeHtml` 去重；实发统一走 `~/jkit/application.yml`（`LiveNotifyTest` 去掉 sqlite/硬编码路径，Server酱/Telegram 去掉 `@Ignore`）。**所有实发用例**（`LiveNotifyTest`、`ServerChanBarkChannelTest#serverChanSend`、`SlackTelegramChannelTest#telegramMarkdownParseMode2`）统一经 `NotifyTestConfig.assumeLiveEnabled()` 门控：须 `-Djkit.notify.live=true` **且** yml 凭证齐全；默认 `mvn test` 即使有密钥也不实发。
+- `jkit-notify`：核心 `ChannelConfig` 移除 SMS 专用 `template`/`appId`/`region`；改用 `ChannelConfig.extra` + `AbstractSmsChannel.CFG_*`（`jkit-notify-extra`）。`name` 保留（Slack 显示名 / 短信签名）。
+- `jkit-notify-extra`：`SlackChannel.EXTRA_CHANNEL` 替代用 `Message.EXTRA_GROUP` 表示 Slack 频道（仍短暂回落兼容 `EXTRA_GROUP`）。
+- `NotificationManager`：核心渠道仅由 `defaults()` 注册；核心 `META-INF/services` 不再列出内置渠道，SPI 只加载可选/extra 模块，避免双重注册。
+
 ### 新增
 
-- 可选模块 `com.alianga:jkit-notify-extra`：将 Slack / Telegram / ntfy / 短信（阿里云/腾讯云/云片/华为云）从 `jkit-notify` 拆出，按需依赖；核心模块保留钉钉/企微/飞书/Server酱/Bark/Webhook/SMTP。SPI 自动注册。
+- 可选模块 `com.alianga:jkit-notify-extra`：将 Slack / Telegram / ntfy / 短信（阿里云/腾讯云/云片/华为云）从 `jkit-notify` 拆出，按需依赖；核心模块保留钉钉/企微/飞书/Server酱/Bark/Webhook/SMTP。extra 渠道经 SPI 自动注册（核心内置走 `defaults()`）。
 - `HttpUtils.debug` / `HttpUtils.printCurl`：发送前把请求摘要或等价 curl 打到标准输出，便于本地复现。摘要只打方法/URL/头/正文预览（二进制按字节数、长正文截断），打印失败不影响实际发送。不要在生产打开。
 - `ConfigLoadOptions.addLocation`：在默认搜索路径上追加目录（后者覆盖前者）。支持 `classpath:` / `file:` / 裸文件系统路径，`~` 展开为 `user.home`；也可传入 `File`（文件则取其父目录）。
 - 新模块 `com.alianga:jkit-notify`：轻量消息通知（版本随 `jkit-parent` 2.0.1，不单独升版）。一套 API 发钉钉机器人（含加签）/ 企微机器人 / 飞书机器人（含签名校验）/ Server酱 / Bark / 通用 Webhook（payload 模板）/ SMTP 邮件（纯 Socket 实现，AUTH LOGIN + STARTTLS/SSL + MIME）；`NotificationChannel` SPI + `NotificationManager` 注册表支持代码 / `META-INF/services` 两种方式扩展渠道，`MessageType`（TEXT/MARKDOWN/HTML）声明式能力；零第三方依赖，HTTP/JSON/日志复用 jkit。用法见 `docs/notify.md`。
@@ -53,7 +60,7 @@
 - `jkit-notify` 附件自动识别 MIME（`FileType` + 常见后缀兜底）；拆包大小支持 `10MB`/`512KB`；SMTP Markdown 默认响应式 HTML；钉钉 feedCard / 企微 news 与 image。
 - `jkit-notify` 模板变量：`Message.var` / `vars`，发送前替换 `${key}` / `${a.b}`。文件附件流式读取与拆包，不再把整文件载入内存。
 - `jkit-notify` `NotifyPolicy`：静默时段、5 分钟去重、本地限流；`sendFailover` 同一渠道多账号顺序切换。抑制为 `FailureType.SUPPRESSED`。
-- `jkit-notify` `AbstractHttpChannel` 新增 `contentType` 扩展点与 payload 感知的 `applyHeaders`；`ChannelConfig` 补 `name` / `template` / `appId` / `region`（Slack 显示名与短信渠道使用）。
+- `jkit-notify` `AbstractHttpChannel` 新增 `contentType` 扩展点与 payload 感知的 `applyHeaders`；`ChannelConfig` 补 `name`（Slack 显示名 / 短信签名）与通用 `extra(key,value)`（短信 `template`/`appId`/`region` 等经 `AbstractSmsChannel.CFG_*` 写入，不在核心暴露 SMS 字段）。
 - `jkit-notify-extra` 渠道：Slack（Incoming Webhook / chat.postMessage）、Telegram Bot（chat_id 支持 `@channel`，话题群与静默；MARKDOWN 转 Telegram HTML 子集发送）、ntfy（tags / 优先级 / markdown 与 Bearer / Basic 鉴权），以及阿里云 / 腾讯云 / 云片 / 华为云短信。渠道 extras 在各自实现类上（`SlackChannel.EXTRA_COLOR`、`TelegramChannel.EXTRA_CHAT_ID`、`NtfyChannel.EXTRA_TAGS`、`AbstractSmsChannel.EXTRA_SMS_PARAMS`），不放进核心 `Message`。
 - `DateUtils.parse(String)`：自动识别常见日期字符串（时间戳、紧凑数字、`-` `/` `.`、中文/韩文、ISO-8601 含 `T`/`Z`/`+0800`/`+08:00`）。
 - `DateUtils.fromEpochNumber(long)`：10 位秒或 13 位毫秒时间戳转 `Date`。
@@ -82,6 +89,7 @@
 
 ### jkit-curl-codegen
 
+- 扩充到 34 种：新增互操作格式 `http`（原始 HTTP/1.1 报文）、`har`（HAR 1.2 JSON）、`httpie`（HTTPie CLI），以及 `ruby-httparty`、`php-guzzle`、`lua`（luasocket `socket.http`，与 curlconverter lua 一致）。
 - 新增 curl 代码生成：OkHttp / Apache 5 / JDK 11+ / jkit / Kotlin / fetch / axios / requests / httpx / Go / C# / PHP。
 - 扩充到 28 种：新增 Java `HttpURLConnection` / Unirest、JavaScript request / unirest / http（follow-redirects）/ jQuery / XMLHttpRequest、PHP pecl_http、R httr2、Rust reqwest、Swift URLSession、Ruby Net::HTTP、PowerShell Invoke-RestMethod、curl（Windows cmd）、curl（Windows PowerShell）、wget。入口为 `CurlCodegen.generate(id, curl)`。
 - 修复 R（httr2）与 PowerShell 生成器的运行时错误：R 改用 `req_perform()`（默认跟随重定向；关闭时 `req_options(followlocation = 0)`），multipart 字段名加反引号、正文不重复设置 Content-Type；PowerShell 把受限头 User-Agent / Cookie 分别转成 `-UserAgent` 参数与 `WebRequestSession`（Windows PowerShell 5.1 的 `-Headers` 不接受这两个头），字符串正文的 Content-Type 自动补 `charset=utf-8`。

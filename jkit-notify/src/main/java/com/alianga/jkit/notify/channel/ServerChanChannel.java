@@ -103,8 +103,7 @@ public class ServerChanChannel extends AbstractHttpChannel {
 
     @Override
     protected FailureType classify(int httpStatus, String responseBody) {
-        Integer code = NotifyUtils.jsonInt(responseBody, "code");
-        if (code != null && code == 40001) {
+        if (jsonIntEquals(responseBody, "code", 40001)) {
             // sendkey 非法
             return FailureType.CONFIG_ERROR;
         }
@@ -116,17 +115,12 @@ public class ServerChanChannel extends AbstractHttpChannel {
         if (httpStatus < 200 || httpStatus >= 300) {
             return false;
         }
-        Integer code = NotifyUtils.jsonInt(responseBody, "code");
-        return code != null && code == 0;
+        return jsonIntEquals(responseBody, "code", 0);
     }
 
     @Override
     protected String errorMessage(int httpStatus, String responseBody) {
-        Integer code = NotifyUtils.jsonInt(responseBody, "code");
-        String message = NotifyUtils.jsonString(responseBody, "message");
-        if (code != null && message != null) {
-            return "serverchan code " + code + ": " + message;
-        }
-        return super.errorMessage(httpStatus, responseBody);
+        String mapped = jsonCodeMessage("serverchan code", responseBody, "code", "message");
+        return mapped != null ? mapped : super.errorMessage(httpStatus, responseBody);
     }
 }

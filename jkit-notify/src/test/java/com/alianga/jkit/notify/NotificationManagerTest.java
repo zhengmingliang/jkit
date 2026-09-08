@@ -26,7 +26,7 @@ import static org.junit.Assert.assertTrue;
 public class NotificationManagerTest {
 
     /**
-     * 内置渠道全部可按 id 取到（含 SPI 注册）。
+     * 核心内置渠道由 defaults() 注册（不再经核心 SPI 双重注册）。
      */
     @Test
     public void builtinChannelsRegistered() {

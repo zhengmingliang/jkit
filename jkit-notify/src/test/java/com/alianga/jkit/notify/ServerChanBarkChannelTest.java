@@ -4,7 +4,6 @@ import com.alianga.jkit.notify.channel.BarkChannel;
 import com.alianga.jkit.notify.channel.ServerChanChannel;
 
 import org.junit.Assume;
-import org.junit.Ignore;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
@@ -34,12 +33,13 @@ public class ServerChanBarkChannelTest extends AbstractHttpChannelTest {
         assertTrue(isEmpty());
     }
     /**
-     * Server酱：SendKey 拼到 URL，title/desp 进 payload。（需配置 serverChan.sendKey；
-     * 测试用的脚本引擎 markdown 内容与本次要验证的正文一致。）
+     * Server酱实发：须 {@code -Djkit.notify.live=true}，且 {@code ~/jkit/application.yml}
+     * 配置 {@code serverChan.sendKey}；缺开关或缺配置时 {@link Assume} 跳过
+     * （勿把真实 SendKey 写进源码）。yml 有密钥不够。
      */
-    @Ignore("需要配置 serverChan.sendKey")
     @Test
     public void serverChanSend() {
+        NotifyTestConfig.assumeLiveEnabled();
         String sendKey = NotifyTestConfig.requiredString("serverChan.sendKey");
         Assume.assumeTrue("缺少 serverChan.sendKey，见 ~/jkit/application.yml", sendKey != null);
         SendResult result = NotificationManager.send(ServerChanChannel.ID,

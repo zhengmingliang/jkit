@@ -64,4 +64,22 @@ public class ChannelConfigTest {
         assertEquals(1536L, NotifyUtils.parseDataSize("1.5K"));
         assertEquals(42L, NotifyUtils.parseDataSize("42"));
     }
+
+    /**
+     * 渠道扩展配置：写入 / 读取 / 删除；与 name（签名或展示名）并存。
+     */
+    @Test
+    public void extraRoundTrip() {
+        ChannelConfig config = ChannelConfig.ofToken("k")
+                .name("签名")
+                .extra("template", "SMS_1")
+                .extra("appId", "1400")
+                .extra("region", "ap-guangzhou");
+        assertEquals("签名", config.name());
+        assertEquals("SMS_1", config.extraString("template"));
+        assertEquals("1400", config.extraString("appId"));
+        assertEquals("ap-guangzhou", config.extraString("region"));
+        config.extra("region", null);
+        assertEquals(null, config.extraString("region"));
+    }
 }

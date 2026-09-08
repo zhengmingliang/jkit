@@ -94,7 +94,7 @@ public class SmsChannelTest extends AbstractHttpChannelTest {
         SendResult result = NotificationManager.send(AliyunSmsChannel.ID,
                 Message.text("验证码短信").extra(AbstractSmsChannel.EXTRA_SMS_PARAMS, "code=9527,min=5"),
                 ChannelConfig.ofToken("accessKeyId").secret("accessKeySecret")
-                        .name("阿里云签名").template("SMS_123456789")
+                        .name("阿里云签名").extra(AbstractSmsChannel.CFG_TEMPLATE, "SMS_123456789")
                         .webhookUrl(baseUrl()).to("13800000001"));
         assertTrue(result.toString(), result.isSuccess());
         Captured request = take();
@@ -123,7 +123,7 @@ public class SmsChannelTest extends AbstractHttpChannelTest {
         SendResult result = NotificationManager.send(AliyunSmsChannel.ID,
                 Message.text("hi"),
                 ChannelConfig.ofToken("k").secret("s").name("签名")
-                        .template("SMS_1").webhookUrl(baseUrl()).to("13800000001"));
+                        .extra(AbstractSmsChannel.CFG_TEMPLATE, "SMS_1").webhookUrl(baseUrl()).to("13800000001"));
         assertFalse(result.isSuccess());
         assertTrue(result.error().startsWith("aliyun sms isv.BUSINESS_LIMIT_CONTROL"));
         assertEquals(FailureType.THROTTLED, result.failureType());
@@ -135,7 +135,7 @@ public class SmsChannelTest extends AbstractHttpChannelTest {
     @Test(expected = IllegalArgumentException.class)
     public void aliyunMissingSignNameRejected() {
         NotificationManager.send(AliyunSmsChannel.ID, Message.text("hi"),
-                ChannelConfig.ofToken("k").secret("s").template("SMS_1")
+                ChannelConfig.ofToken("k").secret("s").extra(AbstractSmsChannel.CFG_TEMPLATE, "SMS_1")
                         .webhookUrl(baseUrl()).to("13800000001"));
     }
 
@@ -149,7 +149,7 @@ public class SmsChannelTest extends AbstractHttpChannelTest {
         SendResult result = NotificationManager.send(TencentSmsChannel.ID,
                 Message.text("验证码短信").extra(AbstractSmsChannel.EXTRA_SMS_PARAMS, "9527,5"),
                 ChannelConfig.ofToken("secretId").secret("secretKey")
-                        .appId("1400006666").name("腾讯云签名").template("1234567")
+                        .extra(AbstractSmsChannel.CFG_APP_ID, "1400006666").name("腾讯云签名").extra(AbstractSmsChannel.CFG_TEMPLATE, "1234567")
                         .webhookUrl(baseUrl()).to("13800000001"));
         assertTrue(result.toString(), result.isSuccess());
         Captured request = take();
@@ -170,8 +170,8 @@ public class SmsChannelTest extends AbstractHttpChannelTest {
                 + "\"Message\":\"发送频率超限\"}]}}");
         SendResult result = NotificationManager.send(TencentSmsChannel.ID,
                 Message.text("hi"),
-                ChannelConfig.ofToken("k").secret("s").appId("1").name("签名")
-                        .template("2").webhookUrl(baseUrl()).to("13800000001"));
+                ChannelConfig.ofToken("k").secret("s").extra(AbstractSmsChannel.CFG_APP_ID, "1").name("签名")
+                        .extra(AbstractSmsChannel.CFG_TEMPLATE, "2").webhookUrl(baseUrl()).to("13800000001"));
         assertFalse(result.isSuccess());
         assertTrue(result.error().startsWith("tencent sms LimitExceeded.DeliveryFrequency"));
         assertEquals(FailureType.THROTTLED, result.failureType());
@@ -183,7 +183,7 @@ public class SmsChannelTest extends AbstractHttpChannelTest {
     @Test(expected = IllegalArgumentException.class)
     public void tencentMissingAppIdRejected() {
         NotificationManager.send(TencentSmsChannel.ID, Message.text("hi"),
-                ChannelConfig.ofToken("k").secret("s").template("t")
+                ChannelConfig.ofToken("k").secret("s").extra(AbstractSmsChannel.CFG_TEMPLATE, "t")
                         .webhookUrl(baseUrl()).to("13800000001"));
     }
 
@@ -197,7 +197,7 @@ public class SmsChannelTest extends AbstractHttpChannelTest {
         SendResult result = NotificationManager.send(HuaweiSmsChannel.ID,
                 Message.text("验证码短信").extra(AbstractSmsChannel.EXTRA_SMS_PARAMS, "9527,5"),
                 ChannelConfig.ofToken("appKey").secret("appSecret")
-                        .appId("8823120512345").name("华为云签名").template("12345678")
+                        .extra(AbstractSmsChannel.CFG_APP_ID, "8823120512345").name("华为云签名").extra(AbstractSmsChannel.CFG_TEMPLATE, "12345678")
                         .webhookUrl(baseUrl()).to("13800000001"));
         assertTrue(result.toString(), result.isSuccess());
         Captured request = take();
@@ -232,7 +232,7 @@ public class SmsChannelTest extends AbstractHttpChannelTest {
                 + " sensitive words\"}");
         SendResult result = NotificationManager.send(HuaweiSmsChannel.ID,
                 Message.text("hi"),
-                ChannelConfig.ofToken("k").secret("s").appId("1").template("2")
+                ChannelConfig.ofToken("k").secret("s").extra(AbstractSmsChannel.CFG_APP_ID, "1").extra(AbstractSmsChannel.CFG_TEMPLATE, "2")
                         .webhookUrl(baseUrl()).to("13800000001"));
         assertFalse(result.isSuccess());
         assertTrue(result.error().startsWith("huawei sms E200037"));
@@ -244,7 +244,7 @@ public class SmsChannelTest extends AbstractHttpChannelTest {
     @Test(expected = IllegalArgumentException.class)
     public void huaweiMissingEndpointRejected() {
         NotificationManager.send(HuaweiSmsChannel.ID, Message.text("hi"),
-                ChannelConfig.ofToken("k").secret("s").appId("1").template("2")
+                ChannelConfig.ofToken("k").secret("s").extra(AbstractSmsChannel.CFG_APP_ID, "1").extra(AbstractSmsChannel.CFG_TEMPLATE, "2")
                         .to("13800000001"));
     }
 
@@ -277,7 +277,7 @@ public class SmsChannelTest extends AbstractHttpChannelTest {
         }
         try {
             NotificationManager.send(AliyunSmsChannel.ID, Message.text("hi"),
-                    ChannelConfig.ofToken("k").secret("s").name("n").template("t")
+                    ChannelConfig.ofToken("k").secret("s").name("n").extra(AbstractSmsChannel.CFG_TEMPLATE, "t")
                             .webhookUrl(baseUrl()));
             throw new AssertionError("receiver should be required");
         } catch (IllegalArgumentException expected) {

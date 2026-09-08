@@ -103,7 +103,7 @@ public class TelegramChannel extends AbstractHttpChannel {
 
     @Override
     protected String buildPayload(Message message, ChannelConfig config) {
-        String chatId = firstNonEmpty(message.extraString(EXTRA_CHAT_ID), defaultChatId(config));
+        String chatId = NotifyUtils.firstNonEmpty(message.extraString(EXTRA_CHAT_ID), defaultChatId(config));
         if (chatId == null || chatId.isEmpty()) {
             throw new IllegalArgumentException("telegram chat_id is required"
                     + " (TelegramChannel.EXTRA_CHAT_ID or ChannelConfig.to)");
@@ -132,7 +132,7 @@ public class TelegramChannel extends AbstractHttpChannel {
         boolean hasTitle = title != null && !title.isEmpty();
         if (hasTitle) {
             // 标题加粗：富文本模式用 <b>x</b>（标题里的 <>& 需转义），纯文本不套语法
-            String boldTitle = parseMode == null ? title : "<b>" + escapeHtml(title) + "</b>";
+            String boldTitle = parseMode == null ? title : "<b>" + NotifyUtils.escapeHtml(title) + "</b>";
             payload.put("text", boldTitle + "\n" + content);
         } else {
             payload.put("text", content);
@@ -245,37 +245,6 @@ public class TelegramChannel extends AbstractHttpChannel {
         return text.substring(start, end);
     }
 
-    /**
-     * HTML 实体转义（{@code & < >}），Telegram HTML 模式要求标签字符转义。
-     *
-     * @param text 原文
-     * @return 转义后的文本
-     */
-    private static String escapeHtml(String text) {
-        if (text == null || text.isEmpty()) {
-            return "";
-        }
-        StringBuilder out = new StringBuilder(text.length() + 8);
-        for (int i = 0; i < text.length(); i++) {
-            char c = text.charAt(i);
-            switch (c) {
-                case '&':
-                    out.append("&amp;");
-                    break;
-                case '<':
-                    out.append("&lt;");
-                    break;
-                case '>':
-                    out.append("&gt;");
-                    break;
-                default:
-                    out.append(c);
-                    break;
-            }
-        }
-        return out.toString();
-    }
-
     private static String defaultChatId(ChannelConfig config) {
         if (config.to() == null || config.to().isEmpty()) {
             return null;
@@ -283,42 +252,26 @@ public class TelegramChannel extends AbstractHttpChannel {
         return config.to().get(0);
     }
 
-    private static String firstNonEmpty(String a, String b) {
-        if (a != null && !a.isEmpty()) {
-            return a;
-        }
-        return b;
-    }
-
     @Override
     protected boolean isAccepted(int httpStatus, String responseBody) {
         if (httpStatus < 200 || httpStatus >= 300) {
             return false;
         }
-        Object parsed = NotifyUtils.parseJson(responseBody);
-        if (parsed instanceof Map) {
-            Object ok = ((Map<?, ?>) parsed).get("ok");
-            return Boolean.TRUE.equals(ok) || "true".equals(String.valueOf(ok));
-        }
         // 非 JSON 响应（反代返回 HTML 错误页）按 HTTP 状态兜底
-        return true;
+        return jsonOk(responseBody);
     }
 
     @Override
     protected FailureType classify(int httpStatus, String responseBody) {
-        Object parsed = NotifyUtils.parseJson(responseBody);
-        if (parsed instanceof Map) {
-            Object description = ((Map<?, ?>) parsed).get("description");
-            if (description != null) {
-                String text = String.valueOf(description);
-                if (text.contains("Too Many Requests") || text.contains("flood")) {
-                    return FailureType.THROTTLED;
-                }
-                if (text.contains("chat not found") || text.contains("bot was blocked")
-                        || text.contains("unauthorized") || text.contains("token")
-                        || text.contains("can't parse entities")) {
-                    return FailureType.CONFIG_ERROR;
-                }
+        String text = jsonStringField(responseBody, "description");
+        if (text != null) {
+            if (text.contains("Too Many Requests") || text.contains("flood")) {
+                return FailureType.THROTTLED;
+            }
+            if (text.contains("chat not found") || text.contains("bot was blocked")
+                    || text.contains("unauthorized") || text.contains("token")
+                    || text.contains("can't parse entities")) {
+                return FailureType.CONFIG_ERROR;
             }
         }
         return super.classify(httpStatus, responseBody);
@@ -326,15 +279,12 @@ public class TelegramChannel extends AbstractHttpChannel {
 
     @Override
     protected String errorMessage(int httpStatus, String responseBody) {
-        Object parsed = NotifyUtils.parseJson(responseBody);
-        if (parsed instanceof Map) {
-            Object errorCode = ((Map<?, ?>) parsed).get("error_code");
-            Object description = ((Map<?, ?>) parsed).get("description");
-            if (description != null) {
-                return "telegram"
-                        + (errorCode == null ? "" : " " + errorCode)
-                        + ": " + description;
-            }
+        String description = jsonStringField(responseBody, "description");
+        if (description != null) {
+            Integer errorCode = NotifyUtils.jsonInt(responseBody, "error_code");
+            return "telegram"
+                    + (errorCode == null ? "" : " " + errorCode)
+                    + ": " + description;
         }
         return super.errorMessage(httpStatus, responseBody);
     }

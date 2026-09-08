@@ -132,19 +132,13 @@ public class FeishuChannel extends AbstractHttpChannel {
 
     @Override
     protected boolean isAccepted(int httpStatus, String responseBody) {
-        Integer code = NotifyUtils.jsonInt(responseBody, "code");
-        if (code == null) {
-            code = NotifyUtils.jsonInt(responseBody, "StatusCode");
-        }
-        return code != null && code == 0;
+        Integer code = jsonIntField(responseBody, "code", "StatusCode");
+        return code != null && code.intValue() == 0;
     }
 
     @Override
     protected FailureType classify(int httpStatus, String responseBody) {
-        Integer code = NotifyUtils.jsonInt(responseBody, "code");
-        if (code == null) {
-            code = NotifyUtils.jsonInt(responseBody, "StatusCode");
-        }
+        Integer code = jsonIntField(responseBody, "code", "StatusCode");
         if (code != null) {
             switch (code) {
                 case 9499:
@@ -166,14 +160,8 @@ public class FeishuChannel extends AbstractHttpChannel {
 
     @Override
     protected String errorMessage(int httpStatus, String responseBody) {
-        Integer code = NotifyUtils.jsonInt(responseBody, "code");
-        String msg = NotifyUtils.jsonString(responseBody, "msg");
-        if (code == null) {
-            code = NotifyUtils.jsonInt(responseBody, "StatusCode");
-        }
-        if (msg == null) {
-            msg = NotifyUtils.jsonString(responseBody, "StatusMessage");
-        }
+        Integer code = jsonIntField(responseBody, "code", "StatusCode");
+        String msg = jsonStringField(responseBody, "msg", "StatusMessage");
         if (code != null && msg != null) {
             return "feishu code " + code + ": " + msg;
         }

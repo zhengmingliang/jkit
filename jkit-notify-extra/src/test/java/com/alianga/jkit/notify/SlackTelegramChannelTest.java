@@ -5,7 +5,6 @@ import com.alianga.jkit.notify.channel.SlackChannel;
 import com.alianga.jkit.notify.channel.TelegramChannel;
 
 import org.junit.Assume;
-import org.junit.Ignore;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
@@ -28,7 +27,7 @@ public class SlackTelegramChannelTest extends AbstractHttpChannelTest {
         respond(200, "ok");
         SendResult result = NotificationManager.send(SlackChannel.ID,
                 Message.text("部署通知", "v1.2.3 已上线")
-                        .extra(Message.EXTRA_GROUP, "#ops")
+                        .extra(SlackChannel.EXTRA_CHANNEL, "#ops")
                         .extra(SlackChannel.EXTRA_USERNAME, "发布机器人"),
                 ChannelConfig.webhook(baseUrl() + "/services/T0/B0/XXX"));
         assertTrue(result.isSuccess());
@@ -36,6 +35,26 @@ public class SlackTelegramChannelTest extends AbstractHttpChannelTest {
         assertJsonEquals("{\"channel\":\"#ops\",\"username\":\"发布机器人\","
                 + "\"text\":\"部署通知\\nv1.2.3 已上线\"}", request.body());
         assertTrue(isEmpty());
+    }
+
+    /**
+     * Slack：EXTRA_CHANNEL 优先；未设时回落 EXTRA_GROUP（临时兼容）。
+     */
+    @Test
+    public void slackChannelPrefersExtraChannelOverGroup() {
+        respond(200, "ok");
+        NotificationManager.send(SlackChannel.ID,
+                Message.text("hi")
+                        .extra(SlackChannel.EXTRA_CHANNEL, "#primary")
+                        .extra(Message.EXTRA_GROUP, "#legacy"),
+                ChannelConfig.webhook(baseUrl()));
+        assertJsonEquals("{\"channel\":\"#primary\",\"text\":\"通知\\nhi\"}", take().body());
+
+        respond(200, "ok");
+        NotificationManager.send(SlackChannel.ID,
+                Message.text("hi").extra(Message.EXTRA_GROUP, "#legacy"),
+                ChannelConfig.webhook(baseUrl()));
+        assertJsonEquals("{\"channel\":\"#legacy\",\"text\":\"通知\\nhi\"}", take().body());
     }
 
     /**
@@ -153,12 +172,14 @@ public class SlackTelegramChannelTest extends AbstractHttpChannelTest {
 
     /**
      * Telegram：MARKDOWN→HTML 实发；标题加粗，任务列表用 ✅/⬜ 勾选框。
-     * 需在 {@code ~/jkit/application.yml} 配置 {@code telegram.botToken} / {@code telegram.chatId}
-     * （模板见 {@code jkit-application.yml.example}）；缺配置时跳过，勿把真实 token 写进源码。
+     * 须 {@code -Djkit.notify.live=true}，且 {@code ~/jkit/application.yml} 配置
+     * {@code telegram.botToken} / {@code telegram.chatId}（模板见
+     * {@code jkit-application.yml.example}）；缺开关或缺配置时跳过，勿把真实 token 写进源码。
+     * yml 有密钥不够。
      */
-    @Ignore("需要配置 telegram.botToken / telegram.chatId")
     @Test
     public void telegramMarkdownParseMode2() {
+        NotifyTestConfig.assumeLiveEnabled();
         String botToken = NotifyTestConfig.requiredString("telegram.botToken");
         String chatId = NotifyTestConfig.requiredString("telegram.chatId");
         Assume.assumeTrue("缺少 telegram.botToken，见 ~/jkit/application.yml", botToken != null);

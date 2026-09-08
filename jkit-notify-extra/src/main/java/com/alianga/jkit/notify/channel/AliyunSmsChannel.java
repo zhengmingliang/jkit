@@ -20,9 +20,9 @@ import java.util.TreeMap;
  *
  * <p>配置：{@link ChannelConfig#ofToken(String)} 创建，token 填 AccessKeyId，
  * {@link ChannelConfig#secret(String)} 填 AccessKeySecret；{@link ChannelConfig#name(String)}
- * 填短信签名（如 {@code 阿里云}）；{@link ChannelConfig#template(String)} 填模板 CODE
- * （如 {@code SMS_123456789}）；{@link ChannelConfig#to(String...)} 填手机号
- * （逗号 / 分号 / 空白分隔多个）。
+ * 填短信签名（如 {@code 阿里云}）；{@code ChannelConfig.extra(CFG_TEMPLATE, ...)} 填模板 CODE
+ * （如 {@code SMS_123456789}）；可选 {@code extra(CFG_REGION, ...)}；
+ * {@link ChannelConfig#to(String...)} 填手机号（逗号 / 分号 / 空白分隔多个）。
  *
  * <p>消息：TEXT。模板参数用 {@link AbstractSmsChannel#EXTRA_SMS_PARAMS}，命名参数风格：
  * {@code .extra(AbstractSmsChannel.EXTRA_SMS_PARAMS, "code=9527,min=5")}。
@@ -60,7 +60,7 @@ public class AliyunSmsChannel extends AbstractSmsChannel {
     @Override
     protected String buildUrl(Message message, ChannelConfig config) {
         requireCredentials(config);
-        String endpoint = resolveHost(config.region(), config.webhook());
+        String endpoint = resolveHost(smsRegion(config), config.webhook());
         Map<String, String> params = commonParams(config, message);
         String canonicalQuery = buildCanonicalQuery(params);
         String stringToSign = "POST&%2F&" + NotifyUtils.urlEncode(canonicalQuery);
@@ -123,7 +123,7 @@ public class AliyunSmsChannel extends AbstractSmsChannel {
         params.put("SignatureMethod", SIGN_METHOD);
         params.put("SignatureNonce", NotifyUtils.uuid());
         params.put("SignatureVersion", "1.0");
-        params.put("TemplateCode", config.template());
+        params.put("TemplateCode", requiredTemplate(config, ID));
         params.put("Timestamp", iso8601());
         params.put("Version", API_VERSION);
         Map<String, String> named = namedParams(message);

@@ -806,6 +806,61 @@ public final class NotifyUtils {
      * @return 32 位十六进制串
      * @since 2.0.1
      */
+
+    /**
+     * 返回第一个非空（非 {@code null} 且非空串）字符串。
+     *
+     * @param values 候选
+     * @return 首个非空值；全空时为 {@code null}
+     * @since 2.0.1
+     */
+    public static String firstNonEmpty(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String value : values) {
+            if (value != null && !value.isEmpty()) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * HTML 实体转义（{@code &amp; &lt; &gt; &quot;}），Markdown→HTML 与 Telegram HTML 模式共用。
+     *
+     * @param text 原文，可为 {@code null}
+     * @return 转义后的文本；{@code null}/空串返回空串
+     * @since 2.0.1
+     */
+    public static String escapeHtml(String text) {
+        if (text == null || text.isEmpty()) {
+            return "";
+        }
+        StringBuilder out = new StringBuilder(text.length() + 8);
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            switch (c) {
+                case '&':
+                    out.append("&amp;");
+                    break;
+                case '<':
+                    out.append("&lt;");
+                    break;
+                case '>':
+                    out.append("&gt;");
+                    break;
+                case '"':
+                    out.append("&quot;");
+                    break;
+                default:
+                    out.append(c);
+                    break;
+            }
+        }
+        return out.toString();
+    }
+
     public static String uuid() {
         return RandomUtils.getUUID();
     }

@@ -3,12 +3,21 @@
 # 用法：
 #   1. 复制本文件到本机： ~/jkit/application.yml
 #      mkdir -p ~/jkit && cp jkit-application.yml.example ~/jkit/application.yml
-#   2. 填入真实 sendKey / botToken 等（切勿把填好的文件提交进 git）
-#   3. 去掉对应测试上的 @Ignore 后本地运行
+#   2. 填入真实密钥 / Webhook / 收件人 / 样例路径（切勿把填好的文件提交进 git）
+#   3. 本地运行：
+#        # 默认离线：即使本文件有密钥，也不会实发
+#        mvn -pl jkit-notify,jkit-notify-extra test
+#        # 手动实发：必须显式 -Djkit.notify.live=true，且对应凭证齐全
+#        mvn -pl jkit-notify,jkit-notify-extra test -Djkit.notify.live=true
+#        # 或只跑 LiveNotifyTest
+#        mvn -pl jkit-notify test -Dtest=LiveNotifyTest -Djkit.notify.live=true
 #
-# 相关测试：
+# Canonical 开关：-Djkit.notify.live=true（缺省 false）。yml 有密钥不够。
+#
+# 相关测试（均需开关 + 凭证）：
 #   - ServerChanBarkChannelTest#serverChanSend      -> serverChan.sendKey
-#   - SlackTelegramChannelTest#telegramMarkdownParseMode2 (jkit-notify-extra) -> telegram.botToken / telegram.chatId
+#   - SlackTelegramChannelTest#telegramMarkdownParseMode2 -> telegram.botToken / telegram.chatId
+#   - LiveNotifyTest                                 -> live.* / dingtalk.* / wecom.* / feishu.* / smtp.*
 #
 # 真实配置路径在仓库外（~/jkit/），仓库内仅保留本 *.example。
 
@@ -25,6 +34,39 @@ telegram:
 bark:
   # Bark device_key（可选，预留）
   deviceKey: your-device-key
+
+# 实发用例（均需 -Djkit.notify.live=true）
+live:
+  # SMTP 收件人（原硬编码邮箱改到这里）
+  recipientEmail: you@example.com
+  # 大附件拆包样例路径；也可用 -Djkit.notify.live.file=... 覆盖
+  largeAttachmentPath: /path/to/large-sample.zip
+  # HTML 报告 / 图片：逗号分隔，取第一个存在的文件
+  htmlReportPaths: /path/to/report.html
+  imagePaths: /path/to/logo.png
+
+dingtalk:
+  webhookUrl: https://oapi.dingtalk.com/robot/send?access_token=REPLACE
+  secret: SECREPLACE
+  # 可选，@ 手机号（逗号分隔）
+  atMobiles: ""
+
+wecom:
+  webhookUrl: https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=REPLACE
+  mentionedList: ""
+
+feishu:
+  webhookUrl: https://open.feishu.cn/open-apis/bot/v2/hook/REPLACE
+  secret: ""
+
+smtp:
+  host: smtp.example.com
+  port: 465
+  ssl: true
+  sslProtocols: TLSv1.2
+  username: bot@example.com
+  password: REPLACE_AUTH_CODE
+  from: bot@example.com
 
 # slack:
 #   botToken: xoxb-...

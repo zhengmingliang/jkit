@@ -16,6 +16,10 @@ import java.util.Map;
  * 子类只需按"当前收件人"组 URL 与请求体——当前收件人经
  * {@link #currentReceiver(Message)} 从消息 extras 取。
  *
+ * <p><b>SMS 专用配置</b>（经 {@link ChannelConfig#extra(String, String)}，不在核心
+ * ChannelConfig 上暴露）：{@link #CFG_TEMPLATE} 模板 ID、{@link #CFG_APP_ID} 应用/通道号、
+ * {@link #CFG_REGION} 地域；签名仍用通用 {@link ChannelConfig#name(String)}。
+ *
  * <p><b>收件人</b>：{@link ChannelConfig#to(String...)}，支持逗号 / 分号 / 空白分隔多个号码，
  * 逐号码各发一次；单号码直接返回该次结果，多号码任一成功即整体成功（与故障转移同语义），
  * 失败明细在 {@link SendResult#parts()}。
@@ -50,6 +54,21 @@ public abstract class AbstractSmsChannel extends AbstractHttpChannel {
      * 逐号码发送时，当前收件人写入消息 extras 的键（内部使用）。
      */
     public static final String EXTRA_CURRENT_RECEIVER = "smsReceiver";
+
+    /**
+     * {@link ChannelConfig#extra} 键：短信模板 ID（阿里云 TemplateCode / 腾讯 TemplateId / 华为 templateId）。
+     */
+    public static final String CFG_TEMPLATE = "template";
+
+    /**
+     * {@link ChannelConfig#extra} 键：应用 ID（腾讯 SdkAppId / 华为短信通道号 sender）。
+     */
+    public static final String CFG_APP_ID = "appId";
+
+    /**
+     * {@link ChannelConfig#extra} 键：地域（腾讯 {@code ap-guangzhou}、阿里云 endpoint 地域等）。
+     */
+    public static final String CFG_REGION = "region";
 
     /**
      * 短信只支持纯文本（模板 + 参数，没有富文本概念）。
@@ -127,11 +146,36 @@ public abstract class AbstractSmsChannel extends AbstractHttpChannel {
      * @return 模板 ID；未配置时抛编程错误
      */
     protected static String requiredTemplate(ChannelConfig config, String channelId) {
-        String template = config.template();
+        String template = smsTemplate(config);
         if (template == null || template.isEmpty()) {
             throw new IllegalArgumentException(
-                    channelId + " template id is required (ChannelConfig.template)");
+                    channelId + " template id is required (ChannelConfig.extra("
+                            + CFG_TEMPLATE + "))");
         }
         return template;
+    }
+
+    /**
+     * @param config 渠道配置
+     * @return {@link #CFG_TEMPLATE}；未设置时为 {@code null}
+     */
+    protected static String smsTemplate(ChannelConfig config) {
+        return config.extraString(CFG_TEMPLATE);
+    }
+
+    /**
+     * @param config 渠道配置
+     * @return {@link #CFG_APP_ID}；未设置时为 {@code null}
+     */
+    protected static String smsAppId(ChannelConfig config) {
+        return config.extraString(CFG_APP_ID);
+    }
+
+    /**
+     * @param config 渠道配置
+     * @return {@link #CFG_REGION}；未设置时为 {@code null}
+     */
+    protected static String smsRegion(ChannelConfig config) {
+        return config.extraString(CFG_REGION);
     }
 }

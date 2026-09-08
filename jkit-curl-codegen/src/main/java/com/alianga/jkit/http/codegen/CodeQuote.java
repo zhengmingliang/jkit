@@ -141,6 +141,68 @@ public final class CodeQuote {
 
     /**
      * @param value 原始值
+     * @return Lua 双引号字面量（优先双引号；若含双引号且不含单引号则用单引号）
+     */
+    public static String lua(String value) {
+        if (value == null) {
+            return "\"\"";
+        }
+        if (value.indexOf('"') >= 0 && value.indexOf('\'') < 0) {
+            return "'" + escape(value, '\'') + "'";
+        }
+        return dquote(value);
+    }
+
+    /**
+     * JSON 字符串内容转义（不含外层引号）。
+     *
+     * @param value 原始值
+     * @return 转义后的 JSON 字符串内容
+     */
+    public static String jsonEscape(String value) {
+        if (value == null) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder(value.length() + 8);
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            switch (c) {
+                case '\\':
+                    sb.append("\\\\");
+                    break;
+                case '"':
+                    sb.append("\\\"");
+                    break;
+                case '\n':
+                    sb.append("\\n");
+                    break;
+                case '\r':
+                    sb.append("\\r");
+                    break;
+                case '\t':
+                    sb.append("\\t");
+                    break;
+                default:
+                    if (c < 0x20) {
+                        sb.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        sb.append(c);
+                    }
+            }
+        }
+        return sb.toString();
+    }
+
+    /**
+     * @param value 原始值
+     * @return 带双引号的 JSON 字符串字面量
+     */
+    public static String json(String value) {
+        return "\"" + jsonEscape(value) + "\"";
+    }
+
+    /**
+     * @param value 原始值
      * @return 通用双引号字面量（C / Rust / Swift / Ruby 系转义规则）
      */
     public static String dquote(String value) {

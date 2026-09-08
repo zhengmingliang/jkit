@@ -18,10 +18,10 @@ import java.util.SimpleTimeZone;
  * 华为云短信渠道（参考 WePush 的 HwYunMsgSender，X-WSSE 鉴权）。
  *
  * <p>配置：{@link ChannelConfig#ofToken(String)} 创建，token 填 App Key；
- * {@link ChannelConfig#secret(String)} 填 App Secret；{@link ChannelConfig#appId(String)}
+ * {@link ChannelConfig#secret(String)} 填 App Secret；{@code ChannelConfig.extra(CFG_APP_ID, ...)}
  * 填短信通道号（sender，国内签名通道号如 {@code 8823120512345}）；
  * {@link ChannelConfig#name(String)} 填签名名称（通用模板时必填）；
- * {@link ChannelConfig#template(String)} 填模板 ID；{@link ChannelConfig#to(String...)} 填手机号。
+ * {@code ChannelConfig.extra(CFG_TEMPLATE, ...)} 填模板 ID；{@link ChannelConfig#to(String...)} 填手机号。
  * {@link ChannelConfig#webhookUrl(String)} 填 APP 接入地址
  * （如 {@code https://smsapi.cn-north-4.myhuaweicloud.com:443/sms/batchSendSmsV1}，必填）。
  *
@@ -73,8 +73,10 @@ public class HuaweiSmsChannel extends AbstractSmsChannel {
         if (config.secret() == null || config.secret().isEmpty()) {
             throw new IllegalArgumentException("huawei sms appSecret is required (ChannelConfig.secret)");
         }
-        if (config.appId() == null || config.appId().isEmpty()) {
-            throw new IllegalArgumentException("huawei sms sender is required (ChannelConfig.appId)");
+        String sender = smsAppId(config);
+        if (sender == null || sender.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "huawei sms sender is required (ChannelConfig.extra(" + CFG_APP_ID + "))");
         }
         requiredTemplate(config, id());
         return url;
@@ -83,9 +85,9 @@ public class HuaweiSmsChannel extends AbstractSmsChannel {
     @Override
     protected String buildPayload(Message message, ChannelConfig config) {
         Map<String, String> form = NotifyUtils.strMap();
-        form.put("from", config.appId());
+        form.put("from", smsAppId(config));
         form.put("to", currentReceiver(message));
-        form.put("templateId", config.template());
+        form.put("templateId", requiredTemplate(config, id()));
         List<String> paras = positionalParams(message);
         if (!paras.isEmpty()) {
             form.put("templateParas", NotifyUtils.toJson(paras));

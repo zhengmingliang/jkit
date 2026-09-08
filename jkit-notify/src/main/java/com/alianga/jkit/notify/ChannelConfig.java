@@ -30,6 +30,8 @@ import java.util.Set;
  *
  * <p>各渠道需要哪些字段、哪些可缺省，见各渠道实现类的 javadoc。
  * 配了本渠道不认识的字段会被忽略，debug 日志会列出被忽略的键。
+ * 渠道专用扩展项（如短信 template/appId/region）用 {@link #extra(String, String)}，
+ * 不在本类暴露 SMS 概念。
  *
  * @author 郑明亮
  * @since 2.0.1
@@ -68,10 +70,8 @@ public final class ChannelConfig {
     private boolean autoSplit;
     private long maxAttachmentSize;
     private long splitChunkSize;
-    private String template;
-    private String appId;
-    private String region;
     private String senderName;
+    private Map<String, String> extras;
 
     private ChannelConfig() {
     }
@@ -582,9 +582,12 @@ public final class ChannelConfig {
     }
 
     /**
-     * 机器人/账号展示名（Slack {@code username} 等可选用）。
+     * 展示名：Slack 机器人 {@code username}，或短信签名名称（阿里云/腾讯云/华为云 SignName）。
      *
-     * @param name 显示名
+     * <p>短信模板 ID / SdkAppId / 地域等 SMS 专用项请用 {@link #extra(String, String)}，
+     * 键见 {@code AbstractSmsChannel.CFG_*}（jkit-notify-extra）。
+     *
+     * @param name 显示名或短信签名
      * @return this
      * @since 2.0.1
      */
@@ -594,71 +597,52 @@ public final class ChannelConfig {
     }
 
     /**
-     * 设置短信模板 ID（阿里云/腾讯云/华为云/云片等模板短信渠道必填）。
-     *
-     * @param template 模板 ID，如 {@code SMS_123456789}
-     * @return this
-     * @since 2.0.1
-     */
-    public ChannelConfig template(String template) {
-        this.template = template;
-        return this;
-    }
-
-    /**
-     * 设置应用 ID（腾讯云 SdkAppId、华为云通道号等）。
-     *
-     * @param appId 应用 ID
-     * @return this
-     * @since 2.0.1
-     */
-    public ChannelConfig appId(String appId) {
-        this.appId = appId;
-        return this;
-    }
-
-    /**
-     * 设置地域（腾讯云 {@code ap-guangzhou} 等），缺省用各渠道内置默认值。
-     *
-     * @param region 地域
-     * @return this
-     * @since 2.0.1
-     */
-    public ChannelConfig region(String region) {
-        this.region = region;
-        return this;
-    }
-
-    /**
-     * @return 短信模板 ID，未设置时为 {@code null}
-     * @since 2.0.1
-     */
-    public String template() {
-        return template;
-    }
-
-    /**
-     * @return 应用 ID，未设置时为 {@code null}
-     * @since 2.0.1
-     */
-    public String appId() {
-        return appId;
-    }
-
-    /**
-     * @return 地域，未设置时为 {@code null}
-     * @since 2.0.1
-     */
-    public String region() {
-        return region;
-    }
-
-    /**
-     * @return 机器人/账号展示名，未设置时为 {@code null}
+     * @return 展示名 / 短信签名，未设置时为 {@code null}
      * @since 2.0.1
      */
     public String name() {
         return senderName;
+    }
+
+    /**
+     * 写入渠道扩展配置（同名键覆盖）。核心不认识的键由各渠道自行解读；
+     * SMS 模板/应用/地域等见 jkit-notify-extra 的 {@code AbstractSmsChannel.CFG_*}。
+     *
+     * @param key 键，非空
+     * @param value 值；{@code null} 表示删除该键
+     * @return this
+     * @since 2.0.1
+     */
+    public ChannelConfig extra(String key, String value) {
+        if (key == null || key.isEmpty()) {
+            throw new IllegalArgumentException("extra key is required");
+        }
+        if (this.extras == null) {
+            this.extras = new LinkedHashMap<String, String>();
+        }
+        if (value == null) {
+            extras.remove(key);
+        } else {
+            extras.put(key, value);
+        }
+        return this;
+    }
+
+    /**
+     * @param key 键
+     * @return 扩展配置值；未设置时为 {@code null}
+     * @since 2.0.1
+     */
+    public String extraString(String key) {
+        return extras == null || key == null ? null : extras.get(key);
+    }
+
+    /**
+     * @return 扩展配置快照（只读）；未设置时为 {@code null}
+     * @since 2.0.1
+     */
+    public Map<String, String> extras() {
+        return extras == null ? null : new LinkedHashMap<String, String>(extras);
     }
 
     /**
@@ -738,10 +722,13 @@ public final class ChannelConfig {
         addIfUnused(unused, used, "autoSplit", autoSplit);
         addIfUnused(unused, used, "maxAttachmentSize", maxAttachmentSize > 0);
         addIfUnused(unused, used, "splitChunkSize", splitChunkSize > 0);
-        addIfUnused(unused, used, "template", template != null && !template.isEmpty());
-        addIfUnused(unused, used, "appId", appId != null && !appId.isEmpty());
-        addIfUnused(unused, used, "region", region != null && !region.isEmpty());
         addIfUnused(unused, used, "name", senderName != null && !senderName.isEmpty());
+        if (extras != null) {
+            for (Map.Entry<String, String> entry : extras.entrySet()) {
+                String value = entry.getValue();
+                addIfUnused(unused, used, entry.getKey(), value != null && !value.isEmpty());
+            }
+        }
         if (!unused.isEmpty()) {
             log.debug("[{}] ignoring config fields: {}", channelId, unused);
         }

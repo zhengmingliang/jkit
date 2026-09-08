@@ -99,17 +99,12 @@ public class BarkChannel extends AbstractHttpChannel {
 
     @Override
     protected boolean isAccepted(int httpStatus, String responseBody) {
-        if (httpStatus != 200) {
-            return false;
-        }
-        Integer code = NotifyUtils.jsonInt(responseBody, "code");
-        return code != null && code == 200;
+        return httpStatus == 200 && jsonIntEquals(responseBody, "code", 200);
     }
 
     @Override
     protected FailureType classify(int httpStatus, String responseBody) {
-        Integer code = NotifyUtils.jsonInt(responseBody, "code");
-        if (code != null && code == 400) {
+        if (jsonIntEquals(responseBody, "code", 400)) {
             // device key 不存在
             return FailureType.CONFIG_ERROR;
         }
@@ -118,11 +113,7 @@ public class BarkChannel extends AbstractHttpChannel {
 
     @Override
     protected String errorMessage(int httpStatus, String responseBody) {
-        Integer code = NotifyUtils.jsonInt(responseBody, "code");
-        String message = NotifyUtils.jsonString(responseBody, "message");
-        if (code != null && message != null) {
-            return "bark code " + code + ": " + message;
-        }
-        return super.errorMessage(httpStatus, responseBody);
+        String mapped = jsonCodeMessage("bark code", responseBody, "code", "message");
+        return mapped != null ? mapped : super.errorMessage(httpStatus, responseBody);
     }
 }

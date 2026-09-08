@@ -30,10 +30,13 @@ import java.util.concurrent.atomic.AtomicInteger;
  * List&lt;SendResult&gt; all = NotificationManager.sendAll(message, targets);
  * }</pre>
  *
- * <p>渠道来源有三：内置注册（钉钉/企微/飞书/Server酱/Bark/通用 Webhook/SMTP）、
- * classpath 上 {@code META-INF/services} SPI（可选模块 {@code jkit-notify-extra} 提供
- * Slack/Telegram/ntfy/短信）、代码 {@link #register(NotificationChannel)}。
- * 相同 id 后注册的覆盖先注册的，因此调用方可以替换任意内置渠道。
+ * <p>渠道注册模型（单一路径，避免双重注册）：
+ * <ul>
+ * <li>{@link #defaults()} 代码注册核心内置渠道（钉钉/企微/飞书/Server酱/Bark/Webhook/SMTP）；</li>
+ * <li>{@link #loadSpi()} 只加载 classpath 上可选/扩展渠道（如 {@code jkit-notify-extra} 的
+ * Slack/Telegram/ntfy/短信）——核心 jar 不再把内置渠道写进 {@code META-INF/services}；</li>
+ * <li>代码 {@link #register(NotificationChannel)} 可覆盖同 id。</li>
+ * </ul>
  *
  * <p>同步 {@link #send(String, Message, ChannelConfig)} 不会因网络失败抛异常；
  * 渠道 id 不存在、消息或配置为 {@code null}、类型不被渠道支持属于编程错误，直接抛
@@ -351,6 +354,7 @@ public final class NotificationManager {
         return channel;
     }
 
+    /** 注册核心内置渠道（不经 SPI，避免与 META-INF/services 双重注册）。 */
     private NotificationManager defaults() {
         register(new DingTalkChannel());
         register(new WecomChannel());
@@ -362,6 +366,10 @@ public final class NotificationManager {
         return this;
     }
 
+    /**
+     * 加载 SPI 扩展渠道。核心内置已由 {@link #defaults()} 注册，核心模块的
+     * services 文件应为空或不列核心渠道；extra 模块的 SPI 在此加载。
+     */
     private NotificationManager loadSpi() {
         for (NotificationChannel channel : ServiceLoader.load(NotificationChannel.class)) {
             register(channel);

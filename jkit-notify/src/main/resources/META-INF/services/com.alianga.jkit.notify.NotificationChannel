@@ -1,7 +1,3 @@
-com.alianga.jkit.notify.channel.DingTalkChannel
-com.alianga.jkit.notify.channel.WecomChannel
-com.alianga.jkit.notify.channel.FeishuChannel
-com.alianga.jkit.notify.channel.ServerChanChannel
-com.alianga.jkit.notify.channel.BarkChannel
-com.alianga.jkit.notify.channel.WebhookChannel
-com.alianga.jkit.notify.channel.SmtpChannel
+# Core channels are registered by NotificationManager.defaults().
+# This file intentionally lists none — SPI is for optional/extra channels only
+# (see jkit-notify-extra META-INF/services).

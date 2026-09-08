@@ -474,6 +474,10 @@ String body = HttpUtils.curlString(curl);
 `com.alianga:jkit-curl-codegen`（见 [jkit-curl-codegen/README.md](../jkit-curl-codegen/README.md)）。
 jkit 本身只做解析和执行：`parseModel` 给出的 `ParsedCurlRequest` 就是生成器的输入。
 
+除语言 SDK 外，本模块也提供与 curlconverter 对齐的互操作格式：`http`（原始 HTTP 报文）、
+`har`（HAR 1.2 JSON）、`httpie`（HTTPie CLI），以及 `ruby-httparty` / `php-guzzle` /
+`lua`（luasocket `socket.http`）。
+
 ## 12. WebSocket（JDK 11+）
 
 ```java

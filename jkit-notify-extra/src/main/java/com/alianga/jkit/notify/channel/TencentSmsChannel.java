@@ -18,11 +18,11 @@ import java.util.SimpleTimeZone;
  * 腾讯云短信渠道（参考 WePush 的 TxYun3MsgSender，API 版本 2021-01-11，TC3-HMAC-SHA256 签名）。
  *
  * <p>配置：{@link ChannelConfig#ofToken(String)} 创建，token 填 SecretId，
- * {@link ChannelConfig#secret(String)} 填 SecretKey；{@link ChannelConfig#appId(String)}
+ * {@link ChannelConfig#secret(String)} 填 SecretKey；{@code ChannelConfig.extra(CFG_APP_ID, ...)}
  * 填 SdkAppId（如 {@code 1400006666}）；{@link ChannelConfig#name(String)} 填短信签名内容；
- * {@link ChannelConfig#template(String)} 填模板 ID；{@link ChannelConfig#to(String...)} 填手机号
+ * {@code extra(CFG_TEMPLATE, ...)} 填模板 ID；{@link ChannelConfig#to(String...)} 填手机号
  * （国内号码直接填，如 {@code 13711112222}）。
- * {@link ChannelConfig#region(String)} 覆盖地域（默认 {@code ap-guangzhou}）。
+ * {@code extra(CFG_REGION, ...)} 覆盖地域（默认 {@code ap-guangzhou}）。
  *
  * <p>消息：TEXT。模板参数用 {@link AbstractSmsChannel#EXTRA_SMS_PARAMS}，有序参数风格：
  * {@code .extra(AbstractSmsChannel.EXTRA_SMS_PARAMS, "1235,10")} 按模板
@@ -73,9 +73,10 @@ public class TencentSmsChannel extends AbstractSmsChannel {
     @Override
     protected String buildPayload(Message message, ChannelConfig config) {
         requireCredentials(config);
-        String sdkAppId = config.appId();
+        String sdkAppId = smsAppId(config);
         if (sdkAppId == null || sdkAppId.isEmpty()) {
-            throw new IllegalArgumentException("tencent sms SdkAppId is required (ChannelConfig.appId)");
+            throw new IllegalArgumentException(
+                    "tencent sms SdkAppId is required (ChannelConfig.extra(" + CFG_APP_ID + "))");
         }
         Map<String, Object> payload = NotifyUtils.map();
         payload.put("PhoneNumberSet", new String[]{e164(currentReceiver(message))});
@@ -128,7 +129,7 @@ public class TencentSmsChannel extends AbstractSmsChannel {
     }
 
     private String regionOf(ChannelConfig config) {
-        String region = config.region();
+        String region = smsRegion(config);
         return region == null || region.isEmpty() ? DEFAULT_REGION : region;
     }
 

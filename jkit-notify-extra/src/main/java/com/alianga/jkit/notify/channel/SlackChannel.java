@@ -22,7 +22,8 @@ import java.util.Map;
  * {@code Authorization: Bearer xoxb-...}）。
  *
  * <p>消息：TEXT / MARKDOWN / HTML。MARKDOWN 用 Slack mrkdwn 原文发送；
- * 频道用 {@link Message#EXTRA_GROUP}（如 {@code #ops}，webhook 里已绑死频道时忽略）；
+ * 频道用 {@link #EXTRA_CHANNEL}（如 {@code #ops}，webhook 里已绑死频道时忽略）；
+ * 暂兼容 {@link Message#EXTRA_GROUP}（Bark「分组」语义，勿与 Slack 频道混用）；
  * 机器人名用 {@link #EXTRA_USERNAME}（或配置 {@code name}）；
  * 消息气泡颜色用 {@link #EXTRA_COLOR}（good/warning/danger 或 #RRGGBB）；
  * 跳转链接用 {@link Message#EXTRA_URL}。正文按 UTF-8 {@value #MAX_TEXT_BYTES} 字节截断。
@@ -37,6 +38,11 @@ public class SlackChannel extends AbstractHttpChannel {
      * 渠道 id。
      */
     public static final String ID = "slack";
+
+    /**
+     * Slack 频道（如 {@code #ops} / {@code C0123}）。优先于 {@link Message#EXTRA_GROUP}。
+     */
+    public static final String EXTRA_CHANNEL = "channel";
 
     /**
      * 机器人显示名（覆盖 webhook 绑定的默认名）。
@@ -99,11 +105,12 @@ public class SlackChannel extends AbstractHttpChannel {
     protected String buildPayload(Message message, ChannelConfig config) {
         String text = message.title("通知") + "\n" + limitedContent(message);
         Map<String, Object> payload = NotifyUtils.map();
-        String channel = message.extraString(Message.EXTRA_GROUP);
+        String channel = NotifyUtils.firstNonEmpty(message.extraString(EXTRA_CHANNEL),
+                message.extraString(Message.EXTRA_GROUP));
         if (channel != null && !channel.isEmpty()) {
             payload.put("channel", channel);
         }
-        String username = firstNonEmpty(message.extraString(EXTRA_USERNAME), config.name());
+        String username = NotifyUtils.firstNonEmpty(message.extraString(EXTRA_USERNAME), config.name());
         if (username != null && !username.isEmpty()) {
             payload.put("username", username);
         }
@@ -142,43 +149,27 @@ public class SlackChannel extends AbstractHttpChannel {
         return NotifyUtils.toJson(payload);
     }
 
-    private static String firstNonEmpty(String a, String b) {
-        if (a != null && !a.isEmpty()) {
-            return a;
-        }
-        return b;
-    }
-
     @Override
     protected boolean isAccepted(int httpStatus, String responseBody) {
         if (httpStatus < 200 || httpStatus >= 300) {
             return false;
         }
         // Incoming Webhook 返回纯文本 "ok"；chat.postMessage 返回 {"ok":true}
-        Object parsed = NotifyUtils.parseJson(responseBody);
-        if (parsed instanceof Map) {
-            Object ok = ((Map<?, ?>) parsed).get("ok");
-            return Boolean.TRUE.equals(ok) || "true".equals(String.valueOf(ok));
-        }
-        return true;
+        return jsonOk(responseBody);
     }
 
     @Override
     protected FailureType classify(int httpStatus, String responseBody) {
-        Object parsed = NotifyUtils.parseJson(responseBody);
-        if (parsed instanceof Map) {
-            Object error = ((Map<?, ?>) parsed).get("error");
-            if (error != null) {
-                String code = String.valueOf(error);
-                if ("rate_limited".equals(code) || "ratelimited".equals(code)) {
-                    return FailureType.THROTTLED;
-                }
-                if ("invalid_auth".equals(code) || "account_inactive".equals(code)
-                        || "token_revoked".equals(code) || "channel_not_found".equals(code)
-                        || "not_in_channel".equals(code) || "no_text".equals(code)
-                        || "no_service_id".equals(code)) {
-                    return FailureType.CONFIG_ERROR;
-                }
+        String code = jsonStringField(responseBody, "error");
+        if (code != null) {
+            if ("rate_limited".equals(code) || "ratelimited".equals(code)) {
+                return FailureType.THROTTLED;
+            }
+            if ("invalid_auth".equals(code) || "account_inactive".equals(code)
+                    || "token_revoked".equals(code) || "channel_not_found".equals(code)
+                    || "not_in_channel".equals(code) || "no_text".equals(code)
+                    || "no_service_id".equals(code)) {
+                return FailureType.CONFIG_ERROR;
             }
         }
         if (httpStatus == 429) {
@@ -189,12 +180,9 @@ public class SlackChannel extends AbstractHttpChannel {
 
     @Override
     protected String errorMessage(int httpStatus, String responseBody) {
-        Object parsed = NotifyUtils.parseJson(responseBody);
-        if (parsed instanceof Map) {
-            Object error = ((Map<?, ?>) parsed).get("error");
-            if (error != null) {
-                return "slack error: " + error;
-            }
+        String error = jsonStringField(responseBody, "error");
+        if (error != null) {
+            return "slack error: " + error;
         }
         if (httpStatus == 404 || httpStatus == 410) {
             return "slack webhook invalid or revoked (http " + httpStatus + ")";

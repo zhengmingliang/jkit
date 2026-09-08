@@ -26,3 +26,9 @@ com.alianga.jkit.http.codegen.swift.SwiftUrlSessionGenerator
 com.alianga.jkit.http.codegen.ruby.RubyNetHttpGenerator
 com.alianga.jkit.http.codegen.rust.RustReqwestGenerator
 com.alianga.jkit.http.codegen.r.RHttr2Generator
+com.alianga.jkit.http.codegen.php.PhpGuzzleGenerator
+com.alianga.jkit.http.codegen.shell.HttpieGenerator
+com.alianga.jkit.http.codegen.ruby.RubyHttpartyGenerator
+com.alianga.jkit.http.codegen.http.HttpMessageGenerator
+com.alianga.jkit.http.codegen.har.HarGenerator
+com.alianga.jkit.http.codegen.lua.LuaSocketHttpGenerator

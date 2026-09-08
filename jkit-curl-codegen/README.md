@@ -83,5 +83,11 @@ GeneratedCode code = CurlCodegen.generate("py-requests", model);
 | `shell-curl-windows` | shell | curl.exe（Windows cmd，`^` 续行多行） |
 | `shell-curl-powershell` | shell | curl.exe（Windows PowerShell，单行 `--%`） |
 | `shell-wget` | shell | wget |
+| `httpie` | shell | HTTPie |
+| `http` | http | HTTP/1.1 raw message |
+| `har` | har | HAR 1.2 JSON |
+| `ruby-httparty` | Ruby | HTTParty |
+| `php-guzzle` | PHP | Guzzle |
+| `lua` | Lua | socket.http (luasocket) |
 
 自定义生成器实现 `CodeGenerator`，再 `GeneratorRegistry.get().register(...)`，或通过 `META-INF/services/com.alianga.jkit.http.codegen.CodeGenerator` 注册。

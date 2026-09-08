@@ -27,9 +27,10 @@ public class CurlCodegenTest {
             "kotlin-okhttp", "js-fetch", "js-axios", "js-request", "js-unirest", "js-native",
             "js-jquery", "js-xhr",
             "py-requests", "py-httpx", "go-nethttp",
-            "csharp-httpclient", "php-curl", "php-pecl-http",
-            "powershell-restmethod", "shell-curl-windows", "shell-curl-powershell", "shell-wget",
-            "swift-urlsession", "ruby-nethttp", "rust-reqwest", "r-httr2"
+            "csharp-httpclient", "php-curl", "php-pecl-http", "php-guzzle",
+            "powershell-restmethod", "shell-curl-windows", "shell-curl-powershell", "shell-wget", "httpie",
+            "swift-urlsession", "ruby-nethttp", "ruby-httparty", "rust-reqwest", "r-httr2",
+            "http", "har", "lua"
     };
 
     private static final String SAMPLE = "curl -kLs -XPOST 'https://example.com/v1/chat' "
@@ -44,7 +45,7 @@ public class CurlCodegenTest {
             ids.add(g.id());
         }
         assertTrue(ids.containsAll(Arrays.asList(IDS)));
-        assertEquals(28, IDS.length);
+        assertEquals(34, IDS.length);
     }
 
     @Test
@@ -54,8 +55,10 @@ public class CurlCodegenTest {
             GeneratedCode code = GeneratorRegistry.get().generate(id, model);
             assertNotNull(id, code.source());
             assertFalse(id, code.source().trim().isEmpty());
-            assertTrue(id + " missing url\n" + code.source(),
-                    code.source().contains("https://example.com/v1/chat"));
+            boolean hasUrl = code.source().contains("https://example.com/v1/chat")
+                    || (code.source().contains("Host: example.com")
+                    && code.source().contains("/v1/chat"));
+            assertTrue(id + " missing url\n" + code.source(), hasUrl);
             assertTrue(id + " missing json\n" + code.source(),
                     code.source().contains("hi") || code.source().contains("\\\"q\\\""));
         }
@@ -112,6 +115,49 @@ public class CurlCodegenTest {
         assertTrue(CurlCodegen.generate("ruby-nethttp", SAMPLE).source().contains("Net::HTTP"));
         assertTrue(CurlCodegen.generate("rust-reqwest", SAMPLE).source().contains("reqwest"));
         assertTrue(CurlCodegen.generate("r-httr2", SAMPLE).source().contains("httr2"));
+        assertTrue(CurlCodegen.generate("httpie", SAMPLE).source().startsWith("https"));
+        assertTrue(CurlCodegen.generate("http", SAMPLE).source().startsWith("POST "));
+        assertTrue(CurlCodegen.generate("har", SAMPLE).source().contains("\"log\""));
+        assertTrue(CurlCodegen.generate("ruby-httparty", SAMPLE).source().contains("HTTParty"));
+        assertTrue(CurlCodegen.generate("php-guzzle", SAMPLE).source().contains("GuzzleHttp\\Client"));
+        assertTrue(CurlCodegen.generate("lua", SAMPLE).source().contains("socket.http"));
+    }
+
+    @Test
+    public void interopAndNewLanguageGeneratorsHaveExpectedShape() {
+        GeneratedCode http = CurlCodegen.generate("http", SAMPLE);
+        assertTrue(http.source().startsWith("POST /v1/chat HTTP/1.1"));
+        assertTrue(http.source().contains("Host: example.com"));
+        assertTrue(http.source().contains("Authorization: Bearer tok"));
+        assertTrue(http.source().contains("{\"q\":\"hi\"}") || http.source().contains("\"hi\""));
+
+        GeneratedCode har = CurlCodegen.generate("har", SAMPLE);
+        assertTrue(har.source().trim().startsWith("{"));
+        assertTrue(har.source().contains("\"version\": \"1.2\""));
+        assertTrue(har.source().contains("\"method\": \"POST\""));
+        assertTrue(har.source().contains("\"url\": \"https://example.com/v1/chat\""));
+        assertTrue(har.source().contains("\"postData\""));
+        // minimal JSON shape: balanced braces
+        int open = 0;
+        for (int i = 0; i < har.source().length(); i++) {
+            char c = har.source().charAt(i);
+            if (c == '{') {
+                open++;
+            } else if (c == '}') {
+                open--;
+            }
+            assertTrue("HAR JSON braces went negative", open >= 0);
+        }
+        assertEquals("HAR JSON braces unbalanced", 0, open);
+
+        GeneratedCode httpie = CurlCodegen.generate("httpie", SAMPLE);
+        assertTrue(httpie.source().startsWith("http") || httpie.source().startsWith("https"));
+        assertTrue(httpie.source().contains("--verify=no"));
+        assertTrue(httpie.source().contains("--raw"));
+
+        assertTrue(CurlCodegen.generate("ruby-httparty", SAMPLE).source().contains("HTTParty.post"));
+        assertTrue(CurlCodegen.generate("php-guzzle", SAMPLE).source().contains("$client->post("));
+        assertTrue(CurlCodegen.generate("lua", SAMPLE).source().contains("http.request"));
     }
 
     @Test
@@ -332,5 +378,37 @@ public class CurlCodegenTest {
         assertTrue(src.trim().endsWith("\"https://alianga.com/api/admin/posts/latest?top=5\""));
         // 含双引号的头按 MSVCRT 规则转义为 \"
         assertTrue(src.contains("--header \"sec-ch-ua: \\\"Not=A?Brand\\\";v=\\\"99\\\"\" ^"));
+    }
+
+    @Test
+    public void genAll() {
+        String curl = "curl --url 'https://aistudio.xiaomimimo.com/open-apis/chat/dialog/list?xiaomichatbot_ph=oY%2BtexC3%2BXUf0mu9RnSVFw%3D%3D' \\\n" +
+                "  -H 'accept: */*' \\\n" +
+                "  -H 'accept-language: system' \\\n" +
+                "  -H 'cache-control: no-cache' \\\n" +
+                "  -H 'content-type: application/json' \\\n" +
+                "  -b 'xiaomichatbot_serviceToken=\"/vjQa88K2JeX+vuUvl6J6AwxcGmmKxEEzN8ieuJPgIl5kn5w3X3yelocnmyjYBTWxCJFzcWNoh3mqS9T55Um8vv5attGAu4/R6+8jlEicuNS5h8BAEr0JmNvYj34XDvoTonIG+1jy2mMMykuF4RbJ2QQ1fkb0tdn5vZagVmFTUMmCOo61UtKOzj4v+yBAeU1qkkob2hTzRTBShnw/boezNn2eRAA7cO2cGobMfBPzhhZlRW/TYkoQ9jilYTcPPyO4DJyTZLij6XmtbIwyNGO7vXricmF0KJ+SWkO52SKgHsqx6EBCQ0OUcZ3Qghx3reJJli7q1yUCvJvuGPBS69Y/r0tBsasdwswR7chqFS3Jfc=\"; userId=449407463; xiaomichatbot_ph=\"oY+texC3+XUf0mu9RnSVFw==\"' \\\n" +
+                "  -H 'origin: https://aistudio.xiaomimimo.com' \\\n" +
+                "  -H 'pragma: no-cache' \\\n" +
+                "  -H 'priority: u=1, i' \\\n" +
+                "  -H 'referer: https://aistudio.xiaomimimo.com/' \\\n" +
+                "  -H 'sec-ch-ua: \"Chromium\";v=\"152\", \"Not?A_Brand\";v=\"24\", \"Google Chrome\";v=\"152\"' \\\n" +
+                "  -H 'sec-ch-ua-mobile: ?0' \\\n" +
+                "  -H 'sec-ch-ua-platform: \"Linux\"' \\\n" +
+                "  -H 'sec-fetch-dest: empty' \\\n" +
+                "  -H 'sec-fetch-mode: cors' \\\n" +
+                "  -H 'sec-fetch-site: same-origin' \\\n" +
+                "  -H 'user-agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36' \\\n" +
+                "  -H 'x-timezone: Asia/Shanghai' \\\n" +
+                "  --data-raw '{\"queryParam\":{\"conversationId\":\"58d63268650a2534e945976526e127e4\"}," +
+                "\"pageInfo\":{\"pageNum\":1,\"pageSize\":10}}'";
+        for (CodeGenerator codeGenerator : CurlCodegen.list()) {
+            String id = codeGenerator.id();
+            String language = codeGenerator.language();
+            GeneratedCode code = codeGenerator.generate(CurlParser.parseModel(curl));
+            System.out.println("----- " + id + " (" + language + ") -----");
+            System.out.println(code.source());
+            System.out.println();
+        }
     }
 }

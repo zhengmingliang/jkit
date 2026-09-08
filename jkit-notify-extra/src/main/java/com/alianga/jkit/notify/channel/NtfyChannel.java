@@ -173,12 +173,8 @@ public class NtfyChannel extends AbstractHttpChannel {
 
     @Override
     protected String errorMessage(int httpStatus, String responseBody) {
-        Integer code = NotifyUtils.jsonInt(responseBody, "code");
-        String error = NotifyUtils.jsonString(responseBody, "error");
-        if (code != null && error != null) {
-            return "ntfy code " + code + ": " + error;
-        }
-        return super.errorMessage(httpStatus, responseBody);
+        String mapped = jsonCodeMessage("ntfy code", responseBody, "code", "error");
+        return mapped != null ? mapped : super.errorMessage(httpStatus, responseBody);
     }
 
     /**

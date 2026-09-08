@@ -227,6 +227,101 @@ public abstract class AbstractHttpChannel implements NotificationChannel {
         return log;
     }
 
+    /**
+     * JSON 布尔字段 {@code ok == true}（Slack chat.postMessage / Telegram 等）。
+     *
+     * <p>非 JSON 响应（如 Incoming Webhook 纯文本 {@code ok}、反代 HTML 错误页）返回
+     * {@code true}，交给调用方已通过的 HTTP 状态码判定。
+     *
+     * @param responseBody 响应正文
+     * @return 业务是否成功
+     * @since 2.0.1
+     */
+    protected static boolean jsonOk(String responseBody) {
+        Object parsed = NotifyUtils.parseJson(responseBody);
+        if (!(parsed instanceof Map)) {
+            return true;
+        }
+        Object ok = ((Map<?, ?>) parsed).get("ok");
+        return Boolean.TRUE.equals(ok) || "true".equals(String.valueOf(ok));
+    }
+
+    /**
+     * JSON 整型字段是否等于期望值；解析失败或缺字段返回 {@code false}。
+     *
+     * @param responseBody 响应正文
+     * @param key 字段名
+     * @param expected 期望值
+     * @return 是否相等
+     * @since 2.0.1
+     */
+    protected static boolean jsonIntEquals(String responseBody, String key, int expected) {
+        Integer value = NotifyUtils.jsonInt(responseBody, key);
+        return value != null && value.intValue() == expected;
+    }
+
+    /**
+     * 按顺序取第一个非 null 的 JSON 整型字段（飞书 {@code code} / {@code StatusCode}）。
+     *
+     * @param responseBody 响应正文
+     * @param keys 字段名，按优先级
+     * @return 整型值；全部缺失为 {@code null}
+     * @since 2.0.1
+     */
+    protected static Integer jsonIntField(String responseBody, String... keys) {
+        if (keys == null) {
+            return null;
+        }
+        for (String key : keys) {
+            Integer value = NotifyUtils.jsonInt(responseBody, key);
+            if (value != null) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 按顺序取第一个非 null 的 JSON 字符串字段。
+     *
+     * @param responseBody 响应正文
+     * @param keys 字段名，按优先级
+     * @return 字符串；全部缺失为 {@code null}
+     * @since 2.0.1
+     */
+    protected static String jsonStringField(String responseBody, String... keys) {
+        if (keys == null) {
+            return null;
+        }
+        for (String key : keys) {
+            String value = NotifyUtils.jsonString(responseBody, key);
+            if (value != null) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 拼平台错误文案 {@code label + " " + code + ": " + message}；码或文案缺失返回 {@code null}。
+     *
+     * @param label 前缀，如 {@code bark code}、{@code dingtalk errcode}
+     * @param responseBody 响应正文
+     * @param codeKey 错误码字段
+     * @param messageKeys 错误文案字段（可多备选）
+     * @return 文案或 {@code null}
+     * @since 2.0.1
+     */
+    protected static String jsonCodeMessage(String label, String responseBody,
+            String codeKey, String... messageKeys) {
+        Integer code = NotifyUtils.jsonInt(responseBody, codeKey);
+        String message = jsonStringField(responseBody, messageKeys);
+        if (code == null || message == null) {
+            return null;
+        }
+        return label + " " + code + ": " + message;
+    }
+
     private static String readBody(HttpResponse response) throws IOException {
         if (response.body() == null) {
             return "";
@@ -235,7 +330,13 @@ public abstract class AbstractHttpChannel implements NotificationChannel {
         return body == null ? "" : body;
     }
 
-    private static String abbreviate(String text) {
+    /**
+     * 截断过长响应正文，避免日志与 {@link SendResult#error()} 膨胀。
+     *
+     * @param text 原文
+     * @return 至多 200 字符的摘要
+     */
+    protected static String abbreviate(String text) {
         if (text == null) {
             return "";
         }

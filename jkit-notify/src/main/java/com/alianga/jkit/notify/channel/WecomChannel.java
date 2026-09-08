@@ -194,8 +194,7 @@ public class WecomChannel extends AbstractHttpChannel {
 
     @Override
     protected boolean isAccepted(int httpStatus, String responseBody) {
-        Integer errcode = NotifyUtils.jsonInt(responseBody, "errcode");
-        return errcode != null && errcode == 0;
+        return jsonIntEquals(responseBody, "errcode", 0);
     }
 
     @Override
@@ -221,11 +220,7 @@ public class WecomChannel extends AbstractHttpChannel {
 
     @Override
     protected String errorMessage(int httpStatus, String responseBody) {
-        Integer errcode = NotifyUtils.jsonInt(responseBody, "errcode");
-        String errmsg = NotifyUtils.jsonString(responseBody, "errmsg");
-        if (errcode != null && errmsg != null) {
-            return "wecom errcode " + errcode + ": " + errmsg;
-        }
-        return super.errorMessage(httpStatus, responseBody);
+        String mapped = jsonCodeMessage("wecom errcode", responseBody, "errcode", "errmsg");
+        return mapped != null ? mapped : super.errorMessage(httpStatus, responseBody);
     }
 }
