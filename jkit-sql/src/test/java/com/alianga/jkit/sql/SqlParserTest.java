@@ -28,6 +28,7 @@ import com.alianga.jkit.sql.ast.SqlStatement;
 import com.alianga.jkit.sql.ast.SqlStatementType;
 import com.alianga.jkit.sql.ast.SqlSubqueryTable;
 import com.alianga.jkit.sql.ast.SqlTable;
+import com.alianga.jkit.sql.ast.SqlUnaryExpr;
 import com.alianga.jkit.sql.ast.SqlUpdate;
 import com.alianga.jkit.sql.ast.SqlValuesTable;
 import com.alianga.jkit.sql.ast.SqlWindowDefinition;
@@ -1388,6 +1389,74 @@ public class SqlParserTest {
         } catch (SqlParseException expected) {
             assertTrue(expected.getMessage(), expected.getMessage().length() > 0);
         }
+    }
+
+    /**
+     * MySQL {@code <=>} 空安全相等。
+     */
+    @Test
+    public void mysqlNullSafeEqual() {
+        SqlSelect s = (SqlSelect) SQL.parse("SELECT * FROM t WHERE a <=> b");
+        assertEquals(SqlBinaryOp.NULL_SAFE_EQ,
+                ((SqlBinaryExpr) s.where()).operator());
+        assertTrue(SQL.toSqlString(s).contains("<=>"));
+    }
+
+    /**
+     * MySQL {@code INSERT DELAYED}。
+     */
+    @Test
+    public void mysqlInsertDelayed() {
+        SqlInsert ins = (SqlInsert) SQL.parse("INSERT DELAYED INTO t (id) VALUES (1)");
+        assertTrue(ins.delayed());
+        String out = SQL.toSqlString(ins);
+        assertTrue(out, out.toUpperCase().contains("DELAYED"));
+        SqlInsert again = (SqlInsert) SQL.parse(out);
+        assertTrue(again.delayed());
+    }
+
+    /**
+     * MySQL {@code BINARY 'abc'} 前缀强制二进制比较。
+     */
+    @Test
+    public void mysqlBinaryPrefix() {
+        SqlSelect s = (SqlSelect) SQL.parse("SELECT * FROM t WHERE BINARY 'abc' = name");
+        SqlBinaryExpr where = (SqlBinaryExpr) s.where();
+        assertTrue(where.left() instanceof SqlUnaryExpr);
+        assertEquals(SqlUnaryExpr.Op.BINARY, ((SqlUnaryExpr) where.left()).operator());
+        String out = SQL.toSqlString(s);
+        assertTrue(out, out.toUpperCase().contains("BINARY"));
+    }
+
+    /**
+     * SQL Server {@code TOP (n) WITH TIES}。
+     */
+    @Test
+    public void sqlServerTopWithTies() {
+        SqlSelect s = (SqlSelect) SQL.parse(
+                "SELECT TOP (10) WITH TIES * FROM t ORDER BY id", SqlDialect.SQLSERVER);
+        assertNotNull(s.top());
+        assertTrue(s.topWithTies());
+        String out = SQL.toSqlString(s, SqlDialect.SQLSERVER);
+        assertTrue(out, out.toUpperCase().contains("WITH TIES"));
+        SqlSelect again = (SqlSelect) SQL.parse(out, SqlDialect.SQLSERVER);
+        assertTrue(again.topWithTies());
+    }
+
+    /**
+     * PG {@code TABLESAMPLE} / Oracle {@code SAMPLE(n)}。
+     */
+    @Test
+    public void tableSampleClauses() {
+        SqlSelect pg = (SqlSelect) SQL.parse(
+                "SELECT * FROM t TABLESAMPLE SYSTEM (10)", SqlDialect.POSTGRES);
+        assertNotNull(((SqlTable) pg.from()).sampleClause());
+        assertTrue(((SqlTable) pg.from()).sampleClause().toUpperCase().contains("TABLESAMPLE"));
+
+        SqlSelect ora = (SqlSelect) SQL.parse(
+                "SELECT * FROM t SAMPLE (5)", SqlDialect.ORACLE);
+        assertNotNull(((SqlTable) ora.from()).sampleClause());
+        assertTrue(((SqlTable) ora.from()).sampleClause().toUpperCase().contains("SAMPLE"));
     }
 
     /**

@@ -16,6 +16,7 @@ public final class SqlSelect extends SqlStatement {
     private boolean distinct;
     private final List<SqlExpr> distinctOn = new ArrayList<SqlExpr>(2);
     private SqlExpr top;
+    private boolean topWithTies;
     private final List<SqlSelectItem> selectItems = new ArrayList<SqlSelectItem>(4);
     private SqlTableSource from;
     private SqlExpr where;
@@ -119,6 +120,22 @@ public final class SqlSelect extends SqlStatement {
      */
     public void setTop(SqlExpr top) {
         this.top = top;
+    }
+
+    /**
+     * @return SQL Server {@code TOP … WITH TIES}
+     * @since 2.1.0
+     */
+    public boolean topWithTies() {
+        return topWithTies;
+    }
+
+    /**
+     * @param topWithTies {@code WITH TIES}
+     * @since 2.1.0
+     */
+    public void setTopWithTies(boolean topWithTies) {
+        this.topWithTies = topWithTies;
     }
 
     /**

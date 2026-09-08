@@ -201,6 +201,12 @@ public final class SqlFormatter {
             kw("TOP");
             sp();
             writeExpr(select.top());
+            if (select.topWithTies()) {
+                sp();
+                kw("WITH");
+                sp();
+                kw("TIES");
+            }
         }
         sp();
         List<SqlSelectItem> items = select.selectItems();
@@ -357,6 +363,10 @@ public final class SqlFormatter {
     private void writeInsert(SqlInsert insert) {
         writeWith(insert);
         kw(insert.replace() ? "REPLACE" : "INSERT");
+        if (insert.delayed()) {
+            sp();
+            kw("DELAYED");
+        }
         if (insert.insertAll() || insert.insertFirst()) {
             sp();
             kw(insert.insertFirst() ? "FIRST" : "ALL");
@@ -856,6 +866,10 @@ public final class SqlFormatter {
                 sp();
                 out.append(table.indexHint());
             }
+            if (table.sampleClause() != null) {
+                sp();
+                out.append(table.sampleClause());
+            }
             if (table.optimizerHint() != null) {
                 sp();
                 out.append(table.optimizerHint());
@@ -1124,6 +1138,9 @@ public final class SqlFormatter {
                 out.append('+');
             } else if (u.operator() == SqlUnaryExpr.Op.TILDE) {
                 out.append('~');
+            } else if (u.operator() == SqlUnaryExpr.Op.BINARY) {
+                kw("BINARY");
+                sp();
             }
             writeExpr(u.expr());
         } else if (expr instanceof SqlBetweenExpr) {

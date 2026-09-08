@@ -274,6 +274,10 @@ public final class SqlParser {
         if (match(SqlTokenType.TOP)) {
             select.setTop(parsePrimary());
             match(SqlTokenType.PERCENT);
+            if (match(SqlTokenType.WITH)) {
+                expect(SqlTokenType.TIES);
+                select.setTopWithTies(true);
+            }
         }
         consumeSelectHints(select);
         do {
@@ -402,6 +406,14 @@ public final class SqlParser {
 
     private SqlInsert parseInsert(boolean replace) {
         next();
+        SqlInsert early = null;
+        if (!replace && match(SqlTokenType.DELAYED)) {
+            early = new SqlInsert();
+            early.setDelayed(true);
+        } else {
+            match(SqlTokenType.LOW_PRIORITY);
+            match(SqlTokenType.HIGH_PRIORITY);
+        }
         match(SqlTokenType.IGNORE);
         if (!replace && (is(SqlTokenType.ALL) || is(SqlTokenType.FIRST))) {
             return parseMultiInsert();
@@ -409,7 +421,7 @@ public final class SqlParser {
         match(SqlTokenType.INTO);
         // Hive / 部分引擎：INSERT INTO TABLE t
         match(SqlTokenType.TABLE);
-        SqlInsert insert = new SqlInsert();
+        SqlInsert insert = early != null ? early : new SqlInsert();
         insert.setReplace(replace);
         insert.setTable(SqlTable.of(parseName()));
         parseTableHints(insert.table());
@@ -1320,6 +1332,7 @@ public final class SqlParser {
             SqlTable table = SqlTable.of(name);
             parseTableHints(table);
             parseTableAlias(table);
+            parseTableSample(table);
             return table;
         }
         if (lateral) {
@@ -1345,6 +1358,54 @@ public final class SqlParser {
                 source.columnAliases().add(parseName());
             } while (match(SqlTokenType.COMMA));
             expect(SqlTokenType.RPAREN);
+        }
+    }
+
+    private void parseTableSample(SqlTable table) {
+        // PG: TABLESAMPLE SYSTEM|BERNOULLI (p) [REPEATABLE (seed)]
+        if (isIdent("TABLESAMPLE")) {
+            StringBuilder sb = new StringBuilder();
+            sb.append(token.text());
+            next();
+            if (identLike()) {
+                sb.append(' ').append(token.text());
+                next();
+            }
+            if (match(SqlTokenType.LPAREN)) {
+                sb.append('(');
+                sb.append(consumeRawUntilType(SqlTokenType.RPAREN));
+                expect(SqlTokenType.RPAREN);
+                sb.append(')');
+            }
+            if (isIdent("REPEATABLE")) {
+                sb.append(' ').append(token.text());
+                next();
+                if (match(SqlTokenType.LPAREN)) {
+                    sb.append('(');
+                    sb.append(consumeRawUntilType(SqlTokenType.RPAREN));
+                    expect(SqlTokenType.RPAREN);
+                    sb.append(')');
+                }
+            }
+            table.setSampleClause(sb.toString());
+            return;
+        }
+        // Oracle: SAMPLE [BLOCK] (percent)
+        if (isIdent("SAMPLE")) {
+            StringBuilder sb = new StringBuilder();
+            sb.append(token.text());
+            next();
+            if (isIdent("BLOCK")) {
+                sb.append(' ').append(token.text());
+                next();
+            }
+            if (match(SqlTokenType.LPAREN)) {
+                sb.append('(');
+                sb.append(consumeRawUntilType(SqlTokenType.RPAREN));
+                expect(SqlTokenType.RPAREN);
+                sb.append(')');
+            }
+            table.setSampleClause(sb.toString());
         }
     }
 
@@ -1431,7 +1492,10 @@ public final class SqlParser {
             // MySQL：SELECT id "别名" / SELECT 1 'x' —— 双引号在 MYSQL 方言下是字符串记号
             return unquote(consumeStringRaw());
         }
-        if (identLike() && !isAliasStop(token.type())) {
+        if (identLike() && !isAliasStop(token.type())
+                && !isIdent("TABLESAMPLE") && !isIdent("SAMPLE")
+                && !is(SqlTokenType.FORCE) && !is(SqlTokenType.USE)
+                && !is(SqlTokenType.IGNORE)) {
             return unquote(consumeIdentRaw());
         }
         return null;
@@ -1794,6 +1858,10 @@ public final class SqlParser {
         if (is(SqlTokenType.TILDE)) {
             next();
             return SqlUnaryExpr.of(SqlUnaryExpr.Op.TILDE, parseUnary());
+        }
+        if (is(SqlTokenType.BINARY)) {
+            next();
+            return SqlUnaryExpr.of(SqlUnaryExpr.Op.BINARY, parseUnary());
         }
         if (is(SqlTokenType.EXISTS)) {
             next();

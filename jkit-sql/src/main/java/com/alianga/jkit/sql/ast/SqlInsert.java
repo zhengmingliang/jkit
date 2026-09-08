@@ -13,6 +13,7 @@ import java.util.List;
  */
 public final class SqlInsert extends SqlStatement {
     private boolean replace;
+    private boolean delayed;
     private SqlTable table;
     private final List<SqlIdentifier> columns = new ArrayList<SqlIdentifier>(4);
     private final List<List<SqlExpr>> valuesList = new ArrayList<List<SqlExpr>>(2);
@@ -57,6 +58,22 @@ public final class SqlInsert extends SqlStatement {
      */
     public void setReplace(boolean replace) {
         this.replace = replace;
+    }
+
+    /**
+     * @return MySQL {@code INSERT DELAYED}
+     * @since 2.1.0
+     */
+    public boolean delayed() {
+        return delayed;
+    }
+
+    /**
+     * @param delayed {@code DELAYED}
+     * @since 2.1.0
+     */
+    public void setDelayed(boolean delayed) {
+        this.delayed = delayed;
     }
 
     /**

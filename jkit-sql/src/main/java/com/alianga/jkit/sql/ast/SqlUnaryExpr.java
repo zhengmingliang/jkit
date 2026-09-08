@@ -17,6 +17,8 @@ public final class SqlUnaryExpr extends SqlExpr {
         PLUS,
         MINUS,
         TILDE,
+        /** MySQL {@code BINARY expr} */
+        BINARY,
         EXISTS
     }
 

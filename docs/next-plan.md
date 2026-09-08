@@ -235,7 +235,8 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 ### 语法缺口（2026-09-09 修过一部分）
 
 - ✅ PG `@>` / `<@`、`~`/`~*`/`!~`；MySQL `FORCE INDEX FOR JOIN|ORDER BY|GROUP BY`
-- 待补：MySQL `<=>` / `INSERT DELAYED` / `BINARY 'x'`；SQL Server `TOP (n) WITH TIES`；可选 `TABLESAMPLE` / Oracle `SAMPLE`
+- ✅ MySQL `<=>` / `INSERT DELAYED` / `BINARY expr`；SQL Server `TOP (n) WITH TIES`；PG `TABLESAMPLE` / Oracle `SAMPLE(n)`
+- 仍跳过：Oracle `(+)`、MySQL `PARTITION (p0)`（非平凡）
 
 ## 3. 对比测试工程（`/opt/workspace/zml/tools-test`）
 

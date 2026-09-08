@@ -41,6 +41,10 @@
 - `jkit-sql`：PostgreSQL `@>` / `<@` 不再被词法误判为 `VARIABLE`；`~` / `~*` / `!~` / `!~*` 按方言解析为正则比较（MySQL 仍保留一元 `~`）。
 - `jkit-sql`：MySQL `FORCE/USE/IGNORE INDEX FOR JOIN|ORDER BY|GROUP BY (...)` 不再误吞进 `FOR UPDATE`。
 
+### 新增
+
+- `jkit-sql`：MySQL `<=>`、`INSERT DELAYED`、`BINARY expr`；SQL Server `TOP (n) WITH TIES`；PG `TABLESAMPLE` / Oracle `SAMPLE(n)`。
+
 - `jkit-sql`：`SqlBuilder` 流式构建 SELECT/INSERT/UPDATE/DELETE + `SQL.and`/`or`/`concat`/`builder`；分页 API `getLimit`/`getOffset`/`setLimit`/`setOffset`/`setPage`；`SqlDialect` 能力矩阵与别名；AST `toString()` 输出紧凑 SQL。
 
 - `tools-test` P3.2：JMH `SqlParseBenchmark`（simple/join/window × jkit/druid/jsql，fork≥2）；`sql-corpus.txt`（~379 条）+ `SqlParserCompareTest#corpusFileSuccessRates`（缺口写 `target/sql-compare-fail.txt`）。Lexer 短 ident intern 仍延期。

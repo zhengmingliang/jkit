@@ -12,6 +12,7 @@ public final class SqlTable extends SqlTableSource {
     private SqlIdentifier name;
     private String indexHint;
     private String optimizerHint;
+    private String sampleClause;
 
     /**
      * @param name 表名
@@ -65,6 +66,22 @@ public final class SqlTable extends SqlTableSource {
      */
     public void setOptimizerHint(String optimizerHint) {
         this.optimizerHint = optimizerHint;
+    }
+
+    /**
+     * @return {@code TABLESAMPLE …} / Oracle {@code SAMPLE(…)} 原文，可空
+     * @since 2.1.0
+     */
+    public String sampleClause() {
+        return sampleClause;
+    }
+
+    /**
+     * @param sampleClause 采样子句原文
+     * @since 2.1.0
+     */
+    public void setSampleClause(String sampleClause) {
+        this.sampleClause = sampleClause;
     }
 
     /**
