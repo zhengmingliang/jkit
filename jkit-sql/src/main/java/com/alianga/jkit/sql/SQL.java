@@ -13,7 +13,7 @@ import java.util.List;
 
 /**
  * SQL 解析门面，对标 Druid {@code SQLUtils} 与 JSqlParser {@code CCJSqlParserUtil}
- * 的常用入口：解析、格式化、抽表列、改写。
+ * 的常用入口：解析、格式化、抽表列、改写、{@link SqlBuilder} 构建。
  *
  * <p>解析器按线程复用，零第三方依赖，JDK 8+。</p>
  *
@@ -40,6 +40,59 @@ public final class SQL {
     };
 
     private SQL() {
+    }
+
+    /**
+     * @return 新的 SELECT {@link SqlBuilder}（默认 {@code SELECT *}）
+     * @since 2.1.0
+     */
+    public static SqlBuilder builder() {
+        return SqlBuilder.select();
+    }
+
+    /**
+     * 多谓词 AND（AST 级，无字符串拼接）。
+     *
+     * @param predicates 谓词
+     * @return 合并表达式
+     * @since 2.1.0
+     */
+    public static SqlExpr and(SqlExpr... predicates) {
+        return SqlBuilder.andAll(predicates);
+    }
+
+    /**
+     * 多谓词 OR。
+     *
+     * @param predicates 谓词
+     * @return 合并表达式
+     * @since 2.1.0
+     */
+    public static SqlExpr or(SqlExpr... predicates) {
+        return SqlBuilder.orAll(predicates);
+    }
+
+    /**
+     * 分号拼接多条语句。
+     *
+     * @param statements 语句列表
+     * @return 紧凑 SQL
+     * @since 2.1.0
+     */
+    public static String concat(List<SqlStatement> statements) {
+        return SqlBuilder.concatStatements(statements, SqlDialect.MYSQL);
+    }
+
+    /**
+     * 分号拼接多条语句。
+     *
+     * @param statements 语句列表
+     * @param dialect 方言
+     * @return 紧凑 SQL
+     * @since 2.1.0
+     */
+    public static String concat(List<SqlStatement> statements, SqlDialect dialect) {
+        return SqlBuilder.concatStatements(statements, dialect);
     }
 
     /**

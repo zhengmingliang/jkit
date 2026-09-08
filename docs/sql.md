@@ -143,6 +143,29 @@ SQL.format(stmt, SqlDialect.MYSQL, true);
 | 分页 | `LIMIT` / `LIMIT off,n`（`supportsLimitOffset`） | PG/ANSI/H2：LIMIT+FETCH；Oracle：FETCH/ROWNUM；SQL Server：TOP + OFFSET FETCH |
 | `\|\|` 能力 | `pipesAsOr()` | `pipesAreConcat()` |
 
+## 快速构建（SqlBuilder）
+
+```java
+String sql = SqlBuilder.select("id", "name")
+        .from("users", "u")
+        .where("u.status = 1")
+        .and("u.age > 18")
+        .orderBy("u.id")
+        .limit(10)
+        .toSql();
+
+SqlBuilder.insertInto("t").columns("id", "name").values(1, "a").toSql();
+SqlBuilder.update("t").set("name", "b").where("id = 1").toSql();
+SqlBuilder.deleteFrom("t").where("id = 1").toSql();
+
+// AST 级拼接（无字符串黑客）
+SQL.and(SqlBuilder.parsePredicate("a=1"), SqlBuilder.parsePredicate("b=2"));
+SQL.concat(Arrays.asList(SQL.parse("SELECT 1"), SQL.parse("SELECT 2")));
+SQL.builder().from("t").where("id = ?").limit(5).toSql();
+```
+
+构建结果是 AST，再经 `SQL.format` / `toSqlString` 回写。
+
 ## 参数抽取
 
 ```java

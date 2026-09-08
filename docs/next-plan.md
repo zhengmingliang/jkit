@@ -25,7 +25,7 @@
 
 入口 `com.alianga.jkit.sql.SQL`：
 
-`parse` / `parseAll` / `format` / `toSqlString` / `tables` / `stat` / `addLimit` / `andWhere` / `replaceTable` / `replaceColumn` / `parameters` / `parameterize` / `exportParameterValues` / `wall` / `clone` / `eval` / `isReadOnly`
+`parse` / `parseAll` / `format` / `toSqlString` / `tables` / `stat` / `addLimit` / `getLimit`/`setPage`… / `andWhere` / `replaceTable` / `replaceColumn` / `parameters` / `parameterize` / `exportParameterValues` / `wall` / `clone` / `eval` / `isReadOnly` / `SqlBuilder` / `and`/`or`/`concat`
 
 已实现：
 
@@ -209,6 +209,13 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 
 `addLimit` 已改为 **clone 后再改**；单测断言原树无 LIMIT。
 
+### P3.x — 后 P3 产品化（2026-09-09 已完成）
+
+- ✅ AST `toString()` → 紧凑 SQL（`SqlNode` + formatter 覆盖 SelectItem/Limit/Join 等）
+- ✅ `SqlDialect` 别名 + `supportsLimitOffset/Top/FetchFirst/Rownum` / `pipesAreConcat` / `quoteIdent`
+- ✅ 分页 get/set/setPage（方言感知）
+- ✅ `SqlBuilder` + `SQL.and`/`or`/`concat`
+
 ### P3 — 工程与性能（P3.1 / P3.2 已完成；lexer intern 延期）
 
 - **JMH 对比** ✅（P3.2，2026-09-09）：`tools-test` 增加 `com.alianga.test.sql.jmh.SqlParseBenchmark`（simple / join / window × jkit/druid/jsql），JMH 1.37 + exec 插件。正式数字用 fork≥2，勿用墙钟 for 循环。
@@ -282,6 +289,7 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 5. P1.1 WINDOW 子句 + P1.2 APPLY/LATERAL（缺了就会在业务 SQL 上直接 parse 失败）。
 6. 把失败 SQL 追加进 `SqlGoldenCorpusTest` 和 `SqlParserCompareTest` 的 CORPUS。
 7. P0.1 拆 Parser（行为稳定后再拆，避免和语法扩展搅在一起）。
-8. P2/P3.2 已完成；lexer 短 ident intern 仍延期。
+8. P2/P3.2 与后 P3（toString/Dialect/分页/SqlBuilder）已完成；lexer 短 ident intern 仍延期。
+9. 余量：P0.1 拆 Parser；P0.4 余量；tools-test 表名集合对比。
 
 每完成一块：补 `@since 2.1.0`、更新 `docs/sql.md` 覆盖表、在 `CHANGELOG.md` 的 `2.1.0 - unreleased` 追加条目。不要把父 POM 版本改成 2.1.0，除非用户明确说要发版。
