@@ -188,14 +188,14 @@ List<Object> literals = SQL.exportParameterValues("SELECT * FROM t WHERE name = 
 - INSERT / REPLACE：列清单、VALUES 多行、INSERT SELECT、INSERT SET、ON DUPLICATE KEY UPDATE、PG `ON CONFLICT`（`DO NOTHING` / `DO UPDATE` / `ON CONSTRAINT`）、`RETURNING`（`*` 或多列列表）、SQL Server `OUTPUT`、Oracle `INSERT ALL` / `INSERT FIRST`
 - UPDATE / DELETE：JOIN、WHERE、ORDER BY、LIMIT、PG `UPDATE … FROM`、PG/MySQL `DELETE … USING`、`RETURNING`（多列）、SQL Server `OUTPUT`
 - MERGE：INTO / USING / ON、多个 `WHEN MATCHED [AND pred]`、`WHEN NOT MATCHED [BY TARGET|SOURCE]`、`OUTPUT`
-- DDL：CREATE/DROP/ALTER TABLE|VIEW|INDEX|DATABASE|PROCEDURE|FUNCTION|TRIGGER|EVENT（抽对象名；`CREATE OR REPLACE`；VIEW/CTAS 的 AS query；过程参数与 BEGIN…END 体进 tail；CREATE TABLE ENGINE/CHARSET/COLLATE/COMMENT + 表级 FOREIGN KEY 引用表；ALTER ADD/DROP INDEX、RENAME TO、CHANGE/MODIFY 列定义、ADD CONSTRAINT）
-- EXPLAIN / DESC、SET、USE、SHOW、CALL（实参进 AST）、TRUNCATE、GRANT（权限 + ON 对象名）
+- DDL：CREATE/DROP/ALTER TABLE|VIEW|INDEX|DATABASE|PROCEDURE|FUNCTION|TRIGGER|EVENT（抽对象名；`CREATE OR REPLACE`；VIEW/CTAS 的 AS query；过程参数与 BEGIN…END 体进 tail；CREATE TABLE 列定义原文（`columnDefinitions`）+ ENGINE/CHARSET/COLLATE/COMMENT + 表级 FOREIGN KEY 引用表；ALTER ADD/DROP INDEX、RENAME TO、CHANGE/MODIFY 列定义、ADD CONSTRAINT）
+- EXPLAIN / DESC、SET、USE、SHOW、CALL（实参进 AST）、TRUNCATE、GRANT（权限 + ON 对象名；收件人 `user@host` 紧凑回写）
 - 过程块 / 维护：`BEGIN … END`、`DECLARE`（OTHER）；`ANALYZE` / `VACUUM` / `OPTIMIZE|REPAIR|CHECK TABLE`；`COMMENT ON TABLE/COLUMN`；SQL Server `GO` 批分隔；PG `COPY … FROM STDIN`；MySQL `HANDLER` / `PREPARE` / `EXECUTE` / `DEALLOCATE PREPARE`（OTHER + 抽名）
 - 表达式：字面量、绑定 `?` / `:name` / `@var`、算术比较、AND/OR/XOR/NOT、IN/BETWEEN/LIKE/ILIKE/REGEXP、IS NULL、`IS DISTINCT FROM` / `IS NOT DISTINCT FROM`、CASE、CAST / `::`、函数、EXISTS、子查询、`INTERVAL '1 day'` / `INTERVAL 1 DAY`、`X'FF'` / `0xFF`、行构造 `(a,b)`、JSON `->` `->>` `#>` `#>>`、数组下标 `arr[1]`、`= ANY/SOME/ALL (...)`；另含 PG `@>`/`<@`/`~`/`~*`、MySQL `FORCE INDEX FOR …`/`<=>`/`INSERT DELAYED`/`BINARY`、SQL Server `TOP WITH TIES`、`TABLESAMPLE`/`SAMPLE`、Oracle `(+)` 外连接后缀
 - 注释：`--`、`/* */`、MySQL `#`；仅注释/空白的输入解析为 `OTHER` 空语句（不抛 empty SQL）；MySQL 可执行注释 `/*!40101 … */` 展开为内部 SQL（不整段丢弃）；优化器 hint `/*+ … */` 挂到 SELECT / 表并可 format 回写
 - 解析选项：`SqlParseOptions.keepComments(true)`（默认 false）时普通注释进入 `SqlStatement.comments()`，热路径默认仍丢弃；`SqlParseOptions.pipesAsConcat(true)` 让 MySQL 方言下 `||` 按拼接解析（等同 `PIPES_AS_CONCAT`）；`SQL.parseAll(sql, dialect, true)` 容错多语句（失败占位 + `parseError`，供审计）
 
-明确未做：过程体结构化执行、CREATE TABLE 完整列类型/约束回写（仍主要抽名；引用表可抽）、执行引擎、完整 Wall 规则集（仅提供 `SQL.wall` 子集）。未知函数按普通函数调用解析，不失败。
+明确未做：过程体结构化执行、执行引擎、完整 Wall 规则集（仅提供 `SQL.wall` 子集）。CREATE TABLE 列类型/约束已进 `columnDefinitions` 并可 format 往返。未知函数按普通函数调用解析，不失败。
 
 ## 性能
 
@@ -206,17 +206,17 @@ cd ../tools-test
 mvn -Dtest=SqlParserCompareTest test
 ```
 
-本机一次实测（37 条对标 SQL，JDK 17）：
+`tools-test` 文件语料 `sql-corpus.txt`（约 **379** 条）上 **jkit 379/379（100%）**；内嵌 CORPUS（约 64 条）亦全绿。竞品缺口随样例变化（Druid 常见挂 `DISTINCT ON` / WINDOW 继承 / UNNEST；JSqlParser 常见挂 `LOCK IN SHARE MODE` / `[dbo].[user]` / WINDOW 继承）。
 
-| | 解析成功率 | simple ns/op | join ns/op | window ns/op |
-| --- | --- | --- | --- | --- |
-| **jkit-sql** | **37/37 (100%)** | 1292 | 1791 | 763 |
-| Druid 1.2.23 | 36/37 (97%) | 5185 | 5905 | 4537 |
-| JSqlParser 4.9 | 35/37 (95%) | 208135 | 238283 | 296810 |
+吞吐请以 **JMH** 为准（`tools-test` 的 `SqlParseBenchmark`，fork≥2）；墙钟 for 循环仅作数量级参考：jkit 与 Druid 同属手写档，明显快于 JavaCC 的 JSqlParser。
 
-Druid 在 `DISTINCT ON` 上失败；JSqlParser 在 `LOCK IN SHARE MODE` 和 `[dbo].[user]` 上失败。吞吐是 warmup 后 2 万次的墙钟，不是 JMH，数量级可信：jkit 与 Druid 同属手写档，明显快于 JavaCC 的 JSqlParser。
+| | 解析成功率（文件语料） | 备注 |
+| --- | --- | --- |
+| **jkit-sql** | **379/379 (100%)** | 模块内黄金集约 203 条（含往返） |
+| Druid 1.2.23 | 低于 jkit（缺口见 `target/sql-compare-fail.txt`） | 对比不进本库依赖 |
+| JSqlParser 4.9 | 低于 jkit | 同上 |
 
 ## 语料与对比
 
-- 模块内：`SqlGoldenCorpusTest`（约 165 条，含往返）、`CommonModelSqlCorpusTest`（从 `icell/common-model` 收获，87 条可解析）。
-- 与 Druid / JSqlParser 对比只在上级工程 `tools-test` 的 `SqlParserCompareTest`（不进本库依赖）。
+- 模块内：`SqlGoldenCorpusTest`（约 **203** 条，含往返）、`CommonModelSqlCorpusTest`（从 `icell/common-model` 收获，87 条可解析）。
+- 与 Druid / JSqlParser 对比只在上级工程 `tools-test` 的 `SqlParserCompareTest`（成功率 + 表名集合差分 + JMH；不进本库依赖）。

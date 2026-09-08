@@ -39,45 +39,16 @@
 ### 修复
 
 - `jkit-sql`：`CREATE TABLE` format 往返保留列类型/约束原文（`columnDefinitions`，不再只回写列名）；`GRANT` 收件人 `'u'@'%'` / `u@localhost` 不再被 raw 拼接拆成 `'u' @ '%'`。
-
-### 变更
-
-- `jkit-sql`：P0.1 重构 — 拆分 `SqlParser` 为 `SqlSelectParser` / `SqlDmlParser` / `SqlDdlParser` / `SqlExprParser`（包内协作共享记号游标）；公开 API 与语法行为不变。
-
-- `jkit-sql`：**破坏性** — `SQL.andWhere` / `replaceTable` / `replaceColumn` 改为与 `addLimit`/`setPage` 一致的 clone-then-mutate（返回新 AST，不污染原树）；调用方须使用返回值。
-
-### 新增
-
-- `jkit-sql`：MySQL 表分区限定 `FROM t PARTITION (p0, p1)`（`SqlTable.partitions`，format 往返；不再误当别名）。
-
-### 新增
-
-- `jkit-sql` P0.4 余量：`ALTER … CHANGE/MODIFY` 抽旧/新列名 + `columnDefinition`；`ALTER ADD CONSTRAINT`（FOREIGN/PRIMARY/UNIQUE/CHECK）与引用表；`CREATE TABLE` 表级 `FOREIGN KEY … REFERENCES` 抽引用表（`referencedTables`）；`GRANT` 抽 `privileges` + 对象名（`*.*`/`db.*`/`db.t`）。
-- `jkit-sql`：`SqlBuilder.leftJoin`/`join`/`groupBy`/`having`。
-
-
-### 修复
-
 - `jkit-sql`：仅注释/空白输入不再抛 `empty SQL`，归为 `SqlSimpleStatement.OTHER`（空 text）。
 - `jkit-sql`：PostgreSQL `@>` / `<@` 不再被词法误判为 `VARIABLE`；`~` / `~*` / `!~` / `!~*` 按方言解析为正则比较（MySQL 仍保留一元 `~`）。
 - `jkit-sql`：MySQL `FORCE/USE/IGNORE INDEX FOR JOIN|ORDER BY|GROUP BY (...)` 不再误吞进 `FOR UPDATE`。
 
-### 新增
-
-- `jkit-sql`：补语料缺口 — Oracle `(+)` 外连接（`SqlUnaryExpr.Op.ORACLE_OUTER_JOIN`）；SQL Server `OPENJSON(...) WITH (...)`（`SqlFunctionTable.withDefinition`）；PG `COPY … FROM STDIN`；MySQL `HANDLER` / `PREPARE` / `EXECUTE` / `DEALLOCATE PREPARE`（OTHER + 抽名）。
-- `jkit-sql`：MySQL `<=>`、`INSERT DELAYED`、`BINARY expr`；SQL Server `TOP (n) WITH TIES`；PG `TABLESAMPLE` / Oracle `SAMPLE(n)`。
-
-- `jkit-sql`：`SqlBuilder` 流式构建 SELECT/INSERT/UPDATE/DELETE + `SQL.and`/`or`/`concat`/`builder`；分页 API `getLimit`/`getOffset`/`setLimit`/`setOffset`/`setPage`；`SqlDialect` 能力矩阵与别名；AST `toString()` 输出紧凑 SQL。
-
-- `tools-test` P3.2：JMH `SqlParseBenchmark`（simple/join/window × jkit/druid/jsql，fork≥2）；`sql-corpus.txt`（~379 条）+ `SqlParserCompareTest#corpusFileSuccessRates`（缺口写 `target/sql-compare-fail.txt`）。Lexer 短 ident intern 仍延期。
-- `jkit-sql` P3.1：`SqlFormatter` 按方言回写标识符引号（MySQL 反引号 / PG·Oracle·ANSI·H2 双引号 / SQL Server `[]`）；`||` 按 AST 运算符回写（`CONCAT`→`||`，`OR`→`OR`，配合 `pipesAsConcat`）；`SQL.parseAll(sql, dialect, true)` 容错多语句（失败记 `SqlSimpleStatement` + `parseError` 继续）；清理 `parseAlias` 未使用的 `inFrom` 参数。Lexer 短 ident intern 仍延期（需 profiling）；tools-test JMH/corpus 已在 P3.2 完成。
-
-### 新增
-
-- `jkit-sql` P2 能力对标（零依赖，入口在 `SQL`）：`parameterize` / `exportParameterValues`（字面量指纹与导出，区别于绑定 `parameters`）；`wall` → `SqlWallResult`（多语句、注释绕过、永远真条件、`SLEEP`、无 WHERE 的 DELETE/UPDATE）；`clone`（format→parse 深拷贝）；`eval`（字面量算术/比较子集）；`SqlAstVisitor` 类型分发（并存不破坏 `SqlVisitorAdapter`）；`replaceColumn` 对称 `replaceTable`。`addLimit` 改为 clone-then-mutate。
 
 ### 变更
 
+- `docs/sql.md` / `docs/next-plan.md`：对齐语料成功率（379/100%、黄金集约 203）、JMH 说明；§6 去掉已完成的 P0.1/列定义回写/表名差分等过时项。
+- `jkit-sql`：P0.1 重构 — 拆分 `SqlParser` 为 `SqlSelectParser` / `SqlDmlParser` / `SqlDdlParser` / `SqlExprParser`（包内协作共享记号游标）；公开 API 与语法行为不变。
+- `jkit-sql`：**破坏性** — `SQL.andWhere` / `replaceTable` / `replaceColumn` 改为与 `addLimit`/`setPage` 一致的 clone-then-mutate（返回新 AST，不污染原树）；调用方须使用返回值。
 - `jkit-sql` P1.7 方言矩阵：`SqlParseOptions.pipesAsConcat`（MySQL `||` 改拼接）；PG `RETURNING` 多列列表（`SqlListExpr`，format 无外层括号）；Oracle `FETCH FIRST n ROWS ONLY` 保留 `SqlLimit.fetchStyle` 并按 FETCH 回写；验收已有 `ON CONFLICT ON CONSTRAINT`、`MINUS`、SQL Server `OUTPUT`/`APPLY`、达梦→ORACLE / GBase→MYSQL。未发明 Hive/ClickHouse/ODPS 方言。
 - `jkit-sql` P1.6 注释与提示：MySQL 可执行注释 `/*!40101 … */` 展开为内部 SQL；优化器 hint `/*+ … */` 挂到 `SqlSelect.hints` / `SqlTable.optimizerHint` 且 format 可输出；`SqlParseOptions.keepComments`（默认 false）保留普通注释到 `SqlStatement.comments()`。
 - `jkit-sql` P1.5 DDL / 过程：`CREATE VIEW` / `CREATE OR REPLACE VIEW`（`SqlDdlStatement.orReplace`）；`CREATE PROCEDURE` / `FUNCTION` / `TRIGGER` / `EVENT` 抽对象名，参数与过程体进 `tail`（BEGIN/END 内允许分号，识别 `END IF`/`END CASE` 等）；`BEGIN … END` / `DECLARE` 为 `SqlSimpleStatement.OTHER`；`CALL proc(a,b)` 实参进 AST（`arguments`/`withArguments`）；`ANALYZE` / `VACUUM` / `OPTIMIZE|REPAIR|CHECK TABLE`、`COMMENT ON TABLE/COLUMN`；SQL Server `GO` 批分隔（同分号）。
@@ -91,10 +62,21 @@
 - `jkit-sql` P0.4（验收最小集）：`FOR UPDATE OF … NOWAIT/SKIP LOCKED` 结构化（`forUpdateOf` + `forUpdateWait`）；CREATE TABLE `ENGINE` / `CHARSET` / `COLLATE` / `COMMENT` 进 AST（PARTITION 等仍 tail）；ALTER `ADD/DROP INDEX`、`RENAME TO` 结构化并可 format 回写。
 - 解析增强：`SELECT` 字符串别名（MySQL 下 `"别名"` / `'x'`）、`INSERT INTO TABLE t`（Hive 风格）。
 
+
 ### 新增
 
+- `jkit-sql`：MySQL 表分区限定 `FROM t PARTITION (p0, p1)`（`SqlTable.partitions`，format 往返；不再误当别名）。
+- `jkit-sql` P0.4 余量：`ALTER … CHANGE/MODIFY` 抽旧/新列名 + `columnDefinition`；`ALTER ADD CONSTRAINT`（FOREIGN/PRIMARY/UNIQUE/CHECK）与引用表；`CREATE TABLE` 表级 `FOREIGN KEY … REFERENCES` 抽引用表（`referencedTables`）；`GRANT` 抽 `privileges` + 对象名（`*.*`/`db.*`/`db.t`）。
+- `jkit-sql`：`SqlBuilder.leftJoin`/`join`/`groupBy`/`having`。
+- `jkit-sql`：补语料缺口 — Oracle `(+)` 外连接（`SqlUnaryExpr.Op.ORACLE_OUTER_JOIN`）；SQL Server `OPENJSON(...) WITH (...)`（`SqlFunctionTable.withDefinition`）；PG `COPY … FROM STDIN`；MySQL `HANDLER` / `PREPARE` / `EXECUTE` / `DEALLOCATE PREPARE`（OTHER + 抽名）。
+- `jkit-sql`：MySQL `<=>`、`INSERT DELAYED`、`BINARY expr`；SQL Server `TOP (n) WITH TIES`；PG `TABLESAMPLE` / Oracle `SAMPLE(n)`。
+- `jkit-sql`：`SqlBuilder` 流式构建 SELECT/INSERT/UPDATE/DELETE + `SQL.and`/`or`/`concat`/`builder`；分页 API `getLimit`/`getOffset`/`setLimit`/`setOffset`/`setPage`；`SqlDialect` 能力矩阵与别名；AST `toString()` 输出紧凑 SQL。
+- `tools-test` P3.2：JMH `SqlParseBenchmark`（simple/join/window × jkit/druid/jsql，fork≥2）；`sql-corpus.txt`（~379 条）+ `SqlParserCompareTest#corpusFileSuccessRates`（缺口写 `target/sql-compare-fail.txt`）。Lexer 短 ident intern 仍延期。
+- `jkit-sql` P3.1：`SqlFormatter` 按方言回写标识符引号（MySQL 反引号 / PG·Oracle·ANSI·H2 双引号 / SQL Server `[]`）；`||` 按 AST 运算符回写（`CONCAT`→`||`，`OR`→`OR`，配合 `pipesAsConcat`）；`SQL.parseAll(sql, dialect, true)` 容错多语句（失败记 `SqlSimpleStatement` + `parseError` 继续）；清理 `parseAlias` 未使用的 `inFrom` 参数。Lexer 短 ident intern 仍延期（需 profiling）；tools-test JMH/corpus 已在 P3.2 完成。
+- `jkit-sql` P2 能力对标（零依赖，入口在 `SQL`）：`parameterize` / `exportParameterValues`（字面量指纹与导出，区别于绑定 `parameters`）；`wall` → `SqlWallResult`（多语句、注释绕过、永远真条件、`SLEEP`、无 WHERE 的 DELETE/UPDATE）；`clone`（format→parse 深拷贝）；`eval`（字面量算术/比较子集）；`SqlAstVisitor` 类型分发（并存不破坏 `SqlVisitorAdapter`）；`replaceColumn` 对称 `replaceTable`。`addLimit` 改为 clone-then-mutate。
 - `jkit-sql`：从 `icell/common-model` 测试收获语料 `common-model-sql-corpus.txt`（87 条可解析）+ `CommonModelSqlCorpusTest`；已知缺口见 `CommonModelSqlKnownGapsTest`（数字开头裸标识符、`<sheet>` 占位表名）。
 - 新模块 `com.alianga:jkit-sql`：零依赖手写 SQL 解析器（词法 `char[]` + 关键字开地址哈希，递归下降 AST）。入口 `SQL.parse` / `parseAll` / `format` / `toSqlString` / `tables` / `stat` / `addLimit` / `andWhere` / `replaceTable` / `parameters`。方言 MYSQL（默认，含 GBase/MariaDB）、POSTGRES、ORACLE、SQLSERVER、ANSI、H2。覆盖 DML（含 JOIN/UNION/CTE/ON DUPLICATE/ON CONFLICT）、窗口函数 `OVER`/`FILTER`、EXTRACT/TRIM/SUBSTRING、SHOW CREATE/COLUMNS 抽表名、常见 DDL。非法 SQL 抛 `SqlParseException`。模块内黄金集；与 Druid / JSqlParser 的对比在上级 `tools-test` 的 `SqlParserCompareTest`（不进本库依赖）。用法见 `docs/sql.md`。
+
 
 ## 2.0.1 - 2026-09-01
 

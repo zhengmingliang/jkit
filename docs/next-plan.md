@@ -52,15 +52,9 @@
 | `SqlFormatter.java` / `SqlRewriter.java` / `SqlSchemaStat.java` | 回写、改写、抽表列 |
 | `docs/sql.md` | 用户文档 |
 
-已知对比结果（`tools-test` 的 `SqlParserCompareTest`，49 条，含 WINDOW/继承/LATERAL/APPLY/UNNEST/TABLE/VALUES）：
+已知对比结果（`tools-test`）：文件语料 **jkit 379/379（100%）**；内嵌 CORPUS 亦全绿。竞品缺口见 `target/sql-compare-fail.txt`。
 
-| | 成功率 | simple ns/op | join | window |
-| --- | --- | --- | --- | --- |
-| jkit-sql | 49/49 | ~1.7µs | ~2.3µs | ~1.2µs |
-| Druid 1.2.23 | 45/49 | ~6µs | ~6.7µs | ~5.8µs |
-| JSqlParser 4.9 | 45/49 | ~240µs | ~276µs | ~325µs |
-
-Druid 挂 `DISTINCT ON`、WINDOW 继承、UNNEST；JSqlParser 挂 `LOCK IN SHARE MODE`、`[dbo].[user]`、WINDOW 继承。吞吐是 warmup 后 2 万次墙钟，**不是 JMH**。
+正式吞吐用 JMH（`SqlParseBenchmark`，fork≥2）；墙钟 for 循环仅数量级参考。
 
 ### 1.2 本仓库其它已有能力（不要当成新需求）
 
@@ -115,9 +109,9 @@ HTTP（含 SSE merge、curl 执行、负载均衡、Nacos）、JSON、YAML、配
 | ALTER ADD/DROP INDEX、RENAME TO | ✅ 结构化并可 format；ADD UNIQUE INDEX 亦支持 |
 | FOR UPDATE OF … NOWAIT / SKIP LOCKED | ✅ `forUpdateOf` + `forUpdateWait`；未知残余仍可 `forUpdateTail` |
 | ALTER CHANGE 全列定义 / ADD CONSTRAINT | ✅ CHANGE/MODIFY → columns + columnDefinition；ADD CONSTRAINT/FK/PK/UNIQUE/CHECK |
-| GRANT / SHOW CREATE VIEW/DATABASE | ✅ GRANT 抽 privileges + 对象名；SHOW CREATE VIEW/DATABASE 仍未扩 |
-| WITHIN GROUP order-by | 可选，仍 `aggOption` 字符串（STRING_AGG 结构化已有） |
-| CREATE TABLE 表级 FOREIGN KEY 引用表 | ✅ `referencedTables`（format 仍主要回写列名） |
+| GRANT / SHOW CREATE VIEW/DATABASE | ✅ GRANT 抽 privileges + 对象名（`user@host` 紧凑）；SHOW CREATE TABLE/COLUMNS/INDEX 已抽表；SHOW CREATE VIEW/DATABASE 仍未扩 |
+| WITHIN GROUP order-by | ✅ `STRING_AGG`/`GROUP_CONCAT` 已结构化；余量仅其它聚合的 `aggOption` 字符串 |
+| CREATE TABLE 表级 FOREIGN KEY 引用表 | ✅ `referencedTables`；列定义原文 `columnDefinitions` 可 format 往返 |
 
 验收三条（ADD INDEX + ENGINE + SKIP LOCKED）✅。
 
@@ -260,7 +254,7 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 
 1. ~~JMH 正式吞吐~~ ✅ P3.2（见上）
 2. ~~corpus 文件化 + `target/sql-compare-fail.txt`~~ ✅ P3.2
-3. 表名集合对比（忽略库名前缀和大小写），输出「仅 jkit 有 / 仅 druid 有」
+3. ~~表名集合对比（忽略库名前缀和大小写），输出「仅 jkit 有 / 仅 druid 有」~~ ✅（`corpusFileTableSetDiff`，软断言）
 4. 改完解析器后必须：`mvn -pl jkit-sql,jkit-core install -DskipTests` 再跑 tools-test，否则会用到旧的本地 2.0.1
 5. 不要把 tools-test 的 POM 改回 jkit 2.0.0
 6. Lexer 短 ident intern（需 profiling）
@@ -303,13 +297,9 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 ## 6. 建议开工顺序（给下一个 agent）
 
 1. 跑绿：`mvn -pl jkit-sql test`；`cd ../tools-test && mvn -Dtest=SqlParserCompareTest test`（先 `install` jkit-sql）。
-2. P0.2 往返测试 ✅。
-3. P0.3 SchemaStat 条件/多访问类型 ✅。
-4. P0.4 ALTER/CREATE/FOR UPDATE 验收最小集 ✅；余量见 P0.4 表（CONSTRAINT/CHANGE/WITHIN GROUP/FOREIGN KEY）。
-5. P1.1 WINDOW 子句 + P1.2 APPLY/LATERAL（缺了就会在业务 SQL 上直接 parse 失败）。
-6. 把失败 SQL 追加进 `SqlGoldenCorpusTest` 和 `SqlParserCompareTest` 的 CORPUS。
-7. P0.1 拆 Parser（行为稳定后再拆，避免和语法扩展搅在一起）。
-8. P2/P3.2 与后 P3（toString/Dialect/分页/SqlBuilder）已完成；lexer 短 ident intern 仍延期。
-9. 余量：P0.1 拆 Parser；SHOW CREATE VIEW/DATABASE；WITHIN GROUP 余量；tools-test 表名集合对比；CREATE TABLE 完整列定义回写。
+2. ~~P0.1 拆 Parser~~ ✅；~~P0.2 往返~~ ✅；~~P0.3 SchemaStat~~ ✅；~~P0.4 验收最小集 + CHANGE/CONSTRAINT/FK/GRANT/列定义回写~~ ✅。
+3. ~~P1.1 WINDOW / P1.2 APPLY·LATERAL / P1–P3 主体~~ ✅；lexer 短 ident intern 仍延期。
+4. 余量（可选）：SHOW CREATE VIEW/DATABASE；其它聚合的 WITHIN GROUP/`aggOption`；SqlBuilder 扩展（rightJoin/union/with/distinct）；OUTPUT INTO 目标表。
+5. 对比工程：语料成功率 ✅；~~表名集合差分~~ ✅；改解析器后记得 `install` 再跑 tools-test。
 
 每完成一块：补 `@since 2.1.0`、更新 `docs/sql.md` 覆盖表、在 `CHANGELOG.md` 的 `2.1.0 - unreleased` 追加条目。不要把父 POM 版本改成 2.1.0，除非用户明确说要发版。
