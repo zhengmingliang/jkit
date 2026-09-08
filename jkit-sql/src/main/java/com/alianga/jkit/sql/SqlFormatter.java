@@ -862,6 +862,14 @@ public final class SqlFormatter {
         if (source instanceof SqlTable) {
             writeExpr(((SqlTable) source).name());
             SqlTable table = (SqlTable) source;
+            if (!table.partitions().isEmpty()) {
+                sp();
+                kw("PARTITION");
+                sp();
+                out.append('(');
+                commaIdents(table.partitions());
+                out.append(')');
+            }
             if (table.indexHint() != null) {
                 sp();
                 out.append(table.indexHint());

@@ -232,7 +232,7 @@ public final class SqlRewriter {
     }
 
     /**
-     * 把谓词 AND 到顶层 WHERE。
+     * 把谓词 AND 到顶层 WHERE（就地修改；公开门面 {@link SQL#andWhere} 会先 clone）。
      *
      * @param statement 语句
      * @param predicate 谓词
@@ -256,7 +256,7 @@ public final class SqlRewriter {
     }
 
     /**
-     * 替换物理表名（忽略大小写）。
+     * 替换物理表名（忽略大小写；就地修改；公开门面 {@link SQL#replaceTable} 会先 clone）。
      *
      * @param statement 语句
      * @param from 原表简单名
@@ -286,7 +286,8 @@ public final class SqlRewriter {
     }
 
     /**
-     * 替换列名（忽略大小写；多段名改最后一段）。不改表名与表别名（跳过 {@link SqlTable} 子树中的标识符）。
+     * 替换列名（忽略大小写；多段名改最后一段；就地修改；公开门面 {@link SQL#replaceColumn} 会先 clone）。
+     * 不改表名与表别名（跳过 {@link SqlTable} 子树中的标识符）。
      *
      * @param statement 语句
      * @param from 原列简单名

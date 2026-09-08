@@ -87,13 +87,14 @@ SQL.getOffset(stmt);
 SqlStatement page = SQL.setPage(stmt, 2, 20, SqlDialect.MYSQL); // clone；offset=20
 SQL.setLimit(stmt, 50, SqlDialect.POSTGRES);
 SQL.setOffset(stmt, 10, SqlDialect.POSTGRES);
-SQL.andWhere(stmt, "tenant_id = ?");            // AND 到顶层 WHERE（就地）
-SQL.replaceTable(stmt, "users", "users_archive");
-SQL.replaceColumn(stmt, "name", "user_name");   // 跳过表名/表别名
+SqlStatement w = SQL.andWhere(stmt, "tenant_id = ?"); // clone 后再 AND WHERE
+SqlStatement t2 = SQL.replaceTable(w, "users", "users_archive"); // clone
+SqlStatement c2 = SQL.replaceColumn(t2, "name", "user_name");   // clone；跳过表名/表别名
 SqlStatement copy = SQL.clone(stmt);
 ```
 
 `addLimit`：已有 LIMIT/TOP 时不覆盖；SQL Server 写 `TOP`，其余写 `LIMIT`。
+`andWhere` / `replaceTable` / `replaceColumn`：现与 `addLimit`/`setPage` 一样 **clone 后再改**（破坏性：旧代码若依赖就地修改需改用返回值）。
 `setLimit` / `setOffset` / `setPage`：**替换**分页；`setPage(pageNo, pageSize)` 中 pageNo 从 1 起。
 方言：MySQL/PG/H2/ANSI → `LIMIT`/`OFFSET`；SQL Server 第 1 页 `TOP`，其后 `OFFSET FETCH`；Oracle → `FETCH FIRST`（可带 `OFFSET`）。
 
@@ -178,7 +179,7 @@ List<Object> literals = SQL.exportParameterValues("SELECT * FROM t WHERE name = 
 
 ## v1 覆盖
 
-- SELECT：列、`*`、`t.*`、DISTINCT / DISTINCT ON、TOP、FROM、JOIN（INNER/LEFT/RIGHT/FULL/CROSS/NATURAL/STRAIGHT/逗号）、`CROSS APPLY` / `OUTER APPLY`、`LATERAL` 子查询/表函数、`UNNEST(...)` / `TABLE(fn(...))` / `OPENJSON(...) WITH (...)` 表函数、`(VALUES …) AS v(cols)`、ON/USING、WHERE、GROUP BY [WITH ROLLUP]、HAVING、`WINDOW … AS (…)`（可继承另一窗口名）、ORDER BY、LIMIT/OFFSET/`FETCH FIRST n ROWS ONLY`、FOR UPDATE [OF cols] [NOWAIT|SKIP LOCKED]、LOCK IN SHARE MODE、UNION/UNION ALL/INTERSECT/EXCEPT/MINUS、CONNECT BY / START WITH / PRIOR、WITH CTE
+- SELECT：列、`*`、`t.*`、DISTINCT / DISTINCT ON、TOP、FROM（含 MySQL `PARTITION (p0,p1)` 表分区限定）、JOIN（INNER/LEFT/RIGHT/FULL/CROSS/NATURAL/STRAIGHT/逗号）、`CROSS APPLY` / `OUTER APPLY`、`LATERAL` 子查询/表函数、`UNNEST(...)` / `TABLE(fn(...))` / `OPENJSON(...) WITH (...)` 表函数、`(VALUES …) AS v(cols)`、ON/USING、WHERE、GROUP BY [WITH ROLLUP]、HAVING、`WINDOW … AS (…)`（可继承另一窗口名）、ORDER BY、LIMIT/OFFSET/`FETCH FIRST n ROWS ONLY`、FOR UPDATE [OF cols] [NOWAIT|SKIP LOCKED]、LOCK IN SHARE MODE、UNION/UNION ALL/INTERSECT/EXCEPT/MINUS、CONNECT BY / START WITH / PRIOR、WITH CTE
 - 窗口函数：`OVER (PARTITION BY ... ORDER BY ... ROWS/RANGE BETWEEN ...)`、命名窗口引用 `OVER w`、SELECT 级 `WINDOW w AS (...)`（可多个；`w2 AS (w)` / `w2 AS (w ORDER BY …)` 继承）、`FILTER (WHERE ...)`
 - 特殊函数：`EXTRACT(field FROM expr)`、`TRIM(BOTH/LEADING/TRAILING ... FROM expr)`、`SUBSTRING(expr FROM n FOR m)`、`POSITION(a IN b)`、`IF(a,b,c)`（MySQL）、`CONVERT(expr USING charset)` / `CONVERT(type, expr)`（SQL Server）、`GROUP_CONCAT(... ORDER BY ... SEPARATOR ...)`、`STRING_AGG(... ORDER BY ...)` / `WITHIN GROUP (ORDER BY ...)`、`MATCH (cols) AGAINST (...)`
 - INSERT / REPLACE：列清单、VALUES 多行、INSERT SELECT、INSERT SET、ON DUPLICATE KEY UPDATE、PG `ON CONFLICT`（`DO NOTHING` / `DO UPDATE` / `ON CONSTRAINT`）、`RETURNING`（`*` 或多列列表）、SQL Server `OUTPUT`、Oracle `INSERT ALL` / `INSERT FIRST`
@@ -191,7 +192,7 @@ List<Object> literals = SQL.exportParameterValues("SELECT * FROM t WHERE name = 
 - 注释：`--`、`/* */`、MySQL `#`；仅注释/空白的输入解析为 `OTHER` 空语句（不抛 empty SQL）；MySQL 可执行注释 `/*!40101 … */` 展开为内部 SQL（不整段丢弃）；优化器 hint `/*+ … */` 挂到 SELECT / 表并可 format 回写
 - 解析选项：`SqlParseOptions.keepComments(true)`（默认 false）时普通注释进入 `SqlStatement.comments()`，热路径默认仍丢弃；`SqlParseOptions.pipesAsConcat(true)` 让 MySQL 方言下 `||` 按拼接解析（等同 `PIPES_AS_CONCAT`）；`SQL.parseAll(sql, dialect, true)` 容错多语句（失败占位 + `parseError`，供审计）
 
-明确未做：MySQL `PARTITION (p0,p1)` 表分区限定、过程体结构化执行、ALTER CHANGE/CONSTRAINT 全量建模、执行引擎、完整 Wall 规则集（仅提供 `SQL.wall` 子集）。未知函数按普通函数调用解析，不失败。
+明确未做：过程体结构化执行、ALTER CHANGE/CONSTRAINT 全量建模（见后续 P0.4 余量）、执行引擎、完整 Wall 规则集（仅提供 `SQL.wall` 子集）。未知函数按普通函数调用解析，不失败。
 
 ## 性能
 

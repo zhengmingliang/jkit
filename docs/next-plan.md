@@ -143,7 +143,7 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 - `TABLE(fn())` / `UNNEST` ✅（`SqlFunctionTable`；一般 `fn(...)` 表函数；可 `LATERAL`）
 - `FROM (VALUES (1),(2)) AS v(id)` 列清单 ✅（`SqlValuesTable` + `columnAliases`）
 - Oracle `(+)` 外连接 ✅（`SqlUnaryExpr.Op.ORACLE_OUTER_JOIN` 后缀，format `col(+)`）
-- MySQL `PARTITION (p0, p1)` 表分区限定（本 pass 跳过）
+- MySQL `PARTITION (p0, p1)` 表分区限定 ✅（`SqlTable.partitions`）
 
 #### P1.3 函数与表达式 ✅ 完成（2026-09-09）
 
@@ -207,7 +207,7 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 | 按类型 Visitor | Druid `visit(SQLSelect)` | ✅ `SqlAstVisitor` 类型分发；保留 `SqlVisitor` / `SqlVisitorAdapter` |
 | 列改写 | — | ✅ `SQL.replaceColumn(stmt, from, to)` 对称 `replaceTable`（跳过 `SqlTable` 子树） |
 
-`addLimit` 已改为 **clone 后再改**；单测断言原树无 LIMIT。
+`addLimit` / `andWhere` / `replaceTable` / `replaceColumn` 已改为 **clone 后再改**；单测断言原树不变。
 
 ### P3.x — 后 P3 产品化（2026-09-09 已完成）
 
@@ -243,13 +243,13 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 5. Oracle `col(+)` 外连接 → `ORACLE_OUTER_JOIN`
 6. MySQL `PREPARE` / `EXECUTE` / `DEALLOCATE PREPARE` → OTHER + 名
 
-仍跳过：`PARTITION (p0)` 等非平凡边角。
+仍跳过：无（表 PARTITION 已落地）。
 
 ### 语法缺口（2026-09-09 修过一部分）
 
 - ✅ PG `@>` / `<@`、`~`/`~*`/`!~`；MySQL `FORCE INDEX FOR JOIN|ORDER BY|GROUP BY`
 - ✅ MySQL `<=>` / `INSERT DELAYED` / `BINARY expr`；SQL Server `TOP (n) WITH TIES`；PG `TABLESAMPLE` / Oracle `SAMPLE(n)`
-- ✅ Oracle `(+)`；仍跳过：MySQL `PARTITION (p0)`（非平凡）
+- ✅ Oracle `(+)`；✅ MySQL `PARTITION (p0, p1)` 表分区限定
 - ✅ 语料剩余缺口：comment-only→OTHER；PG `COPY … STDIN`；SQL Server `OPENJSON … WITH`；MySQL `HANDLER` / `PREPARE|EXECUTE|DEALLOCATE`（OTHER+抽名）
 
 ## 3. 对比测试工程（`/opt/workspace/zml/tools-test`）

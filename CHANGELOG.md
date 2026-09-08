@@ -36,6 +36,14 @@
 
 ## 2.1.0 - unreleased
 
+### 变更
+
+- `jkit-sql`：**破坏性** — `SQL.andWhere` / `replaceTable` / `replaceColumn` 改为与 `addLimit`/`setPage` 一致的 clone-then-mutate（返回新 AST，不污染原树）；调用方须使用返回值。
+
+### 新增
+
+- `jkit-sql`：MySQL 表分区限定 `FROM t PARTITION (p0, p1)`（`SqlTable.partitions`，format 往返；不再误当别名）。
+
 ### 修复
 
 - `jkit-sql`：仅注释/空白输入不再抛 `empty SQL`，归为 `SqlSimpleStatement.OTHER`（空 text）。

@@ -2,6 +2,9 @@ package com.alianga.jkit.sql.ast;
 
 import com.alianga.jkit.sql.visitor.SqlVisitor;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * 物理表或视图。
  *
@@ -13,6 +16,7 @@ public final class SqlTable extends SqlTableSource {
     private String indexHint;
     private String optimizerHint;
     private String sampleClause;
+    private final List<SqlIdentifier> partitions = new ArrayList<SqlIdentifier>(2);
 
     /**
      * @param name 表名
@@ -85,11 +89,20 @@ public final class SqlTable extends SqlTableSource {
     }
 
     /**
+     * @return MySQL {@code PARTITION (p0, p1)} 分区名列表，可空
+     * @since 2.1.0
+     */
+    public List<SqlIdentifier> partitions() {
+        return partitions;
+    }
+
+    /**
      * {@inheritDoc}
      */
     @Override
     protected void acceptChildren(SqlVisitor visitor) {
         child(visitor, name);
+        children(visitor, partitions);
         children(visitor, columnAliases());
     }
 }

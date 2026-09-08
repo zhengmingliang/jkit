@@ -1403,6 +1403,7 @@ public final class SqlParser {
                 throw error("LATERAL requires a subquery or table function");
             }
             SqlTable table = SqlTable.of(name);
+            parseTablePartition(table);
             parseTableHints(table);
             parseTableAlias(table);
             parseTableSample(table);
@@ -1432,6 +1433,20 @@ public final class SqlParser {
             } while (match(SqlTokenType.COMMA));
             expect(SqlTokenType.RPAREN);
         }
+    }
+
+    /**
+     * MySQL {@code PARTITION (p0, p1)} 表分区限定（位于表名之后、别名之前）。
+     */
+    private void parseTablePartition(SqlTable table) {
+        if (!match(SqlTokenType.PARTITION)) {
+            return;
+        }
+        expect(SqlTokenType.LPAREN);
+        do {
+            table.partitions().add(parseName());
+        } while (match(SqlTokenType.COMMA));
+        expect(SqlTokenType.RPAREN);
     }
 
     private void parseTableSample(SqlTable table) {
@@ -1568,7 +1583,7 @@ public final class SqlParser {
         if (identLike() && !isAliasStop(token.type())
                 && !isIdent("TABLESAMPLE") && !isIdent("SAMPLE")
                 && !is(SqlTokenType.FORCE) && !is(SqlTokenType.USE)
-                && !is(SqlTokenType.IGNORE)) {
+                && !is(SqlTokenType.IGNORE) && !is(SqlTokenType.PARTITION)) {
             return unquote(consumeIdentRaw());
         }
         return null;
@@ -1616,6 +1631,7 @@ public final class SqlParser {
             case MODE:
             case FROM:
             case WINDOW:
+            case PARTITION:
             case APPLY:
             case OUTPUT:
             case WHEN:

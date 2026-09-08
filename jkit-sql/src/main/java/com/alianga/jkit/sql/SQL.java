@@ -456,43 +456,53 @@ public final class SQL {
     }
 
     /**
-     * 解析谓词并 AND 到顶层 WHERE。
+     * 解析谓词并 AND 到顶层 WHERE（先 {@link #clone(SqlStatement) 深拷贝} 再改，不污染原树）。
+     *
+     * <p><b>破坏性变更（2.1.0）</b>：旧实现就地修改并返回原对象；现与 {@link #addLimit}/{@link #setPage}
+     * 一致，返回新语句，原 AST 不变。调用方需使用返回值。
      *
      * @param statement 语句
      * @param predicateSql 谓词 SQL，如 {@code tenant_id = ?}
-     * @return 原对象
+     * @return 带新 WHERE 的拷贝；谓词为空时返回原对象
      */
     public static SqlStatement andWhere(SqlStatement statement, String predicateSql) {
         if (predicateSql == null || predicateSql.trim().isEmpty()) {
             return statement;
         }
         SqlSelect tmp = (SqlSelect) parse("SELECT 1 WHERE " + predicateSql);
-        return SqlRewriter.andWhere(statement, tmp.where());
+        SqlStatement copy = clone(statement);
+        return SqlRewriter.andWhere(copy, tmp.where());
     }
 
     /**
-     * 替换物理表名。
+     * 替换物理表名（先深拷贝再改，不污染原树）。
+     *
+     * <p><b>破坏性变更（2.1.0）</b>：旧实现就地修改；现返回新语句，原 AST 不变。
      *
      * @param statement 语句
      * @param from 原简单名
      * @param to 新简单名
-     * @return 原对象
+     * @return 替换后的拷贝
      */
     public static SqlStatement replaceTable(SqlStatement statement, String from, String to) {
-        return SqlRewriter.replaceTable(statement, from, to);
+        SqlStatement copy = clone(statement);
+        return SqlRewriter.replaceTable(copy, from, to);
     }
 
     /**
-     * 替换列名（忽略大小写），对称 {@link #replaceTable}。
+     * 替换列名（忽略大小写），对称 {@link #replaceTable}（先深拷贝再改）。
+     *
+     * <p><b>破坏性变更（2.1.0）</b>：旧实现就地修改；现返回新语句，原 AST 不变。
      *
      * @param statement 语句
      * @param from 原列简单名
      * @param to 新列简单名
-     * @return 原对象（就地修改）
+     * @return 替换后的拷贝
      * @since 2.1.0
      */
     public static SqlStatement replaceColumn(SqlStatement statement, String from, String to) {
-        return SqlRewriter.replaceColumn(statement, from, to);
+        SqlStatement copy = clone(statement);
+        return SqlRewriter.replaceColumn(copy, from, to);
     }
 
     /**

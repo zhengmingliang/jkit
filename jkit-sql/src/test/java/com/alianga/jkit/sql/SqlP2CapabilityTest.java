@@ -135,8 +135,9 @@ public class SqlP2CapabilityTest {
     @Test
     public void replaceColumnSymmetricToReplaceTable() {
         SqlStatement stmt = SQL.parse("SELECT u.name, u.age FROM users u WHERE u.name = 'x'");
-        SQL.replaceColumn(stmt, "name", "user_name");
-        String sql = SQL.toSqlString(stmt);
+        SqlStatement replaced = SQL.replaceColumn(stmt, "name", "user_name");
+        assertTrue("replaceColumn must clone", SQL.toSqlString(stmt).contains("u.name"));
+        String sql = SQL.toSqlString(replaced);
         assertTrue(sql, sql.contains("user_name"));
         assertFalse("table name must stay", sql.toLowerCase().contains("from user_name"));
         assertTrue(sql, sql.toLowerCase().contains("from users"));

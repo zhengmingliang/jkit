@@ -153,11 +153,40 @@ public class SqlParserTest {
         SqlStatement limited = SQL.addLimit(stmt, 100);
         assertNotNull(((SqlSelect) limited).limit());
         assertTrue("addLimit must clone", ((SqlSelect) stmt).limit() == null);
-        SQL.andWhere(stmt, "tenant_id = ?");
-        String sql = SQL.toSqlString(stmt);
+        SqlStatement withWhere = SQL.andWhere(stmt, "tenant_id = ?");
+        assertTrue("andWhere must clone", !SQL.toSqlString(stmt).contains("tenant_id"));
+        String sql = SQL.toSqlString(withWhere);
         assertTrue(sql, sql.contains("tenant_id"));
-        SQL.replaceTable(stmt, "users", "users_archive");
-        assertTrue(SQL.toSqlString(stmt).contains("users_archive"));
+        assertTrue(sql, sql.contains("status"));
+        SqlStatement replaced = SQL.replaceTable(withWhere, "users", "users_archive");
+        assertTrue(SQL.toSqlString(replaced).contains("users_archive"));
+        assertTrue("replaceTable must clone", SQL.toSqlString(withWhere).contains("users"));
+        assertTrue(!SQL.toSqlString(withWhere).contains("users_archive"));
+    }
+
+    /**
+     * MySQL {@code FROM t PARTITION (p0, p1)} 表分区限定；往返后仍为分区而非别名。
+     */
+    @Test
+    public void mysqlTablePartitionQualifier() {
+        SqlSelect select = (SqlSelect) SQL.parse(
+                "SELECT * FROM t PARTITION (p0, p1) WHERE id > 0");
+        assertTrue(select.from() instanceof com.alianga.jkit.sql.ast.SqlTable);
+        com.alianga.jkit.sql.ast.SqlTable table =
+                (com.alianga.jkit.sql.ast.SqlTable) select.from();
+        assertEquals(2, table.partitions().size());
+        assertEquals("p0", table.partitions().get(0).qualifiedName());
+        assertEquals("p1", table.partitions().get(1).qualifiedName());
+        assertTrue("PARTITION must not be alias", table.alias() == null
+                || !"PARTITION".equalsIgnoreCase(table.alias()));
+        String out = SQL.toSqlString(select);
+        assertTrue(out, out.toUpperCase().contains("PARTITION"));
+        assertTrue(out, out.contains("p0") && out.contains("p1"));
+        SqlSelect again = (SqlSelect) SQL.parse(out);
+        com.alianga.jkit.sql.ast.SqlTable t2 =
+                (com.alianga.jkit.sql.ast.SqlTable) again.from();
+        assertEquals(2, t2.partitions().size());
+        assertEquals(java.util.Arrays.asList("t"), SQL.tables(again));
     }
 
     /**
