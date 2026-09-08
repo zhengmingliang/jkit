@@ -1004,19 +1004,27 @@ public final class SqlFormatter {
             }
             return;
         }
-        kw("LIMIT");
-        sp();
-        if (limit.mysqlCommaStyle() && limit.offset() != null) {
+        if (limit.mysqlCommaStyle() && limit.offset() != null && limit.rowCount() != null) {
+            kw("LIMIT");
+            sp();
             writeExpr(limit.offset());
             out.append(',');
             writeExpr(limit.rowCount());
             return;
         }
         if (limit.rowCount() != null) {
+            kw("LIMIT");
+            sp();
             writeExpr(limit.rowCount());
+            if (limit.offset() != null) {
+                sp();
+                kw("OFFSET");
+                sp();
+                writeExpr(limit.offset());
+            }
+            return;
         }
         if (limit.offset() != null) {
-            sp();
             kw("OFFSET");
             sp();
             writeExpr(limit.offset());

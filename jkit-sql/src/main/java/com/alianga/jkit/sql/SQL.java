@@ -22,6 +22,7 @@ import java.util.List;
  * SQL.tables(stmt);                 // [users]
  * SQL.format(stmt);
  * SQL.addLimit(stmt, 100);
+ * SQL.setPage(stmt, 2, 20, SqlDialect.MYSQL);
  * }</pre>
  *
  * @author 郑明亮
@@ -286,6 +287,113 @@ public final class SQL {
     public static SqlStatement addLimit(SqlStatement statement, long rowCount, SqlDialect dialect) {
         SqlStatement copy = clone(statement, dialect);
         return SqlRewriter.addLimit(copy, rowCount, dialect);
+    }
+
+    /**
+     * 读取 SELECT 行数上限（LIMIT rowCount 或 TOP）。
+     *
+     * @param statement 语句
+     * @return 行数，无或非数字字面量时 null
+     * @since 2.1.0
+     */
+    public static Long getLimit(SqlStatement statement) {
+        return SqlRewriter.getLimit(statement);
+    }
+
+    /**
+     * 读取 SELECT OFFSET。
+     *
+     * @param statement 语句
+     * @return 偏移，无则 null
+     * @since 2.1.0
+     */
+    public static Long getOffset(SqlStatement statement) {
+        return SqlRewriter.getOffset(statement);
+    }
+
+    /**
+     * 设置/替换行数上限（先深拷贝再改）。负值清空分页。
+     *
+     * @param statement 语句
+     * @param rowCount 行数
+     * @return 新语句
+     * @since 2.1.0
+     */
+    public static SqlStatement setLimit(SqlStatement statement, long rowCount) {
+        return setLimit(statement, rowCount, SqlDialect.MYSQL);
+    }
+
+    /**
+     * 设置/替换行数上限（先深拷贝再改）。
+     *
+     * @param statement 语句
+     * @param rowCount 行数
+     * @param dialect 方言
+     * @return 新语句
+     * @since 2.1.0
+     */
+    public static SqlStatement setLimit(SqlStatement statement, long rowCount, SqlDialect dialect) {
+        SqlDialect d = dialect == null ? SqlDialect.MYSQL : dialect;
+        SqlStatement copy = clone(statement, d);
+        return SqlRewriter.setLimit(copy, rowCount, d);
+    }
+
+    /**
+     * 设置/替换 OFFSET（先深拷贝再改）。
+     *
+     * @param statement 语句
+     * @param offset 偏移
+     * @return 新语句
+     * @since 2.1.0
+     */
+    public static SqlStatement setOffset(SqlStatement statement, long offset) {
+        return setOffset(statement, offset, SqlDialect.MYSQL);
+    }
+
+    /**
+     * 设置/替换 OFFSET（先深拷贝再改）。
+     *
+     * @param statement 语句
+     * @param offset 偏移
+     * @param dialect 方言
+     * @return 新语句
+     * @since 2.1.0
+     */
+    public static SqlStatement setOffset(SqlStatement statement, long offset, SqlDialect dialect) {
+        SqlDialect d = dialect == null ? SqlDialect.MYSQL : dialect;
+        SqlStatement copy = clone(statement, d);
+        return SqlRewriter.setOffset(copy, offset, d);
+    }
+
+    /**
+     * 按页码设置分页（先深拷贝再改）。{@code pageNo} 从 1 起。
+     *
+     * @param statement 语句
+     * @param pageNo 页码
+     * @param pageSize 页大小
+     * @return 新语句
+     * @since 2.1.0
+     */
+    public static SqlStatement setPage(SqlStatement statement, long pageNo, long pageSize) {
+        return setPage(statement, pageNo, pageSize, SqlDialect.MYSQL);
+    }
+
+    /**
+     * 按页码设置分页（先深拷贝再改）。方言感知：MySQL/PG {@code LIMIT/OFFSET}，
+     * SQL Server {@code TOP} 或 {@code OFFSET FETCH}，Oracle {@code FETCH FIRST}。
+     *
+     * @param statement 语句
+     * @param pageNo 页码（从 1 起）
+     * @param pageSize 页大小
+     * @param dialect 方言
+     * @return 新语句
+     * @since 2.1.0
+     */
+    public static SqlStatement setPage(SqlStatement statement, long pageNo, long pageSize,
+            SqlDialect dialect) {
+        SqlDialect d = dialect == null ? SqlDialect.MYSQL : dialect;
+        SqlStatement copy = clone(statement, d);
+        return SqlRewriter.setPage(copy, pageNo, pageSize, d);
     }
 
     /**

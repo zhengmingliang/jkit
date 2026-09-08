@@ -82,13 +82,20 @@ stat.getGroupByColumns();
 stat.getTables();           // Map<String, SqlTableAccess>，同表可 INSERT+SELECT
 
 SqlStatement limited = SQL.addLimit(stmt, 100); // clone 后再补 LIMIT，不改原树
+SQL.getLimit(stmt);                              // Long，来自 LIMIT/TOP
+SQL.getOffset(stmt);
+SqlStatement page = SQL.setPage(stmt, 2, 20, SqlDialect.MYSQL); // clone；offset=20
+SQL.setLimit(stmt, 50, SqlDialect.POSTGRES);
+SQL.setOffset(stmt, 10, SqlDialect.POSTGRES);
 SQL.andWhere(stmt, "tenant_id = ?");            // AND 到顶层 WHERE（就地）
 SQL.replaceTable(stmt, "users", "users_archive");
 SQL.replaceColumn(stmt, "name", "user_name");   // 跳过表名/表别名
 SqlStatement copy = SQL.clone(stmt);
 ```
 
-SQL Server 的 `addLimit` 写 `TOP`；MySQL/PG/Oracle 写 `LIMIT`。已有 LIMIT/TOP 时不覆盖。
+`addLimit`：已有 LIMIT/TOP 时不覆盖；SQL Server 写 `TOP`，其余写 `LIMIT`。
+`setLimit` / `setOffset` / `setPage`：**替换**分页；`setPage(pageNo, pageSize)` 中 pageNo 从 1 起。
+方言：MySQL/PG/H2/ANSI → `LIMIT`/`OFFSET`；SQL Server 第 1 页 `TOP`，其后 `OFFSET FETCH`；Oracle → `FETCH FIRST`（可带 `OFFSET`）。
 
 ## 参数化 / Wall / 求值（P2）
 
