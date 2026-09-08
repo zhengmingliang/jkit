@@ -126,4 +126,41 @@ public class SqlBuilderTest {
         assertTrue(sql, upper.contains("HAVING"));
         SQL.parse(sql);
     }
+    @Test
+    public void rightJoinUnionWithDistinct() {
+        String sql = SqlBuilder.select("u.id")
+                .distinct()
+                .from("users", "u")
+                .rightJoin("depts", "u.dept = depts.id")
+                .crossJoin("flags")
+                .toSql();
+        String upper = sql.toUpperCase();
+        assertTrue(sql, upper.contains("DISTINCT"));
+        assertTrue(sql, upper.contains("RIGHT"));
+        assertTrue(sql, upper.contains("CROSS"));
+        SQL.parse(sql);
+
+        String unionSql = SqlBuilder.select("id").from("a")
+                .union(SqlBuilder.select("id").from("b"))
+                .unionAll(SqlBuilder.select("id").from("c"))
+                .toSql();
+        String uu = unionSql.toUpperCase();
+        assertTrue(unionSql, uu.contains("UNION"));
+        assertTrue(unionSql, uu.contains("UNION ALL"));
+        SQL.parse(unionSql);
+
+        String withSql = SqlBuilder.select("*").from("c")
+                .with("c", "SELECT id FROM t WHERE active = 1")
+                .toSql();
+        assertTrue(withSql.toUpperCase(), withSql.toUpperCase().contains("WITH"));
+        assertTrue(withSql, withSql.contains("c"));
+        SQL.parse(withSql);
+
+        String withBuilder = SqlBuilder.select("id").from("cte")
+                .with("cte", SqlBuilder.select("id").from("src").where("x = 1"))
+                .fullJoin("other", "cte.id = other.id")
+                .toSql();
+        assertTrue(withBuilder.toUpperCase(), withBuilder.toUpperCase().contains("FULL"));
+        SQL.parse(withBuilder);
+    }
 }

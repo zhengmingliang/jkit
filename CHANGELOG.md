@@ -65,6 +65,8 @@
 
 ### 新增
 
+- `jkit-sql`：`SqlBuilder` 补 `rightJoin` / `fullJoin` / `crossJoin`、`union` / `unionAll`、`with` CTE、`distinct()`。
+
 - `jkit-sql`：SQL Server `OUTPUT … INTO` 目标表（`dbo.archive` / `@out` / `#tmp`）进 AST（`outputInto`）并计入 `tables()`；SQL Server 下 `#tmp`/`##g` 不再被词法当成 JSON 运算符。
 
 - `jkit-sql`：MySQL 表分区限定 `FROM t PARTITION (p0, p1)`（`SqlTable.partitions`，format 往返；不再误当别名）。

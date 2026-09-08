@@ -17,6 +17,7 @@ import com.alianga.jkit.sql.ast.SqlStatement;
 import com.alianga.jkit.sql.ast.SqlTable;
 import com.alianga.jkit.sql.ast.SqlTableSource;
 import com.alianga.jkit.sql.ast.SqlUpdate;
+import com.alianga.jkit.sql.ast.SqlWithItem;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -32,6 +33,7 @@ import java.util.List;
  *         .where("status = 1")
  *         .and("age > 18")
  *         .leftJoin("orders", "users.id = orders.uid")
+ *         .rightJoin("depts", "users.dept = depts.id")
  *         .groupBy("users.id")
  *         .having("count(1) > 1")
  *         .orderBy("id")
@@ -63,6 +65,10 @@ public final class SqlBuilder {
     private final List<SqlOrderByItem> orderBy = new ArrayList<SqlOrderByItem>(2);
     private Long limitRows;
     private Long offsetRows;
+    private boolean distinct;
+    private final List<SqlWithItem> withItems = new ArrayList<SqlWithItem>(2);
+    private final List<String> unionOps = new ArrayList<String>(2);
+    private final List<SqlSelect> unionSelects = new ArrayList<SqlSelect>(2);
 
     private final List<SqlIdentifier> insertColumns = new ArrayList<SqlIdentifier>(4);
     private final List<SqlExpr> insertValues = new ArrayList<SqlExpr>(4);
@@ -227,6 +233,41 @@ public final class SqlBuilder {
     }
 
     /**
+     * RIGHT JOIN。
+     *
+     * @param table 右表
+     * @param onSql ON 谓词
+     * @return this
+     * @since 2.1.0
+     */
+    public SqlBuilder rightJoin(String table, String onSql) {
+        return join(SqlJoin.Type.RIGHT, table, null, onSql);
+    }
+
+    /**
+     * FULL JOIN。
+     *
+     * @param table 右表
+     * @param onSql ON 谓词
+     * @return this
+     * @since 2.1.0
+     */
+    public SqlBuilder fullJoin(String table, String onSql) {
+        return join(SqlJoin.Type.FULL, table, null, onSql);
+    }
+
+    /**
+     * CROSS JOIN（无 ON）。
+     *
+     * @param table 右表
+     * @return this
+     * @since 2.1.0
+     */
+    public SqlBuilder crossJoin(String table) {
+        return join(SqlJoin.Type.CROSS, table, null, null);
+    }
+
+    /**
      * INNER JOIN。
      *
      * @param table 右表
@@ -257,8 +298,84 @@ public final class SqlBuilder {
         join.setJoinType(type == null ? SqlJoin.Type.INNER : type);
         join.setLeft(fromSource != null ? fromSource : this.table);
         join.setRight(right);
-        join.setCondition(parsePredicate(onSql));
+        if (onSql != null && !onSql.isEmpty()) {
+            join.setCondition(parsePredicate(onSql));
+        }
         this.fromSource = join;
+        return this;
+    }
+
+    /**
+     * {@code SELECT DISTINCT}。
+     *
+     * @return this
+     * @since 2.1.0
+     */
+    public SqlBuilder distinct() {
+        this.distinct = true;
+        return this;
+    }
+
+    /**
+     * 追加 CTE：{@code WITH name AS (subquerySql)}。
+     *
+     * @param name CTE 名
+     * @param subquerySql 子查询 SQL（不含外层括号）
+     * @return this
+     * @since 2.1.0
+     */
+    public SqlBuilder with(String name, String subquerySql) {
+        SqlWithItem item = new SqlWithItem();
+        item.setName(ident(name));
+        item.setQuery(SQL.parse(subquerySql, dialect));
+        withItems.add(item);
+        return this;
+    }
+
+    /**
+     * 追加 CTE：{@code WITH name AS (…)}，子查询来自另一构建器。
+     *
+     * @param name CTE 名
+     * @param subquery SELECT 构建器
+     * @return this
+     * @since 2.1.0
+     */
+    public SqlBuilder with(String name, SqlBuilder subquery) {
+        SqlWithItem item = new SqlWithItem();
+        item.setName(ident(name));
+        item.setQuery(subquery == null ? null : subquery.buildSelect());
+        withItems.add(item);
+        return this;
+    }
+
+    /**
+     * {@code UNION} 右侧查询（右侧须为完整 SELECT 构建器）。
+     *
+     * @param other 右侧
+     * @return this
+     * @since 2.1.0
+     */
+    public SqlBuilder union(SqlBuilder other) {
+        return appendUnion("UNION", other);
+    }
+
+    /**
+     * {@code UNION ALL} 右侧查询。
+     *
+     * @param other 右侧
+     * @return this
+     * @since 2.1.0
+     */
+    public SqlBuilder unionAll(SqlBuilder other) {
+        return appendUnion("UNION ALL", other);
+    }
+
+    private SqlBuilder appendUnion(String op, SqlBuilder other) {
+        if (other == null) {
+            throw new IllegalArgumentException("union other is null");
+        }
+        unionOps.add(op);
+        unionSelects.add(other.buildSelect());
         return this;
     }
 
@@ -421,6 +538,10 @@ public final class SqlBuilder {
             throw new IllegalStateException("not a SELECT builder");
         }
         SqlSelect select = new SqlSelect();
+        select.setDistinct(distinct);
+        if (!withItems.isEmpty()) {
+            select.setWithItems(new ArrayList<SqlWithItem>(withItems));
+        }
         for (int i = 0; i < selectItems.size(); i++) {
             select.addSelectItem(selectItems.get(i));
         }
@@ -441,6 +562,14 @@ public final class SqlBuilder {
             select.orderBy().add(orderBy.get(i));
         }
         applyLimit(select);
+        if (!unionSelects.isEmpty()) {
+            SqlSelect cursor = select;
+            for (int i = 0; i < unionSelects.size(); i++) {
+                cursor.setUnionOp(unionOps.get(i));
+                cursor.setUnion(unionSelects.get(i));
+                cursor = unionSelects.get(i);
+            }
+        }
         return select;
     }
 

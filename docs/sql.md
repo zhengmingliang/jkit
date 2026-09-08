@@ -148,14 +148,18 @@ SQL.format(stmt, SqlDialect.MYSQL, true);
 
 ```java
 String sql = SqlBuilder.select("id", "name")
+        .distinct()
         .from("users", "u")
         .where("u.status = 1")
         .and("u.age > 18")
         .leftJoin("orders", "u.id = orders.uid")
+        .rightJoin("depts", "u.dept = depts.id")
+        .with("c", "SELECT id FROM t WHERE active = 1")
         .groupBy("u.id")
         .having("count(1) > 1")
         .orderBy("u.id")
         .limit(10)
+        .unionAll(SqlBuilder.select("id", "name").from("archive"))
         .toSql();
 
 SqlBuilder.insertInto("t").columns("id", "name").values(1, "a").toSql();
