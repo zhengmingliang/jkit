@@ -12,6 +12,7 @@ public final class SqlLimit extends SqlNode {
     private SqlExpr offset;
     private SqlExpr rowCount;
     private boolean mysqlCommaStyle;
+    private boolean fetchStyle;
 
     /**
      * @return OFFSET
@@ -53,6 +54,20 @@ public final class SqlLimit extends SqlNode {
      */
     public void setMysqlCommaStyle(boolean mysqlCommaStyle) {
         this.mysqlCommaStyle = mysqlCommaStyle;
+    }
+
+    /**
+     * @return 是否来自 {@code OFFSET … FETCH FIRST/NEXT … ROWS ONLY}
+     */
+    public boolean fetchStyle() {
+        return fetchStyle;
+    }
+
+    /**
+     * @param fetchStyle FETCH 写法
+     */
+    public void setFetchStyle(boolean fetchStyle) {
+        this.fetchStyle = fetchStyle;
     }
 
     /**

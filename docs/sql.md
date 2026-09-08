@@ -93,7 +93,7 @@ SQL.format(stmt, SqlDialect.MYSQL, true);
 | --- | --- | --- |
 | 标识符 | 反引号 `` ` `` | 双引号 |
 | 双引号 | 默认当字符串 | 当标识符 |
-| `\|\|` | 逻辑 OR | 字符串拼接 |
+| `\|\|` | 逻辑 OR（`SqlParseOptions.pipesAsConcat(true)` 可改为拼接） | 字符串拼接 |
 | `#` 行注释 | 是 | 否 |
 | 分页 | `LIMIT` / `LIMIT off,n` | `LIMIT`/`OFFSET`/`FETCH`；SQL Server 用 `TOP` |
 
@@ -106,18 +106,18 @@ List<String> params = SQL.parameters("SELECT * FROM t WHERE id = ? AND name = :n
 
 ## v1 覆盖
 
-- SELECT：列、`*`、`t.*`、DISTINCT / DISTINCT ON、TOP、FROM、JOIN（INNER/LEFT/RIGHT/FULL/CROSS/NATURAL/STRAIGHT/逗号）、`CROSS APPLY` / `OUTER APPLY`、`LATERAL` 子查询/表函数、`UNNEST(...)` / `TABLE(fn(...))` 表函数、`(VALUES …) AS v(cols)`、ON/USING、WHERE、GROUP BY [WITH ROLLUP]、HAVING、`WINDOW … AS (…)`（可继承另一窗口名）、ORDER BY、LIMIT/OFFSET/FETCH、FOR UPDATE [OF cols] [NOWAIT|SKIP LOCKED]、LOCK IN SHARE MODE、UNION/UNION ALL/INTERSECT/EXCEPT/MINUS、CONNECT BY / START WITH / PRIOR、WITH CTE
+- SELECT：列、`*`、`t.*`、DISTINCT / DISTINCT ON、TOP、FROM、JOIN（INNER/LEFT/RIGHT/FULL/CROSS/NATURAL/STRAIGHT/逗号）、`CROSS APPLY` / `OUTER APPLY`、`LATERAL` 子查询/表函数、`UNNEST(...)` / `TABLE(fn(...))` 表函数、`(VALUES …) AS v(cols)`、ON/USING、WHERE、GROUP BY [WITH ROLLUP]、HAVING、`WINDOW … AS (…)`（可继承另一窗口名）、ORDER BY、LIMIT/OFFSET/`FETCH FIRST n ROWS ONLY`、FOR UPDATE [OF cols] [NOWAIT|SKIP LOCKED]、LOCK IN SHARE MODE、UNION/UNION ALL/INTERSECT/EXCEPT/MINUS、CONNECT BY / START WITH / PRIOR、WITH CTE
 - 窗口函数：`OVER (PARTITION BY ... ORDER BY ... ROWS/RANGE BETWEEN ...)`、命名窗口引用 `OVER w`、SELECT 级 `WINDOW w AS (...)`（可多个；`w2 AS (w)` / `w2 AS (w ORDER BY …)` 继承）、`FILTER (WHERE ...)`
 - 特殊函数：`EXTRACT(field FROM expr)`、`TRIM(BOTH/LEADING/TRAILING ... FROM expr)`、`SUBSTRING(expr FROM n FOR m)`、`POSITION(a IN b)`、`IF(a,b,c)`（MySQL）、`CONVERT(expr USING charset)` / `CONVERT(type, expr)`（SQL Server）、`GROUP_CONCAT(... ORDER BY ... SEPARATOR ...)`、`STRING_AGG(... ORDER BY ...)` / `WITHIN GROUP (ORDER BY ...)`、`MATCH (cols) AGAINST (...)`
-- INSERT / REPLACE：列清单、VALUES 多行、INSERT SELECT、INSERT SET、ON DUPLICATE KEY UPDATE、PG `ON CONFLICT`（`DO NOTHING` / `DO UPDATE` / `ON CONSTRAINT`）、RETURNING、SQL Server `OUTPUT`、Oracle `INSERT ALL` / `INSERT FIRST`
-- UPDATE / DELETE：JOIN、WHERE、ORDER BY、LIMIT、PG `UPDATE … FROM`、PG/MySQL `DELETE … USING`、RETURNING、SQL Server `OUTPUT`
+- INSERT / REPLACE：列清单、VALUES 多行、INSERT SELECT、INSERT SET、ON DUPLICATE KEY UPDATE、PG `ON CONFLICT`（`DO NOTHING` / `DO UPDATE` / `ON CONSTRAINT`）、`RETURNING`（`*` 或多列列表）、SQL Server `OUTPUT`、Oracle `INSERT ALL` / `INSERT FIRST`
+- UPDATE / DELETE：JOIN、WHERE、ORDER BY、LIMIT、PG `UPDATE … FROM`、PG/MySQL `DELETE … USING`、`RETURNING`（多列）、SQL Server `OUTPUT`
 - MERGE：INTO / USING / ON、多个 `WHEN MATCHED [AND pred]`、`WHEN NOT MATCHED [BY TARGET|SOURCE]`、`OUTPUT`
 - DDL：CREATE/DROP/ALTER TABLE|VIEW|INDEX|DATABASE|PROCEDURE|FUNCTION|TRIGGER|EVENT（抽对象名；`CREATE OR REPLACE`；VIEW/CTAS 的 AS query；过程参数与 BEGIN…END 体进 tail；CREATE TABLE ENGINE/CHARSET/COLLATE/COMMENT；ALTER ADD/DROP INDEX、RENAME TO）
 - EXPLAIN / DESC、SET、USE、SHOW、CALL（实参进 AST）、TRUNCATE、GRANT
 - 过程块 / 维护：`BEGIN … END`、`DECLARE`（OTHER）；`ANALYZE` / `VACUUM` / `OPTIMIZE|REPAIR|CHECK TABLE`；`COMMENT ON TABLE/COLUMN`；SQL Server `GO` 批分隔
 - 表达式：字面量、绑定 `?` / `:name` / `@var`、算术比较、AND/OR/XOR/NOT、IN/BETWEEN/LIKE/ILIKE/REGEXP、IS NULL、`IS DISTINCT FROM` / `IS NOT DISTINCT FROM`、CASE、CAST / `::`、函数、EXISTS、子查询、`INTERVAL '1 day'` / `INTERVAL 1 DAY`、`X'FF'` / `0xFF`、行构造 `(a,b)`、JSON `->` `->>` `#>` `#>>`、数组下标 `arr[1]`、`= ANY/SOME/ALL (...)`
 - 注释：`--`、`/* */`、MySQL `#`；MySQL 可执行注释 `/*!40101 … */` 展开为内部 SQL（不整段丢弃）；优化器 hint `/*+ … */` 挂到 SELECT / 表并可 format 回写
-- 解析选项：`SqlParseOptions.keepComments(true)`（默认 false）时普通注释进入 `SqlStatement.comments()`，热路径默认仍丢弃
+- 解析选项：`SqlParseOptions.keepComments(true)`（默认 false）时普通注释进入 `SqlStatement.comments()`，热路径默认仍丢弃；`SqlParseOptions.pipesAsConcat(true)` 让 MySQL 方言下 `||` 按拼接解析（等同 `PIPES_AS_CONCAT`）
 
 明确未做：Oracle `(+)` 外连接、MySQL `PARTITION (p0,p1)` 表分区限定、过程体结构化执行、ALTER CHANGE/CONSTRAINT 全量建模、执行引擎、SQL 防火墙规则集。未知函数按普通函数调用解析，不失败。
 

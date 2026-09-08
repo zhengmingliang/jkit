@@ -8,9 +8,10 @@ package com.alianga.jkit.sql;
  */
 public final class SqlParseOptions {
     private boolean keepComments;
+    private boolean pipesAsConcat;
 
     /**
-     * @return 默认选项（不保留普通注释）
+     * @return 默认选项（不保留普通注释；MySQL {@code ||} 仍为 OR）
      */
     public static SqlParseOptions defaults() {
         return new SqlParseOptions();
@@ -30,6 +31,25 @@ public final class SqlParseOptions {
      */
     public SqlParseOptions keepComments(boolean keepComments) {
         this.keepComments = keepComments;
+        return this;
+    }
+
+    /**
+     * MySQL 默认 {@code ||} 为逻辑 OR。打开后按 ANSI/PG 把 {@code ||} 解析为字符串拼接
+     * （等价于会话 {@code PIPES_AS_CONCAT}）。
+     *
+     * @return 是否把 {@code ||} 当拼接
+     */
+    public boolean pipesAsConcat() {
+        return pipesAsConcat;
+    }
+
+    /**
+     * @param pipesAsConcat 把 {@code ||} 解析为拼接
+     * @return this
+     */
+    public SqlParseOptions pipesAsConcat(boolean pipesAsConcat) {
+        this.pipesAsConcat = pipesAsConcat;
         return this;
     }
 }

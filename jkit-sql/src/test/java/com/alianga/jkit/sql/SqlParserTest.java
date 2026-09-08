@@ -14,6 +14,8 @@ import com.alianga.jkit.sql.ast.SqlFunctionTable;
 import com.alianga.jkit.sql.ast.SqlInExpr;
 import com.alianga.jkit.sql.ast.SqlInsert;
 import com.alianga.jkit.sql.ast.SqlJoin;
+import com.alianga.jkit.sql.ast.SqlLiteral;
+import com.alianga.jkit.sql.ast.SqlListExpr;
 import com.alianga.jkit.sql.ast.SqlMerge;
 import com.alianga.jkit.sql.ast.SqlMergeWhen;
 import com.alianga.jkit.sql.ast.SqlOverExpr;
@@ -1226,4 +1228,113 @@ public class SqlParserTest {
         String fmt = SQL.toSqlString(kept);
         assertTrue(fmt, fmt.contains("keep me") || fmt.contains("--"));
     }
+
+    /**
+     * P1.7：MySQL PIPES_AS_CONCAT — 默认 || 为 OR，选项开启后为拼接。
+     */
+    @Test
+    public void p17MysqlPipesAsConcat() {
+        SqlSelect orDefault = (SqlSelect) SQL.parse("SELECT 'a' || 'b' FROM t");
+        assertTrue(orDefault.selectItems().get(0).expr() instanceof SqlBinaryExpr);
+        assertEquals(SqlBinaryOp.OR,
+                ((SqlBinaryExpr) orDefault.selectItems().get(0).expr()).operator());
+        String fOr = SQL.toSqlString(orDefault);
+        assertTrue(fOr, fOr.contains(" OR "));
+
+        SqlParseOptions opts = SqlParseOptions.defaults().pipesAsConcat(true);
+        SqlSelect concat = (SqlSelect) SQL.parse("SELECT 'a' || 'b' FROM t", SqlDialect.MYSQL, opts);
+        assertEquals(SqlBinaryOp.CONCAT,
+                ((SqlBinaryExpr) concat.selectItems().get(0).expr()).operator());
+        String fConcat = SQL.toSqlString(concat, SqlDialect.MYSQL);
+        assertTrue(fConcat, fConcat.contains("||"));
+        SQL.parse(fConcat, SqlDialect.POSTGRES);
+
+        SqlSelect stillOr = (SqlSelect) SQL.parse("SELECT 1 || 0", SqlDialect.MYSQL,
+                SqlParseOptions.defaults().pipesAsConcat(false));
+        assertEquals(SqlBinaryOp.OR,
+                ((SqlBinaryExpr) stillOr.selectItems().get(0).expr()).operator());
+    }
+
+    /**
+     * P1.7：PG RETURNING 多列列表（INSERT/UPDATE/DELETE）format 往返。
+     */
+    @Test
+    public void p17PgReturningMultiColumn() {
+        SqlInsert ins = (SqlInsert) SQL.parse(
+                "INSERT INTO t (id, name) VALUES (1, 'a') RETURNING id, name",
+                SqlDialect.POSTGRES);
+        assertTrue(ins.returning() instanceof SqlListExpr);
+        assertEquals(2, ((SqlListExpr) ins.returning()).items().size());
+        String fi = SQL.toSqlString(ins, SqlDialect.POSTGRES);
+        assertTrue(fi, fi.contains("RETURNING"));
+        assertTrue(fi, fi.contains("id") && fi.contains("name"));
+        assertFalse(fi, fi.contains("RETURNING ("));
+        SqlInsert ins2 = (SqlInsert) SQL.parse(fi, SqlDialect.POSTGRES);
+        assertTrue(ins2.returning() instanceof SqlListExpr);
+
+        SqlUpdate upd = (SqlUpdate) SQL.parse(
+                "UPDATE t SET name = 'x' WHERE id = 1 RETURNING id, name, updated_at",
+                SqlDialect.POSTGRES);
+        assertEquals(3, ((SqlListExpr) upd.returning()).items().size());
+        String fu = SQL.toSqlString(upd, SqlDialect.POSTGRES);
+        assertFalse(fu, fu.contains("RETURNING ("));
+        SQL.parse(fu, SqlDialect.POSTGRES);
+
+        SqlDelete del = (SqlDelete) SQL.parse(
+                "DELETE FROM t WHERE id = 1 RETURNING id, name",
+                SqlDialect.POSTGRES);
+        assertEquals(2, ((SqlListExpr) del.returning()).items().size());
+        String fd = SQL.toSqlString(del, SqlDialect.POSTGRES);
+        assertTrue(fd, fd.contains("RETURNING id"));
+        SQL.parse(fd, SqlDialect.POSTGRES);
+    }
+
+    /**
+     * P1.7：已有能力验收 — ON CONFLICT ON CONSTRAINT、Oracle FETCH/MINUS、SS OUTPUT/APPLY。
+     */
+    @Test
+    public void p17DialectMatrixAlreadyPresent() {
+        SqlInsert cons = (SqlInsert) SQL.parse(
+                "INSERT INTO t (id) VALUES (1) ON CONFLICT ON CONSTRAINT t_pkey DO NOTHING",
+                SqlDialect.POSTGRES);
+        assertNotNull(cons.conflictConstraint());
+        assertEquals("t_pkey", cons.conflictConstraint().simpleName());
+
+        SqlSelect fetch = (SqlSelect) SQL.parse(
+                "SELECT * FROM t FETCH FIRST 10 ROWS ONLY", SqlDialect.ORACLE);
+        assertNotNull(fetch.limit());
+        assertTrue(fetch.limit().fetchStyle());
+        assertEquals("10", ((SqlLiteral) fetch.limit().rowCount()).value());
+        String ff = SQL.toSqlString(fetch, SqlDialect.ORACLE);
+        assertTrue(ff, ff.contains("FETCH FIRST"));
+        assertTrue(ff, ff.contains("ROWS ONLY"));
+        SQL.parse(ff, SqlDialect.ORACLE);
+
+        SqlSelect fetchOrd = (SqlSelect) SQL.parse(
+                "SELECT id FROM emp ORDER BY id FETCH FIRST 5 ROWS ONLY", SqlDialect.ORACLE);
+        assertTrue(fetchOrd.limit().fetchStyle());
+        String fo = SQL.toSqlString(fetchOrd, SqlDialect.ORACLE);
+        assertTrue(fo, fo.contains("FETCH FIRST 5"));
+        SQL.parse(fo, SqlDialect.ORACLE);
+
+        SqlSelect minus = (SqlSelect) SQL.parse(
+                "SELECT a FROM t MINUS SELECT a FROM s", SqlDialect.ORACLE);
+        assertEquals("MINUS", minus.unionOp());
+        assertNotNull(minus.union());
+        SQL.parse(SQL.toSqlString(minus, SqlDialect.ORACLE), SqlDialect.ORACLE);
+
+        SqlSelect apply = (SqlSelect) SQL.parse(
+                "SELECT * FROM a CROSS APPLY (SELECT TOP 1 id FROM b WHERE b.aid = a.id) x",
+                SqlDialect.SQLSERVER);
+        assertEquals(SqlJoin.Type.CROSS_APPLY, ((SqlJoin) apply.from()).joinType());
+
+        SqlInsert out = (SqlInsert) SQL.parse(
+                "INSERT INTO t (id) OUTPUT INSERTED.id VALUES (1)", SqlDialect.SQLSERVER);
+        assertEquals(1, out.output().size());
+
+        assertEquals(SqlDialect.ORACLE, SqlDialect.fromName("dameng"));
+        assertEquals(SqlDialect.ORACLE, SqlDialect.fromName("dm"));
+        assertEquals(SqlDialect.MYSQL, SqlDialect.fromName("gbase"));
+    }
 }
+

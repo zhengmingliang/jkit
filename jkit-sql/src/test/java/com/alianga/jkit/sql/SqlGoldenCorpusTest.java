@@ -210,6 +210,13 @@ public class SqlGoldenCorpusTest {
                 {"mysql", "SELECT /*!50000 DISTINCT */ id FROM t"},
                 {"mysql", "SELECT /*+ INDEX(t idx_id) */ id FROM t"},
                 {"mysql", "SELECT id FROM t /*+ INDEX(t idx_name) */ WHERE id = 1"},
+                {"mysql", "SELECT 1 || 0 AS flag"},
+                {"postgres", "INSERT INTO t (id, name) VALUES (1, 'a') RETURNING id, name"},
+                {"postgres", "UPDATE t SET name = 'x' WHERE id = 1 RETURNING id, name"},
+                {"postgres", "DELETE FROM t WHERE id = 1 RETURNING id, name"},
+                {"oracle", "SELECT * FROM t FETCH FIRST 10 ROWS ONLY"},
+                {"oracle", "SELECT id FROM emp ORDER BY id FETCH FIRST 5 ROWS ONLY"},
+                {"sqlserver", "SELECT * FROM a OUTER APPLY (SELECT id FROM b WHERE b.aid = a.id) y"},
         });
     }
 

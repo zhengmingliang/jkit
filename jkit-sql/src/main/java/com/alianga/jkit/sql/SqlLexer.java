@@ -17,6 +17,7 @@ public final class SqlLexer {
     private int lineStart;
     private SqlDialect dialect;
     private boolean keepComments;
+    private boolean pipesAsConcat;
     private int executableDepth;
 
     private final SqlToken tokA = new SqlToken();
@@ -80,6 +81,22 @@ public final class SqlLexer {
      */
     public boolean keepComments() {
         return keepComments;
+    }
+
+    /**
+     * MySQL 下把 {@code ||} 当拼接（PIPES_AS_CONCAT）。默认 false。
+     *
+     * @param pipesAsConcat 拼接语义
+     */
+    public void setPipesAsConcat(boolean pipesAsConcat) {
+        this.pipesAsConcat = pipesAsConcat;
+    }
+
+    /**
+     * @return 是否把 {@code ||} 当拼接
+     */
+    public boolean pipesAsConcat() {
+        return pipesAsConcat;
     }
 
     /**
@@ -481,7 +498,8 @@ public final class SqlLexer {
                 break;
             case '|':
                 if (match('|')) {
-                    type = dialect.pipesAsOr() ? SqlTokenType.OR_OP : SqlTokenType.CONCAT;
+                    type = (dialect.pipesAsOr() && !pipesAsConcat)
+                            ? SqlTokenType.OR_OP : SqlTokenType.CONCAT;
                 } else {
                     type = SqlTokenType.BIT_OR;
                 }

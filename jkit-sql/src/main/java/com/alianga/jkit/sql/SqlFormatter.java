@@ -436,7 +436,7 @@ public final class SqlFormatter {
             sp();
             kw("RETURNING");
             sp();
-            writeExpr(insert.returning());
+            writeReturning(insert.returning());
         }
     }
 
@@ -518,7 +518,7 @@ public final class SqlFormatter {
             sp();
             kw("RETURNING");
             sp();
-            writeExpr(update.returning());
+            writeReturning(update.returning());
         }
     }
 
@@ -557,7 +557,7 @@ public final class SqlFormatter {
             sp();
             kw("RETURNING");
             sp();
-            writeExpr(delete.returning());
+            writeReturning(delete.returning());
         }
     }
 
@@ -968,6 +968,28 @@ public final class SqlFormatter {
     }
 
     private void writeLimit(SqlLimit limit) {
+        if (limit.fetchStyle()) {
+            if (limit.offset() != null) {
+                kw("OFFSET");
+                sp();
+                writeExpr(limit.offset());
+                sp();
+                kw("ROWS");
+                sp();
+            }
+            if (limit.rowCount() != null) {
+                kw("FETCH");
+                sp();
+                kw("FIRST");
+                sp();
+                writeExpr(limit.rowCount());
+                sp();
+                kw("ROWS");
+                sp();
+                kw("ONLY");
+            }
+            return;
+        }
         kw("LIMIT");
         sp();
         if (limit.mysqlCommaStyle() && limit.offset() != null) {
@@ -984,6 +1006,17 @@ public final class SqlFormatter {
             kw("OFFSET");
             sp();
             writeExpr(limit.offset());
+        }
+    }
+
+    /**
+     * RETURNING 多列用 {@link SqlListExpr} 存，回写时不加括号。
+     */
+    private void writeReturning(SqlExpr expr) {
+        if (expr instanceof SqlListExpr) {
+            commaExprs(((SqlListExpr) expr).items());
+        } else {
+            writeExpr(expr);
         }
     }
 

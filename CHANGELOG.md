@@ -38,6 +38,7 @@
 
 ### 变更
 
+- `jkit-sql` P1.7 方言矩阵：`SqlParseOptions.pipesAsConcat`（MySQL `||` 改拼接）；PG `RETURNING` 多列列表（`SqlListExpr`，format 无外层括号）；Oracle `FETCH FIRST n ROWS ONLY` 保留 `SqlLimit.fetchStyle` 并按 FETCH 回写；验收已有 `ON CONFLICT ON CONSTRAINT`、`MINUS`、SQL Server `OUTPUT`/`APPLY`、达梦→ORACLE / GBase→MYSQL。未发明 Hive/ClickHouse/ODPS 方言。
 - `jkit-sql` P1.6 注释与提示：MySQL 可执行注释 `/*!40101 … */` 展开为内部 SQL；优化器 hint `/*+ … */` 挂到 `SqlSelect.hints` / `SqlTable.optimizerHint` 且 format 可输出；`SqlParseOptions.keepComments`（默认 false）保留普通注释到 `SqlStatement.comments()`。
 - `jkit-sql` P1.5 DDL / 过程：`CREATE VIEW` / `CREATE OR REPLACE VIEW`（`SqlDdlStatement.orReplace`）；`CREATE PROCEDURE` / `FUNCTION` / `TRIGGER` / `EVENT` 抽对象名，参数与过程体进 `tail`（BEGIN/END 内允许分号，识别 `END IF`/`END CASE` 等）；`BEGIN … END` / `DECLARE` 为 `SqlSimpleStatement.OTHER`；`CALL proc(a,b)` 实参进 AST（`arguments`/`withArguments`）；`ANALYZE` / `VACUUM` / `OPTIMIZE|REPAIR|CHECK TABLE`、`COMMENT ON TABLE/COLUMN`；SQL Server `GO` 批分隔（同分号）。
 - `jkit-sql` P1.4 DML 边角：Oracle `INSERT ALL` / `INSERT FIRST`（`SqlInsertBranch`）；PG `INSERT … SELECT … ON CONFLICT`（含 `ON CONSTRAINT`）；`UPDATE … FROM`；`DELETE … USING`（PG，MySQL USING 多表删除保留）；MERGE 多个 `WHEN MATCHED AND <pred>` / `WHEN NOT MATCHED BY SOURCE|TARGET`（`SqlMergeWhen`）；SQL Server `OUTPUT INSERTED.*` / `DELETED.*`（INSERT/UPDATE/DELETE/MERGE）。format 往返；MERGE 无表 INSERT 不再误写 `INSERT INTO (`。

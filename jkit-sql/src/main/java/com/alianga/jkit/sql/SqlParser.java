@@ -81,6 +81,7 @@ public final class SqlParser {
         this.pendingComments = null;
         lexer.reset(sql, this.dialect);
         lexer.setKeepComments(this.keepComments);
+        lexer.setPipesAsConcat(options.pipesAsConcat());
         next();
     }
 
@@ -396,7 +397,7 @@ public final class SqlParser {
         }
         parseOnConflictOrDuplicate(insert);
         if (match(SqlTokenType.RETURNING)) {
-            insert.setReturning(parseExpr());
+            insert.setReturning(parseReturningExpr());
         }
         if (insert.output().isEmpty()) {
             parseOutputClause(insert.output());
@@ -492,6 +493,23 @@ public final class SqlParser {
         throw error("expected DUPLICATE KEY or CONFLICT after ON");
     }
 
+    /**
+     * RETURNING 列表：单列直接返回表达式；多列包进 {@link com.alianga.jkit.sql.ast.SqlListExpr}
+     *（format 时不加外层括号）。
+     */
+    private SqlExpr parseReturningExpr() {
+        SqlExpr first = parseExpr();
+        if (!match(SqlTokenType.COMMA)) {
+            return first;
+        }
+        SqlListExpr list = new SqlListExpr();
+        list.add(first);
+        do {
+            list.add(parseExpr());
+        } while (match(SqlTokenType.COMMA));
+        return list;
+    }
+
     private void parseOutputClause(List<SqlExpr> target) {
         if (!match(SqlTokenType.OUTPUT)) {
             return;
@@ -541,7 +559,7 @@ public final class SqlParser {
             update.setLimit(parseLimit());
         }
         if (match(SqlTokenType.RETURNING)) {
-            update.setReturning(parseExpr());
+            update.setReturning(parseReturningExpr());
         }
         if (update.output().isEmpty()) {
             parseOutputClause(update.output());
@@ -581,7 +599,7 @@ public final class SqlParser {
             delete.setLimit(parseLimit());
         }
         if (match(SqlTokenType.RETURNING)) {
-            delete.setReturning(parseExpr());
+            delete.setReturning(parseReturningExpr());
         }
         if (delete.output().isEmpty()) {
             parseOutputClause(delete.output());
@@ -1471,6 +1489,7 @@ public final class SqlParser {
                 limit = new SqlLimit();
                 select.setLimit(limit);
             }
+            limit.setFetchStyle(true);
             limit.setRowCount(parsePrimary());
             match(SqlTokenType.ROW);
             match(SqlTokenType.ROWS);

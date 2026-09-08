@@ -181,17 +181,17 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 - 优化器 hint `/*+ INDEX(t idx) */`：挂到 SELECT/表上，format 可输出 ✅（`SqlSelect.hints` / `SqlTable.optimizerHint`）
 - 解析器可选 `keepComments`（默认 false，避免热路径变慢）✅（`SqlParseOptions` + `SqlStatement.comments()`）
 
-#### P1.7 方言矩阵（先 MYSQL/PG，再 Oracle/SQLServer）
+#### P1.7 方言矩阵（先 MYSQL/PG，再 Oracle/SQLServer） ✅ 完成（2026-09-09）
 
 不要一上来做 Hive/ClickHouse/ODPS（Druid 有 30 种方言，那是深坑）。
 
 缺的方言行为：
 
-- MYSQL：`||` 已当 OR；补 `PIPES_AS_CONCAT` 作为 parse 选项
-- PG：`RETURNING *`、`ILIKE`、`::` 已有；补 `RETURNING` 多列列表、`ON CONFLICT ON CONSTRAINT name`
-- Oracle：`DUAL`、`ROWNUM`、`CONNECT BY` 已有；补 `FETCH FIRST n ROWS ONLY` 与 `MINUS`
-- SQL Server：`TOP`、`[]` 已有；补 `OUTPUT`、`APPLY`
-- 达梦/GBase：继续映射到 ORACLE/MYSQL，特殊函数随业务 SQL 加，不要预先发明方言枚举
+- MYSQL：`||` 已当 OR；补 `PIPES_AS_CONCAT` 作为 parse 选项 ✅（`SqlParseOptions.pipesAsConcat`）
+- PG：`RETURNING *`、`ILIKE`、`::` 已有；补 `RETURNING` 多列列表 ✅；`ON CONFLICT ON CONSTRAINT name` ✅（P1.4 已有，本 pass 验收）
+- Oracle：`DUAL`、`ROWNUM`、`CONNECT BY` 已有；补 `FETCH FIRST n ROWS ONLY` ✅（`SqlLimit.fetchStyle` + FETCH 回写）；`MINUS` ✅（原先已有，本 pass 验收）
+- SQL Server：`TOP`、`[]` 已有；补 `OUTPUT`、`APPLY` ✅（P1.2/P1.4 已有，本 pass 验收）
+- 达梦/GBase：继续映射到 ORACLE/MYSQL ✅（未发明新方言枚举）
 
 ### P2 — 能力对标（Druid 常用 Visitor）
 
