@@ -9,6 +9,7 @@ import com.alianga.jkit.http.curl.ParsedCurlRequest.Auth;
 import com.alianga.jkit.http.curl.ParsedCurlRequest.Body;
 import com.alianga.jkit.http.curl.ParsedCurlRequest.Header;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -18,6 +19,9 @@ import java.util.regex.Pattern;
 
 /**
  * Lua {@code socket.http}（luasocket，对齐 curlconverter {@code lua}）。
+ *
+ * <p>表单 {@code http.request{...}} 的返回值是 {@code 1, code, headers, status}，
+ * 响应体必须通过 {@code ltn12.sink.table} 收集；带 body 时还需设置 {@code Content-Length}。
  *
  * @author 郑明亮
  * @since 2.0.1
@@ -64,40 +68,55 @@ public final class LuaSocketHttpGenerator extends AbstractCodeGenerator {
                 .equalsIgnoreCase(CurlGenSupport.mediaType(req));
 
         StringBuilder code = new StringBuilder();
-        code.append("local body, code, headers, status = http.request");
+        boolean tableForm = !simpleGet && !simplePost;
         if (simpleGet) {
+            code.append("local body, code, headers, status = http.request");
             code.append("(").append(CodeQuote.lua(req.url())).append(")\n");
         } else if (simplePost) {
+            code.append("local body, code, headers, status = http.request");
             code.append("(\n");
             code.append("\t").append(CodeQuote.lua(req.url())).append(",\n");
             code.append("\t").append(CodeQuote.lua(body.text() == null ? "" : body.text())).append("\n");
             code.append(")\n");
         } else {
-            code.append("{\n");
+            // Table form: first return is success flag (1), not the response body.
+            imports.add("ltn12");
+            code.append("local respbody = {}\n");
+            code.append("local _, code, headers, status = http.request{\n");
             if (!"GET".equalsIgnoreCase(req.method())) {
                 code.append("\tmethod = ").append(CodeQuote.lua(req.method().toUpperCase(Locale.ROOT)))
                         .append(",\n");
             }
             code.append("\turl = ").append(CodeQuote.lua(req.url())).append(",\n");
+
+            String payloadText = null;
             if (body.kind() == Body.Kind.MULTIPART) {
                 notes.add("luasocket 无内置 multipart，请改用 curl 或自行拼装 body。");
             } else if (body.kind() == Body.Kind.FILE) {
-                imports.add("ltn12");
                 code.append("\tsource = ltn12.source.file(assert(io.open(")
                         .append(CodeQuote.lua(body.filePath())).append(", \"rb\"))),\n");
                 notes.add("正文来自本地文件，请确认路径在运行环境中可访问。");
+                notes.add("文件正文未自动写入 Content-Length，如服务端要求请自行补充。");
             } else if (body.isPresent()) {
-                imports.add("ltn12");
+                payloadText = body.text() == null ? "" : body.text();
                 code.append("\tsource = ltn12.source.string(")
-                        .append(CodeQuote.lua(body.text())).append("),\n");
+                        .append(CodeQuote.lua(payloadText)).append("),\n");
             }
+
+            boolean needContentLength = payloadText != null;
             boolean needHeaders = !headers.isEmpty()
+                    || needContentLength
                     || (auth != null && "basic".equals(auth.type()) && !req.hasHeader("Authorization"));
             if (needHeaders) {
                 code.append("\theaders = {\n");
                 for (Header h : headers) {
                     code.append("\t\t").append(reprKey(h.name())).append(" = ")
                             .append(CodeQuote.lua(h.value())).append(",\n");
+                }
+                if (needContentLength) {
+                    int len = payloadText.getBytes(StandardCharsets.UTF_8).length;
+                    code.append("\t\t[\"Content-Length\"] = ").append(CodeQuote.lua(Integer.toString(len)))
+                            .append(",\n");
                 }
                 if (auth != null && "basic".equals(auth.type()) && !req.hasHeader("Authorization")) {
                     imports.add("mime");
@@ -108,6 +127,7 @@ public final class LuaSocketHttpGenerator extends AbstractCodeGenerator {
                 }
                 code.append("\t},\n");
             }
+            code.append("\tsink = ltn12.sink.table(respbody),\n");
             code.append("}\n");
         }
 
@@ -134,7 +154,11 @@ public final class LuaSocketHttpGenerator extends AbstractCodeGenerator {
         }
         src.append('\n').append(code);
         src.append("print(code)\n");
-        src.append("print(body)\n");
+        if (tableForm) {
+            src.append("print(table.concat(respbody))\n");
+        } else {
+            src.append("print(body)\n");
+        }
 
         List<String> deps = new ArrayList<String>();
         deps.add("luasocket (socket.http)");
@@ -145,6 +169,9 @@ public final class LuaSocketHttpGenerator extends AbstractCodeGenerator {
             deps.add("mime (luasocket)");
         }
         notes.add(0, "使用 luasocket 的 socket.http，与 curlconverter lua 生成器一致。");
+        if (tableForm) {
+            notes.add(1, "表单 request 通过 ltn12.sink.table 收集响应体（返回值首项为成功标志，不是正文）。");
+        }
         return new GeneratedCode("curl_socket_http.lua", "lua", src.toString(), deps, notes);
     }
 
