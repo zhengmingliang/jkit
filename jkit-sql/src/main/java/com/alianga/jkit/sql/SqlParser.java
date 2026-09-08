@@ -710,19 +710,30 @@ public final class SqlParser {
     }
 
     private void appendRawToken(StringBuilder sb) {
-        if (sb.length() > 0) {
+        String t = token.text();
+        if (sb.length() > 0 && !noSpaceBeforeRawToken(sb, t)) {
             sb.append(' ');
         }
-        sb.append(token.text());
+        sb.append(t);
+    }
+
+    /**
+     * MySQL {@code 'u'@'%'} / {@code u@localhost} 收件人：{@code @} 两侧不加空格。
+     */
+    private static boolean noSpaceBeforeRawToken(StringBuilder sb, String next) {
+        if (next == null || next.isEmpty()) {
+            return false;
+        }
+        if (next.charAt(0) == '@') {
+            return true;
+        }
+        return sb.charAt(sb.length() - 1) == '@';
     }
 
     String consumeRawUntilSemi() {
         StringBuilder sb = new StringBuilder();
         while (!atStmtBreak()) {
-            if (sb.length() > 0) {
-                sb.append(' ');
-            }
-            sb.append(token.text());
+            appendRawToken(sb);
             next();
         }
         return sb.toString();
@@ -740,10 +751,7 @@ public final class SqlParser {
             } else if (is(SqlTokenType.RPAREN)) {
                 depth--;
             }
-            if (sb.length() > 0) {
-                sb.append(' ');
-            }
-            sb.append(token.text());
+            appendRawToken(sb);
             next();
         }
         return sb.toString();

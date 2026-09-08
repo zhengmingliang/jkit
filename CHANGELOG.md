@@ -36,6 +36,10 @@
 
 ## 2.1.0 - unreleased
 
+### 修复
+
+- `jkit-sql`：`CREATE TABLE` format 往返保留列类型/约束原文（`columnDefinitions`，不再只回写列名）；`GRANT` 收件人 `'u'@'%'` / `u@localhost` 不再被 raw 拼接拆成 `'u' @ '%'`。
+
 ### 变更
 
 - `jkit-sql`：P0.1 重构 — 拆分 `SqlParser` 为 `SqlSelectParser` / `SqlDmlParser` / `SqlDdlParser` / `SqlExprParser`（包内协作共享记号游标）；公开 API 与语法行为不变。

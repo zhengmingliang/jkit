@@ -699,11 +699,21 @@ public final class SqlFormatter {
             commaIdents(ddl.columns());
             out.append(')');
         }
-        if (ddl.type() == SqlStatementType.CREATE && isTableDdl(ddl) && !ddl.columns().isEmpty()
-                && ddl.query() == null) {
+        if (ddl.type() == SqlStatementType.CREATE && isTableDdl(ddl) && ddl.query() == null
+                && (!ddl.columnDefinitions().isEmpty() || !ddl.columns().isEmpty())) {
             sp();
             out.append('(');
-            commaIdents(ddl.columns());
+            if (!ddl.columnDefinitions().isEmpty()) {
+                for (int i = 0; i < ddl.columnDefinitions().size(); i++) {
+                    if (i > 0) {
+                        out.append(',');
+                        sp();
+                    }
+                    out.append(ddl.columnDefinitions().get(i));
+                }
+            } else {
+                commaIdents(ddl.columns());
+            }
             out.append(')');
         }
         if (ddl.type() == SqlStatementType.ALTER) {

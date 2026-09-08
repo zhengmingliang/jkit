@@ -341,6 +341,7 @@ final class SqlDdlParser {
             return;
         }
         do {
+            int start = p.token.start();
             if (p.is(SqlTokenType.PRIMARY) || p.is(SqlTokenType.UNIQUE) || p.is(SqlTokenType.KEY)
                     || p.is(SqlTokenType.CONSTRAINT) || p.is(SqlTokenType.INDEX)
                     || p.is(SqlTokenType.FOREIGN) || p.is(SqlTokenType.CHECK)) {
@@ -350,6 +351,11 @@ final class SqlDdlParser {
                 skipBalancedComma(depth);
             } else {
                 skipBalancedComma(depth);
+            }
+            // 当前停在分隔 COMMA 或闭合 RPAREN：用源切片保留类型/约束原文
+            String def = p.lexer.rawSlice(start, p.token.start()).trim();
+            if (!def.isEmpty()) {
+                ddl.columnDefinitions().add(def);
             }
         } while (p.match(SqlTokenType.COMMA));
     }

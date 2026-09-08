@@ -232,6 +232,22 @@ public class SqlParserTest {
         SqlStatement create = SQL.parse(
                 "CREATE TABLE IF NOT EXISTS t (id INT PRIMARY KEY, name VARCHAR(32))");
         assertEquals(SqlStatementType.CREATE, create.type());
+        com.alianga.jkit.sql.ast.SqlDdlStatement ddl =
+                (com.alianga.jkit.sql.ast.SqlDdlStatement) create;
+        assertEquals(2, ddl.columns().size());
+        assertEquals(2, ddl.columnDefinitions().size());
+        assertTrue(ddl.columnDefinitions().get(0),
+                ddl.columnDefinitions().get(0).toUpperCase().contains("INT"));
+        assertTrue(ddl.columnDefinitions().get(0),
+                ddl.columnDefinitions().get(0).toUpperCase().contains("PRIMARY"));
+        assertTrue(ddl.columnDefinitions().get(1),
+                ddl.columnDefinitions().get(1).toUpperCase().contains("VARCHAR"));
+        String formatted = SQL.toSqlString(create);
+        assertTrue(formatted, formatted.toUpperCase().contains("INT"));
+        assertTrue(formatted, formatted.toUpperCase().contains("VARCHAR"));
+        assertTrue(formatted, formatted.toUpperCase().contains("PRIMARY"));
+        assertFalse(formatted, formatted.contains("(id, name)")
+                || formatted.replace(" ", "").contains("(id,name)"));
         SqlStatement drop = SQL.parse("DROP TABLE IF EXISTS t, s");
         assertEquals(SqlStatementType.DROP, drop.type());
     }
@@ -1753,9 +1769,17 @@ public class SqlParserTest {
         String out = SQL.toSqlString(g);
         assertTrue(out, out.toUpperCase().startsWith("GRANT"));
         assertTrue(out, out.toUpperCase().contains("ON"));
+        assertTrue(out, out.contains("'u'@'%'"));
+        assertFalse(out, out.contains("'u' @"));
         SqlSimpleStatement again = (SqlSimpleStatement) SQL.parse(out);
         assertEquals("db.t", again.name().qualifiedName());
         assertTrue(again.privileges().toUpperCase().contains("SELECT"));
+
+        SqlSimpleStatement host = (SqlSimpleStatement) SQL.parse(
+                "GRANT SELECT ON db.t TO u@localhost");
+        String hostOut = SQL.toSqlString(host);
+        assertTrue(hostOut, hostOut.contains("u@localhost"));
+        assertFalse(hostOut, hostOut.contains("u @"));
 
         SqlSimpleStatement all = (SqlSimpleStatement) SQL.parse(
                 "GRANT ALL PRIVILEGES ON *.* TO admin");

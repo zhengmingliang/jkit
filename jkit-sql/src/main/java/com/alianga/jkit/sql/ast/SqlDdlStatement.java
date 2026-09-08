@@ -7,7 +7,7 @@ import java.util.List;
 
 /**
  * CREATE / DROP / ALTER 等 DDL。抽取对象名；支持 {@code OR REPLACE}、VIEW / PROCEDURE 等；
- * CREATE TABLE 解析 ENGINE/CHARSET/COMMENT 与表级 FOREIGN KEY 引用表；
+ * CREATE TABLE 解析列定义原文、ENGINE/CHARSET/COMMENT 与表级 FOREIGN KEY 引用表；
  * ALTER 解析 ADD/DROP INDEX、RENAME TO、CHANGE/MODIFY 列定义、ADD CONSTRAINT；
  * 过程体等可留在 {@link #tail()}。
  *
@@ -32,6 +32,8 @@ public final class SqlDdlStatement extends SqlStatement {
     private final List<SqlIdentifier> indexColumns = new ArrayList<SqlIdentifier>(4);
     private SqlIdentifier renameTo;
     private String columnDefinition;
+    /** CREATE TABLE 括号内各列/表约束的原文（含类型），按逗号分段。 */
+    private final List<String> columnDefinitions = new ArrayList<String>(4);
     private SqlIdentifier constraintName;
     private String constraintType;
     private final List<SqlIdentifier> referencedTables = new ArrayList<SqlIdentifier>(1);
@@ -280,6 +282,14 @@ public final class SqlDdlStatement extends SqlStatement {
      */
     public void setColumnDefinition(String columnDefinition) {
         this.columnDefinition = columnDefinition;
+    }
+
+    /**
+     * @return CREATE TABLE 列定义/表约束原文列表（含类型与约束关键字）
+     * @since 2.1.0
+     */
+    public List<String> columnDefinitions() {
+        return columnDefinitions;
     }
 
     /**

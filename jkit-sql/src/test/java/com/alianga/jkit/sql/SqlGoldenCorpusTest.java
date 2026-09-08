@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Locale;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
@@ -279,6 +280,24 @@ public class SqlGoldenCorpusTest {
                 first.isReadOnly(), second.isReadOnly());
         assertEquals(sql + " tables after format: " + formatted,
                 normalizeTables(SQL.tables(first)), normalizeTables(SQL.tables(second)));
+        if (sql.toUpperCase(Locale.ROOT).contains("CREATE TABLE")
+                && sql.indexOf('(') >= 0
+                && !sql.toUpperCase(Locale.ROOT).contains(" AS SELECT")) {
+            assertTrue(sql + " format must keep type tokens: " + formatted,
+                    containsTypeToken(formatted));
+        }
+                if (sql.toUpperCase(Locale.ROOT).contains("GRANT") && sql.contains("@")) {
+            assertFalse(sql + " GRANT @ must stay tight: " + formatted,
+                    formatted.contains("' @") || formatted.contains("u @"));
+        }
+    }
+
+    private static boolean containsTypeToken(String formatted) {
+        String u = formatted.toUpperCase(Locale.ROOT);
+        return u.contains("INT") || u.contains("VARCHAR") || u.contains("CHAR")
+                || u.contains("TEXT") || u.contains("DATE") || u.contains("DECIMAL")
+                || u.contains("BLOB") || u.contains("FLOAT") || u.contains("DOUBLE")
+                || u.contains("BOOLEAN") || u.contains("BIGINT") || u.contains("SMALLINT");
     }
 
     private static List<String> normalizeTables(List<String> tables) {
