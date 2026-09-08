@@ -20,6 +20,7 @@ public final class SqlSimpleStatement extends SqlStatement {
     private String text;
     private final List<SqlExpr> arguments = new ArrayList<SqlExpr>(2);
     private boolean withArguments;
+    private String parseError;
 
     /**
      * {@inheritDoc}
@@ -124,6 +125,32 @@ public final class SqlSimpleStatement extends SqlStatement {
      */
     public void setWithArguments(boolean withArguments) {
         this.withArguments = withArguments;
+    }
+
+    /**
+     * 容错 {@code parseAll(..., true)} 时单条失败的错误信息；成功解析时为 null。
+     *
+     * @return 错误信息，无则 null
+     * @since 2.1.0
+     */
+    public String parseError() {
+        return parseError;
+    }
+
+    /**
+     * @param parseError 解析错误信息
+     * @since 2.1.0
+     */
+    public void setParseError(String parseError) {
+        this.parseError = parseError;
+    }
+
+    /**
+     * @return 是否为容错解析留下的失败占位
+     * @since 2.1.0
+     */
+    public boolean hasParseError() {
+        return parseError != null;
     }
 
     /**

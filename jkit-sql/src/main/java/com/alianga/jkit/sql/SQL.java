@@ -101,7 +101,7 @@ public final class SQL {
     }
 
     /**
-     * 解析分号分隔的多条语句（带选项）。
+     * 解析分号分隔的多条语句（带选项；一条失败则整批抛错）。
      *
      * @param sql SQL
      * @param dialect 方言
@@ -110,12 +110,44 @@ public final class SQL {
      * @since 2.1.0
      */
     public static List<SqlStatement> parseAll(String sql, SqlDialect dialect, SqlParseOptions options) {
+        return parseAll(sql, dialect, options, false);
+    }
+
+    /**
+     * 解析分号分隔的多条语句；可选容错（审计场景）。
+     *
+     * <p>{@code tolerant=true} 时单条失败不抛错，改为 {@link com.alianga.jkit.sql.ast.SqlSimpleStatement}
+     * 占位（{@code type=OTHER}，{@link com.alianga.jkit.sql.ast.SqlSimpleStatement#parseError()} 有值，
+     * {@code text} 为失败片段），并继续下一条。</p>
+     *
+     * @param sql SQL
+     * @param dialect 方言
+     * @param tolerant 是否容错
+     * @return 语句列表，无语句时为空列表
+     * @since 2.1.0
+     */
+    public static List<SqlStatement> parseAll(String sql, SqlDialect dialect, boolean tolerant) {
+        return parseAll(sql, dialect, SqlParseOptions.defaults(), tolerant);
+    }
+
+    /**
+     * 解析分号分隔的多条语句（带选项与容错开关）。
+     *
+     * @param sql SQL
+     * @param dialect 方言
+     * @param options 解析选项，null 视为默认
+     * @param tolerant 是否容错
+     * @return 语句列表，无语句时为空列表
+     * @since 2.1.0
+     */
+    public static List<SqlStatement> parseAll(String sql, SqlDialect dialect,
+            SqlParseOptions options, boolean tolerant) {
         if (sql == null || sql.trim().isEmpty()) {
             return Collections.emptyList();
         }
         SqlParser parser = PARSER.get();
         parser.reset(sql, dialect, options);
-        return parser.parseAll();
+        return parser.parseAll(tolerant);
     }
 
     /**

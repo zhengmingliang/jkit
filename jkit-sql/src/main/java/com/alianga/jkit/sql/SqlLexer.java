@@ -678,6 +678,30 @@ public final class SqlLexer {
     }
 
     /**
+     * 截取源缓冲绝对区间（不含 to），供容错 parseAll 保留失败语句原文。
+     *
+     * @param from 起始下标（含）
+     * @param to 结束下标（不含）
+     * @return 原文切片，越界时裁剪；空区间返回空串
+     * @since 2.1.0
+     */
+    public String rawSlice(int from, int to) {
+        if (src == null || to <= from) {
+            return "";
+        }
+        if (from < start) {
+            from = start;
+        }
+        if (to > limit) {
+            to = limit;
+        }
+        if (to <= from) {
+            return "";
+        }
+        return new String(src, from, to - from);
+    }
+
+    /**
      * 从当前记号截取附近原文，供报错使用。
      *
      * @param around 中心下标

@@ -40,6 +40,9 @@ stmt.isReadOnly();      // true
 SQL.tables(stmt);       // [users, order_t]
 
 List<SqlStatement> batch = SQL.parseAll("SELECT 1; DELETE FROM t WHERE id=1");
+
+// 容错多语句（审计）：失败条目为 SqlSimpleStatement，parseError() 有值，继续下一条
+List<SqlStatement> audit = SQL.parseAll(sql, SqlDialect.MYSQL, true);
 ```
 
 默认方言是 **MySQL**（GBase / MariaDB / TiDB 走同一套）。其它方言：
@@ -107,6 +110,9 @@ SQL.toSqlString(stmt);                      // 紧凑单行
 SQL.format(stmt, SqlDialect.MYSQL, true);
 ```
 
+带引号的标识符按方言回写：MySQL 反引号、PostgreSQL/Oracle/ANSI/H2 双引号、SQL Server `[]`。
+`||` 按 AST 回写（`CONCAT`→`||`，MySQL 默认解析出的 `OR`→`OR`）。
+
 回写是 pretty-print，**不保证注释和空白 round-trip**。
 
 ## 方言差异
@@ -142,7 +148,7 @@ List<Object> literals = SQL.exportParameterValues("SELECT * FROM t WHERE name = 
 - 过程块 / 维护：`BEGIN … END`、`DECLARE`（OTHER）；`ANALYZE` / `VACUUM` / `OPTIMIZE|REPAIR|CHECK TABLE`；`COMMENT ON TABLE/COLUMN`；SQL Server `GO` 批分隔
 - 表达式：字面量、绑定 `?` / `:name` / `@var`、算术比较、AND/OR/XOR/NOT、IN/BETWEEN/LIKE/ILIKE/REGEXP、IS NULL、`IS DISTINCT FROM` / `IS NOT DISTINCT FROM`、CASE、CAST / `::`、函数、EXISTS、子查询、`INTERVAL '1 day'` / `INTERVAL 1 DAY`、`X'FF'` / `0xFF`、行构造 `(a,b)`、JSON `->` `->>` `#>` `#>>`、数组下标 `arr[1]`、`= ANY/SOME/ALL (...)`
 - 注释：`--`、`/* */`、MySQL `#`；MySQL 可执行注释 `/*!40101 … */` 展开为内部 SQL（不整段丢弃）；优化器 hint `/*+ … */` 挂到 SELECT / 表并可 format 回写
-- 解析选项：`SqlParseOptions.keepComments(true)`（默认 false）时普通注释进入 `SqlStatement.comments()`，热路径默认仍丢弃；`SqlParseOptions.pipesAsConcat(true)` 让 MySQL 方言下 `||` 按拼接解析（等同 `PIPES_AS_CONCAT`）
+- 解析选项：`SqlParseOptions.keepComments(true)`（默认 false）时普通注释进入 `SqlStatement.comments()`，热路径默认仍丢弃；`SqlParseOptions.pipesAsConcat(true)` 让 MySQL 方言下 `||` 按拼接解析（等同 `PIPES_AS_CONCAT`）；`SQL.parseAll(sql, dialect, true)` 容错多语句（失败占位 + `parseError`，供审计）
 
 明确未做：Oracle `(+)` 外连接、MySQL `PARTITION (p0,p1)` 表分区限定、过程体结构化执行、ALTER CHANGE/CONSTRAINT 全量建模、执行引擎、完整 Wall 规则集（仅提供 `SQL.wall` 子集）。未知函数按普通函数调用解析，不失败。
 

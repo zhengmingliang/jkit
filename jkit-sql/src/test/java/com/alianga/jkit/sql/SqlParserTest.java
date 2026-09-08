@@ -4,6 +4,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 import com.alianga.jkit.sql.ast.SqlBinaryExpr;
 import com.alianga.jkit.sql.ast.SqlBinaryOp;
@@ -12,6 +13,7 @@ import com.alianga.jkit.sql.ast.SqlDelete;
 import com.alianga.jkit.sql.ast.SqlFunctionExpr;
 import com.alianga.jkit.sql.ast.SqlFunctionTable;
 import com.alianga.jkit.sql.ast.SqlInExpr;
+import com.alianga.jkit.sql.ast.SqlIdentifier;
 import com.alianga.jkit.sql.ast.SqlInsert;
 import com.alianga.jkit.sql.ast.SqlJoin;
 import com.alianga.jkit.sql.ast.SqlLiteral;
@@ -1337,5 +1339,72 @@ public class SqlParserTest {
         assertEquals(SqlDialect.ORACLE, SqlDialect.fromName("dm"));
         assertEquals(SqlDialect.MYSQL, SqlDialect.fromName("gbase"));
     }
-}
 
+
+    /**
+     * P3.1：方言标识符引号回写（MySQL 反引号 / PG 双引号 / SQL Server []）。
+     */
+    @Test
+    public void p31DialectQuoting() {
+        SqlSelect mysql = (SqlSelect) SQL.parse("SELECT `order` FROM `user`");
+        String fm = SQL.toSqlString(mysql, SqlDialect.MYSQL);
+        assertTrue(fm, fm.contains("`order`"));
+        assertTrue(fm, fm.contains("`user`"));
+        SQL.parse(fm, SqlDialect.MYSQL);
+
+        SqlSelect pg = (SqlSelect) SQL.parse("SELECT \"Order\" FROM \"User\"", SqlDialect.POSTGRES);
+        String fp = SQL.toSqlString(pg, SqlDialect.POSTGRES);
+        assertTrue(fp, fp.contains("\"Order\""));
+        assertTrue(fp, fp.contains("\"User\""));
+        SQL.parse(fp, SqlDialect.POSTGRES);
+
+        SqlSelect ss = (SqlSelect) SQL.parse("SELECT [Order] FROM [User]", SqlDialect.SQLSERVER);
+        String fs = SQL.toSqlString(ss, SqlDialect.SQLSERVER);
+        assertTrue(fs, fs.contains("[Order]"));
+        assertTrue(fs, fs.contains("[User]"));
+        SQL.parse(fs, SqlDialect.SQLSERVER);
+    }
+
+    /**
+     * P3.1：容错 parseAll — 失败语句记 SqlSimpleStatement + parseError，继续下一条。
+     */
+    @Test
+    public void p31ParseAllTolerant() {
+        String batch = "SELECT 1; !!!; SELECT 2";
+        List<SqlStatement> all = SQL.parseAll(batch, SqlDialect.MYSQL, true);
+        assertEquals(3, all.size());
+        assertEquals(SqlStatementType.SELECT, all.get(0).type());
+        assertTrue(all.get(1) instanceof SqlSimpleStatement);
+        SqlSimpleStatement bad = (SqlSimpleStatement) all.get(1);
+        assertTrue(bad.hasParseError());
+        assertNotNull(bad.parseError());
+        assertEquals(SqlStatementType.OTHER, bad.type());
+        assertEquals(SqlStatementType.SELECT, all.get(2).type());
+
+        // 默认仍整批抛错
+        try {
+            SQL.parseAll(batch, SqlDialect.MYSQL, false);
+            fail("expected SqlParseException");
+        } catch (SqlParseException expected) {
+            assertTrue(expected.getMessage(), expected.getMessage().length() > 0);
+        }
+    }
+
+    /**
+     * P3.1：|| 按 AST 回写 — MySQL 默认 OR；pipesAsConcat / PG 为 CONCAT→||。
+     */
+    @Test
+    public void p31PipesFormatSemantics() {
+        SqlSelect orStmt = (SqlSelect) SQL.parse("SELECT 1 || 0 FROM t");
+        assertEquals(SqlBinaryOp.OR,
+                ((SqlBinaryExpr) orStmt.selectItems().get(0).expr()).operator());
+        assertTrue(SQL.toSqlString(orStmt).contains("OR"));
+
+        SqlParseOptions opts = SqlParseOptions.defaults().pipesAsConcat(true);
+        SqlSelect concat = (SqlSelect) SQL.parse("SELECT 'a' || 'b' FROM t", SqlDialect.MYSQL, opts);
+        assertEquals(SqlBinaryOp.CONCAT,
+                ((SqlBinaryExpr) concat.selectItems().get(0).expr()).operator());
+        assertTrue(SQL.toSqlString(concat, SqlDialect.MYSQL).contains("||"));
+    }
+
+}

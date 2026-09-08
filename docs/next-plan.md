@@ -209,14 +209,14 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 
 `addLimit` 已改为 **clone 后再改**；单测断言原树无 LIMIT。
 
-### P3 — 工程与性能
+### P3 — 工程与性能（P3.1 jkit-sql 已完成；JMH/corpus → P3.2）
 
-- **JMH 对比**：在 `tools-test` 加 JMH（该工程已有 jmh 也可放到 `jmh-test`）。测 simple / join / window 三条，fork≥2，不要用墙钟 for 循环当正式数字。
-- **扩 corpus**：从业务日志抽 200～500 条真实 SQL 放到 `tools-test/src/test/resources/sql-corpus.txt`（一行一条，`#` 注释）。统计三家成功率。**不要**把 Druid 测试 jar 拷进 jkit。
-- Lexer：关键字哈希已无字符串分配；profile 一下 `new String` 在 ident 上的占比，必要时对短 ident intern。
-- `SqlFormatter` 的 `dialect` 字段已保存但几乎没用：按方言输出反引号 / 双引号 / `[]`，`||` 语义。
-- `parseAlias(boolean inFrom)` 的 `inFrom` 已不再使用，删参数或真正用起来。
-- 多语句：一条失败时现在整批抛错。可选 `SQL.parseAll(sql, dialect, true)` 容错，失败的记 `SqlSimpleStatement` + 错误，继续下一条（审计场景有用）。
+- **JMH 对比**（P3.2，本 pass 未做）：在 `tools-test` 加 JMH（该工程已有 jmh 也可放到 `jmh-test`）。测 simple / join / window 三条，fork≥2，不要用墙钟 for 循环当正式数字。
+- **扩 corpus**（P3.2，本 pass 未做）：从业务日志抽 200～500 条真实 SQL 放到 `tools-test/src/test/resources/sql-corpus.txt`（一行一条，`#` 注释）。统计三家成功率。**不要**把 Druid 测试 jar 拷进 jkit。
+- Lexer：关键字哈希已无字符串分配；短 ident intern 轻量优化 **跳过**（需 profiling，留 P3.2）。
+- `SqlFormatter` 按方言输出反引号 / 双引号 / `[]`，`||` 按 AST 回写 ✅（P3.1，2026-09-09）。
+- `parseAlias` 删除未使用的 `inFrom` ✅（P3.1）。
+- 多语句：`SQL.parseAll(sql, dialect, true)` 容错 ✅（P3.1）；失败记 `SqlSimpleStatement` + `parseError`，继续下一条。
 - 发布：父版本仍是 2.0.1。`jkit-sql` 若要发 Central，应随 **2.0.1** 一起发，不要用已发布的 2.0.1 坐标抢发（artifactId 虽新，但和 BOM/文档版本会乱）。发布前补 
   `@since`、README 版本号。
 

@@ -36,6 +36,8 @@
 
 ## 2.1.0 - unreleased
 
+- `jkit-sql` P3.1：`SqlFormatter` 按方言回写标识符引号（MySQL 反引号 / PG·Oracle·ANSI·H2 双引号 / SQL Server `[]`）；`||` 按 AST 运算符回写（`CONCAT`→`||`，`OR`→`OR`，配合 `pipesAsConcat`）；`SQL.parseAll(sql, dialect, true)` 容错多语句（失败记 `SqlSimpleStatement` + `parseError` 继续）；清理 `parseAlias` 未使用的 `inFrom` 参数。Lexer 短 ident intern 与 tools-test JMH/corpus 留待 P3.2。
+
 ### 新增
 
 - `jkit-sql` P2 能力对标（零依赖，入口在 `SQL`）：`parameterize` / `exportParameterValues`（字面量指纹与导出，区别于绑定 `parameters`）；`wall` → `SqlWallResult`（多语句、注释绕过、永远真条件、`SLEEP`、无 WHERE 的 DELETE/UPDATE）；`clone`（format→parse 深拷贝）；`eval`（字面量算术/比较子集）；`SqlAstVisitor` 类型分发（并存不破坏 `SqlVisitorAdapter`）；`replaceColumn` 对称 `replaceTable`。`addLimit` 改为 clone-then-mutate。

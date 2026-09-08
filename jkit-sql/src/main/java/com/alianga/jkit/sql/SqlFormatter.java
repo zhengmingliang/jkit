@@ -43,6 +43,8 @@ import java.util.List;
 
 /**
  * 把 AST 打回 SQL。pretty 模式换行缩进；compact 模式只保留必要空格。
+ * 标识符引号按 {@link SqlDialect#identQuoteOpen()} / {@link SqlDialect#identQuoteClose()} 输出；
+ * {@code ||} 按 AST 运算符回写（{@link SqlBinaryOp#CONCAT}→{@code ||}，{@link SqlBinaryOp#OR}→{@code OR}）。
  *
  * @author 郑明亮
  * @since 2.1.0
@@ -1044,7 +1046,7 @@ public final class SqlFormatter {
         if (expr instanceof SqlLiteral) {
             writeLiteral((SqlLiteral) expr);
         } else if (expr instanceof SqlIdentifier) {
-            out.append(((SqlIdentifier) expr).qualifiedName());
+            writeIdentifier((SqlIdentifier) expr);
         } else if (expr instanceof SqlAllColumns) {
             SqlAllColumns all = (SqlAllColumns) expr;
             if (all.owner() != null) {
@@ -1062,6 +1064,7 @@ public final class SqlFormatter {
             } else {
                 writeExpr(bin.left());
                 sp();
+                // CONCAT 一律回写 ||；MySQL 默认把 || 解析为 OR，故 AST 里的 OR 回写为 OR
                 out.append(bin.operator().symbol());
                 sp();
                 writeExpr(bin.right());
@@ -1145,6 +1148,43 @@ public final class SqlFormatter {
             writeNode(((SqlQueryExpr) expr).query());
             out.append(')');
         }
+    }
+
+    /**
+     * 按方言输出标识符引号：MySQL 反引号、SQL Server {@code []}、其余双引号。
+     * 仅当 {@link SqlIdentifier#quoted()} 为 true 时加引号（解析时带引号的名字）。
+     */
+    private void writeIdentifier(SqlIdentifier id) {
+        List<String> names = id.names();
+        for (int i = 0; i < names.size(); i++) {
+            if (i > 0) {
+                out.append('.');
+            }
+            writeIdentPart(names.get(i), id.quoted());
+        }
+    }
+
+    private void writeIdentPart(String part, boolean quoted) {
+        if (part == null) {
+            return;
+        }
+        if (!quoted) {
+            out.append(part);
+            return;
+        }
+        char open = dialect.identQuoteOpen();
+        char close = dialect.identQuoteClose();
+        out.append(open);
+        if (open == '`') {
+            out.append(part.replace("`", "``"));
+        } else if (open == '"') {
+            out.append(part.replace("\"", "\"\""));
+        } else if (open == '[') {
+            out.append(part.replace("]", "]]"));
+        } else {
+            out.append(part);
+        }
+        out.append(close);
     }
 
     private void writeFunction(SqlFunctionExpr fn) {

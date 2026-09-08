@@ -86,11 +86,22 @@ public final class SqlParser {
     }
 
     /**
-     * 解析全部语句。
+     * 解析全部语句（一条失败则整批抛错）。
      *
      * @return 语句列表
      */
     public List<SqlStatement> parseAll() {
+        return parseAll(false);
+    }
+
+    /**
+     * 解析全部语句。
+     *
+     * @param tolerant {@code true} 时单条失败记为带 {@link SqlSimpleStatement#parseError()} 的占位并继续
+     * @return 语句列表
+     * @since 2.1.0
+     */
+    public List<SqlStatement> parseAll(boolean tolerant) {
         List<SqlStatement> list = new ArrayList<SqlStatement>(1);
         while (!is(SqlTokenType.EOF)) {
             while (isStmtSeparator()) {
@@ -99,12 +110,35 @@ public final class SqlParser {
             if (is(SqlTokenType.EOF)) {
                 break;
             }
-            list.add(parseStatement());
+            int stmtStart = token.start();
+            if (tolerant) {
+                try {
+                    list.add(parseStatement());
+                } catch (SqlParseException ex) {
+                    pendingComments = null;
+                    skipToStmtEnd();
+                    SqlSimpleStatement bad = new SqlSimpleStatement();
+                    bad.setStatementType(SqlStatementType.OTHER);
+                    bad.setParseError(ex.getMessage());
+                    String raw = lexer.rawSlice(stmtStart, token.start()).trim();
+                    bad.setText(raw.isEmpty() ? ex.snippet() : raw);
+                    list.add(bad);
+                }
+            } else {
+                list.add(parseStatement());
+            }
             if (isStmtSeparator()) {
                 next();
             }
         }
         return list;
+    }
+
+    /** 容错模式下跳到下一条语句边界（分号 / GO / EOF）。 */
+    private void skipToStmtEnd() {
+        while (!is(SqlTokenType.EOF) && !isStmtSeparator()) {
+            next();
+        }
     }
 
     /**
@@ -302,7 +336,7 @@ public final class SqlParser {
             } else if (!is(SqlTokenType.SEMICOLON) && !is(SqlTokenType.EOF)
                     && !is(SqlTokenType.UNION) && !is(SqlTokenType.INTERSECT)
                     && !is(SqlTokenType.EXCEPT) && !is(SqlTokenType.MINUS)
-                    && !is(SqlTokenType.LOCK) && !isAliasStop(token.type(), false)) {
+                    && !is(SqlTokenType.LOCK) && !isAliasStop(token.type())) {
                 select.setForUpdateTail(consumeRawUntilClause());
             }
         }
@@ -361,7 +395,7 @@ public final class SqlParser {
             item.setExpr(all);
         } else {
             item.setExpr(expr);
-            item.setAlias(parseAlias(false));
+            item.setAlias(parseAlias());
         }
         return item;
     }
@@ -1304,7 +1338,7 @@ public final class SqlParser {
     }
 
     private void parseTableAlias(SqlTableSource source) {
-        String alias = parseAlias(true);
+        String alias = parseAlias();
         source.setAlias(alias);
         if (alias != null && match(SqlTokenType.LPAREN)) {
             do {
@@ -1372,7 +1406,7 @@ public final class SqlParser {
         pendingComments = null;
     }
 
-    private String parseAlias(boolean inFrom) {
+    private String parseAlias() {
         if (match(SqlTokenType.AS)) {
             if (is(SqlTokenType.STRING)) {
                 return unquote(consumeStringRaw());
@@ -1383,13 +1417,13 @@ public final class SqlParser {
             // MySQL：SELECT id "别名" / SELECT 1 'x' —— 双引号在 MYSQL 方言下是字符串记号
             return unquote(consumeStringRaw());
         }
-        if (identLike() && !isAliasStop(token.type(), inFrom)) {
+        if (identLike() && !isAliasStop(token.type())) {
             return unquote(consumeIdentRaw());
         }
         return null;
     }
 
-    private static boolean isAliasStop(SqlTokenType t, boolean inFrom) {
+    private static boolean isAliasStop(SqlTokenType t) {
         switch (t) {
             case WHERE:
             case GROUP:
@@ -2243,7 +2277,7 @@ public final class SqlParser {
 
     private boolean identLike() {
         return is(SqlTokenType.IDENT) || (token.type() != null && token.type().keyword()
-                && !isAliasStop(token.type(), true));
+                && !isAliasStop(token.type()));
     }
 
     private boolean isIdent(String word) {
@@ -2413,7 +2447,7 @@ public final class SqlParser {
 
     private String consumeRawUntilClause() {
         StringBuilder sb = new StringBuilder();
-        while (!is(SqlTokenType.EOF) && !is(SqlTokenType.SEMICOLON) && !isAliasStop(token.type(), false)) {
+        while (!is(SqlTokenType.EOF) && !is(SqlTokenType.SEMICOLON) && !isAliasStop(token.type())) {
             if (sb.length() > 0) {
                 sb.append(' ');
             }
