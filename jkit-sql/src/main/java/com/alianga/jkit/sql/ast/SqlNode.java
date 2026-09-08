@@ -1,11 +1,13 @@
 package com.alianga.jkit.sql.ast;
 
+import com.alianga.jkit.sql.SqlDialect;
+import com.alianga.jkit.sql.SqlFormatter;
 import com.alianga.jkit.sql.visitor.SqlVisitor;
 
 import java.util.List;
 
 /**
- * AST 节点。
+ * AST 节点。{@link #toString()} 输出紧凑 SQL（经 {@link SqlFormatter}），便于调试。
  *
  * @author 郑明亮
  * @since 2.1.0
@@ -54,5 +56,15 @@ public abstract class SqlNode {
         for (int i = 0; i < nodes.size(); i++) {
             child(visitor, nodes.get(i));
         }
+    }
+
+    /**
+     * 紧凑 SQL 文本（方言中性 ANSI 引号），便于调试；永不回落到 {@code Class@hash}。
+     *
+     * @return 格式化 SQL 片段
+     */
+    @Override
+    public String toString() {
+        return new SqlFormatter(false, SqlDialect.ANSI).format(this);
     }
 }

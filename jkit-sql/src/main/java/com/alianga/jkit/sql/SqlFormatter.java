@@ -98,6 +98,22 @@ public final class SqlFormatter {
             writeSimple((SqlSimpleStatement) node);
         } else if (node instanceof SqlExpr) {
             writeExpr((SqlExpr) node);
+        } else if (node instanceof SqlTableSource) {
+            writeFrom((SqlTableSource) node);
+        } else if (node instanceof SqlLimit) {
+            writeLimit((SqlLimit) node);
+        } else if (node instanceof SqlSelectItem) {
+            writeSelectItem((SqlSelectItem) node);
+        } else if (node instanceof SqlOrderByItem) {
+            writeOrderByItem((SqlOrderByItem) node);
+        } else if (node instanceof SqlWithItem) {
+            writeWithItem((SqlWithItem) node);
+        } else if (node instanceof SqlWindowDefinition) {
+            writeWindowDefinition((SqlWindowDefinition) node);
+        } else if (node instanceof SqlMergeWhen) {
+            writeMergeWhen((SqlMergeWhen) node);
+        } else if (node instanceof SqlInsertBranch) {
+            writeInsertBranch((SqlInsertBranch) node);
         } else {
             out.append(node.getClass().getSimpleName());
         }
@@ -129,16 +145,24 @@ public final class SqlFormatter {
                 out.append(',');
                 sp();
             }
-            SqlWithItem item = items.get(i);
-            writeExpr(item.name());
-            sp();
-            kw("AS");
-            sp();
-            out.append('(');
-            writeNode(item.query());
-            out.append(')');
+            writeWithItem(items.get(i));
         }
         nl();
+    }
+
+    private void writeWithItem(SqlWithItem item) {
+        writeExpr(item.name());
+        if (item.columns() != null && !item.columns().isEmpty()) {
+            out.append('(');
+            commaIdents(item.columns());
+            out.append(')');
+        }
+        sp();
+        kw("AS");
+        sp();
+        out.append('(');
+        writeNode(item.query());
+        out.append(')');
     }
 
     private void writeSelect(SqlSelect select) {
@@ -185,14 +209,7 @@ public final class SqlFormatter {
                 out.append(',');
                 sp();
             }
-            SqlSelectItem item = items.get(i);
-            writeExpr(item.expr());
-            if (item.alias() != null) {
-                sp();
-                kw("AS");
-                sp();
-                out.append(item.alias());
-            }
+            writeSelectItem(items.get(i));
         }
         if (select.from() != null) {
             nl();
@@ -252,12 +269,7 @@ public final class SqlFormatter {
                     out.append(',');
                     sp();
                 }
-                SqlWindowDefinition window = windows.get(i);
-                writeExpr(window.name());
-                sp();
-                kw("AS");
-                sp();
-                writeOver(window.spec());
+                writeWindowDefinition(windows.get(i));
             }
         }
         if (!select.orderBy().isEmpty()) {
@@ -1028,15 +1040,36 @@ public final class SqlFormatter {
                 out.append(',');
                 sp();
             }
-            SqlOrderByItem item = items.get(i);
-            writeExpr(item.expr());
-            sp();
-            kw(item.asc() ? "ASC" : "DESC");
-            if (item.nulls() != null) {
-                sp();
-                out.append(item.nulls());
-            }
+            writeOrderByItem(items.get(i));
         }
+    }
+
+    private void writeSelectItem(SqlSelectItem item) {
+        writeExpr(item.expr());
+        if (item.alias() != null) {
+            sp();
+            kw("AS");
+            sp();
+            out.append(item.alias());
+        }
+    }
+
+    private void writeOrderByItem(SqlOrderByItem item) {
+        writeExpr(item.expr());
+        sp();
+        kw(item.asc() ? "ASC" : "DESC");
+        if (item.nulls() != null) {
+            sp();
+            out.append(item.nulls());
+        }
+    }
+
+    private void writeWindowDefinition(SqlWindowDefinition window) {
+        writeExpr(window.name());
+        sp();
+        kw("AS");
+        sp();
+        writeOver(window.spec());
     }
 
     private void writeExpr(SqlExpr expr) {
