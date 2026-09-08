@@ -209,11 +209,13 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 
 `addLimit` 已改为 **clone 后再改**；单测断言原树无 LIMIT。
 
-### P3 — 工程与性能（P3.1 jkit-sql 已完成；JMH/corpus → P3.2）
+### P3 — 工程与性能（P3.1 / P3.2 已完成；lexer intern 延期）
 
-- **JMH 对比**（P3.2，本 pass 未做）：在 `tools-test` 加 JMH（该工程已有 jmh 也可放到 `jmh-test`）。测 simple / join / window 三条，fork≥2，不要用墙钟 for 循环当正式数字。
-- **扩 corpus**（P3.2，本 pass 未做）：从业务日志抽 200～500 条真实 SQL 放到 `tools-test/src/test/resources/sql-corpus.txt`（一行一条，`#` 注释）。统计三家成功率。**不要**把 Druid 测试 jar 拷进 jkit。
-- Lexer：关键字哈希已无字符串分配；短 ident intern 轻量优化 **跳过**（需 profiling，留 P3.2）。
+- **JMH 对比** ✅（P3.2，2026-09-09）：`tools-test` 增加 `com.alianga.test.sql.jmh.SqlParseBenchmark`（simple / join / window × jkit/druid/jsql），JMH 1.37 + exec 插件。正式数字用 fork≥2，勿用墙钟 for 循环。
+  - Smoke：`cd tools-test && mvn -DskipTests package && java -jar target/benchmarks.jar com.alianga.test.sql.jmh.SqlParseBenchmark -f 1 -wi 1 -i 1`
+  - Full：`java -jar target/benchmarks.jar com.alianga.test.sql.jmh.SqlParseBenchmark -f 2 -wi 5 -i 5`
+- **扩 corpus** ✅（P3.2）：`tools-test/src/test/resources/sql-corpus.txt`（~379 条，`dialect | SQL`，`#` 注释；来自 CompareTest / Golden / common-model / 安全样例）。`SqlParserCompareTest#corpusFileSuccessRates` 统计三家成功率，缺口写入 `target/sql-compare-fail.txt`。**不要**把 Druid 测试 jar 拷进 jkit。
+- Lexer：关键字哈希已无字符串分配；短 ident intern 轻量优化 **延期**（需 profiling，不阻塞 P3.2）。
 - `SqlFormatter` 按方言输出反引号 / 双引号 / `[]`，`||` 按 AST 回写 ✅（P3.1，2026-09-09）。
 - `parseAlias` 删除未使用的 `inFrom` ✅（P3.1）。
 - 多语句：`SQL.parseAll(sql, dialect, true)` 容错 ✅（P3.1）；失败记 `SqlSimpleStatement` + `parseError`，继续下一条。
@@ -229,11 +231,12 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 
 后续可做：
 
-1. JMH 正式吞吐（见 P3）
-2. corpus 文件化，失败 SQL 写入 `target/sql-compare-fail.txt` 方便 diff
+1. ~~JMH 正式吞吐~~ ✅ P3.2（见上）
+2. ~~corpus 文件化 + `target/sql-compare-fail.txt`~~ ✅ P3.2
 3. 表名集合对比（忽略库名前缀和大小写），输出「仅 jkit 有 / 仅 druid 有」
 4. 改完解析器后必须：`mvn -pl jkit-sql,jkit-core install -DskipTests` 再跑 tools-test，否则会用到旧的本地 2.0.1
 5. 不要把 tools-test 的 POM 改回 jkit 2.0.0
+6. Lexer 短 ident intern（需 profiling）
 
 ---
 
@@ -279,6 +282,6 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 5. P1.1 WINDOW 子句 + P1.2 APPLY/LATERAL（缺了就会在业务 SQL 上直接 parse 失败）。
 6. 把失败 SQL 追加进 `SqlGoldenCorpusTest` 和 `SqlParserCompareTest` 的 CORPUS。
 7. P0.1 拆 Parser（行为稳定后再拆，避免和语法扩展搅在一起）。
-8. P2 已完成；有余力再 tools-test JMH。
+8. P2/P3.2 已完成；lexer 短 ident intern 仍延期。
 
 每完成一块：补 `@since 2.1.0`、更新 `docs/sql.md` 覆盖表、在 `CHANGELOG.md` 的 `2.1.0 - unreleased` 追加条目。不要把父 POM 版本改成 2.1.0，除非用户明确说要发版。

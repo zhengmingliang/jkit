@@ -36,7 +36,8 @@
 
 ## 2.1.0 - unreleased
 
-- `jkit-sql` P3.1：`SqlFormatter` 按方言回写标识符引号（MySQL 反引号 / PG·Oracle·ANSI·H2 双引号 / SQL Server `[]`）；`||` 按 AST 运算符回写（`CONCAT`→`||`，`OR`→`OR`，配合 `pipesAsConcat`）；`SQL.parseAll(sql, dialect, true)` 容错多语句（失败记 `SqlSimpleStatement` + `parseError` 继续）；清理 `parseAlias` 未使用的 `inFrom` 参数。Lexer 短 ident intern 与 tools-test JMH/corpus 留待 P3.2。
+- `tools-test` P3.2：JMH `SqlParseBenchmark`（simple/join/window × jkit/druid/jsql，fork≥2）；`sql-corpus.txt`（~379 条）+ `SqlParserCompareTest#corpusFileSuccessRates`（缺口写 `target/sql-compare-fail.txt`）。Lexer 短 ident intern 仍延期。
+- `jkit-sql` P3.1：`SqlFormatter` 按方言回写标识符引号（MySQL 反引号 / PG·Oracle·ANSI·H2 双引号 / SQL Server `[]`）；`||` 按 AST 运算符回写（`CONCAT`→`||`，`OR`→`OR`，配合 `pipesAsConcat`）；`SQL.parseAll(sql, dialect, true)` 容错多语句（失败记 `SqlSimpleStatement` + `parseError` 继续）；清理 `parseAlias` 未使用的 `inFrom` 参数。Lexer 短 ident intern 仍延期（需 profiling）；tools-test JMH/corpus 已在 P3.2 完成。
 
 ### 新增
 
