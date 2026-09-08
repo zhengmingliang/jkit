@@ -17,6 +17,7 @@ import com.alianga.jkit.sql.ast.SqlMergeWhen;
 import com.alianga.jkit.sql.ast.SqlOverExpr;
 import com.alianga.jkit.sql.ast.SqlSelect;
 import com.alianga.jkit.sql.ast.SqlSelectItem;
+import com.alianga.jkit.sql.ast.SqlSimpleStatement;
 import com.alianga.jkit.sql.ast.SqlStatement;
 import com.alianga.jkit.sql.ast.SqlStatementType;
 import com.alianga.jkit.sql.ast.SqlSubqueryTable;
@@ -990,4 +991,139 @@ public class SqlParserTest {
         SQL.parse(f4, SqlDialect.SQLSERVER);
     }
 
+
+    /**
+     * P1.5：CREATE VIEW / CREATE OR REPLACE VIEW。
+     */
+    @Test
+    public void p15CreateViewAndOrReplace() {
+        SqlDdlStatement view = (SqlDdlStatement) SQL.parse("CREATE VIEW v AS SELECT id FROM t");
+        assertEquals("VIEW", view.objectType());
+        assertFalse(view.orReplace());
+        assertNotNull(view.query());
+        assertTrue(SQL.tables(view).contains("v"));
+        assertTrue(SQL.tables(view).contains("t"));
+
+        SqlDdlStatement replace = (SqlDdlStatement) SQL.parse(
+                "CREATE OR REPLACE VIEW v AS SELECT 1 AS n");
+        assertTrue(replace.orReplace());
+        String fmt = SQL.toSqlString(replace);
+        assertTrue(fmt, fmt.contains("OR REPLACE"));
+        assertEquals(SqlStatementType.CREATE, SQL.parse(fmt).type());
+    }
+
+    /**
+     * P1.5：CREATE PROCEDURE / FUNCTION / TRIGGER / EVENT 抽名 + tail，不抛 unsupported。
+     */
+    @Test
+    public void p15CreateRoutineAndEvent() {
+        SqlDdlStatement proc = (SqlDdlStatement) SQL.parse(
+                "CREATE PROCEDURE sp_add(IN a INT) BEGIN SELECT a; END");
+        assertEquals("PROCEDURE", proc.objectType());
+        assertEquals("sp_add", proc.names().get(0).simpleName());
+        assertNotNull(proc.tail());
+        assertTrue(proc.tail(), proc.tail().contains("BEGIN"));
+
+        SqlDdlStatement fn = (SqlDdlStatement) SQL.parse(
+                "CREATE FUNCTION fn_one() RETURNS INT RETURN 1");
+        assertEquals("FUNCTION", fn.objectType());
+        assertEquals("fn_one", fn.names().get(0).simpleName());
+
+        SqlDdlStatement trg = (SqlDdlStatement) SQL.parse(
+                "CREATE TRIGGER trg_bi BEFORE INSERT ON t FOR EACH ROW SET NEW.id = 1");
+        assertEquals("TRIGGER", trg.objectType());
+        assertEquals("trg_bi", trg.names().get(0).simpleName());
+
+        SqlDdlStatement ev = (SqlDdlStatement) SQL.parse(
+                "CREATE EVENT ev_daily ON SCHEDULE EVERY 1 DAY DO SELECT 1");
+        assertEquals("EVENT", ev.objectType());
+        assertEquals("ev_daily", ev.names().get(0).simpleName());
+        assertEquals(1, ev.names().size());
+    }
+
+    /**
+     * P1.5：BEGIN … END / DECLARE 作为 OTHER，批处理不挂。
+     */
+    @Test
+    public void p15BeginDeclareBatch() {
+        SqlSimpleStatement block = (SqlSimpleStatement) SQL.parse("BEGIN SELECT 1; END");
+        assertEquals(SqlStatementType.OTHER, block.type());
+        assertTrue(block.text(), block.text().startsWith("BEGIN"));
+        assertTrue(block.text(), block.text().contains("END"));
+
+        SqlSimpleStatement decl = (SqlSimpleStatement) SQL.parse("DECLARE x INT DEFAULT 1");
+        assertEquals(SqlStatementType.OTHER, decl.type());
+        assertEquals("x", decl.name().simpleName());
+
+        List<SqlStatement> batch = SQL.parseAll("BEGIN SELECT 1; END; SELECT 2");
+        assertEquals(2, batch.size());
+        assertEquals(SqlStatementType.OTHER, batch.get(0).type());
+        assertEquals(SqlStatementType.SELECT, batch.get(1).type());
+    }
+
+    /**
+     * P1.5：CALL 实参进 AST。
+     */
+    @Test
+    public void p15CallArguments() {
+        SqlSimpleStatement call = (SqlSimpleStatement) SQL.parse("CALL sp_add(1, 'a')");
+        assertEquals(SqlStatementType.CALL, call.type());
+        assertEquals("sp_add", call.name().simpleName());
+        assertTrue(call.withArguments());
+        assertEquals(2, call.arguments().size());
+        String fmt = SQL.toSqlString(call);
+        assertTrue(fmt, fmt.contains("CALL sp_add(1, 'a')") || fmt.contains("CALL sp_add(1,'a')"));
+        assertFalse(fmt.contains(" = "));
+
+        SqlSimpleStatement empty = (SqlSimpleStatement) SQL.parse("CALL sp_noop()");
+        assertTrue(empty.withArguments());
+        assertEquals(0, empty.arguments().size());
+        assertTrue(SQL.toSqlString(empty).contains("()"));
+    }
+
+    /**
+     * P1.5：ANALYZE / VACUUM / OPTIMIZE / REPAIR / CHECK TABLE。
+     */
+    @Test
+    public void p15MaintenanceStatements() {
+        SqlSimpleStatement analyze = (SqlSimpleStatement) SQL.parse("ANALYZE TABLE t");
+        assertEquals(SqlStatementType.OTHER, analyze.type());
+        assertEquals("t", analyze.name().simpleName());
+        assertTrue(analyze.text().startsWith("ANALYZE"));
+
+        SqlSimpleStatement vacuum = (SqlSimpleStatement) SQL.parse("VACUUM ANALYZE t", SqlDialect.POSTGRES);
+        assertEquals("t", vacuum.name().simpleName());
+
+        assertEquals("t", ((SqlSimpleStatement) SQL.parse("OPTIMIZE TABLE t")).name().simpleName());
+        assertEquals("t", ((SqlSimpleStatement) SQL.parse("REPAIR TABLE t")).name().simpleName());
+        assertEquals("t", ((SqlSimpleStatement) SQL.parse("CHECK TABLE t")).name().simpleName());
+    }
+
+    /**
+     * P1.5：COMMENT ON TABLE/COLUMN。
+     */
+    @Test
+    public void p15CommentOn() {
+        SqlSimpleStatement table = (SqlSimpleStatement) SQL.parse(
+                "COMMENT ON TABLE t IS 'users'", SqlDialect.POSTGRES);
+        assertEquals(SqlStatementType.OTHER, table.type());
+        assertEquals("t", table.name().simpleName());
+        assertTrue(table.text(), table.text().contains("COMMENT ON TABLE"));
+
+        SqlSimpleStatement col = (SqlSimpleStatement) SQL.parse(
+                "COMMENT ON COLUMN t.id IS 'pk'", SqlDialect.POSTGRES);
+        assertEquals("t.id", col.name().qualifiedName());
+    }
+
+    /**
+     * P1.5：GO 作为 SQL Server 批分隔（同分号）。
+     */
+    @Test
+    public void p15GoBatchSeparator() {
+        List<SqlStatement> batch = SQL.parseAll("SELECT 1\nGO\nSELECT 2", SqlDialect.SQLSERVER);
+        assertEquals(2, batch.size());
+        assertEquals(SqlStatementType.SELECT, batch.get(0).type());
+        assertEquals(SqlStatementType.SELECT, batch.get(1).type());
+        assertFalse(SQL.toSqlString(batch.get(0)).toUpperCase().contains(" GO"));
+    }
 }

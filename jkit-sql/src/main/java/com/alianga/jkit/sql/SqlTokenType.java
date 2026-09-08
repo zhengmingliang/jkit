@@ -258,7 +258,15 @@ public enum SqlTokenType {
     SQL_CALC_FOUND_ROWS,
     LOW_PRIORITY,
     DELAYED,
-    QUICK;
+    QUICK,
+    PROCEDURE,
+    FUNCTION,
+    TRIGGER,
+    EVENT,
+    BEGIN,
+    DECLARE,
+    VACUUM,
+    GO;
 
     /**
      * @return 是否关键字（不是字面量或符号）

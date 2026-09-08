@@ -72,14 +72,14 @@ public final class SqlParser {
     public List<SqlStatement> parseAll() {
         List<SqlStatement> list = new ArrayList<SqlStatement>(1);
         while (!is(SqlTokenType.EOF)) {
-            while (is(SqlTokenType.SEMICOLON)) {
+            while (isStmtSeparator()) {
                 next();
             }
             if (is(SqlTokenType.EOF)) {
                 break;
             }
             list.add(parseStatement());
-            if (is(SqlTokenType.SEMICOLON)) {
+            if (isStmtSeparator()) {
                 next();
             }
         }
@@ -138,6 +138,18 @@ public final class SqlParser {
             case GRANT:
             case REVOKE:
                 return parseGrant();
+            case BEGIN:
+                return parseBeginBlock();
+            case DECLARE:
+                return parseDeclare();
+            case ANALYZE:
+            case VACUUM:
+            case OPTIMIZE:
+            case REPAIR:
+            case CHECK:
+                return parseMaintenance();
+            case COMMENT:
+                return parseCommentOn();
             case LPAREN:
                 return parseSelect();
             default:
@@ -617,17 +629,23 @@ public final class SqlParser {
 
     private SqlStatement parseCreate() {
         expect(SqlTokenType.CREATE);
-        match(SqlTokenType.OR);
-        match(SqlTokenType.REPLACE);
+        boolean orReplace = false;
+        if (match(SqlTokenType.OR)) {
+            expect(SqlTokenType.REPLACE);
+            orReplace = true;
+        }
         match(SqlTokenType.TEMPORARY);
         match(SqlTokenType.TEMP);
         match(SqlTokenType.UNIQUE);
         match(SqlTokenType.MATERIALIZED);
         SqlDdlStatement ddl = new SqlDdlStatement();
         ddl.setStatementType(SqlStatementType.CREATE);
+        ddl.setOrReplace(orReplace);
         if (is(SqlTokenType.TABLE) || is(SqlTokenType.VIEW) || is(SqlTokenType.INDEX)
                 || is(SqlTokenType.DATABASE) || is(SqlTokenType.SCHEMA)
-                || is(SqlTokenType.SEQUENCE)) {
+                || is(SqlTokenType.SEQUENCE) || is(SqlTokenType.PROCEDURE)
+                || is(SqlTokenType.FUNCTION) || is(SqlTokenType.TRIGGER)
+                || is(SqlTokenType.EVENT)) {
             ddl.setObjectType(token.text().toUpperCase());
             next();
         } else if (identLike()) {
@@ -639,22 +657,36 @@ public final class SqlParser {
             ddl.setIfNotExists(true);
         }
         ddl.names().add(parseName());
-        if (match(SqlTokenType.ON)) {
+        // CREATE INDEX name ON table；EVENT 的 ON SCHEDULE 不抽成对象名
+        if (isIndexObject(ddl.objectType()) && match(SqlTokenType.ON)) {
             ddl.names().add(parseName());
         }
+        boolean routine = isRoutineObject(ddl.objectType());
+        String paramTail = null;
         if (match(SqlTokenType.LPAREN)) {
-            parseCreateColumns(ddl);
-            expect(SqlTokenType.RPAREN);
+            if (routine) {
+                paramTail = "(" + skipBalancedParensContent() + ")";
+            } else {
+                parseCreateColumns(ddl);
+                expect(SqlTokenType.RPAREN);
+            }
         }
         if (match(SqlTokenType.AS) || is(SqlTokenType.SELECT) || is(SqlTokenType.WITH)) {
             match(SqlTokenType.AS);
             ddl.setQuery(parseStatement());
-        } else if (!is(SqlTokenType.SEMICOLON) && !is(SqlTokenType.EOF)) {
+        } else if (!atStmtBreak()) {
             if ("TABLE".equalsIgnoreCase(ddl.objectType())) {
                 parseCreateTableOptions(ddl);
             } else {
-                ddl.setTail(consumeRawUntilSemi());
+                String body = consumeRawAllowingBeginEnd();
+                if (paramTail != null) {
+                    ddl.setTail(body.isEmpty() ? paramTail : paramTail + " " + body);
+                } else {
+                    ddl.setTail(body);
+                }
             }
+        } else if (paramTail != null) {
+            ddl.setTail(paramTail);
         }
         return ddl;
     }
@@ -987,9 +1019,103 @@ public final class SqlParser {
         SqlSimpleStatement stmt = new SqlSimpleStatement();
         stmt.setStatementType(SqlStatementType.CALL);
         stmt.setName(parseName());
-        if (is(SqlTokenType.LPAREN)) {
-            stmt.setValue(parsePrimary());
+        if (match(SqlTokenType.LPAREN)) {
+            stmt.setWithArguments(true);
+            if (!is(SqlTokenType.RPAREN)) {
+                do {
+                    stmt.arguments().add(parseExpr());
+                } while (match(SqlTokenType.COMMA));
+            }
+            expect(SqlTokenType.RPAREN);
         }
+        return stmt;
+    }
+
+    private SqlStatement parseBeginBlock() {
+        expect(SqlTokenType.BEGIN);
+        SqlSimpleStatement stmt = new SqlSimpleStatement();
+        stmt.setStatementType(SqlStatementType.OTHER);
+        String body = trailingRawAllowingBeginEnd(1);
+        stmt.setText(body.isEmpty() ? "BEGIN" : "BEGIN " + body);
+        return stmt;
+    }
+
+    private SqlStatement parseDeclare() {
+        expect(SqlTokenType.DECLARE);
+        SqlSimpleStatement stmt = new SqlSimpleStatement();
+        stmt.setStatementType(SqlStatementType.OTHER);
+        if (identLike()) {
+            stmt.setName(parseName());
+        }
+        String rest = consumeRawUntilSemi();
+        StringBuilder text = new StringBuilder("DECLARE");
+        if (stmt.name() != null) {
+            text.append(' ').append(stmt.name().qualifiedName());
+        }
+        if (!rest.isEmpty()) {
+            text.append(' ').append(rest);
+        }
+        stmt.setText(text.toString());
+        return stmt;
+    }
+
+    private SqlStatement parseMaintenance() {
+        String kind = token.text().toUpperCase();
+        next();
+        SqlSimpleStatement stmt = new SqlSimpleStatement();
+        stmt.setStatementType(SqlStatementType.OTHER);
+        StringBuilder text = new StringBuilder(kind);
+        // VACUUM [FULL] [ANALYZE] / ANALYZE [TABLE] / OPTIMIZE|REPAIR|CHECK TABLE
+        while (is(SqlTokenType.ANALYZE) || is(SqlTokenType.TABLE) || is(SqlTokenType.FULL)
+                || is(SqlTokenType.LOCAL) || isIdent("FREEZE") || isIdent("VERBOSE")
+                || isIdent("NO_WRITE_TO_BINLOG")) {
+            text.append(' ').append(token.text().toUpperCase());
+            next();
+        }
+        if (identLike()) {
+            stmt.setName(parseName());
+            text.append(' ').append(stmt.name().qualifiedName());
+            while (match(SqlTokenType.COMMA)) {
+                text.append(',');
+                SqlIdentifier more = parseName();
+                text.append(' ').append(more.qualifiedName());
+            }
+        }
+        if (!atStmtBreak()) {
+            String rest = consumeRawUntilSemi();
+            if (!rest.isEmpty()) {
+                text.append(' ').append(rest);
+            }
+        }
+        stmt.setText(text.toString());
+        return stmt;
+    }
+
+    private SqlStatement parseCommentOn() {
+        expect(SqlTokenType.COMMENT);
+        expect(SqlTokenType.ON);
+        SqlSimpleStatement stmt = new SqlSimpleStatement();
+        stmt.setStatementType(SqlStatementType.OTHER);
+        StringBuilder text = new StringBuilder("COMMENT ON");
+        if (is(SqlTokenType.TABLE) || is(SqlTokenType.INDEX) || is(SqlTokenType.VIEW)
+                || isIdent("COLUMN") || identLike()) {
+            text.append(' ').append(token.text().toUpperCase());
+            next();
+        }
+        if (identLike()) {
+            stmt.setName(parseName());
+            text.append(' ').append(stmt.name().qualifiedName());
+        }
+        if (match(SqlTokenType.IS)) {
+            text.append(" IS");
+        }
+        if (!atStmtBreak()) {
+            String rest = consumeRawUntilSemi();
+            if (!rest.isEmpty()) {
+                text.append(' ').append(rest);
+            }
+        }
+        stmt.setText(text.toString());
         return stmt;
     }
 
@@ -1209,6 +1335,7 @@ public final class SqlParser {
             case COMMA:
             case RPAREN:
             case SEMICOLON:
+            case GO:
             case EOF:
             case FOR:
             case START:
@@ -2057,9 +2184,119 @@ public final class SqlParser {
         return raw;
     }
 
+    private boolean isStmtSeparator() {
+        return is(SqlTokenType.SEMICOLON) || is(SqlTokenType.GO);
+    }
+
+    private boolean atStmtBreak() {
+        return isStmtSeparator() || is(SqlTokenType.EOF);
+    }
+
+    private static boolean isIndexObject(String objectType) {
+        return objectType != null && "INDEX".equalsIgnoreCase(objectType);
+    }
+
+    private static boolean isRoutineObject(String objectType) {
+        if (objectType == null) {
+            return false;
+        }
+        return "PROCEDURE".equalsIgnoreCase(objectType)
+                || "FUNCTION".equalsIgnoreCase(objectType)
+                || "TRIGGER".equalsIgnoreCase(objectType)
+                || "EVENT".equalsIgnoreCase(objectType);
+    }
+
+    /**
+     * LPAREN 已消费；跳过到匹配的 RPAREN（含消费该 RPAREN），返回括号内原文。
+     *
+     * @return 括号内 token 文本（不含外层括号）
+     */
+    private String skipBalancedParensContent() {
+        StringBuilder sb = new StringBuilder();
+        int depth = 1;
+        while (!is(SqlTokenType.EOF) && depth > 0) {
+            if (is(SqlTokenType.LPAREN)) {
+                depth++;
+                appendRawToken(sb);
+                next();
+            } else if (is(SqlTokenType.RPAREN)) {
+                depth--;
+                if (depth == 0) {
+                    next();
+                    break;
+                }
+                appendRawToken(sb);
+                next();
+            } else {
+                appendRawToken(sb);
+                next();
+            }
+        }
+        return sb.toString();
+    }
+
+    private String consumeRawAllowingBeginEnd() {
+        return trailingRawAllowingBeginEnd(0);
+    }
+
+    /**
+     * 吞掉过程体等尾部：BEGIN/END 配对内允许分号；CASE … END / END IF 等不误关 BEGIN。
+     *
+     * @param beginDepth 起始 BEGIN 深度（parseBeginBlock 传入 1）
+     * @return 尾部原文
+     */
+    private String trailingRawAllowingBeginEnd(int beginDepth) {
+        StringBuilder sb = new StringBuilder();
+        int caseDepth = 0;
+        while (!is(SqlTokenType.EOF)) {
+            if (beginDepth == 0 && caseDepth == 0 && isStmtSeparator()) {
+                break;
+            }
+            if (is(SqlTokenType.BEGIN)) {
+                beginDepth++;
+                appendRawToken(sb);
+                next();
+                continue;
+            }
+            if (is(SqlTokenType.CASE)) {
+                caseDepth++;
+                appendRawToken(sb);
+                next();
+                continue;
+            }
+            if (is(SqlTokenType.END)) {
+                appendRawToken(sb);
+                next();
+                if (is(SqlTokenType.IF) || is(SqlTokenType.CASE) || isIdent("WHILE")
+                        || isIdent("LOOP") || isIdent("REPEAT")) {
+                    if (is(SqlTokenType.CASE) && caseDepth > 0) {
+                        caseDepth--;
+                    }
+                    appendRawToken(sb);
+                    next();
+                } else if (caseDepth > 0) {
+                    caseDepth--;
+                } else if (beginDepth > 0) {
+                    beginDepth--;
+                }
+                continue;
+            }
+            appendRawToken(sb);
+            next();
+        }
+        return sb.toString();
+    }
+
+    private void appendRawToken(StringBuilder sb) {
+        if (sb.length() > 0) {
+            sb.append(' ');
+        }
+        sb.append(token.text());
+    }
+
     private String consumeRawUntilSemi() {
         StringBuilder sb = new StringBuilder();
-        while (!is(SqlTokenType.SEMICOLON) && !is(SqlTokenType.EOF)) {
+        while (!atStmtBreak()) {
             if (sb.length() > 0) {
                 sb.append(' ');
             }

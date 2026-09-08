@@ -165,15 +165,15 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 - MERGE：多个 `WHEN MATCHED AND <pred>`、`WHEN NOT MATCHED BY SOURCE` ✅（`SqlMergeWhen`；含 `BY TARGET`）
 - `OUTPUT INSERTED.*`（SQL Server）✅（INSERT/UPDATE/DELETE/MERGE 的 `output` 列表；`OUTPUT … INTO tbl` 表名跳过未结构化）
 
-#### P1.5 DDL / 过程（解析能过 + 抽对象名即可，不必执行）
+#### P1.5 DDL / 过程（解析能过 + 抽对象名即可，不必执行） ✅ 完成（2026-09-09）
 
-- `CREATE VIEW` / `CREATE OR REPLACE VIEW`（CREATE 已有 AS query，核对 VIEW）
-- `CREATE PROCEDURE` / `FUNCTION` / `TRIGGER` / `EVENT`：解析到名字后可 tail，但 **不要抛 unsupported**
-- `BEGIN … END`、`DECLARE`：可作为 `SqlSimpleStatement.OTHER` 吃到匹配 END，避免批处理第一句就挂
-- `CALL proc(a,b)` 参数进 AST（现在 CALL 只到名字）
-- `ANALYZE` / `VACUUM` / `OPTIMIZE TABLE` / `REPAIR` / `CHECK TABLE`（词法已有部分关键字）
-- `COMMENT ON TABLE/COLUMN`（COMMENT 是关键字）
-- `USE` 已有；补 `GO`（SQL Server 批分隔）可当分号
+- `CREATE VIEW` / `CREATE OR REPLACE VIEW` ✅（`orReplace`；AS query）
+- `CREATE PROCEDURE` / `FUNCTION` / `TRIGGER` / `EVENT` ✅（抽名；参数与过程体进 `tail`，BEGIN/END 内允许分号）
+- `BEGIN … END`、`DECLARE` ✅（`SqlSimpleStatement.OTHER`，吃到匹配 END）
+- `CALL proc(a,b)` ✅（`arguments` + `withArguments`；format `CALL p(a, b)`）
+- `ANALYZE` / `VACUUM` / `OPTIMIZE TABLE` / `REPAIR` / `CHECK TABLE` ✅（OTHER + 抽表名）
+- `COMMENT ON TABLE/COLUMN` ✅（OTHER + 抽对象名）
+- `GO` ✅（SQL Server 批分隔，同分号；`isAliasStop` 避免当别名）
 
 #### P1.6 注释与提示
 

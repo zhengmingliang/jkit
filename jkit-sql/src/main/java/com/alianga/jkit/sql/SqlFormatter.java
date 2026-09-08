@@ -609,6 +609,12 @@ public final class SqlFormatter {
 
     private void writeDdl(SqlDdlStatement ddl) {
         kw(ddl.type().name());
+        if (ddl.orReplace()) {
+            sp();
+            kw("OR");
+            sp();
+            kw("REPLACE");
+        }
         if (ddl.objectType() != null) {
             sp();
             out.append(ddl.objectType());
@@ -744,6 +750,13 @@ public final class SqlFormatter {
     }
 
     private void writeSimple(SqlSimpleStatement stmt) {
+        // OTHER（BEGIN/DECLARE/ANALYZE/COMMENT ON 等）：text 已是完整语句
+        if (stmt.type() == SqlStatementType.OTHER) {
+            if (stmt.text() != null) {
+                out.append(stmt.text());
+            }
+            return;
+        }
         kw(stmt.type().name());
         // SHOW：text 已含完整子句（含表名），name 仅供抽表
         if (stmt.type() == SqlStatementType.SHOW) {
@@ -757,6 +770,18 @@ public final class SqlFormatter {
             if (stmt.inner() != null) {
                 sp();
                 writeNode(stmt.inner());
+            }
+            return;
+        }
+        if (stmt.type() == SqlStatementType.CALL) {
+            if (stmt.name() != null) {
+                sp();
+                writeExpr(stmt.name());
+            }
+            if (stmt.withArguments()) {
+                out.append('(');
+                commaExprs(stmt.arguments());
+                out.append(')');
             }
             return;
         }

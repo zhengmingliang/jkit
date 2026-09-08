@@ -220,6 +220,14 @@ final class SqlKeywords {
         put("LOW_PRIORITY", SqlTokenType.LOW_PRIORITY);
         put("DELAYED", SqlTokenType.DELAYED);
         put("QUICK", SqlTokenType.QUICK);
+        put("PROCEDURE", SqlTokenType.PROCEDURE);
+        put("FUNCTION", SqlTokenType.FUNCTION);
+        put("TRIGGER", SqlTokenType.TRIGGER);
+        put("EVENT", SqlTokenType.EVENT);
+        put("BEGIN", SqlTokenType.BEGIN);
+        put("DECLARE", SqlTokenType.DECLARE);
+        put("VACUUM", SqlTokenType.VACUUM);
+        put("GO", SqlTokenType.GO);
     }
 
     private SqlKeywords() {

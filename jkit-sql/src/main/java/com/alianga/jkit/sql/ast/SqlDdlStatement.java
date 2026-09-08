@@ -6,8 +6,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * CREATE / DROP / ALTER 等 DDL。抽取对象名；CREATE TABLE 解析 ENGINE/CHARSET/COMMENT，
- * ALTER 解析 ADD/DROP INDEX 与 RENAME TO，其余子句可留在 {@link #tail()}。
+ * CREATE / DROP / ALTER 等 DDL。抽取对象名；支持 {@code OR REPLACE}、VIEW / PROCEDURE 等；
+ * CREATE TABLE 解析 ENGINE/CHARSET/COMMENT，ALTER 解析 ADD/DROP INDEX 与 RENAME TO，
+ * 过程体等可留在 {@link #tail()}。
  *
  * @author 郑明亮
  * @since 2.1.0
@@ -15,6 +16,7 @@ import java.util.List;
 public final class SqlDdlStatement extends SqlStatement {
     private SqlStatementType statementType = SqlStatementType.CREATE;
     private String objectType;
+    private boolean orReplace;
     private final List<SqlIdentifier> names = new ArrayList<SqlIdentifier>(1);
     private boolean ifExists;
     private boolean ifNotExists;
@@ -65,6 +67,22 @@ public final class SqlDdlStatement extends SqlStatement {
      */
     public void setObjectType(String objectType) {
         this.objectType = objectType;
+    }
+
+    /**
+     * @return {@code CREATE OR REPLACE}
+     * @since 2.1.0
+     */
+    public boolean orReplace() {
+        return orReplace;
+    }
+
+    /**
+     * @param orReplace OR REPLACE
+     * @since 2.1.0
+     */
+    public void setOrReplace(boolean orReplace) {
+        this.orReplace = orReplace;
     }
 
     /**

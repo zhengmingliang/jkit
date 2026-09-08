@@ -2,8 +2,12 @@ package com.alianga.jkit.sql.ast;
 
 import com.alianga.jkit.sql.visitor.SqlVisitor;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
- * EXPLAIN / SET / USE / SHOW / CALL / TRUNCATE / GRANT 等相对扁平的语句。
+ * EXPLAIN / SET / USE / SHOW / CALL / TRUNCATE / GRANT / BEGIN / DECLARE /
+ * ANALYZE 等相对扁平的语句；{@link SqlStatementType#OTHER} 用于过程块与维护语句。
  *
  * @author 郑明亮
  * @since 2.1.0
@@ -14,6 +18,8 @@ public final class SqlSimpleStatement extends SqlStatement {
     private SqlIdentifier name;
     private SqlExpr value;
     private String text;
+    private final List<SqlExpr> arguments = new ArrayList<SqlExpr>(2);
+    private boolean withArguments;
 
     /**
      * {@inheritDoc}
@@ -97,6 +103,30 @@ public final class SqlSimpleStatement extends SqlStatement {
     }
 
     /**
+     * @return CALL 实参列表
+     * @since 2.1.0
+     */
+    public List<SqlExpr> arguments() {
+        return arguments;
+    }
+
+    /**
+     * @return CALL 是否带括号（区分 {@code CALL p} 与 {@code CALL p()}）
+     * @since 2.1.0
+     */
+    public boolean withArguments() {
+        return withArguments;
+    }
+
+    /**
+     * @param withArguments 是否带括号
+     * @since 2.1.0
+     */
+    public void setWithArguments(boolean withArguments) {
+        this.withArguments = withArguments;
+    }
+
+    /**
      * {@inheritDoc}
      */
     @Override
@@ -105,5 +135,6 @@ public final class SqlSimpleStatement extends SqlStatement {
         child(visitor, inner);
         child(visitor, name);
         child(visitor, value);
+        children(visitor, arguments);
     }
 }
