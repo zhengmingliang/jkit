@@ -74,15 +74,14 @@ HTTP（含 SSE merge、curl 执行、负载均衡、Nacos）、JSON、YAML、配
 
 ### P0 — 正确性与可维护性（先做这些）
 
-#### P0.1 拆 `SqlParser.java`
+#### P0.1 拆 `SqlParser.java` ✅ 完成（2026-09-09）
 
-现状单文件过大（1500+ 行）。建议拆：
+已拆（包内协作，共享 `SqlParser` 记号游标；公开 API 不变）：
 
-- `SqlParser`：语句分发 + WITH
-- `SqlSelectParser` / `SqlDmlParser` / `SqlDdlParser`
-- 表达式继续留在 `SqlParser` 或抽 `SqlExprParser`（共享 lexer/token 状态，用包内可见字段或把 lexer 传入）
+- `SqlParser`：语句分发 + WITH + 杂项语句 + 记号工具
+- `SqlSelectParser` / `SqlDmlParser` / `SqlDdlParser` / `SqlExprParser`
 
-验收：`mvn -pl jkit-sql test` 全绿；公开 API 不变。
+验收：`mvn -pl jkit-sql test` 全绿（606）；公开 API 不变；纯重构无语法变更。
 
 #### P0.2 parse → format → parse 语义往返 ✅ 完成（2026-09-09）
 

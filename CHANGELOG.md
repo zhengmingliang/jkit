@@ -38,6 +38,8 @@
 
 ### 变更
 
+- `jkit-sql`：P0.1 重构 — 拆分 `SqlParser` 为 `SqlSelectParser` / `SqlDmlParser` / `SqlDdlParser` / `SqlExprParser`（包内协作共享记号游标）；公开 API 与语法行为不变。
+
 - `jkit-sql`：**破坏性** — `SQL.andWhere` / `replaceTable` / `replaceColumn` 改为与 `addLimit`/`setPage` 一致的 clone-then-mutate（返回新 AST，不污染原树）；调用方须使用返回值。
 
 ### 新增
