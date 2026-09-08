@@ -20,6 +20,7 @@ public final class SqlUpdate extends SqlStatement {
     private SqlTableSource from;
     private SqlExpr returning;
     private final List<SqlExpr> output = new ArrayList<SqlExpr>(2);
+    private SqlTable outputInto;
 
     /**
      * {@inheritDoc}
@@ -131,6 +132,23 @@ public final class SqlUpdate extends SqlStatement {
     /**
      * {@inheritDoc}
      */
+
+    /**
+     * @return SQL Server {@code OUTPUT … INTO} 目标表/表变量（可 {@code @out} / {@code #tmp}）
+     * @since 2.1.0
+     */
+    public SqlTable outputInto() {
+        return outputInto;
+    }
+
+    /**
+     * @param outputInto INTO 目标
+     * @since 2.1.0
+     */
+    public void setOutputInto(SqlTable outputInto) {
+        this.outputInto = outputInto;
+    }
+
     @Override
     protected void acceptChildren(SqlVisitor visitor) {
         super.acceptChildren(visitor);
@@ -142,5 +160,6 @@ public final class SqlUpdate extends SqlStatement {
         child(visitor, from);
         child(visitor, returning);
         children(visitor, output);
+        child(visitor, outputInto);
     }
 }

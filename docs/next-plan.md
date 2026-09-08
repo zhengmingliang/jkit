@@ -299,7 +299,7 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 1. 跑绿：`mvn -pl jkit-sql test`；`cd ../tools-test && mvn -Dtest=SqlParserCompareTest test`（先 `install` jkit-sql）。
 2. ~~P0.1 拆 Parser~~ ✅；~~P0.2 往返~~ ✅；~~P0.3 SchemaStat~~ ✅；~~P0.4 验收最小集 + CHANGE/CONSTRAINT/FK/GRANT/列定义回写~~ ✅。
 3. ~~P1.1 WINDOW / P1.2 APPLY·LATERAL / P1–P3 主体~~ ✅；lexer 短 ident intern 仍延期。
-4. 余量（可选）：SHOW CREATE VIEW/DATABASE；其它聚合的 WITHIN GROUP/`aggOption`；SqlBuilder 扩展（rightJoin/union/with/distinct）；OUTPUT INTO 目标表。
+4. 余量（可选）：SHOW CREATE VIEW/DATABASE；其它聚合的 WITHIN GROUP/`aggOption`；SqlBuilder 扩展（rightJoin/union/with/distinct）。~~OUTPUT INTO~~ ✅。
 5. 对比工程：语料成功率 ✅；~~表名集合差分~~ ✅；改解析器后记得 `install` 再跑 tools-test。
 
 每完成一块：补 `@since 2.1.0`、更新 `docs/sql.md` 覆盖表、在 `CHANGELOG.md` 的 `2.1.0 - unreleased` 追加条目。不要把父 POM 版本改成 2.1.0，除非用户明确说要发版。

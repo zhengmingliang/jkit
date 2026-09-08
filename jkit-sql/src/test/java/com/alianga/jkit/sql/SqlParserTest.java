@@ -1029,7 +1029,7 @@ public class SqlParserTest {
     }
 
     /**
-     * P1.4：SQL Server OUTPUT INSERTED.* / DELETED.*。
+     * P1.4：SQL Server OUTPUT INSERTED.* / DELETED.*；OUTPUT INTO 表 / @var / #tmp。
      */
     @Test
     public void parseSqlServerOutputClause() {
@@ -1041,6 +1041,38 @@ public class SqlParserTest {
         assertTrue(f1, f1.contains("OUTPUT"));
         assertTrue(f1, f1.contains("INSERTED"));
         SQL.parse(f1, SqlDialect.SQLSERVER);
+
+        SqlInsert intoTbl = (SqlInsert) SQL.parse(
+                "INSERT INTO t (id) OUTPUT INSERTED.id INTO dbo.archive VALUES (1)",
+                SqlDialect.SQLSERVER);
+        assertNotNull(intoTbl.outputInto());
+        assertEquals("dbo.archive", intoTbl.outputInto().name().qualifiedName());
+        assertTrue(SQL.tables(intoTbl).toString().toLowerCase(),
+                SQL.tables(intoTbl).toString().toLowerCase().contains("archive"));
+        String fInto = SQL.toSqlString(intoTbl, SqlDialect.SQLSERVER);
+        assertTrue(fInto, fInto.toUpperCase().contains("INTO"));
+        assertTrue(fInto, fInto.contains("archive"));
+        SqlInsert again = (SqlInsert) SQL.parse(fInto, SqlDialect.SQLSERVER);
+        assertEquals("dbo.archive", again.outputInto().name().qualifiedName());
+
+        SqlInsert intoVar = (SqlInsert) SQL.parse(
+                "INSERT INTO t (id) OUTPUT INSERTED.id INTO @out VALUES (1)",
+                SqlDialect.SQLSERVER);
+        assertEquals("@out", intoVar.outputInto().name().qualifiedName());
+        assertTrue(SQL.tables(intoVar).toString(), SQL.tables(intoVar).toString().contains("@out"));
+        String fVar = SQL.toSqlString(intoVar, SqlDialect.SQLSERVER);
+        assertTrue(fVar, fVar.contains("@out"));
+        assertFalse(fVar, fVar.contains("@ out"));
+
+        SqlDelete intoTmp = (SqlDelete) SQL.parse(
+                "DELETE FROM t OUTPUT DELETED.* INTO #tmp WHERE id = 1",
+                SqlDialect.SQLSERVER);
+        assertEquals("#tmp", intoTmp.outputInto().name().qualifiedName());
+        assertTrue(SQL.tables(intoTmp).toString(), SQL.tables(intoTmp).toString().contains("#tmp"));
+        String fTmp = SQL.toSqlString(intoTmp, SqlDialect.SQLSERVER);
+        assertTrue(fTmp, fTmp.contains("#tmp"));
+        SqlDelete againTmp = (SqlDelete) SQL.parse(fTmp, SqlDialect.SQLSERVER);
+        assertEquals("#tmp", againTmp.outputInto().name().qualifiedName());
 
         SqlUpdate upd = (SqlUpdate) SQL.parse(
                 "UPDATE t SET name = 'x' OUTPUT INSERTED.name, DELETED.name WHERE id = 1",

@@ -240,6 +240,20 @@ public final class SqlLexer {
             token.set(SqlTokenType.VARIABLE, src, tStart, pos, tLine, tCol);
             return;
         }
+        // SQL Server 临时表 #tmp / ##global：非 MySQL/H2 时 # 不是行注释
+        if (c == '#' && !dialect.hashLineComment()
+                && pos + 1 < limit
+                && (isIdentStart(src[pos + 1]) || src[pos + 1] == '#')) {
+            pos++;
+            if (pos < limit && src[pos] == '#') {
+                pos++;
+            }
+            while (pos < limit && isIdentPart(src[pos])) {
+                pos++;
+            }
+            token.set(SqlTokenType.IDENT, src, tStart, pos, tLine, tCol);
+            return;
+        }
         if (c == '$' && pos + 1 < limit && src[pos + 1] == '$') {
             scanDollarString(token, tLine, tCol, tStart);
             return;

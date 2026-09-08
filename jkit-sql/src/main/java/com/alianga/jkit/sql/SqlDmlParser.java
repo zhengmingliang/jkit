@@ -4,6 +4,7 @@ import com.alianga.jkit.sql.ast.SqlBinaryExpr;
 import com.alianga.jkit.sql.ast.SqlBinaryOp;
 import com.alianga.jkit.sql.ast.SqlDelete;
 import com.alianga.jkit.sql.ast.SqlExpr;
+import com.alianga.jkit.sql.ast.SqlIdentifier;
 import com.alianga.jkit.sql.ast.SqlInsert;
 import com.alianga.jkit.sql.ast.SqlInsertBranch;
 import com.alianga.jkit.sql.ast.SqlListExpr;
@@ -57,7 +58,7 @@ final class SqlDmlParser {
                 delete.setFrom(p.selectParser.parseJoinedTable());
             }
         }
-        parseOutputClause(delete.output());
+        delete.setOutputInto(parseOutputClause(delete.output()));
         if (p.match(SqlTokenType.WHERE)) {
             delete.setWhere(p.exprParser.parseExpr());
         }
@@ -72,7 +73,7 @@ final class SqlDmlParser {
             delete.setReturning(parseReturningExpr());
         }
         if (delete.output().isEmpty()) {
-            parseOutputClause(delete.output());
+            delete.setOutputInto(parseOutputClause(delete.output()));
         }
         return delete;
     }
@@ -106,7 +107,7 @@ final class SqlDmlParser {
             }
             p.expect(SqlTokenType.RPAREN);
         }
-        parseOutputClause(insert.output());
+        insert.setOutputInto(parseOutputClause(insert.output()));
         if (p.match(SqlTokenType.SET)) {
             parseAssignList(insert.setList());
         } else if (p.is(SqlTokenType.SELECT) || p.is(SqlTokenType.WITH) || p.is(SqlTokenType.LPAREN)) {
@@ -119,7 +120,7 @@ final class SqlDmlParser {
             insert.setReturning(parseReturningExpr());
         }
         if (insert.output().isEmpty()) {
-            parseOutputClause(insert.output());
+            insert.setOutputInto(parseOutputClause(insert.output()));
         }
         return insert;
     }
@@ -184,7 +185,7 @@ final class SqlDmlParser {
             }
             merge.whens().add(when);
         }
-        parseOutputClause(merge.output());
+        merge.setOutputInto(parseOutputClause(merge.output()));
         return merge;
     }
 
@@ -276,17 +277,34 @@ final class SqlDmlParser {
         throw p.error("expected DUPLICATE KEY or CONFLICT after ON");
     }
 
-    private void parseOutputClause(List<SqlExpr> target) {
+    private SqlTable parseOutputClause(List<SqlExpr> target) {
         if (!p.match(SqlTokenType.OUTPUT)) {
-            return;
+            return null;
         }
         do {
             target.add(p.exprParser.parseExpr());
         } while (p.match(SqlTokenType.COMMA));
-        // OUTPUT … INTO @table / table — 暂不结构化，跳过 INTO 后的简单表名
-        if (p.match(SqlTokenType.INTO)) {
-            p.parseName();
+        if (!p.match(SqlTokenType.INTO)) {
+            return null;
         }
+        SqlTable into = SqlTable.of(parseOutputIntoName());
+        // 可选列清单 OUTPUT … INTO tgt (c1, c2)
+        if (p.match(SqlTokenType.LPAREN)) {
+            p.skipBalancedParensContent();
+        }
+        return into;
+    }
+
+    /**
+     * OUTPUT INTO 目标：普通名 / {@code dbo.archive} / {@code @out} / {@code #tmp}。
+     */
+    private SqlIdentifier parseOutputIntoName() {
+        if (p.is(SqlTokenType.VARIABLE)) {
+            SqlIdentifier id = SqlIdentifier.of(p.token.text());
+            p.next();
+            return id;
+        }
+        return p.parseName();
     }
 
     /**
@@ -313,7 +331,7 @@ final class SqlDmlParser {
         update.setTable(p.selectParser.parseJoinedTable());
         p.expect(SqlTokenType.SET);
         parseAssignList(update.setList());
-        parseOutputClause(update.output());
+        update.setOutputInto(parseOutputClause(update.output()));
         if (p.match(SqlTokenType.FROM)) {
             update.setFrom(p.selectParser.parseJoinedTable());
         }
@@ -331,7 +349,7 @@ final class SqlDmlParser {
             update.setReturning(parseReturningExpr());
         }
         if (update.output().isEmpty()) {
-            parseOutputClause(update.output());
+            update.setOutputInto(parseOutputClause(update.output()));
         }
         return update;
     }

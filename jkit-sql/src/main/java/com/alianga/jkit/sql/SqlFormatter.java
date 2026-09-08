@@ -391,7 +391,7 @@ public final class SqlFormatter {
             commaIdents(insert.columns());
             out.append(')');
         }
-        writeOutput(insert.output());
+        writeOutput(insert.output(), insert.outputInto());
         if (!insert.setList().isEmpty()) {
             sp();
             kw("SET");
@@ -492,7 +492,7 @@ public final class SqlFormatter {
         out.append(')');
     }
 
-    private void writeOutput(List<SqlExpr> output) {
+    private void writeOutput(List<SqlExpr> output, SqlTable outputInto) {
         if (output == null || output.isEmpty()) {
             return;
         }
@@ -500,6 +500,12 @@ public final class SqlFormatter {
         kw("OUTPUT");
         sp();
         commaExprs(output);
+        if (outputInto != null) {
+            sp();
+            kw("INTO");
+            sp();
+            writeFrom(outputInto);
+        }
     }
 
     private void writeUpdate(SqlUpdate update) {
@@ -513,7 +519,7 @@ public final class SqlFormatter {
         kw("SET");
         sp();
         commaBinaries(update.setList());
-        writeOutput(update.output());
+        writeOutput(update.output(), update.outputInto());
         if (update.from() != null) {
             sp();
             kw("FROM");
@@ -566,7 +572,7 @@ public final class SqlFormatter {
             sp();
             writeFrom(delete.from());
         }
-        writeOutput(delete.output());
+        writeOutput(delete.output(), delete.outputInto());
         if (delete.where() != null) {
             nl();
             kw("WHERE");
@@ -603,7 +609,7 @@ public final class SqlFormatter {
             sp();
             writeMergeWhen(merge.whens().get(i));
         }
-        writeOutput(merge.output());
+        writeOutput(merge.output(), merge.outputInto());
     }
 
     private void writeMergeWhen(SqlMergeWhen when) {

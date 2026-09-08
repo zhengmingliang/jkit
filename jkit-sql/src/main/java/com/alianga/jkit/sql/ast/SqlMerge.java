@@ -17,6 +17,7 @@ public final class SqlMerge extends SqlStatement {
     private SqlExpr on;
     private final List<SqlMergeWhen> whens = new ArrayList<SqlMergeWhen>(2);
     private final List<SqlExpr> output = new ArrayList<SqlExpr>(2);
+    private SqlTable outputInto;
 
     /**
      * {@inheritDoc}
@@ -125,6 +126,23 @@ public final class SqlMerge extends SqlStatement {
     /**
      * {@inheritDoc}
      */
+
+    /**
+     * @return SQL Server {@code OUTPUT … INTO} 目标表/表变量（可 {@code @out} / {@code #tmp}）
+     * @since 2.1.0
+     */
+    public SqlTable outputInto() {
+        return outputInto;
+    }
+
+    /**
+     * @param outputInto INTO 目标
+     * @since 2.1.0
+     */
+    public void setOutputInto(SqlTable outputInto) {
+        this.outputInto = outputInto;
+    }
+
     @Override
     protected void acceptChildren(SqlVisitor visitor) {
         super.acceptChildren(visitor);
@@ -133,5 +151,6 @@ public final class SqlMerge extends SqlStatement {
         child(visitor, on);
         children(visitor, whens);
         children(visitor, output);
+        child(visitor, outputInto);
     }
 }
