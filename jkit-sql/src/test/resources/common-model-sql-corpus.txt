@@ -1,0 +1,88 @@
+# dialect | sql — harvested from icell/common-model tests (no secrets).
+mysql | SHOW DATABASES;
+mysql | SELECT * FROM city;
+mysql | SELECT * FROM city LIMIT 5;
+mysql | INSERT INTO TABLE persons VALUES(1,'小明','北京'),(2,'小红','上海');
+mysql | SELECT * FROM persons;
+mysql | UPDATE students SET age = age + 5 WHERE age > 20;
+ansi | SELECT * FROM UP_CASE T0 LEFT JOIN "apply" T1 ON 1 = 1 LEFT JOIN `TabLe` T2 ON 1 = 1;
+mysql | SELECT * FROM TABLE1
+mysql | SELECT *\nFROM TABLE2
+mysql | SELECT * FROM `TABLE1`
+ansi | SELECT *\nFROM "TABLE2"
+mysql | SELECT * FROM `数据存储表`
+ansi | SELECT *\nFROM "数据存储表1"
+mysql | SELECT `数据存储表`.field1 FROM `数据存储表`
+ansi | SELECT "数据存储表1".field1\nFROM "数据存储表1"
+mysql | SELECT dataTable.`数据存储表`.field1 FROM `数据存储表`
+ansi | SELECT dataTable."数据存储表1".field1\nFROM "数据存储表1"
+mysql | SELECT max(dataTable.`数据存储表`.field1) FROM `数据存储表`
+ansi | SELECT max(dataTable."数据存储表1".field1)\nFROM "数据存储表1"
+mysql | SELECT max(dataTable.`数据存储表`.field1) FROM `数据存储表` GROUP BY dataTable.`数据存储表`.field1
+ansi | SELECT max(dataTable."数据存储表1".field1)\nFROM "数据存储表1"\nGROUP BY dataTable."数据存储表1".field1
+mysql | SELECT max(dataTable.`数据存储表`.field1) FROM `数据存储表` GROUP BY dataTable.`数据存储表`.field1 ORDER BY dataTable.`数据存储表`.field1
+ansi | SELECT max(dataTable."数据存储表1".field1)\nFROM "数据存储表1"\nGROUP BY dataTable."数据存储表1".field1\nORDER BY dataTable."数据存储表1".field1
+mysql | SELECT max(dataTable.`数据存储表`.field1) FROM `数据存储表` GROUP BY dataTable.`数据存储表`.field1 HAVING COUNT(dataTable.`数据存储表`.field1) > 1 ORDER BY dataTable.`数据存储表`.field1
+ansi | SELECT max(dataTable."数据存储表1".field1)\nFROM "数据存储表1"\nGROUP BY dataTable."数据存储表1".field1\nHAVING COUNT(dataTable."数据存储表1".field1) > 1\nORDER BY dataTable."数据存储表1".field1
+mysql | select * from t_user where 1 = 1;
+mysql | select DISTINCT COST_TYPE,COST_NM FROM TMP_COSTDATA
+mysql | SELECT COUNT(*) FROM ( 	SELECT DISTINCT COST_TYPE, COST_NM 	FROM TMP_COSTDATA ) ALIAS_COUNT
+oracle | select 1 '-- a' from dual;
+oracle | select 1 '-- a' from dual
+oracle | select 1 `-- a` from dual;
+oracle | select 1 `-- a` from dual
+oracle | select 1 '# a' from dual;
+oracle | select 1 '# a' from dual
+oracle | select 1 `# a` from dual;
+oracle | select 1 `# a` from dual
+mysql | select t1.RPT_DT          日期,    t1.RGN_NO          区域编号,    t1.ORG_NO          机构号,    CGT_SORT          认定表类别,    AGT_NO           合约编号,    CNT_NO           合同号,    APCDE            核算码,    PRD_CDE           产品大类,    PRD_SUB_CAT         产品子类,    CUS_NO           客户号,    ENT_STD           企业标准码,    ENT_SCP           工信部企业规模,    CUS_IDYCDE         客户行业代码,    CUS_CRL           客户信用评级,    CUS_STOPFLG         客户关停标志,    CUS_REGATTR         企业性质,    CLS5            五级分类,    OVDU_FLG          逾期标志,    GUR_MOD           担保方式,    LN_TYPE1          借款种类1,    LN_TYPE           贷款种类,    IDY_DRT           行业投向,    ORG_TRM           原始期限,    DUE_TRM           到期期限,    IS_RETYPLED         "是否房地产抵押0-非 1-个人 2-非个人",    t1.CURCDE          货币码,    LN_AMT           贷款金额,    LN_AMT* t3.fxrat      贷款金额折人民币,    LN_BAL           贷款余额,    LN_BAL* t3.fxrat      贷款余额折人民币,    CUS_SUBTYP         客户子类型,    CUNT_CDE          国家码,    IDY_TYP_ORIG        客户行业,    EMP_NUM           从业人数,    CUS_NAM           客户名称,    ORG_NAM           机构名称,    FST_ADV_DTE         发放日期,    DUE_DTE           到期日,    CONT_AVA_DT         合同生效日期,    BUS_INCOME         销售额,    ASS_SCALE          资产总额,    OVDU_TRM          逾期期限级别,    REG_ADD           企业注册地址,    ECNM_CODE          企业经济成分,    ID_TYP           证件类型,    CUS_RGN_NO         客户区域号,    CUS_ORG_NO         客户机构号,    CUS_ORG_NM         客户机构名称,    LOAN_AMT          授信金额,    SCP_FLG1          银监企业规模,    RAT             利率,    HGST_PRCT          销售额币种,    LGST_TERM          资产总额币种,    CREDIT_ORGCODE       信用机构代码,    AREA_CODE          行政区划代码,    PLATFORM_FLAG        融资平台标志,    OPEN_DT           客户开户时间,    SYSFLAG           系统标识,    RLVR_FLG          展期标识,    DRT_FLD           贷款投向领域,    AGRI_FLG          "CCMS涉农标识",    ENT_SCP3          "企业规模模式三（税务局标准）",    APP_DTE           "申请日期",    CCMS_CNTNO         "CCMS合同文本流水号",    LN_PURPOSE         "经营性物业贷款用途",    AREA_FLG          "城市地区标识",    LAST_UNPAID_DUE_DATE    "应还未还日期",    TIEX_FLG          "贴现标志0-非1-是",    SUMLOAN_AMT         "月累计发放额",    SUMLOAN_AMT* t3.fxrat         "月累计发放额折人民币",     SUMLOAN_AMT_YEAR      "年累计发放额",    SUMLOAN_AMT_YEAR * t3.fxrat      "年累计发放额折人民币",     POV_ALLEV_LOAN_FLG     "项目扶贫类型",    PRECISE_HELP_POOR_LOANNUM  "精准扶贫贷款服务人数",    PRECISE_HELP_POOR_FLG    "产业扶贫标识0-否，1-是",    RECEIVE_HAVEJOB_POOR_NUM  "吸纳就业的建档立卡贫困人口数",    HAVESTOCK_POOR_NUM     "参股的建档立卡贫困人口数",    SIGNTREATY_POOR_NUM     "签订帮扶协议或交易协议的建档立卡贫困人口数",    LOAD_MAIN_FLG        "0-其他，1-家庭农场，2-农业专业大户，3-农业产业化龙头企业",    TIEXI_FLG          "贴息标识0-否1-是",    MOVE_POOR_NUM        "易地扶贫搬迁项目总人数",    CY_GUR_FLG         "创业担保标识0-否；1-是",    KC_FLG           "科创标识0-否；1-是",    NCJT_FLG          "普惠型农村集体经济组织:0-否；1-是",    LOAN_AMT_PH         "授信金额-普惠金融口径",    CONTLOANFLG         "续贷标识",    MAINLENDER_JTNC       "承贷主体-家庭农场0-否1-是",    MAINLENDER_NYZY       "承贷主体-农业专业大户0-否1-是",    MAINLENDER_NYCY       "承贷主体-农业产业化龙头企业0-否1-是",    MAINLENDER_CBF       "承贷主体-承包方农户0-否1-是",    MAINLENDER_OTHERS      "承贷主体-其他0-否1-是",    INTBGNDT          "起息日",    ENT_SIZE          "BANCS企业规模",    ISBANKTAX          "是否银税互动客户",    DRVCOM_HELP_FLG       "单位带动扶贫标识 0--否 1--是",    RECEIVE_HAVEJOB_POOR_NUM_TP "脱贫享受政策就业人数",    SIGNTREATY_POOR_NUM_TP   "脱贫享受政策帮扶及交易人数",    HAVESTOCK_POOR_NUM_TP    "脱贫享受政策参股人数",    SER_POOR_FLG        "服务贫困人口项目标识",    ENJOYPOL_NUM_TP       "项目服务已脱贫享受政策人数",    DPT_FLG 部门标识,    guar_flg 融资担保标识 ,    gov_flg 政府性融资担保标识,    indpay_flg 自主支付标识 ,    gur_mod_rh 一层担保方式_人行,    bad_loans 当年累计形成的不良贷款,    tx_flg 贴现种类标识 ,    ISGRPCUS 是否是集团客户,    DUE_DTE_BAK 原始到期日bak,    ORG_TRM_BAK 原始期限bak,    OVDU_FLG_BAK 逾期标志bak,    LAST_UNPAID_DUE_DATE_BAK 应还未还日期bak,    OVDU_TRM_BAK 逾期期限级别bak,    PENTRADENO 养老行业小类代码 , ISPPP "是否为PPP（政府和社会资本合作）项目" , PPPMECH 项目适用机制 , PPPPROJNAME 项目名称 , t2.org_parent_0 全国汇总机构号, t2.org_parent_1 一级行号, t2.org_parent_2 二级行号, t2.org_parent_3 三级行号, t2.org_parent_4 四级行号, t2.org_parent_5 五几行号, t2.org_parent_6 六级行号, t2.org_parent_7 七级行号, t2.org_parent_8 网点号 from cbs_dzx_loandtlinfo t1  left join lu_org_tree t2 on t1.org_no=REGEXP_REPLACE(t2.org_no,'^0+', '')  left join genl_convfxrat t3 ON t1.curcde = t3.curcde                   AND t3.conv_dt = t1.RPT_DT                   AND t3.sec_cur = '001'
+mysql | SELECT ID_ "--11asd" FROM WK_DEPLOYMENT
+mysql | SELECT DISTINCT CLIENT_ID,CODE_ FROM t_client
+mysql | select distinct * from(SELECT * FROM T_DSJRWGS_BZBGS_18_7 U WHERE DAY_ID ='202311--')t
+mysql | select distinct A1,B2,C3,D4 from t_client
+mysql | SELECT * FROM TEST;
+mysql | SELECT Persons.LastName, Persons.FirstName, Orders.OrderNo
+mysql | SELECT LastName,FirstName
+mysql | SHOW DATABASES LIKE '%test';
+mysql | SHOW CREATE DATABASE test;
+mysql | SHOW TABLES FROM db_name;
+mysql | SHOW CHARACTER SET;
+mysql | SHOW COLUMNS FROM blog.info;
+mysql | DESC table_name;
+mysql | INSERT INTO table2 SELECT * FROM table1;
+mysql | INSERT INTO Persons VALUES ('Gates', 'Bill', 'Xuanwumen 10', 'Beijing')
+mysql | UPDATE Person SET FirstName = 'Fred' WHERE LastName = 'Wilson'
+mysql | DELETE FROM Person WHERE LastName = 'Wilson'
+mysql | ALTER TABLE Persons
+mysql | DROP TABLE Persons
+mysql | SELECT * FROM TEST
+mysql | SHOW DATABASES
+mysql | SHOW TABLES FROM db_name
+mysql | DESC table_name
+mysql | DESCRIBE table_name
+mysql | EXPLAIN SELECT * FROM table_name
+mysql | INSERT INTO table2 SELECT * FROM table1
+mysql | SHOW CREATE TABLE table_name
+mysql | select id,CONCAT(SUBSTR(name,1,1),'*',SUBSTR(name,-1)) name, phone, id_card, money1, money2, email, address  from aaaaa
+mysql | select `1019使用`.`id` as `id`, `name`, `1019使用`.`city_code` as `city_code`, `1019使用`
+mysql | select * from test_table
+mysql | select * from test_table limit 10000
+mysql | SELECT a.id, a.name FROM (SELECT id, name, age FROM users ORDER BY age DESC, create_time ASC) a WHERE a.age > 20
+mysql | SELECT t1.id FROM main_table t1 JOIN (SELECT user_id FROM orders WHERE amount > 100 ORDER BY order_date DESC) t2 ON t1.id = t2.user_id
+mysql | SELECT * FROM (SELECT u.id, u.name, p.product_name FROM (SELECT id, name FROM users ORDER BY registration_date DESC) u JOIN products p ON u.id = p.user_id) final_result WHERE final_result.id < 1000
+mysql | SELECT id, name, age, create_time FROM users
+mysql | SELECT user_id, order_date FROM orders WHERE amount > 100
+mysql | SELECT id, name, registration_date FROM users
+mysql | select id,name from aaa order by id
+mysql | SELECT * FROM (SELECT id, name FROM users WHERE status = 'A' ORDER BY created_at DESC) u WHERE u.id < 100
+mysql | SELECT id, name, created_at FROM users WHERE status = 'A'
+mysql | SELECT t.* FROM (SELECT id, score FROM exam_results ORDER BY score DESC) t LEFT JOIN classes c ON c.id = t.id
+mysql | SELECT * FROM (SELECT id FROM users ORDER BY id DESC LIMIT 10) x WHERE x.id > 5
+mysql | SELECT id FROM users ORDER BY id DESC LIMIT 10
+mysql | SELECT * FROM (SELECT * FROM (SELECT name, salary FROM employees ORDER BY salary DESC LIMIT 50) top_50 ORDER BY name ASC LIMIT 10) final_10
+mysql | SELECT `A`.`rn`,`A`.`CUST_NO`,`A`.`A0001`,`A`.`A0002`,`A`.`A0003`,`A`.`A0004`,`A`
+mysql | select distinct 房地产税收城市信息.年 from 房地产税收城市信息 where 1 = 1  order by 房地产税收城市信息.省份 desc
+mysql | select 房地产税收城市信息.年 from 房地产税收城市信息 where 1 = 1  order by 房地产税收城市信息.省份 desc
+mysql | SELECT T1.NAME AS 名称,T2.age AS 年龄 FROM ods.test1 T1 LEFT JOIN ods.test2 T2 ON T1.id=T2.id AND T1.NAME=T2.NAME GROUP BY T1.NAME,T2.age ORDER BY T1.NAME
+mysql | select * from student
+mysql | select * from student where a = 1
