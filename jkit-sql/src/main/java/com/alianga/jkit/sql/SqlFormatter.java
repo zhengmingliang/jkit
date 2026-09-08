@@ -3,6 +3,7 @@ package com.alianga.jkit.sql;
 import com.alianga.jkit.sql.ast.SqlAllColumns;
 import com.alianga.jkit.sql.ast.SqlBetweenExpr;
 import com.alianga.jkit.sql.ast.SqlBinaryExpr;
+import com.alianga.jkit.sql.ast.SqlBinaryOp;
 import com.alianga.jkit.sql.ast.SqlCaseExpr;
 import com.alianga.jkit.sql.ast.SqlCastExpr;
 import com.alianga.jkit.sql.ast.SqlDdlStatement;
@@ -865,11 +866,18 @@ public final class SqlFormatter {
             out.append('*');
         } else if (expr instanceof SqlBinaryExpr) {
             SqlBinaryExpr bin = (SqlBinaryExpr) expr;
-            writeExpr(bin.left());
-            sp();
-            out.append(bin.operator().symbol());
-            sp();
-            writeExpr(bin.right());
+            if (bin.operator() == SqlBinaryOp.SUBSCRIPT) {
+                writeExpr(bin.left());
+                out.append('[');
+                writeExpr(bin.right());
+                out.append(']');
+            } else {
+                writeExpr(bin.left());
+                sp();
+                out.append(bin.operator().symbol());
+                sp();
+                writeExpr(bin.right());
+            }
         } else if (expr instanceof SqlUnaryExpr) {
             SqlUnaryExpr u = (SqlUnaryExpr) expr;
             if (u.operator() == SqlUnaryExpr.Op.EXISTS) {
@@ -952,15 +960,35 @@ public final class SqlFormatter {
     }
 
     private void writeFunction(SqlFunctionExpr fn) {
+        String fnName = fn.name() == null ? "" : fn.name().simpleName();
+        List<SqlExpr> args = fn.arguments();
+        if (isTypedLiteralName(fnName) && canWriteTypedLiteral(fn)) {
+            writeExpr(fn.name());
+            sp();
+            if (equalsIgnoreCase(fnName, "INTERVAL") && args.size() == 2
+                    && args.get(1) instanceof SqlIdentifier) {
+                writeExpr(args.get(0));
+                sp();
+                writeExpr(args.get(1));
+            } else {
+                writeExpr(args.get(0));
+            }
+            writeFunctionSuffix(fn);
+            return;
+        }
         writeExpr(fn.name());
         out.append('(');
         if (fn.distinct()) {
             kw("DISTINCT");
             sp();
         }
-        String fnName = fn.name() == null ? "" : fn.name().simpleName();
-        List<SqlExpr> args = fn.arguments();
-        if (equalsIgnoreCase(fnName, "EXTRACT") && args.size() == 2) {
+        if (fn.usingCharset() && args.size() >= 2) {
+            writeExpr(args.get(0));
+            sp();
+            kw("USING");
+            sp();
+            writeExpr(args.get(1));
+        } else if (equalsIgnoreCase(fnName, "EXTRACT") && args.size() == 2) {
             writeExpr(args.get(0));
             sp();
             kw("FROM");
@@ -987,10 +1015,51 @@ public final class SqlFormatter {
             sp();
             writeExpr(args.get(1));
         } else {
-            commaExprs(args);
+            commaFunctionArgs(args);
+            if (!fn.withinGroup() && fn.orderBy() != null && !fn.orderBy().isEmpty()) {
+                sp();
+                kw("ORDER");
+                sp();
+                kw("BY");
+                sp();
+                writeOrder(fn.orderBy());
+            }
+            if (fn.separator() != null) {
+                sp();
+                kw("SEPARATOR");
+                sp();
+                writeExpr(fn.separator());
+            }
         }
         out.append(')');
-        if (fn.aggOption() != null) {
+        if (fn.against() != null) {
+            sp();
+            kw("AGAINST");
+            out.append(" (");
+            writeExpr(fn.against());
+            if (fn.againstModifier() != null && fn.againstModifier().length() > 0) {
+                sp();
+                out.append(fn.againstModifier());
+            }
+            out.append(')');
+        }
+        writeFunctionSuffix(fn);
+    }
+
+    private void writeFunctionSuffix(SqlFunctionExpr fn) {
+        if (fn.withinGroup() && fn.orderBy() != null && !fn.orderBy().isEmpty()) {
+            sp();
+            kw("WITHIN");
+            sp();
+            kw("GROUP");
+            out.append(" (");
+            kw("ORDER");
+            sp();
+            kw("BY");
+            sp();
+            writeOrder(fn.orderBy());
+            out.append(')');
+        } else if (fn.aggOption() != null) {
             sp();
             out.append(fn.aggOption());
         }
@@ -1009,6 +1078,32 @@ public final class SqlFormatter {
             sp();
             writeExpr(fn.over());
         }
+    }
+
+    private static boolean isTypedLiteralName(String fnName) {
+        return equalsIgnoreCase(fnName, "DATE")
+                || equalsIgnoreCase(fnName, "TIME")
+                || equalsIgnoreCase(fnName, "TIMESTAMP")
+                || equalsIgnoreCase(fnName, "DATETIME")
+                || equalsIgnoreCase(fnName, "INTERVAL");
+    }
+
+    private static boolean canWriteTypedLiteral(SqlFunctionExpr fn) {
+        if (fn.distinct() || fn.over() != null || fn.filter() != null || fn.against() != null
+                || fn.separator() != null || fn.usingCharset() || fn.withinGroup()
+                || (fn.orderBy() != null && !fn.orderBy().isEmpty()) || fn.aggOption() != null) {
+            return false;
+        }
+        List<SqlExpr> args = fn.arguments();
+        if (args == null || args.isEmpty()) {
+            return false;
+        }
+        String name = fn.name() == null ? "" : fn.name().simpleName();
+        if (equalsIgnoreCase(name, "INTERVAL") && args.size() == 2
+                && args.get(1) instanceof SqlIdentifier) {
+            return true;
+        }
+        return args.size() == 1;
     }
 
     private void writeTrimArgs(List<SqlExpr> args) {
@@ -1151,6 +1246,24 @@ public final class SqlFormatter {
             default:
                 out.append(lit.value());
                 break;
+        }
+    }
+
+    private void commaFunctionArgs(List<SqlExpr> exprs) {
+        if (exprs == null) {
+            return;
+        }
+        for (int i = 0; i < exprs.size(); i++) {
+            if (i > 0) {
+                out.append(',');
+                sp();
+            }
+            SqlExpr arg = exprs.get(i);
+            if (arg instanceof SqlQueryExpr) {
+                writeNode(((SqlQueryExpr) arg).query());
+            } else {
+                writeExpr(arg);
+            }
         }
     }
 

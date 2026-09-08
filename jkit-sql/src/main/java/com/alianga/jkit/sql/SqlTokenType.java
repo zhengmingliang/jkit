@@ -241,6 +241,8 @@ public enum SqlTokenType {
     SIBLINGS,
     PIVOT,
     UNPIVOT,
+    MATCH,
+    AGAINST,
     MATCHED,
     SOURCE,
     TARGET,

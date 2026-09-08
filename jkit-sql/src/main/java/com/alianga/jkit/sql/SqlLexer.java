@@ -159,7 +159,8 @@ public final class SqlLexer {
             scanString(token, tLine, tCol, tStart, c);
             return;
         }
-        if (c == '`' || (c == '"' && !dialect.doubleQuoteIsString()) || c == '[') {
+        if (c == '`' || (c == '"' && !dialect.doubleQuoteIsString())
+                || (c == '[' && dialect == SqlDialect.SQLSERVER)) {
             scanQuotedIdent(token, tLine, tCol, tStart, c);
             return;
         }

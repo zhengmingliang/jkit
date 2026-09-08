@@ -202,6 +202,8 @@ final class SqlKeywords {
         put("SIBLINGS", SqlTokenType.SIBLINGS);
         put("PIVOT", SqlTokenType.PIVOT);
         put("UNPIVOT", SqlTokenType.UNPIVOT);
+        put("MATCH", SqlTokenType.MATCH);
+        put("AGAINST", SqlTokenType.AGAINST);
         put("MATCHED", SqlTokenType.MATCHED);
         put("SOURCE", SqlTokenType.SOURCE);
         put("TARGET", SqlTokenType.TARGET);

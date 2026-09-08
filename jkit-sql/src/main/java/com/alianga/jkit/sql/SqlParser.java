@@ -1232,7 +1232,14 @@ public final class SqlParser {
             } else if (is(SqlTokenType.IS)) {
                 next();
                 boolean not = match(SqlTokenType.NOT);
-                left = SqlBinaryExpr.of(left, not ? SqlBinaryOp.IS_NOT : SqlBinaryOp.IS, parseBit());
+                if (match(SqlTokenType.DISTINCT)) {
+                    expect(SqlTokenType.FROM);
+                    left = SqlBinaryExpr.of(left,
+                            not ? SqlBinaryOp.IS_NOT_DISTINCT_FROM : SqlBinaryOp.IS_DISTINCT_FROM,
+                            parseBit());
+                } else {
+                    left = SqlBinaryExpr.of(left, not ? SqlBinaryOp.IS_NOT : SqlBinaryOp.IS, parseBit());
+                }
             } else if (is(SqlTokenType.LIKE) || is(SqlTokenType.ILIKE)
                     || is(SqlTokenType.REGEXP) || is(SqlTokenType.RLIKE)) {
                 SqlBinaryOp op = is(SqlTokenType.ILIKE) ? SqlBinaryOp.ILIKE
@@ -1306,6 +1313,7 @@ public final class SqlParser {
                 || is(SqlTokenType.SHIFT_LEFT) || is(SqlTokenType.SHIFT_RIGHT)
                 || is(SqlTokenType.CONCAT) || is(SqlTokenType.JSON_OP) || is(SqlTokenType.CAST_OP)) {
             SqlTokenType t = token.type();
+            String opText = token.text();
             next();
             if (t == SqlTokenType.CAST_OP) {
                 SqlCastExpr cast = new SqlCastExpr();
@@ -1314,13 +1322,22 @@ public final class SqlParser {
                 cast.setDataType(parseDataType());
                 left = cast;
             } else {
-                SqlBinaryOp op = t == SqlTokenType.CONCAT ? SqlBinaryOp.CONCAT
-                        : (t == SqlTokenType.JSON_OP ? SqlBinaryOp.JSON
-                        : (t == SqlTokenType.BIT_AND ? SqlBinaryOp.BIT_AND
-                        : (t == SqlTokenType.BIT_OR ? SqlBinaryOp.BIT_OR
-                        : (t == SqlTokenType.BIT_XOR ? SqlBinaryOp.BIT_XOR
-                        : (t == SqlTokenType.SHIFT_LEFT ? SqlBinaryOp.SHIFT_LEFT
-                        : SqlBinaryOp.SHIFT_RIGHT)))));
+                SqlBinaryOp op;
+                if (t == SqlTokenType.CONCAT) {
+                    op = SqlBinaryOp.CONCAT;
+                } else if (t == SqlTokenType.JSON_OP) {
+                    op = jsonOp(opText);
+                } else if (t == SqlTokenType.BIT_AND) {
+                    op = SqlBinaryOp.BIT_AND;
+                } else if (t == SqlTokenType.BIT_OR) {
+                    op = SqlBinaryOp.BIT_OR;
+                } else if (t == SqlTokenType.BIT_XOR) {
+                    op = SqlBinaryOp.BIT_XOR;
+                } else if (t == SqlTokenType.SHIFT_LEFT) {
+                    op = SqlBinaryOp.SHIFT_LEFT;
+                } else {
+                    op = SqlBinaryOp.SHIFT_RIGHT;
+                }
                 left = SqlBinaryExpr.of(left, op, parseAdd());
             }
         }
@@ -1407,6 +1424,11 @@ public final class SqlParser {
         }
         if (is(SqlTokenType.LPAREN) && expr instanceof SqlIdentifier) {
             return parseFunction((SqlIdentifier) expr);
+        }
+        while (match(SqlTokenType.LBRACKET)) {
+            SqlExpr index = parseExpr();
+            expect(SqlTokenType.RBRACKET);
+            expr = SqlBinaryExpr.of(expr, SqlBinaryOp.SUBSCRIPT, index);
         }
         if (match(SqlTokenType.COLLATE)) {
             expr = SqlBinaryExpr.of(expr, SqlBinaryOp.COLLATE, parseName());
@@ -1520,6 +1542,12 @@ public final class SqlParser {
         if (equalsIgnoreCase(fnName, "POSITION")) {
             return parsePosition(name);
         }
+        if (equalsIgnoreCase(fnName, "CONVERT")) {
+            return parseConvert(name);
+        }
+        if (equalsIgnoreCase(fnName, "GROUP_CONCAT") || equalsIgnoreCase(fnName, "STRING_AGG")) {
+            return parseGroupConcatLike(name);
+        }
         expect(SqlTokenType.LPAREN);
         SqlFunctionExpr fn = new SqlFunctionExpr();
         fn.setName(name);
@@ -1530,14 +1558,87 @@ public final class SqlParser {
             do {
                 if (is(SqlTokenType.STAR)) {
                     fn.addArgument(parsePrimary());
+                } else if (isQueryStart()) {
+                    fn.addArgument(SqlQueryExpr.of(parseStatement()));
                 } else {
                     fn.addArgument(parseExpr());
                 }
             } while (match(SqlTokenType.COMMA));
         }
         expect(SqlTokenType.RPAREN);
+        if (equalsIgnoreCase(fnName, "MATCH")) {
+            parseMatchAgainst(fn);
+        }
         parseFunctionTail(fn);
         return fn;
+    }
+
+    private SqlExpr parseConvert(SqlIdentifier name) {
+        expect(SqlTokenType.LPAREN);
+        SqlFunctionExpr fn = new SqlFunctionExpr();
+        fn.setName(name);
+        fn.addArgument(parseExpr());
+        if (match(SqlTokenType.USING)) {
+            fn.setUsingCharset(true);
+            if (identLike() || (token.type() != null && token.type().keyword())) {
+                fn.addArgument(parseName());
+            } else {
+                fn.addArgument(parsePrimary());
+            }
+        } else if (match(SqlTokenType.COMMA)) {
+            do {
+                fn.addArgument(parseExpr());
+            } while (match(SqlTokenType.COMMA));
+        }
+        expect(SqlTokenType.RPAREN);
+        parseFunctionTail(fn);
+        return fn;
+    }
+
+    private SqlExpr parseGroupConcatLike(SqlIdentifier name) {
+        expect(SqlTokenType.LPAREN);
+        SqlFunctionExpr fn = new SqlFunctionExpr();
+        fn.setName(name);
+        if (match(SqlTokenType.DISTINCT)) {
+            fn.setDistinct(true);
+        }
+        if (!is(SqlTokenType.RPAREN)) {
+            fn.addArgument(parseExpr());
+            while (match(SqlTokenType.COMMA)) {
+                if (is(SqlTokenType.ORDER)) {
+                    break;
+                }
+                fn.addArgument(parseExpr());
+            }
+            if (match(SqlTokenType.ORDER)) {
+                expect(SqlTokenType.BY);
+                parseOrderBy(fn.orderBy());
+            }
+            if (isIdent("SEPARATOR")) {
+                next();
+                fn.setSeparator(parseExpr());
+            }
+        }
+        expect(SqlTokenType.RPAREN);
+        parseFunctionTail(fn);
+        return fn;
+    }
+
+    private void parseMatchAgainst(SqlFunctionExpr fn) {
+        if (!(is(SqlTokenType.AGAINST) || isIdent("AGAINST"))) {
+            return;
+        }
+        next();
+        expect(SqlTokenType.LPAREN);
+        // 不能用 parseExpr：IN BOOLEAN MODE 会被当成 IN 谓词
+        fn.setAgainst(parseBit());
+        if (!is(SqlTokenType.RPAREN)) {
+            String mod = consumeRawUntilType(SqlTokenType.RPAREN).trim();
+            if (mod.length() > 0) {
+                fn.setAgainstModifier(mod);
+            }
+        }
+        expect(SqlTokenType.RPAREN);
     }
 
     private void parseFunctionTail(SqlFunctionExpr fn) {
@@ -1553,8 +1654,30 @@ public final class SqlParser {
         }
         if (isIdent("WITHIN")) {
             next();
-            fn.setAggOption("WITHIN GROUP " + consumeRawUntilClause());
+            expect(SqlTokenType.GROUP);
+            expect(SqlTokenType.LPAREN);
+            expect(SqlTokenType.ORDER);
+            expect(SqlTokenType.BY);
+            parseOrderBy(fn.orderBy());
+            expect(SqlTokenType.RPAREN);
+            fn.setWithinGroup(true);
         }
+    }
+
+    private static SqlBinaryOp jsonOp(String text) {
+        if ("->>".equals(text)) {
+            return SqlBinaryOp.JSON_ARROW_TEXT;
+        }
+        if ("#>".equals(text)) {
+            return SqlBinaryOp.JSON_PATH;
+        }
+        if ("#>>".equals(text)) {
+            return SqlBinaryOp.JSON_PATH_TEXT;
+        }
+        if ("->".equals(text)) {
+            return SqlBinaryOp.JSON_ARROW;
+        }
+        return SqlBinaryOp.JSON;
     }
 
     private SqlExpr parseExtract(SqlIdentifier name) {

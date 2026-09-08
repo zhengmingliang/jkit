@@ -38,6 +38,7 @@
 
 ### 变更
 
+- `jkit-sql` P1.3：`GROUP_CONCAT` / `STRING_AGG`（`ORDER BY` / `SEPARATOR` / `WITHIN GROUP`）；`IF(a,b,c)`；`CONVERT(expr USING charset)` 与 SQL Server `CONVERT(type, expr)`；JSON `#>` `#>>`（与 `->` `->>` 同为 JSON_OP，format 保留原文）；`MATCH (...) AGAINST (...)`；`IS [NOT] DISTINCT FROM`；数组下标 `arr[1]`（非 SQL Server 方言下 `[` 不再当标识符引号）；`ANY`/`SOME`/`ALL` 子查询参数；`INTERVAL '1 day'` / `INTERVAL 1 DAY` 与 `X'FF'` 字面量往返。
 - `jkit-sql` P1.2+：WINDOW 继承另一窗口名（`WINDOW w2 AS (w)` / `w2 AS (w ORDER BY …)`，`SqlOverExpr.existingWindowName`）；`UNNEST(...)` / 一般表函数 / `TABLE(fn(...))`（`SqlFunctionTable`，可 `LATERAL`）；`FROM (VALUES …) AS v(cols)`（`SqlValuesTable` + `SqlTableSource.columnAliases`）；顶层 `VALUES` 回写不再误加 `SELECT`。
 - `jkit-sql` P1.1：SELECT 级 `WINDOW w AS (PARTITION BY … ORDER BY …)`（可多个）；保留内联 `OVER (…)` 与 `OVER w`；format 往返。
 - `jkit-sql` P1.2：`LATERAL` 子查询（`SqlSubqueryTable.lateral`）；SQL Server `CROSS APPLY` / `OUTER APPLY`。

@@ -1,5 +1,7 @@
 package com.alianga.jkit.sql;
 
+import com.alianga.jkit.sql.ast.SqlBinaryExpr;
+import com.alianga.jkit.sql.ast.SqlBinaryOp;
 import com.alianga.jkit.sql.ast.SqlDdlStatement;
 import com.alianga.jkit.sql.ast.SqlDelete;
 import com.alianga.jkit.sql.ast.SqlFunctionExpr;
@@ -15,7 +17,6 @@ import com.alianga.jkit.sql.ast.SqlSubqueryTable;
 import com.alianga.jkit.sql.ast.SqlUpdate;
 import com.alianga.jkit.sql.ast.SqlValuesTable;
 import com.alianga.jkit.sql.ast.SqlWindowDefinition;
-
 import org.junit.Test;
 
 import java.util.List;
@@ -627,5 +628,189 @@ public class SqlParserTest {
         SqlSelect again2 = (SqlSelect) SQL.parse(f2, SqlDialect.POSTGRES);
         assertEquals(2, ((SqlValuesTable) again2.from()).columnAliases().size());
     }
+
+
+    /**
+     * P1.3：GROUP_CONCAT / STRING_AGG 的 ORDER BY、SEPARATOR、WITHIN GROUP。
+     */
+    @Test
+    public void parseGroupConcatAndStringAgg() {
+        SqlSelect gc = (SqlSelect) SQL.parse(
+                "SELECT GROUP_CONCAT(name ORDER BY id SEPARATOR ',') FROM t");
+        SqlFunctionExpr fn = (SqlFunctionExpr) gc.selectItems().get(0).expr();
+        assertEquals("GROUP_CONCAT", fn.name().simpleName());
+        assertEquals(1, fn.orderBy().size());
+        assertNotNull(fn.separator());
+        String f1 = SQL.toSqlString(gc);
+        assertTrue(f1, f1.contains("SEPARATOR"));
+        assertTrue(f1, f1.contains("ORDER"));
+        SQL.parse(f1);
+
+        SqlSelect gc2 = (SqlSelect) SQL.parse(
+                "SELECT GROUP_CONCAT(DISTINCT name SEPARATOR ';') FROM t");
+        SqlFunctionExpr fn2 = (SqlFunctionExpr) gc2.selectItems().get(0).expr();
+        assertTrue(fn2.distinct());
+        assertNotNull(fn2.separator());
+        SQL.parse(SQL.toSqlString(gc2));
+
+        SqlSelect agg = (SqlSelect) SQL.parse(
+                "SELECT STRING_AGG(name, ',' ORDER BY id) FROM t", SqlDialect.POSTGRES);
+        SqlFunctionExpr sfn = (SqlFunctionExpr) agg.selectItems().get(0).expr();
+        assertEquals(2, sfn.arguments().size());
+        assertEquals(1, sfn.orderBy().size());
+        assertFalse(sfn.withinGroup());
+        String f3 = SQL.toSqlString(agg, SqlDialect.POSTGRES);
+        assertTrue(f3, f3.contains("ORDER"));
+        SQL.parse(f3, SqlDialect.POSTGRES);
+
+        SqlSelect within = (SqlSelect) SQL.parse(
+                "SELECT STRING_AGG(name, ',') WITHIN GROUP (ORDER BY id) FROM t",
+                SqlDialect.POSTGRES);
+        SqlFunctionExpr wfn = (SqlFunctionExpr) within.selectItems().get(0).expr();
+        assertTrue(wfn.withinGroup());
+        assertEquals(1, wfn.orderBy().size());
+        String f4 = SQL.toSqlString(within, SqlDialect.POSTGRES);
+        assertTrue(f4, f4.contains("WITHIN"));
+        SqlSelect again = (SqlSelect) SQL.parse(f4, SqlDialect.POSTGRES);
+        assertTrue(((SqlFunctionExpr) again.selectItems().get(0).expr()).withinGroup());
+    }
+
+    /**
+     * P1.3：IF 关键字函数、CONVERT USING / SQL Server CONVERT。
+     */
+    @Test
+    public void parseIfAndConvert() {
+        SqlSelect iff = (SqlSelect) SQL.parse("SELECT IF(a > 0, 'y', 'n') FROM t");
+        assertEquals("IF", ((SqlFunctionExpr) iff.selectItems().get(0).expr()).name().simpleName());
+        String f1 = SQL.toSqlString(iff);
+        assertTrue(f1, f1.contains("IF("));
+        SQL.parse(f1);
+
+        SqlSelect conv = (SqlSelect) SQL.parse("SELECT CONVERT(name USING utf8) FROM t");
+        SqlFunctionExpr cfn = (SqlFunctionExpr) conv.selectItems().get(0).expr();
+        assertTrue(cfn.usingCharset());
+        String f2 = SQL.toSqlString(conv);
+        assertTrue(f2, f2.contains("USING"));
+        SqlSelect again = (SqlSelect) SQL.parse(f2);
+        assertTrue(((SqlFunctionExpr) again.selectItems().get(0).expr()).usingCharset());
+
+        SqlSelect ss = (SqlSelect) SQL.parse(
+                "SELECT CONVERT(varchar(20), name) FROM t", SqlDialect.SQLSERVER);
+        String f3 = SQL.toSqlString(ss, SqlDialect.SQLSERVER);
+        assertTrue(f3, f3.contains("CONVERT"));
+        SQL.parse(f3, SqlDialect.SQLSERVER);
+    }
+
+    /**
+     * P1.3：JSON -&gt; / -&gt;&gt; / #&gt; / #&gt;&gt; 保留运算符原文。
+     */
+    @Test
+    public void parseJsonPathOps() {
+        SqlSelect a = (SqlSelect) SQL.parse("SELECT data -> 'a', data ->> 'b' FROM t", SqlDialect.POSTGRES);
+        assertEquals(SqlBinaryOp.JSON_ARROW,
+                ((SqlBinaryExpr) a.selectItems().get(0).expr()).operator());
+        assertEquals(SqlBinaryOp.JSON_ARROW_TEXT,
+                ((SqlBinaryExpr) a.selectItems().get(1).expr()).operator());
+        String fa = SQL.toSqlString(a, SqlDialect.POSTGRES);
+        assertTrue(fa, fa.contains("->"));
+        assertTrue(fa, fa.contains("->>"));
+        SQL.parse(fa, SqlDialect.POSTGRES);
+
+        SqlSelect b = (SqlSelect) SQL.parse(
+                "SELECT data #> '{x}', data #>> '{x,y}' FROM t", SqlDialect.POSTGRES);
+        assertEquals(SqlBinaryOp.JSON_PATH,
+                ((SqlBinaryExpr) b.selectItems().get(0).expr()).operator());
+        assertEquals(SqlBinaryOp.JSON_PATH_TEXT,
+                ((SqlBinaryExpr) b.selectItems().get(1).expr()).operator());
+        String fb = SQL.toSqlString(b, SqlDialect.POSTGRES);
+        assertTrue(fb, fb.contains("#>"));
+        assertTrue(fb, fb.contains("#>>"));
+        SQL.parse(fb, SqlDialect.POSTGRES);
+    }
+
+    /**
+     * P1.3：MATCH ... AGAINST 全文检索。
+     */
+    @Test
+    public void parseMatchAgainst() {
+        SqlSelect s = (SqlSelect) SQL.parse(
+                "SELECT * FROM t WHERE MATCH(title, body) AGAINST ('foo' IN BOOLEAN MODE)");
+        SqlFunctionExpr match = (SqlFunctionExpr) s.where();
+        assertEquals("MATCH", match.name().simpleName());
+        assertEquals(2, match.arguments().size());
+        assertNotNull(match.against());
+        assertTrue(match.againstModifier(), match.againstModifier().contains("BOOLEAN"));
+        String f = SQL.toSqlString(s);
+        assertTrue(f, f.contains("AGAINST"));
+        SqlSelect again = (SqlSelect) SQL.parse(f);
+        assertNotNull(((SqlFunctionExpr) again.where()).against());
+
+        SqlSelect s2 = (SqlSelect) SQL.parse(
+                "SELECT * FROM t WHERE MATCH(title) AGAINST ('bar')");
+        assertNotNull(((SqlFunctionExpr) s2.where()).against());
+        SQL.parse(SQL.toSqlString(s2));
+    }
+
+    /**
+     * P1.3：IS DISTINCT FROM / 数组下标 / ANY·SOME·ALL 子查询。
+     */
+    @Test
+    public void parseDistinctFromArrayAny() {
+        SqlSelect d = (SqlSelect) SQL.parse(
+                "SELECT * FROM t WHERE a IS DISTINCT FROM b", SqlDialect.POSTGRES);
+        assertEquals(SqlBinaryOp.IS_DISTINCT_FROM, ((SqlBinaryExpr) d.where()).operator());
+        SqlSelect d2 = (SqlSelect) SQL.parse(
+                "SELECT * FROM t WHERE a IS NOT DISTINCT FROM b", SqlDialect.POSTGRES);
+        assertEquals(SqlBinaryOp.IS_NOT_DISTINCT_FROM, ((SqlBinaryExpr) d2.where()).operator());
+        SQL.parse(SQL.toSqlString(d, SqlDialect.POSTGRES), SqlDialect.POSTGRES);
+        SQL.parse(SQL.toSqlString(d2, SqlDialect.POSTGRES), SqlDialect.POSTGRES);
+
+        SqlSelect arr = (SqlSelect) SQL.parse("SELECT arr[1], arr[1][2] FROM t", SqlDialect.POSTGRES);
+        assertEquals(SqlBinaryOp.SUBSCRIPT,
+                ((SqlBinaryExpr) arr.selectItems().get(0).expr()).operator());
+        SqlBinaryExpr nested = (SqlBinaryExpr) arr.selectItems().get(1).expr();
+        assertEquals(SqlBinaryOp.SUBSCRIPT, nested.operator());
+        assertEquals(SqlBinaryOp.SUBSCRIPT, ((SqlBinaryExpr) nested.left()).operator());
+        String fa = SQL.toSqlString(arr, SqlDialect.POSTGRES);
+        assertTrue(fa, fa.contains("arr[1]"));
+        SQL.parse(fa, SqlDialect.POSTGRES);
+
+        SqlSelect any = (SqlSelect) SQL.parse(
+                "SELECT * FROM t WHERE x = ANY(SELECT id FROM s)", SqlDialect.POSTGRES);
+        String fany = SQL.toSqlString(any, SqlDialect.POSTGRES);
+        assertTrue(fany, fany.contains("ANY"));
+        SQL.parse(fany, SqlDialect.POSTGRES);
+
+        SqlSelect some = (SqlSelect) SQL.parse(
+                "SELECT * FROM t WHERE x = SOME(SELECT id FROM s)", SqlDialect.POSTGRES);
+        SQL.parse(SQL.toSqlString(some, SqlDialect.POSTGRES), SqlDialect.POSTGRES);
+
+        SqlSelect all = (SqlSelect) SQL.parse(
+                "SELECT * FROM t WHERE x <> ALL(arr)", SqlDialect.POSTGRES);
+        SQL.parse(SQL.toSqlString(all, SqlDialect.POSTGRES), SqlDialect.POSTGRES);
+    }
+
+    /**
+     * P1.3：INTERVAL / X'FF' 字面量往返。
+     */
+    @Test
+    public void parseIntervalAndHexLiterals() {
+        SqlSelect iv = (SqlSelect) SQL.parse("SELECT INTERVAL '1 day'", SqlDialect.POSTGRES);
+        String f1 = SQL.toSqlString(iv, SqlDialect.POSTGRES);
+        assertTrue(f1, f1.contains("INTERVAL"));
+        assertFalse(f1, f1.contains("INTERVAL("));
+        SQL.parse(f1, SqlDialect.POSTGRES);
+
+        SqlSelect iv2 = (SqlSelect) SQL.parse("SELECT INTERVAL 1 DAY");
+        String f2 = SQL.toSqlString(iv2);
+        assertTrue(f2, f2.contains("INTERVAL"));
+        SQL.parse(f2);
+
+        SqlSelect hex = (SqlSelect) SQL.parse("SELECT X'FF', 0xFF");
+        String f3 = SQL.toSqlString(hex);
+        assertTrue(f3, f3.contains("X'FF'") || f3.contains("X'ff'") || f3.toUpperCase().contains("X'FF'"));
+        SQL.parse(f3);
+    }
+
 
 }

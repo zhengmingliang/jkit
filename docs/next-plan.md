@@ -34,7 +34,7 @@
 - SELECT：JOIN（INNER/LEFT/RIGHT/FULL/CROSS/NATURAL/STRAIGHT/逗号）、UNION 族、WITH/RECURSIVE、DISTINCT ON、LIMIT/OFFSET/FETCH、TOP、FOR UPDATE、LOCK IN SHARE MODE、CONNECT BY / START WITH / PRIOR、`t.*`
 - 窗口：`OVER (PARTITION BY … ORDER BY … ROWS/RANGE BETWEEN …)`、命名窗口、SELECT 级 WINDOW、窗口继承、`FILTER (WHERE …)`
 - DML：INSERT/REPLACE（VALUES 多行、INSERT SELECT、INSERT SET、ON DUPLICATE KEY、ON CONFLICT DO UPDATE/NOTHING、RETURNING）、UPDATE/DELETE（JOIN、LIMIT、RETURNING）、MERGE 基本形态
-- 表达式：CASE、CAST / `::`、IN/BETWEEN/LIKE/ILIKE/REGEXP、`?` / `:name` / `@var`、EXTRACT/TRIM/SUBSTRING/POSITION、行构造 `(a,b) IN ((?,?))`
+- 表达式：CASE、CAST / `::`、IN/BETWEEN/LIKE/ILIKE/REGEXP、`IS [NOT] DISTINCT FROM`、`?` / `:name` / `@var`、EXTRACT/TRIM/SUBSTRING/POSITION/IF/CONVERT/GROUP_CONCAT/STRING_AGG/MATCH AGAINST、JSON `->`/`->>`/`#>`/`#>>`、数组下标、ANY/SOME/ALL、INTERVAL/HEX、行构造 `(a,b) IN ((?,?))`
 - DDL：CREATE/DROP/ALTER/TRUNCATE 抽对象名；ALTER ADD/DROP/MODIFY/CHANGE 抽列名；其余进 `SqlDdlStatement.tail`
 - SHOW CREATE TABLE / SHOW COLUMNS FROM / SHOW INDEX FROM 抽表名
 - 类型字面量：`DATE '2020-01-01'`
@@ -145,16 +145,16 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 - Oracle `(+)` 外连接（本 pass 跳过）
 - MySQL `PARTITION (p0, p1)` 表分区限定（本 pass 跳过）
 
-#### P1.3 函数与表达式
+#### P1.3 函数与表达式 ✅ 完成（2026-09-09）
 
-- `GROUP_CONCAT` / `STRING_AGG` 的 `ORDER BY` / `SEPARATOR`
-- `IF(a,b,c)`（MySQL，`IF` 是关键字，确认函数调用路径）
-- `CONVERT(expr USING charset)` vs SQL Server `CONVERT(type, expr)`
-- `JSON_EXTRACT` / `->` `->>` 已有 JSON_OP，补 `#>` `#>>` 与路径字面量
-- `MATCH (cols) AGAINST (...)` 全文
-- `IS DISTINCT FROM`（PG）
-- 数组 `col[1]`、PG `ANY(array)`
-- 类型字面量补 `INTERVAL '1 day'` 与 `X'FF'`（lexer 已有 HEX）
+- `GROUP_CONCAT` / `STRING_AGG` 的 `ORDER BY` / `SEPARATOR` ✅（含 PG `WITHIN GROUP (ORDER BY …)` 结构化）
+- `IF(a,b,c)`（MySQL，`IF` 是关键字，确认函数调用路径）✅
+- `CONVERT(expr USING charset)` vs SQL Server `CONVERT(type, expr)` ✅
+- `JSON_EXTRACT` / `->` `->>` 已有 JSON_OP，补 `#>` `#>>` 与路径字面量 ✅（`SqlBinaryOp.JSON_ARROW/_TEXT/JSON_PATH/_TEXT`）
+- `MATCH (cols) AGAINST (...)` 全文 ✅
+- `IS DISTINCT FROM`（PG）✅（含 `IS NOT DISTINCT FROM`）
+- 数组 `col[1]`、PG `ANY(array)` ✅（`SOME`/`ALL` 子查询参数；SQL Server 仍用 `[]` 引号标识符）
+- 类型字面量补 `INTERVAL '1 day'` 与 `X'FF'`（lexer 已有 HEX）✅
 
 #### P1.4 DML 边角
 
