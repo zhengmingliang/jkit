@@ -209,6 +209,14 @@ public final class SqlParser {
                 return parseMaintenance();
             case COMMENT:
                 return parseCommentOn();
+            case COPY:
+                return parseCopy();
+            case HANDLER:
+                return parseHandler();
+            case PREPARE:
+            case EXECUTE:
+            case DEALLOCATE:
+                return parsePrepareFamily();
             case LPAREN:
                 return parseSelect();
             default:
@@ -1209,6 +1217,69 @@ public final class SqlParser {
         return stmt;
     }
 
+    private SqlStatement parseCopy() {
+        expect(SqlTokenType.COPY);
+        SqlSimpleStatement stmt = new SqlSimpleStatement();
+        stmt.setStatementType(SqlStatementType.OTHER);
+        StringBuilder text = new StringBuilder("COPY");
+        if (identLike()) {
+            stmt.setName(parseName());
+            text.append(' ').append(stmt.name().qualifiedName());
+        }
+        if (!atStmtBreak()) {
+            String rest = consumeRawUntilSemi();
+            if (!rest.isEmpty()) {
+                text.append(' ').append(rest);
+            }
+        }
+        stmt.setText(text.toString());
+        return stmt;
+    }
+
+    private SqlStatement parseHandler() {
+        expect(SqlTokenType.HANDLER);
+        SqlSimpleStatement stmt = new SqlSimpleStatement();
+        stmt.setStatementType(SqlStatementType.OTHER);
+        StringBuilder text = new StringBuilder("HANDLER");
+        if (identLike()) {
+            stmt.setName(parseName());
+            text.append(' ').append(stmt.name().qualifiedName());
+        }
+        if (!atStmtBreak()) {
+            String rest = consumeRawUntilSemi();
+            if (!rest.isEmpty()) {
+                text.append(' ').append(rest);
+            }
+        }
+        stmt.setText(text.toString());
+        return stmt;
+    }
+
+    private SqlStatement parsePrepareFamily() {
+        String kind = token.text().toUpperCase();
+        next();
+        SqlSimpleStatement stmt = new SqlSimpleStatement();
+        stmt.setStatementType(SqlStatementType.OTHER);
+        StringBuilder text = new StringBuilder(kind);
+        // DEALLOCATE PREPARE stmt
+        if ("DEALLOCATE".equals(kind) && is(SqlTokenType.PREPARE)) {
+            text.append(' ').append(token.text().toUpperCase());
+            next();
+        }
+        if (identLike()) {
+            stmt.setName(parseName());
+            text.append(' ').append(stmt.name().qualifiedName());
+        }
+        if (!atStmtBreak()) {
+            String rest = consumeRawUntilSemi();
+            if (!rest.isEmpty()) {
+                text.append(' ').append(rest);
+            }
+        }
+        stmt.setText(text.toString());
+        return stmt;
+    }
+
     private SqlStatement parseGrant() {
         SqlSimpleStatement stmt = new SqlSimpleStatement();
         stmt.setStatementType(SqlStatementType.GRANT);
@@ -1294,6 +1365,7 @@ public final class SqlParser {
             ft.setFunction(parseExpr());
             expect(SqlTokenType.RPAREN);
             parseTableAlias(ft);
+            parseFunctionTableWith(ft);
             return ft;
         }
         if (match(SqlTokenType.LPAREN)) {
@@ -1324,6 +1396,7 @@ public final class SqlParser {
                 ft.setLateral(lateral);
                 ft.setFunction(parseFunction(name));
                 parseTableAlias(ft);
+                parseFunctionTableWith(ft);
                 return ft;
             }
             if (lateral) {
@@ -1547,6 +1620,7 @@ public final class SqlParser {
             case OUTPUT:
             case WHEN:
             case MATCHED:
+            case WITH:
                 return true;
             default:
                 return false;
@@ -1897,6 +1971,13 @@ public final class SqlParser {
                 id.addName(unquote(consumeIdentRaw()));
                 expr = id;
             }
+        }
+        // Oracle 外连接：col(+) / t.col(+)
+        if (lookingAtOracleOuterJoin()) {
+            next(); // (
+            next(); // +
+            expect(SqlTokenType.RPAREN);
+            return SqlUnaryExpr.of(SqlUnaryExpr.Op.ORACLE_OUTER_JOIN, expr);
         }
         if (is(SqlTokenType.LPAREN) && expr instanceof SqlIdentifier) {
             return parseFunction((SqlIdentifier) expr);
@@ -2423,6 +2504,50 @@ public final class SqlParser {
 
     private boolean atStmtBreak() {
         return isStmtSeparator() || is(SqlTokenType.EOF);
+    }
+
+    /**
+     * 当前是否 {@code (+)} Oracle 外连接标记（不消费记号）。
+     *
+     * @return 是否外连接标记
+     */
+    private boolean lookingAtOracleOuterJoin() {
+        if (!is(SqlTokenType.LPAREN)) {
+            return false;
+        }
+        SqlToken plus = lexer.peek();
+        if (plus == null || plus.type() != SqlTokenType.PLUS) {
+            return false;
+        }
+        char[] src = plus.src;
+        if (src == null) {
+            return false;
+        }
+        int i = plus.end();
+        while (i < src.length) {
+            char c = src[i];
+            if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f') {
+                i++;
+                continue;
+            }
+            return c == ')';
+        }
+        return false;
+    }
+
+    /**
+     * SQL Server {@code OPENJSON(...) WITH (...)} 等：WITH 后跟括号的 schema 定义。
+     *
+     * @param ft 表函数
+     */
+    private void parseFunctionTableWith(SqlFunctionTable ft) {
+        if (!is(SqlTokenType.WITH) || lexer.peek().type() != SqlTokenType.LPAREN) {
+            return;
+        }
+        next(); // WITH
+        expect(SqlTokenType.LPAREN);
+        String inner = skipBalancedParensContent();
+        ft.setWithDefinition("(" + inner + ")");
     }
 
     private static boolean isIndexObject(String objectType) {

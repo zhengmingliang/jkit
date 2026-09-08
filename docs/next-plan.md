@@ -142,7 +142,7 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 - `LATERAL` 子查询（PG）✅（`SqlSubqueryTable.lateral`；JOIN LATERAL / 逗号 LATERAL）
 - `TABLE(fn())` / `UNNEST` ✅（`SqlFunctionTable`；一般 `fn(...)` 表函数；可 `LATERAL`）
 - `FROM (VALUES (1),(2)) AS v(id)` 列清单 ✅（`SqlValuesTable` + `columnAliases`）
-- Oracle `(+)` 外连接（本 pass 跳过）
+- Oracle `(+)` 外连接 ✅（`SqlUnaryExpr.Op.ORACLE_OUTER_JOIN` 后缀，format `col(+)`）
 - MySQL `PARTITION (p0, p1)` 表分区限定（本 pass 跳过）
 
 #### P1.3 函数与表达式 ✅ 完成（2026-09-09）
@@ -232,11 +232,25 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 ---
 
 
+### 语料 6 缺口（2026-09-09） ✅
+
+`tools-test` corpus 原 jkit=373/379，已补：
+
+1. 仅注释/空白 → `SQL.parse` 返回 `OTHER` 空语句（不再抛 empty SQL）
+2. PG `COPY t FROM STDIN WITH (FORMAT csv)` → OTHER + 表名
+3. SQL Server `OPENJSON(@json) WITH (...)` → `SqlFunctionTable.withDefinition`
+4. MySQL `HANDLER t OPEN|READ|CLOSE` → OTHER + 表名（批处理 parseAll）
+5. Oracle `col(+)` 外连接 → `ORACLE_OUTER_JOIN`
+6. MySQL `PREPARE` / `EXECUTE` / `DEALLOCATE PREPARE` → OTHER + 名
+
+仍跳过：`PARTITION (p0)` 等非平凡边角。
+
 ### 语法缺口（2026-09-09 修过一部分）
 
 - ✅ PG `@>` / `<@`、`~`/`~*`/`!~`；MySQL `FORCE INDEX FOR JOIN|ORDER BY|GROUP BY`
 - ✅ MySQL `<=>` / `INSERT DELAYED` / `BINARY expr`；SQL Server `TOP (n) WITH TIES`；PG `TABLESAMPLE` / Oracle `SAMPLE(n)`
-- 仍跳过：Oracle `(+)`、MySQL `PARTITION (p0)`（非平凡）
+- ✅ Oracle `(+)`；仍跳过：MySQL `PARTITION (p0)`（非平凡）
+- ✅ 语料剩余缺口：comment-only→OTHER；PG `COPY … STDIN`；SQL Server `OPENJSON … WITH`；MySQL `HANDLER` / `PREPARE|EXECUTE|DEALLOCATE`（OTHER+抽名）
 
 ## 3. 对比测试工程（`/opt/workspace/zml/tools-test`）
 

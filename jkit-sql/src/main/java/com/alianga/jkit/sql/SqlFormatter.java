@@ -916,6 +916,12 @@ public final class SqlFormatter {
             } else {
                 writeExpr(ft.function());
             }
+            if (ft.withDefinition() != null && !ft.withDefinition().isEmpty()) {
+                sp();
+                kw("WITH");
+                sp();
+                out.append(ft.withDefinition());
+            }
         } else if (source instanceof SqlValuesTable) {
             SqlValuesTable vt = (SqlValuesTable) source;
             out.append('(');
@@ -1126,23 +1132,28 @@ public final class SqlFormatter {
             }
         } else if (expr instanceof SqlUnaryExpr) {
             SqlUnaryExpr u = (SqlUnaryExpr) expr;
-            if (u.operator() == SqlUnaryExpr.Op.EXISTS) {
-                kw("EXISTS");
-                sp();
-            } else if (u.operator() == SqlUnaryExpr.Op.NOT) {
-                kw("NOT");
-                sp();
-            } else if (u.operator() == SqlUnaryExpr.Op.MINUS) {
-                out.append('-');
-            } else if (u.operator() == SqlUnaryExpr.Op.PLUS) {
-                out.append('+');
-            } else if (u.operator() == SqlUnaryExpr.Op.TILDE) {
-                out.append('~');
-            } else if (u.operator() == SqlUnaryExpr.Op.BINARY) {
-                kw("BINARY");
-                sp();
+            if (u.operator() == SqlUnaryExpr.Op.ORACLE_OUTER_JOIN) {
+                writeExpr(u.expr());
+                out.append("(+)");
+            } else {
+                if (u.operator() == SqlUnaryExpr.Op.EXISTS) {
+                    kw("EXISTS");
+                    sp();
+                } else if (u.operator() == SqlUnaryExpr.Op.NOT) {
+                    kw("NOT");
+                    sp();
+                } else if (u.operator() == SqlUnaryExpr.Op.MINUS) {
+                    out.append('-');
+                } else if (u.operator() == SqlUnaryExpr.Op.PLUS) {
+                    out.append('+');
+                } else if (u.operator() == SqlUnaryExpr.Op.TILDE) {
+                    out.append('~');
+                } else if (u.operator() == SqlUnaryExpr.Op.BINARY) {
+                    kw("BINARY");
+                    sp();
+                }
+                writeExpr(u.expr());
             }
-            writeExpr(u.expr());
         } else if (expr instanceof SqlBetweenExpr) {
             SqlBetweenExpr b = (SqlBetweenExpr) expr;
             writeExpr(b.expr());

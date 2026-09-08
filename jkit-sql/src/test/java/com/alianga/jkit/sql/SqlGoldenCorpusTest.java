@@ -232,6 +232,17 @@ public class SqlGoldenCorpusTest {
                 {"oracle", "SELECT * FROM t FETCH FIRST 10 ROWS ONLY"},
                 {"oracle", "SELECT id FROM emp ORDER BY id FETCH FIRST 5 ROWS ONLY"},
                 {"sqlserver", "SELECT * FROM a OUTER APPLY (SELECT id FROM b WHERE b.aid = a.id) y"},
+                {"postgres", "COPY t FROM STDIN WITH (FORMAT csv)"},
+                {"sqlserver", "SELECT * FROM OPENJSON(@json) WITH (id int '$.id', name nvarchar(50) '$.name')"},
+                {"mysql", "HANDLER t OPEN"},
+                {"mysql", "HANDLER t READ FIRST"},
+                {"mysql", "HANDLER t CLOSE"},
+                {"mysql", "HANDLER t OPEN; HANDLER t READ FIRST; HANDLER t CLOSE"},
+                {"oracle", "SELECT e.ename, d.dname FROM emp e, dept d WHERE e.deptno = d.deptno(+)"},
+                {"mysql", "PREPARE stmt FROM 'SELECT * FROM t WHERE id = ?'"},
+                {"mysql", "EXECUTE stmt USING @id"},
+                {"mysql", "DEALLOCATE PREPARE stmt"},
+                {"mysql", "PREPARE stmt FROM 'SELECT * FROM t WHERE id = ?'; EXECUTE stmt USING @id; DEALLOCATE PREPARE stmt"},
         });
     }
 

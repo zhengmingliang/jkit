@@ -38,11 +38,13 @@
 
 ### 修复
 
+- `jkit-sql`：仅注释/空白输入不再抛 `empty SQL`，归为 `SqlSimpleStatement.OTHER`（空 text）。
 - `jkit-sql`：PostgreSQL `@>` / `<@` 不再被词法误判为 `VARIABLE`；`~` / `~*` / `!~` / `!~*` 按方言解析为正则比较（MySQL 仍保留一元 `~`）。
 - `jkit-sql`：MySQL `FORCE/USE/IGNORE INDEX FOR JOIN|ORDER BY|GROUP BY (...)` 不再误吞进 `FOR UPDATE`。
 
 ### 新增
 
+- `jkit-sql`：补语料缺口 — Oracle `(+)` 外连接（`SqlUnaryExpr.Op.ORACLE_OUTER_JOIN`）；SQL Server `OPENJSON(...) WITH (...)`（`SqlFunctionTable.withDefinition`）；PG `COPY … FROM STDIN`；MySQL `HANDLER` / `PREPARE` / `EXECUTE` / `DEALLOCATE PREPARE`（OTHER + 抽名）。
 - `jkit-sql`：MySQL `<=>`、`INSERT DELAYED`、`BINARY expr`；SQL Server `TOP (n) WITH TIES`；PG `TABLESAMPLE` / Oracle `SAMPLE(n)`。
 
 - `jkit-sql`：`SqlBuilder` 流式构建 SELECT/INSERT/UPDATE/DELETE + `SQL.and`/`or`/`concat`/`builder`；分页 API `getLimit`/`getOffset`/`setLimit`/`setOffset`/`setPage`；`SqlDialect` 能力矩阵与别名；AST `toString()` 输出紧凑 SQL。

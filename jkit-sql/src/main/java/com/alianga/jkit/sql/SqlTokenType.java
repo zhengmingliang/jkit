@@ -277,6 +277,11 @@ public enum SqlTokenType {
     BEGIN,
     DECLARE,
     VACUUM,
+    COPY,
+    HANDLER,
+    PREPARE,
+    EXECUTE,
+    DEALLOCATE,
     GO;
 
     /**

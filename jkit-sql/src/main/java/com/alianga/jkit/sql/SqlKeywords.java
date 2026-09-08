@@ -227,6 +227,11 @@ final class SqlKeywords {
         put("BEGIN", SqlTokenType.BEGIN);
         put("DECLARE", SqlTokenType.DECLARE);
         put("VACUUM", SqlTokenType.VACUUM);
+        put("COPY", SqlTokenType.COPY);
+        put("HANDLER", SqlTokenType.HANDLER);
+        put("PREPARE", SqlTokenType.PREPARE);
+        put("EXECUTE", SqlTokenType.EXECUTE);
+        put("DEALLOCATE", SqlTokenType.DEALLOCATE);
         put("GO", SqlTokenType.GO);
     }
 

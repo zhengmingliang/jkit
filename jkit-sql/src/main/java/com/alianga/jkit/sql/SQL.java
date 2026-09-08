@@ -4,7 +4,9 @@ import com.alianga.jkit.sql.ast.SqlExpr;
 import com.alianga.jkit.sql.ast.SqlLiteral;
 import com.alianga.jkit.sql.ast.SqlNode;
 import com.alianga.jkit.sql.ast.SqlSelect;
+import com.alianga.jkit.sql.ast.SqlSimpleStatement;
 import com.alianga.jkit.sql.ast.SqlStatement;
+import com.alianga.jkit.sql.ast.SqlStatementType;
 import com.alianga.jkit.sql.visitor.SqlVisitorAdapter;
 
 import java.util.ArrayList;
@@ -128,7 +130,11 @@ public final class SQL {
     public static SqlStatement parse(String sql, SqlDialect dialect, SqlParseOptions options) {
         List<SqlStatement> all = parseAll(sql, dialect, options);
         if (all.isEmpty()) {
-            throw new SqlParseException("empty SQL", 1, 1, "");
+            // 仅注释 / 空白：不硬失败，返回 OTHER 空语句（语料 comment-only 边）
+            SqlSimpleStatement empty = new SqlSimpleStatement();
+            empty.setStatementType(SqlStatementType.OTHER);
+            empty.setText("");
+            return empty;
         }
         return all.get(0);
     }

@@ -1555,4 +1555,97 @@ public class SqlParserTest {
         assertTrue(SQL.toSqlString(concat, SqlDialect.MYSQL).contains("||"));
     }
 
+    /**
+     * 仅注释 / 空白：不抛 empty SQL，归为 OTHER。
+     */
+    @Test
+    public void commentOnlyParsesAsEmptyOther() {
+        SqlStatement stmt = SQL.parse("-- line comment SELECT 1 /* block */ FROM t");
+        assertEquals(SqlStatementType.OTHER, stmt.type());
+        assertTrue(stmt instanceof SqlSimpleStatement);
+
+        SqlStatement blank = SQL.parse("   /* block only */  ");
+        assertEquals(SqlStatementType.OTHER, blank.type());
+        assertTrue(SQL.parseAll("-- x").isEmpty());
+    }
+
+    /**
+     * PG COPY … STDIN：OTHER + 抽表名。
+     */
+    @Test
+    public void copyFromStdin() {
+        SqlSimpleStatement copy = (SqlSimpleStatement) SQL.parse(
+                "COPY t FROM STDIN WITH (FORMAT csv)", SqlDialect.POSTGRES);
+        assertEquals(SqlStatementType.OTHER, copy.type());
+        assertEquals("t", copy.name().simpleName());
+        assertTrue(copy.text().toUpperCase().contains("STDIN"));
+        assertTrue(SQL.tables(copy).contains("t"));
+    }
+
+    /**
+     * SQL Server OPENJSON … WITH (schema)。
+     */
+    @Test
+    public void openJsonWithClause() {
+        SqlSelect select = (SqlSelect) SQL.parse(
+                "SELECT * FROM OPENJSON(@json) WITH (id int '$.id', name nvarchar(50) '$.name')",
+                SqlDialect.SQLSERVER);
+        assertTrue(select.from() instanceof SqlFunctionTable);
+        SqlFunctionTable ft = (SqlFunctionTable) select.from();
+        assertNotNull(ft.withDefinition());
+        assertTrue(ft.withDefinition().contains("$.id"));
+        String fmt = SQL.toSqlString(select, SqlDialect.SQLSERVER);
+        assertTrue(fmt.toUpperCase().contains("OPENJSON"));
+        assertTrue(fmt.toUpperCase().contains("WITH"));
+    }
+
+    /**
+     * MySQL HANDLER 批：OTHER + 抽表。
+     */
+    @Test
+    public void handlerBatch() {
+        java.util.List<SqlStatement> all = SQL.parseAll(
+                "HANDLER t OPEN; HANDLER t READ FIRST; HANDLER t CLOSE");
+        assertEquals(3, all.size());
+        for (int i = 0; i < all.size(); i++) {
+            assertEquals(SqlStatementType.OTHER, all.get(i).type());
+            assertTrue(SQL.tables(all.get(i)).contains("t"));
+        }
+        assertTrue(((SqlSimpleStatement) all.get(1)).text().toUpperCase().contains("READ"));
+    }
+
+    /**
+     * Oracle (+) 外连接后缀。
+     */
+    @Test
+    public void oracleOuterJoinPlus() {
+        SqlSelect select = (SqlSelect) SQL.parse(
+                "SELECT e.ename, d.dname FROM emp e, dept d WHERE e.deptno = d.deptno(+)",
+                SqlDialect.ORACLE);
+        SqlBinaryExpr where = (SqlBinaryExpr) select.where();
+        assertTrue(where.right() instanceof SqlUnaryExpr);
+        SqlUnaryExpr u = (SqlUnaryExpr) where.right();
+        assertEquals(SqlUnaryExpr.Op.ORACLE_OUTER_JOIN, u.operator());
+        String fmt = SQL.toSqlString(select, SqlDialect.ORACLE);
+        assertTrue(fmt.contains("(+)"));
+        SqlSelect again = (SqlSelect) SQL.parse(fmt, SqlDialect.ORACLE);
+        assertTrue(((SqlBinaryExpr) again.where()).right() instanceof SqlUnaryExpr);
+    }
+
+    /**
+     * MySQL PREPARE / EXECUTE / DEALLOCATE。
+     */
+    @Test
+    public void prepareExecuteDeallocate() {
+        java.util.List<SqlStatement> all = SQL.parseAll(
+                "PREPARE stmt FROM 'SELECT * FROM t WHERE id = ?'; "
+                        + "EXECUTE stmt USING @id; DEALLOCATE PREPARE stmt");
+        assertEquals(3, all.size());
+        assertEquals(SqlStatementType.OTHER, all.get(0).type());
+        assertEquals("stmt", ((SqlSimpleStatement) all.get(0)).name().simpleName());
+        assertTrue(((SqlSimpleStatement) all.get(0)).text().toUpperCase().startsWith("PREPARE"));
+        assertTrue(((SqlSimpleStatement) all.get(1)).text().toUpperCase().startsWith("EXECUTE"));
+        assertTrue(((SqlSimpleStatement) all.get(2)).text().toUpperCase().contains("DEALLOCATE"));
+    }
+
 }

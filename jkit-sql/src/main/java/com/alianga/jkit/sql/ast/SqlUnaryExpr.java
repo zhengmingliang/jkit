@@ -3,7 +3,7 @@ package com.alianga.jkit.sql.ast;
 import com.alianga.jkit.sql.visitor.SqlVisitor;
 
 /**
- * 一元表达式：{@code NOT}、{@code -}、{@code ~}、{@code EXISTS}。
+ * 一元表达式：{@code NOT}、{@code -}、{@code ~}、{@code EXISTS}、Oracle {@code (+)}。
  *
  * @author 郑明亮
  * @since 2.1.0
@@ -19,7 +19,9 @@ public final class SqlUnaryExpr extends SqlExpr {
         TILDE,
         /** MySQL {@code BINARY expr} */
         BINARY,
-        EXISTS
+        EXISTS,
+        /** Oracle 外连接标记 {@code col(+)}（后缀） */
+        ORACLE_OUTER_JOIN
     }
 
     private Op operator;
