@@ -40,12 +40,14 @@ public final class SqlRewriter {
         if (select.union() != null) {
             addLimit(select.union(), rowCount, dialect);
         }
-        if (dialect == SqlDialect.SQLSERVER) {
+        SqlDialect d = dialect == null ? SqlDialect.MYSQL : dialect;
+        if (d.supportsTop()) {
             if (select.top() == null) {
                 select.setTop(SqlLiteral.of(SqlLiteral.Kind.NUMBER, Long.toString(rowCount)));
             }
             return statement;
         }
+        // LIMIT 形态：MySQL/PG/H2/ANSI；Oracle 亦写 LIMIT（解析器可吃），FETCH 留给分页 API
         if (select.limit() == null) {
             SqlLimit limit = new SqlLimit();
             limit.setRowCount(SqlLiteral.of(SqlLiteral.Kind.NUMBER, Long.toString(rowCount)));

@@ -56,6 +56,16 @@ SQL.parse(sql, SqlDialect.ANSI);
 SqlDialect.fromName("gbase");     // MYSQL
 SqlDialect.fromName("gaussdb");   // POSTGRES
 SqlDialect.fromName("dm");        // ORACLE
+SqlDialect.fromName("tidb");      // MYSQL
+SqlDialect.fromName("sqlite");    // ANSI
+
+// 能力查询（改写/格式化单一事实来源）
+SqlDialect.MYSQL.supportsLimitOffset();   // true
+SqlDialect.SQLSERVER.supportsTop();       // true
+SqlDialect.ORACLE.supportsFetchFirst();   // true
+SqlDialect.ORACLE.supportsRownum();       // true
+SqlDialect.POSTGRES.pipesAreConcat();     // true
+SqlDialect.MYSQL.quoteIdent("user");      // `user`
 ```
 
 非法 SQL 抛 `SqlParseException`，带行号、列号和附近原文，不返回半棵树。
@@ -123,7 +133,8 @@ SQL.format(stmt, SqlDialect.MYSQL, true);
 | 双引号 | 默认当字符串 | 当标识符 |
 | `\|\|` | 逻辑 OR（`SqlParseOptions.pipesAsConcat(true)` 可改为拼接） | 字符串拼接 |
 | `#` 行注释 | 是 | 否 |
-| 分页 | `LIMIT` / `LIMIT off,n` | `LIMIT`/`OFFSET`/`FETCH`；SQL Server 用 `TOP` |
+| 分页 | `LIMIT` / `LIMIT off,n`（`supportsLimitOffset`） | PG/ANSI/H2：LIMIT+FETCH；Oracle：FETCH/ROWNUM；SQL Server：TOP + OFFSET FETCH |
+| `\|\|` 能力 | `pipesAsOr()` | `pipesAreConcat()` |
 
 ## 参数抽取
 
