@@ -11,6 +11,7 @@ import com.alianga.jkit.sql.visitor.SqlVisitor;
 public final class SqlTable extends SqlTableSource {
     private SqlIdentifier name;
     private String indexHint;
+    private String optimizerHint;
 
     /**
      * @param name 表名
@@ -48,6 +49,22 @@ public final class SqlTable extends SqlTableSource {
      */
     public void setIndexHint(String indexHint) {
         this.indexHint = indexHint;
+    }
+
+    /**
+     * @return 表级优化器提示原文（slash-star-plus），可空
+     * @since 2.1.0
+     */
+    public String optimizerHint() {
+        return optimizerHint;
+    }
+
+    /**
+     * @param optimizerHint 表级优化器提示
+     * @since 2.1.0
+     */
+    public void setOptimizerHint(String optimizerHint) {
+        this.optimizerHint = optimizerHint;
     }
 
     /**

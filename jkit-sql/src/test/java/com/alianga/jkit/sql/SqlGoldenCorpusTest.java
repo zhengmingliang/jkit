@@ -206,6 +206,10 @@ public class SqlGoldenCorpusTest {
                 {"postgres", "COMMENT ON TABLE t IS 'users'"},
                 {"postgres", "COMMENT ON COLUMN t.id IS 'pk'"},
                 {"sqlserver", "SELECT TOP 3 * FROM t ORDER BY id"},
+                {"mysql", "/*!40101 SET NAMES utf8 */"},
+                {"mysql", "SELECT /*!50000 DISTINCT */ id FROM t"},
+                {"mysql", "SELECT /*+ INDEX(t idx_id) */ id FROM t"},
+                {"mysql", "SELECT id FROM t /*+ INDEX(t idx_name) */ WHERE id = 1"},
         });
     }
 

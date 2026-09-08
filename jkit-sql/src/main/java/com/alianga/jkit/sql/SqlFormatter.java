@@ -77,6 +77,9 @@ public final class SqlFormatter {
         if (node == null) {
             return;
         }
+        if (node instanceof SqlStatement) {
+            writeLeadingComments((SqlStatement) node);
+        }
         if (node instanceof SqlSelect) {
             writeSelect((SqlSelect) node);
         } else if (node instanceof SqlInsert) {
@@ -95,6 +98,16 @@ public final class SqlFormatter {
             writeExpr((SqlExpr) node);
         } else {
             out.append(node.getClass().getSimpleName());
+        }
+    }
+
+    private void writeLeadingComments(SqlStatement stmt) {
+        if (stmt == null || stmt.comments().isEmpty()) {
+            return;
+        }
+        for (int i = 0; i < stmt.comments().size(); i++) {
+            out.append(stmt.comments().get(i));
+            nl();
         }
     }
 
@@ -139,6 +152,12 @@ public final class SqlFormatter {
             return;
         }
         kw("SELECT");
+        if (!select.hints().isEmpty()) {
+            for (int hi = 0; hi < select.hints().size(); hi++) {
+                sp();
+                out.append(select.hints().get(hi));
+            }
+        }
         if (select.distinct()) {
             sp();
             kw("DISTINCT");
@@ -822,6 +841,10 @@ public final class SqlFormatter {
             if (table.indexHint() != null) {
                 sp();
                 out.append(table.indexHint());
+            }
+            if (table.optimizerHint() != null) {
+                sp();
+                out.append(table.optimizerHint());
             }
         } else if (source instanceof SqlJoin) {
             SqlJoin join = (SqlJoin) source;

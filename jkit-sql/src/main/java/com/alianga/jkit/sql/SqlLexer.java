@@ -16,6 +16,8 @@ public final class SqlLexer {
     private int line;
     private int lineStart;
     private SqlDialect dialect;
+    private boolean keepComments;
+    private int executableDepth;
 
     private final SqlToken tokA = new SqlToken();
     private final SqlToken tokB = new SqlToken();
@@ -60,6 +62,24 @@ public final class SqlLexer {
         this.dialect = dialect == null ? SqlDialect.MYSQL : dialect;
         this.peeked = false;
         this.peekBuf = null;
+        this.executableDepth = 0;
+    }
+
+    /**
+     * 是否保留普通注释为 {@link SqlTokenType#SQL_COMMENT}（默认 false）。
+     * 可执行注释与优化器 hint 不受此开关影响。
+     *
+     * @param keepComments 保留注释
+     */
+    public void setKeepComments(boolean keepComments) {
+        this.keepComments = keepComments;
+    }
+
+    /**
+     * @return 是否保留普通注释
+     */
+    public boolean keepComments() {
+        return keepComments;
     }
 
     /**
@@ -114,6 +134,17 @@ public final class SqlLexer {
         int tCol = col();
         int tStart = pos;
         char c = src[pos];
+        if (c == '/' && pos + 1 < limit && src[pos + 1] == '*'
+                && pos + 2 < limit && src[pos + 2] == '+') {
+            scanHint(token, tLine, tCol, tStart);
+            return;
+        }
+        if (keepComments && ((c == '-' && pos + 1 < limit && src[pos + 1] == '-')
+                || (c == '#' && dialect.hashLineComment())
+                || (c == '/' && pos + 1 < limit && src[pos + 1] == '*'))) {
+            scanSqlComment(token, tLine, tCol, tStart);
+            return;
+        }
         if (pos + 1 < limit && src[pos + 1] == '\'') {
             if (c == 'N' || c == 'n') {
                 pos++;
@@ -488,6 +519,11 @@ public final class SqlLexer {
 
     private void skipSpaceAndComment() {
         while (pos < limit) {
+            if (executableDepth > 0 && pos + 1 < limit && src[pos] == '*' && src[pos + 1] == '/') {
+                pos += 2;
+                executableDepth--;
+                continue;
+            }
             char c = src[pos];
             if (c == ' ' || c == '\t' || c == '\r') {
                 pos++;
@@ -500,16 +536,36 @@ public final class SqlLexer {
                 continue;
             }
             if (c == '-' && pos + 1 < limit && src[pos + 1] == '-') {
+                if (keepComments) {
+                    return;
+                }
                 pos += 2;
                 skipToEol();
                 continue;
             }
             if (c == '#' && dialect.hashLineComment()) {
+                if (keepComments) {
+                    return;
+                }
                 pos++;
                 skipToEol();
                 continue;
             }
             if (c == '/' && pos + 1 < limit && src[pos + 1] == '*') {
+                if (pos + 2 < limit && src[pos + 2] == '!') {
+                    pos += 3;
+                    while (pos < limit && src[pos] >= '0' && src[pos] <= '9') {
+                        pos++;
+                    }
+                    executableDepth++;
+                    continue;
+                }
+                if (pos + 2 < limit && src[pos + 2] == '+') {
+                    return;
+                }
+                if (keepComments) {
+                    return;
+                }
                 pos += 2;
                 skipBlockComment();
                 continue;
@@ -537,6 +593,53 @@ public final class SqlLexer {
             pos++;
         }
         pos = limit;
+    }
+
+    private void scanHint(SqlToken token, int tLine, int tCol, int tStart) {
+        pos += 3;
+        while (pos + 1 < limit) {
+            if (src[pos] == '*' && src[pos + 1] == '/') {
+                pos += 2;
+                token.set(SqlTokenType.HINT, src, tStart, pos, tLine, tCol);
+                return;
+            }
+            if (src[pos] == '\n') {
+                line++;
+                lineStart = pos + 1;
+            }
+            pos++;
+        }
+        pos = limit;
+        token.set(SqlTokenType.HINT, src, tStart, pos, tLine, tCol);
+    }
+
+    private void scanSqlComment(SqlToken token, int tLine, int tCol, int tStart) {
+        char c = src[pos];
+        if (c == '-' || c == '#') {
+            if (c == '-') {
+                pos += 2;
+            } else {
+                pos++;
+            }
+            skipToEol();
+            token.set(SqlTokenType.SQL_COMMENT, src, tStart, pos, tLine, tCol);
+            return;
+        }
+        pos += 2;
+        while (pos + 1 < limit) {
+            if (src[pos] == '*' && src[pos + 1] == '/') {
+                pos += 2;
+                token.set(SqlTokenType.SQL_COMMENT, src, tStart, pos, tLine, tCol);
+                return;
+            }
+            if (src[pos] == '\n') {
+                line++;
+                lineStart = pos + 1;
+            }
+            pos++;
+        }
+        pos = limit;
+        token.set(SqlTokenType.SQL_COMMENT, src, tStart, pos, tLine, tCol);
     }
 
     private int col() {

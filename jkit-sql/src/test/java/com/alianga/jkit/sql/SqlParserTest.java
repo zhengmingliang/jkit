@@ -4,12 +4,14 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
+
 import com.alianga.jkit.sql.ast.SqlBinaryExpr;
 import com.alianga.jkit.sql.ast.SqlBinaryOp;
 import com.alianga.jkit.sql.ast.SqlDdlStatement;
 import com.alianga.jkit.sql.ast.SqlDelete;
 import com.alianga.jkit.sql.ast.SqlFunctionExpr;
 import com.alianga.jkit.sql.ast.SqlFunctionTable;
+import com.alianga.jkit.sql.ast.SqlInExpr;
 import com.alianga.jkit.sql.ast.SqlInsert;
 import com.alianga.jkit.sql.ast.SqlJoin;
 import com.alianga.jkit.sql.ast.SqlMerge;
@@ -21,12 +23,15 @@ import com.alianga.jkit.sql.ast.SqlSimpleStatement;
 import com.alianga.jkit.sql.ast.SqlStatement;
 import com.alianga.jkit.sql.ast.SqlStatementType;
 import com.alianga.jkit.sql.ast.SqlSubqueryTable;
+import com.alianga.jkit.sql.ast.SqlTable;
 import com.alianga.jkit.sql.ast.SqlUpdate;
 import com.alianga.jkit.sql.ast.SqlValuesTable;
 import com.alianga.jkit.sql.ast.SqlWindowDefinition;
+
 import org.junit.Test;
 
 import java.util.List;
+import java.util.Set;
 
 /**
  * SQL 解析器功能与兼容性测试。
@@ -68,6 +73,27 @@ public class SqlParserTest {
         assertTrue(tables.toString(), tables.contains("user"));
         assertTrue(tables.toString(), tables.contains("order_t"));
         assertTrue(tables.toString(), tables.contains("vip"));
+    }
+
+    @Test
+    public void parseComplicateSql() {
+        SqlStatement statement = SQL.parse(
+                "select * from JER_CASPINFO where isremark='0'  and (isCustomer='0' or isCustomer='' or isCustomer " +
+                        "is null)  and reportUnitCode = '8600000011'  and bbq = '202601--'  and taskCode = 'TM2_1'  order by " +
+                        "createdatetime desc");
+        SqlSchemaStat stat = SQL.stat(statement);
+        Set<String> columns = stat.getColumns();
+        System.out.println("columns = " + columns);
+        List<String> conditions = stat.getConditions();
+        List<String> groupByColumns = stat.getGroupByColumns();
+        List<String> orderByColumns = stat.getOrderByColumns();
+        System.out.println("conditions = " + conditions);
+        System.out.println("groupByColumns = " + groupByColumns);
+        System.out.println("orderByColumns = " + orderByColumns);
+        SqlSelect select = (SqlSelect) statement;
+        System.out.println(SQL.toSqlString(SqlRewriter.addLimit(statement, 100, SqlDialect.ORACLE)));
+        System.out.println(select.limit());
+        System.out.println(SQL.toSqlString(statement));
     }
 
     /**
@@ -1125,5 +1151,79 @@ public class SqlParserTest {
         assertEquals(SqlStatementType.SELECT, batch.get(0).type());
         assertEquals(SqlStatementType.SELECT, batch.get(1).type());
         assertFalse(SQL.toSqlString(batch.get(0)).toUpperCase().contains(" GO"));
+    }
+
+    /**
+     * P1.6：MySQL 可执行注释展开为内部 SQL，不整段丢弃。
+     */
+    @Test
+    public void p16ExecutableComments() {
+        SqlStatement set = SQL.parse("/*!40101 SET NAMES utf8 */");
+        assertEquals(SqlStatementType.SET, set.type());
+        String fmt = SQL.toSqlString(set);
+        assertTrue(fmt, fmt.toUpperCase().contains("SET"));
+        assertTrue(fmt, fmt.toUpperCase().contains("NAMES"));
+
+        SqlSelect select = (SqlSelect) SQL.parse(
+                "SELECT /*!50000 DISTINCT */ id FROM t /*!40101 USE INDEX (PRIMARY) */");
+        assertTrue(select.distinct());
+        assertEquals("t", ((SqlTable) select.from()).name().simpleName());
+        // USE INDEX 在可执行注释展开后应由 parseTableHints 吃掉
+        assertNotNull(((SqlTable) select.from()).indexHint());
+        SQL.parse(SQL.toSqlString(select));
+    }
+
+    /**
+     * P1.6：优化器 hint 挂到 SELECT / 表，format 可输出。
+     */
+    @Test
+    public void p16OptimizerHints() {
+        SqlSelect select = (SqlSelect) SQL.parse("SELECT /*+ INDEX(t idx_id) */ id FROM t");
+        assertEquals(1, select.hints().size());
+        assertTrue(select.hints().get(0), select.hints().get(0).contains("INDEX"));
+        String fmt = SQL.toSqlString(select);
+        assertTrue(fmt, fmt.contains("/*+"));
+        assertTrue(fmt, fmt.contains("INDEX"));
+        SqlSelect again = (SqlSelect) SQL.parse(fmt);
+        assertEquals(1, again.hints().size());
+
+        SqlSelect tableHint = (SqlSelect) SQL.parse(
+                "SELECT id FROM t /*+ INDEX(t idx_name) */ WHERE id = 1");
+        SqlTable table = (SqlTable) tableHint.from();
+        assertNotNull(table.optimizerHint());
+        assertTrue(table.optimizerHint(), table.optimizerHint().contains("INDEX"));
+        String tfmt = SQL.toSqlString(tableHint);
+        assertTrue(tfmt, tfmt.contains("/*+"));
+        SqlSelect tableAgain = (SqlSelect) SQL.parse(tfmt);
+        assertNotNull(((SqlTable) tableAgain.from()).optimizerHint());
+    }
+
+    /**
+     * P1.6：keepComments 默认 false；开启后语句前注释进 AST。
+     */
+    @Test
+    public void p16KeepComments() {
+        SqlSelect hot = (SqlSelect) SQL.parse("-- dropped\nSELECT 1 FROM t /* also dropped */");
+        assertTrue(hot.comments().isEmpty());
+        assertEquals(0, hot.hints().size());
+
+        SqlParseOptions opts = SqlParseOptions.defaults().keepComments(true);
+        SqlSelect kept = (SqlSelect) SQL.parse("-- keep me\nSELECT 1 /* block */ FROM t",
+                SqlDialect.MYSQL, opts);
+        assertFalse(kept.comments().isEmpty());
+        boolean foundLine = false;
+        boolean foundBlock = false;
+        for (String c : kept.comments()) {
+            if (c.contains("keep me")) {
+                foundLine = true;
+            }
+            if (c.contains("block")) {
+                foundBlock = true;
+            }
+        }
+        assertTrue("line comment kept", foundLine);
+        assertTrue("block comment kept", foundBlock);
+        String fmt = SQL.toSqlString(kept);
+        assertTrue(fmt, fmt.contains("keep me") || fmt.contains("--"));
     }
 }

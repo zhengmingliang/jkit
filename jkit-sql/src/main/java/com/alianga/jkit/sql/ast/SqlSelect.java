@@ -3,6 +3,7 @@ package com.alianga.jkit.sql.ast;
 import com.alianga.jkit.sql.visitor.SqlVisitor;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -34,6 +35,7 @@ public final class SqlSelect extends SqlStatement {
     private SqlExpr startWith;
     private final List<SqlWindowDefinition> windows = new ArrayList<SqlWindowDefinition>(2);
     private boolean valuesClause;
+    private List<String> hints;
 
     /**
      * {@inheritDoc}
@@ -41,6 +43,31 @@ public final class SqlSelect extends SqlStatement {
     @Override
     public SqlStatementType type() {
         return SqlStatementType.SELECT;
+    }
+
+    /**
+     * @return 优化器提示原文列表（含 slash-star-plus 包装），可能为空列表
+     * @since 2.1.0
+     */
+    public List<String> hints() {
+        if (hints == null) {
+            return Collections.emptyList();
+        }
+        return hints;
+    }
+
+    /**
+     * @param hint 优化器提示原文
+     * @since 2.1.0
+     */
+    public void addHint(String hint) {
+        if (hint == null || hint.isEmpty()) {
+            return;
+        }
+        if (hints == null) {
+            hints = new ArrayList<String>(2);
+        }
+        hints.add(hint);
     }
 
     /**

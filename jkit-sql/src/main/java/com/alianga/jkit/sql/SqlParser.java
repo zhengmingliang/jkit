@@ -51,6 +51,8 @@ public final class SqlParser {
     private final SqlLexer lexer = new SqlLexer();
     private SqlToken token;
     private SqlDialect dialect;
+    private boolean keepComments;
+    private List<String> pendingComments;
 
     /**
      * 绑定输入。
@@ -59,8 +61,26 @@ public final class SqlParser {
      * @param dialect 方言
      */
     public void reset(String sql, SqlDialect dialect) {
+        reset(sql, dialect, SqlParseOptions.defaults());
+    }
+
+    /**
+     * 绑定输入与解析选项。
+     *
+     * @param sql SQL
+     * @param dialect 方言
+     * @param options 选项，null 视为默认
+     * @since 2.1.0
+     */
+    public void reset(String sql, SqlDialect dialect, SqlParseOptions options) {
         this.dialect = dialect == null ? SqlDialect.MYSQL : dialect;
+        if (options == null) {
+            options = SqlParseOptions.defaults();
+        }
+        this.keepComments = options.keepComments();
+        this.pendingComments = null;
         lexer.reset(sql, this.dialect);
+        lexer.setKeepComments(this.keepComments);
         next();
     }
 
@@ -92,10 +112,14 @@ public final class SqlParser {
      * @return 语句
      */
     public SqlStatement parseStatement() {
+        SqlStatement stmt;
         if (is(SqlTokenType.WITH)) {
-            return parseWith();
+            stmt = parseWith();
+        } else {
+            stmt = parseStatementNoWith();
         }
-        return parseStatementNoWith();
+        attachPendingComments(stmt);
+        return stmt;
     }
 
     private SqlStatement parseStatementNoWith() {
@@ -197,6 +221,7 @@ public final class SqlParser {
         }
         expect(SqlTokenType.SELECT);
         SqlSelect select = new SqlSelect();
+        consumeSelectHints(select);
         if (match(SqlTokenType.DISTINCT) || match(SqlTokenType.DISTINCTROW)) {
             select.setDistinct(true);
             if (match(SqlTokenType.ON)) {
@@ -215,6 +240,7 @@ public final class SqlParser {
             select.setTop(parsePrimary());
             match(SqlTokenType.PERCENT);
         }
+        consumeSelectHints(select);
         do {
             select.addSelectItem(parseSelectItem());
         } while (match(SqlTokenType.COMMA));
@@ -1271,6 +1297,15 @@ public final class SqlParser {
     }
 
     private void parseTableHints(SqlTable table) {
+        while (is(SqlTokenType.HINT)) {
+            String h = token.text();
+            next();
+            if (table.optimizerHint() == null) {
+                table.setOptimizerHint(h);
+            } else {
+                table.setOptimizerHint(table.optimizerHint() + " " + h);
+            }
+        }
         if (is(SqlTokenType.USE) || is(SqlTokenType.FORCE) || is(SqlTokenType.IGNORE)) {
             StringBuilder sb = new StringBuilder();
             sb.append(token.text());
@@ -1287,6 +1322,36 @@ public final class SqlParser {
             }
             table.setIndexHint(sb.toString());
         }
+        while (is(SqlTokenType.HINT)) {
+            String h = token.text();
+            next();
+            if (table.optimizerHint() == null) {
+                table.setOptimizerHint(h);
+            } else {
+                table.setOptimizerHint(table.optimizerHint() + " " + h);
+            }
+        }
+    }
+
+    private void consumeSelectHints(SqlSelect select) {
+        while (is(SqlTokenType.HINT)) {
+            select.addHint(token.text());
+            next();
+        }
+    }
+
+    private void attachPendingComments(SqlStatement stmt) {
+        if (!keepComments || pendingComments == null || pendingComments.isEmpty() || stmt == null) {
+            return;
+        }
+        if (stmt.comments().isEmpty()) {
+            stmt.setComments(pendingComments);
+        } else {
+            for (int i = 0; i < pendingComments.size(); i++) {
+                stmt.addComment(pendingComments.get(i));
+            }
+        }
+        pendingComments = null;
     }
 
     private String parseAlias(boolean inFrom) {
@@ -2389,6 +2454,15 @@ public final class SqlParser {
 
     private void next() {
         token = lexer.next();
+        if (keepComments) {
+            while (token.type() == SqlTokenType.SQL_COMMENT) {
+                if (pendingComments == null) {
+                    pendingComments = new ArrayList<String>(2);
+                }
+                pendingComments.add(token.text());
+                token = lexer.next();
+            }
+        }
     }
 
     private SqlParseException error(String message) {

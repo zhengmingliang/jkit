@@ -58,7 +58,20 @@ public final class SQL {
      * @return 第一条语句
      */
     public static SqlStatement parse(String sql, SqlDialect dialect) {
-        List<SqlStatement> all = parseAll(sql, dialect);
+        return parse(sql, dialect, SqlParseOptions.defaults());
+    }
+
+    /**
+     * 解析一条语句（带选项）。
+     *
+     * @param sql SQL
+     * @param dialect 方言
+     * @param options 解析选项，null 视为默认
+     * @return 第一条语句
+     * @since 2.1.0
+     */
+    public static SqlStatement parse(String sql, SqlDialect dialect, SqlParseOptions options) {
+        List<SqlStatement> all = parseAll(sql, dialect, options);
         if (all.isEmpty()) {
             throw new SqlParseException("empty SQL", 1, 1, "");
         }
@@ -83,11 +96,24 @@ public final class SQL {
      * @return 语句列表，无语句时为空列表
      */
     public static List<SqlStatement> parseAll(String sql, SqlDialect dialect) {
+        return parseAll(sql, dialect, SqlParseOptions.defaults());
+    }
+
+    /**
+     * 解析分号分隔的多条语句（带选项）。
+     *
+     * @param sql SQL
+     * @param dialect 方言
+     * @param options 解析选项，null 视为默认
+     * @return 语句列表，无语句时为空列表
+     * @since 2.1.0
+     */
+    public static List<SqlStatement> parseAll(String sql, SqlDialect dialect, SqlParseOptions options) {
         if (sql == null || sql.trim().isEmpty()) {
             return Collections.emptyList();
         }
         SqlParser parser = PARSER.get();
-        parser.reset(sql, dialect);
+        parser.reset(sql, dialect, options);
         return parser.parseAll();
     }
 

@@ -53,6 +53,11 @@ public enum SqlTokenType {
     TILDE,
     QUESTION,
 
+    /** 优化器提示（slash-star-plus ... star-slash） */
+    HINT,
+    /** 保留的行/块注释（仅 keepComments=true 时出现） */
+    SQL_COMMENT,
+
     SELECT,
     INSERT,
     UPDATE,

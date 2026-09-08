@@ -175,11 +175,11 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 - `COMMENT ON TABLE/COLUMN` ✅（OTHER + 抽对象名）
 - `GO` ✅（SQL Server 批分隔，同分号；`isAliasStop` 避免当别名）
 
-#### P1.6 注释与提示
+#### P1.6 注释与提示 ✅ 完成（2026-09-09）
 
-- MySQL 可执行注释 `/*!40101 SET … */`：应展开为内部 SQL，而不是整段丢掉
-- 优化器 hint `/*+ INDEX(t idx) */`：挂到 SELECT/表上，format 可输出
-- 解析器可选 `keepComments`（默认 false，避免热路径变慢）
+- MySQL 可执行注释 `/*!40101 SET … */`：展开为内部 SQL，而不是整段丢掉 ✅
+- 优化器 hint `/*+ INDEX(t idx) */`：挂到 SELECT/表上，format 可输出 ✅（`SqlSelect.hints` / `SqlTable.optimizerHint`）
+- 解析器可选 `keepComments`（默认 false，避免热路径变慢）✅（`SqlParseOptions` + `SqlStatement.comments()`）
 
 #### P1.7 方言矩阵（先 MYSQL/PG，再 Oracle/SQLServer）
 

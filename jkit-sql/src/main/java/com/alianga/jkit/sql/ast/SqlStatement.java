@@ -13,6 +13,7 @@ import java.util.List;
 public abstract class SqlStatement extends SqlNode {
     private List<SqlWithItem> withItems;
     private boolean withRecursive;
+    private List<String> comments;
 
     /**
      * @return 语句种类
@@ -67,6 +68,39 @@ public abstract class SqlStatement extends SqlNode {
             withItems = new ArrayList<SqlWithItem>(2);
         }
         withItems.add(item);
+    }
+
+    /**
+     * @return 语句前保留的普通注释（仅 keepComments 时有值），可能为空列表
+     * @since 2.1.0
+     */
+    public List<String> comments() {
+        if (comments == null) {
+            return Collections.emptyList();
+        }
+        return comments;
+    }
+
+    /**
+     * @param comments 语句前注释
+     * @since 2.1.0
+     */
+    public void setComments(List<String> comments) {
+        this.comments = comments;
+    }
+
+    /**
+     * @param comment 追加一条注释原文
+     * @since 2.1.0
+     */
+    public void addComment(String comment) {
+        if (comment == null || comment.isEmpty()) {
+            return;
+        }
+        if (comments == null) {
+            comments = new ArrayList<String>(2);
+        }
+        comments.add(comment);
     }
 
     /**

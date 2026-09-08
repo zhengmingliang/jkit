@@ -116,7 +116,8 @@ List<String> params = SQL.parameters("SELECT * FROM t WHERE id = ? AND name = :n
 - EXPLAIN / DESC、SET、USE、SHOW、CALL（实参进 AST）、TRUNCATE、GRANT
 - 过程块 / 维护：`BEGIN … END`、`DECLARE`（OTHER）；`ANALYZE` / `VACUUM` / `OPTIMIZE|REPAIR|CHECK TABLE`；`COMMENT ON TABLE/COLUMN`；SQL Server `GO` 批分隔
 - 表达式：字面量、绑定 `?` / `:name` / `@var`、算术比较、AND/OR/XOR/NOT、IN/BETWEEN/LIKE/ILIKE/REGEXP、IS NULL、`IS DISTINCT FROM` / `IS NOT DISTINCT FROM`、CASE、CAST / `::`、函数、EXISTS、子查询、`INTERVAL '1 day'` / `INTERVAL 1 DAY`、`X'FF'` / `0xFF`、行构造 `(a,b)`、JSON `->` `->>` `#>` `#>>`、数组下标 `arr[1]`、`= ANY/SOME/ALL (...)`
-- 注释：`--`、`/* */`、MySQL `#`
+- 注释：`--`、`/* */`、MySQL `#`；MySQL 可执行注释 `/*!40101 … */` 展开为内部 SQL（不整段丢弃）；优化器 hint `/*+ … */` 挂到 SELECT / 表并可 format 回写
+- 解析选项：`SqlParseOptions.keepComments(true)`（默认 false）时普通注释进入 `SqlStatement.comments()`，热路径默认仍丢弃
 
 明确未做：Oracle `(+)` 外连接、MySQL `PARTITION (p0,p1)` 表分区限定、过程体结构化执行、ALTER CHANGE/CONSTRAINT 全量建模、执行引擎、SQL 防火墙规则集。未知函数按普通函数调用解析，不失败。
 
@@ -141,5 +142,5 @@ Druid 在 `DISTINCT ON` 上失败；JSqlParser 在 `LOCK IN SHARE MODE` 和 `[db
 
 ## 语料与对比
 
-- 模块内：`SqlGoldenCorpusTest`（约 89 条，含往返）、`CommonModelSqlCorpusTest`（从 `icell/common-model` 收获，87 条可解析）。
+- 模块内：`SqlGoldenCorpusTest`（约 165 条，含往返）、`CommonModelSqlCorpusTest`（从 `icell/common-model` 收获，87 条可解析）。
 - 与 Druid / JSqlParser 对比只在上级工程 `tools-test` 的 `SqlParserCompareTest`（不进本库依赖）。
