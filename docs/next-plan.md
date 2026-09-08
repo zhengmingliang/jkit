@@ -25,7 +25,7 @@
 
 入口 `com.alianga.jkit.sql.SQL`：
 
-`parse` / `parseAll` / `format` / `toSqlString` / `tables` / `stat` / `addLimit` / `andWhere` / `replaceTable` / `parameters` / `isReadOnly`
+`parse` / `parseAll` / `format` / `toSqlString` / `tables` / `stat` / `addLimit` / `andWhere` / `replaceTable` / `replaceColumn` / `parameters` / `parameterize` / `exportParameterValues` / `wall` / `clone` / `eval` / `isReadOnly`
 
 已实现：
 
@@ -193,21 +193,21 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 - SQL Server：`TOP`、`[]` 已有；补 `OUTPUT`、`APPLY` ✅（P1.2/P1.4 已有，本 pass 验收）
 - 达梦/GBase：继续映射到 ORACLE/MYSQL ✅（未发明新方言枚举）
 
-### P2 — 能力对标（Druid 常用 Visitor）
+### P2 — 能力对标（Druid 常用 Visitor） ✅ 完成（2026-09-09）
 
 均保持零依赖，API 放 `SQL` 门面。
 
 | 能力 | 对标 | 说明 |
 | --- | --- | --- |
-| 参数化归一 | Druid `ParameterizedOutputVisitor` | `SQL.parameterize(sql)` → 字面量变 `?`，便于 SQL 统计去重 |
-| 导出参数值 | `ExportParameterVisitor` | 与 `parameters()` 不同：要抽出 `'a'` / `1` 这些字面量 |
-| 注入/危险操作 | `WallFilter` 子集 | 检测多语句、注释绕过、永远真条件、`SLEEP`、无 WHERE 的 DELETE/UPDATE。默认关闭，显式 `SQL.wall(sql)` |
-| 表达式求值常量折 | `EvalVisitor` 子集 | 仅字面量算术/比较，不要反射 |
-| AST clone | JSqlParser `DeParser` 配套 | `statement` 深拷贝，改写不要污染原树（`addLimit` 现在是就地改） |
-| 按类型 Visitor | Druid `visit(SQLSelect)` | 现在只有 `visit(SqlNode)` + instanceof。可保留现接口，另加 `SqlAstVisitor` 带具体类型，避免破坏已有 Adapter |
-| 列改写 | — | `SQL.replaceColumn(stmt, from, to)` 对称 `replaceTable` |
+| 参数化归一 | Druid `ParameterizedOutputVisitor` | ✅ `SQL.parameterize(sql)` → 字面量变 `?`（STRING/NUMBER/BOOLEAN/HEX/BIT；NULL/绑定保留） |
+| 导出参数值 | `ExportParameterVisitor` | ✅ `SQL.exportParameterValues` 抽出 `'a'` / `1`（去引号）；与 `parameters()` 绑定占位符分立 |
+| 注入/危险操作 | `WallFilter` 子集 | ✅ `SQL.wall(sql)` → `SqlWallResult`：multi-statement、comment-bypass、always-true、SLEEP、DELETE/UPDATE without WHERE。默认不接入解析 |
+| 表达式求值常量折 | `EvalVisitor` 子集 | ✅ `SQL.eval(expr)` / `SqlEval`：字面量算术/比较/AND/OR/NOT，无反射 |
+| AST clone | JSqlParser `DeParser` 配套 | ✅ `SQL.clone(stmt[, dialect])`（format→parse）；`addLimit` 改为 clone-then-mutate |
+| 按类型 Visitor | Druid `visit(SQLSelect)` | ✅ `SqlAstVisitor` 类型分发；保留 `SqlVisitor` / `SqlVisitorAdapter` |
+| 列改写 | — | ✅ `SQL.replaceColumn(stmt, from, to)` 对称 `replaceTable`（跳过 `SqlTable` 子树） |
 
-`addLimit` 就地修改应改成 **clone 后再改**，或文档+测试写明；推荐 clone，避免 `parse` 结果被调用方改掉后无法复用。
+`addLimit` 已改为 **clone 后再改**；单测断言原树无 LIMIT。
 
 ### P3 — 工程与性能
 
@@ -217,7 +217,8 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 - `SqlFormatter` 的 `dialect` 字段已保存但几乎没用：按方言输出反引号 / 双引号 / `[]`，`||` 语义。
 - `parseAlias(boolean inFrom)` 的 `inFrom` 已不再使用，删参数或真正用起来。
 - 多语句：一条失败时现在整批抛错。可选 `SQL.parseAll(sql, dialect, true)` 容错，失败的记 `SqlSimpleStatement` + 错误，继续下一条（审计场景有用）。
-- 发布：父版本仍是 2.0.1。`jkit-sql` 若要发 Central，应随 **2.1.0** 一起发，不要用已发布的 2.0.1 坐标抢发（artifactId 虽新，但和 BOM/文档版本会乱）。发布前补 `@since`、README 版本号。
+- 发布：父版本仍是 2.0.1。`jkit-sql` 若要发 Central，应随 **2.0.1** 一起发，不要用已发布的 2.0.1 坐标抢发（artifactId 虽新，但和 BOM/文档版本会乱）。发布前补 
+  `@since`、README 版本号。
 
 ---
 
@@ -278,6 +279,6 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 5. P1.1 WINDOW 子句 + P1.2 APPLY/LATERAL（缺了就会在业务 SQL 上直接 parse 失败）。
 6. 把失败 SQL 追加进 `SqlGoldenCorpusTest` 和 `SqlParserCompareTest` 的 CORPUS。
 7. P0.1 拆 Parser（行为稳定后再拆，避免和语法扩展搅在一起）。
-8. 有余力再 P2 parameterize / wall，以及 tools-test JMH。
+8. P2 已完成；有余力再 tools-test JMH。
 
 每完成一块：补 `@since 2.1.0`、更新 `docs/sql.md` 覆盖表、在 `CHANGELOG.md` 的 `2.1.0 - unreleased` 追加条目。不要把父 POM 版本改成 2.1.0，除非用户明确说要发版。

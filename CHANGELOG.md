@@ -36,6 +36,10 @@
 
 ## 2.1.0 - unreleased
 
+### 新增
+
+- `jkit-sql` P2 能力对标（零依赖，入口在 `SQL`）：`parameterize` / `exportParameterValues`（字面量指纹与导出，区别于绑定 `parameters`）；`wall` → `SqlWallResult`（多语句、注释绕过、永远真条件、`SLEEP`、无 WHERE 的 DELETE/UPDATE）；`clone`（format→parse 深拷贝）；`eval`（字面量算术/比较子集）；`SqlAstVisitor` 类型分发（并存不破坏 `SqlVisitorAdapter`）；`replaceColumn` 对称 `replaceTable`。`addLimit` 改为 clone-then-mutate。
+
 ### 变更
 
 - `jkit-sql` P1.7 方言矩阵：`SqlParseOptions.pipesAsConcat`（MySQL `||` 改拼接）；PG `RETURNING` 多列列表（`SqlListExpr`，format 无外层括号）；Oracle `FETCH FIRST n ROWS ONLY` 保留 `SqlLimit.fetchStyle` 并按 FETCH 回写；验收已有 `ON CONFLICT ON CONSTRAINT`、`MINUS`、SQL Server `OUTPUT`/`APPLY`、达梦→ORACLE / GBase→MYSQL。未发明 Hive/ClickHouse/ODPS 方言。

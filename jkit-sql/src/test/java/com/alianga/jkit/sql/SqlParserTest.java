@@ -147,8 +147,9 @@ public class SqlParserTest {
     @Test
     public void rewrite() {
         SqlStatement stmt = SQL.parse("SELECT * FROM users WHERE status = 1");
-        SQL.addLimit(stmt, 100);
-        assertNotNull(((SqlSelect) stmt).limit());
+        SqlStatement limited = SQL.addLimit(stmt, 100);
+        assertNotNull(((SqlSelect) limited).limit());
+        assertTrue("addLimit must clone", ((SqlSelect) stmt).limit() == null);
         SQL.andWhere(stmt, "tenant_id = ?");
         String sql = SQL.toSqlString(stmt);
         assertTrue(sql, sql.contains("tenant_id"));

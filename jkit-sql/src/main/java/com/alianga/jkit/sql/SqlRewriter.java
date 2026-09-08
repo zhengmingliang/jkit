@@ -108,6 +108,52 @@ public final class SqlRewriter {
         return statement;
     }
 
+    /**
+     * 替换列名（忽略大小写；多段名改最后一段）。不改表名与表别名（跳过 {@link SqlTable} 子树中的标识符）。
+     *
+     * @param statement 语句
+     * @param from 原列简单名
+     * @param to 新列简单名
+     * @return 原对象
+     */
+    public static SqlStatement replaceColumn(SqlStatement statement, final String from, final String to) {
+        if (statement == null || from == null || to == null) {
+            return statement;
+        }
+        statement.accept(new SqlVisitorAdapter() {
+            private int tableDepth;
+
+            /**
+             * {@inheritDoc}
+             */
+            @Override
+            public boolean visit(SqlNode node) {
+                if (node instanceof SqlTable) {
+                    tableDepth++;
+                    return true;
+                }
+                if (tableDepth == 0 && node instanceof SqlIdentifier) {
+                    SqlIdentifier id = (SqlIdentifier) node;
+                    if (from.equalsIgnoreCase(id.simpleName()) && !id.names().isEmpty()) {
+                        id.names().set(id.names().size() - 1, to);
+                    }
+                }
+                return true;
+            }
+
+            /**
+             * {@inheritDoc}
+             */
+            @Override
+            public void endVisit(SqlNode node) {
+                if (node instanceof SqlTable && tableDepth > 0) {
+                    tableDepth--;
+                }
+            }
+        });
+        return statement;
+    }
+
     private static SqlExpr and(SqlExpr left, SqlExpr right) {
         if (left == null) {
             return right;

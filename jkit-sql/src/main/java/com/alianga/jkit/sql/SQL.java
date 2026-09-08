@@ -1,5 +1,6 @@
 package com.alianga.jkit.sql;
 
+import com.alianga.jkit.sql.ast.SqlExpr;
 import com.alianga.jkit.sql.ast.SqlLiteral;
 import com.alianga.jkit.sql.ast.SqlNode;
 import com.alianga.jkit.sql.ast.SqlSelect;
@@ -232,26 +233,27 @@ public final class SQL {
     }
 
     /**
-     * 给 SELECT 补 LIMIT。
+     * 给 SELECT 补 LIMIT（先 {@link #clone(SqlStatement) 深拷贝} 再改，不污染原树）。
      *
      * @param statement 语句
      * @param rowCount 行数
-     * @return 原对象（就地修改）
+     * @return 带 LIMIT 的新语句（或非 SELECT 时为拷贝）
      */
     public static SqlStatement addLimit(SqlStatement statement, long rowCount) {
-        return SqlRewriter.addLimit(statement, rowCount, SqlDialect.MYSQL);
+        return addLimit(statement, rowCount, SqlDialect.MYSQL);
     }
 
     /**
-     * 给 SELECT 补 LIMIT。
+     * 给 SELECT 补 LIMIT（先深拷贝再改）。
      *
      * @param statement 语句
      * @param rowCount 行数
      * @param dialect 方言
-     * @return 原对象
+     * @return 带 LIMIT 的新语句
      */
     public static SqlStatement addLimit(SqlStatement statement, long rowCount, SqlDialect dialect) {
-        return SqlRewriter.addLimit(statement, rowCount, dialect);
+        SqlStatement copy = clone(statement, dialect);
+        return SqlRewriter.addLimit(copy, rowCount, dialect);
     }
 
     /**
@@ -279,6 +281,19 @@ public final class SQL {
      */
     public static SqlStatement replaceTable(SqlStatement statement, String from, String to) {
         return SqlRewriter.replaceTable(statement, from, to);
+    }
+
+    /**
+     * 替换列名（忽略大小写），对称 {@link #replaceTable}。
+     *
+     * @param statement 语句
+     * @param from 原列简单名
+     * @param to 新列简单名
+     * @return 原对象（就地修改）
+     * @since 2.1.0
+     */
+    public static SqlStatement replaceColumn(SqlStatement statement, String from, String to) {
+        return SqlRewriter.replaceColumn(statement, from, to);
     }
 
     /**
@@ -321,5 +336,133 @@ public final class SQL {
             }
         });
         return list;
+    }
+
+    /**
+     * 深拷贝语句（format → parse 往返；方言默认 MySQL）。
+     *
+     * @param statement 语句
+     * @return 新 AST，null 入参返回 null
+     * @since 2.1.0
+     */
+    public static SqlStatement clone(SqlStatement statement) {
+        return clone(statement, SqlDialect.MYSQL);
+    }
+
+    /**
+     * 深拷贝语句（format → parse 往返）。
+     *
+     * @param statement 语句
+     * @param dialect 方言
+     * @return 新 AST，null 入参返回 null
+     * @since 2.1.0
+     */
+    public static SqlStatement clone(SqlStatement statement, SqlDialect dialect) {
+        if (statement == null) {
+            return null;
+        }
+        SqlDialect d = dialect == null ? SqlDialect.MYSQL : dialect;
+        return parse(toSqlString(statement, d), d);
+    }
+
+    /**
+     * 参数化归一：字面量变为 {@code ?}，便于 SQL 指纹 / 去重（对标 Druid ParameterizedOutputVisitor）。
+     *
+     * @param sql SQL
+     * @return 参数化后的紧凑 SQL
+     * @since 2.1.0
+     */
+    public static String parameterize(String sql) {
+        return parameterize(sql, SqlDialect.MYSQL);
+    }
+
+    /**
+     * 参数化归一。
+     *
+     * @param sql SQL
+     * @param dialect 方言
+     * @return 参数化后的紧凑 SQL
+     * @since 2.1.0
+     */
+    public static String parameterize(String sql, SqlDialect dialect) {
+        return SqlParameterizer.parameterize(parse(sql, dialect), dialect);
+    }
+
+    /**
+     * 参数化已解析语句（不修改入参）。
+     *
+     * @param statement 语句
+     * @return 参数化后的紧凑 SQL
+     * @since 2.1.0
+     */
+    public static String parameterize(SqlStatement statement) {
+        return SqlParameterizer.parameterize(statement, SqlDialect.MYSQL);
+    }
+
+    /**
+     * 导出字面量参数值（{@code 'a'} / {@code 1}），与 {@link #parameters}（绑定占位符）不同。
+     *
+     * @param sql SQL
+     * @return 值列表
+     * @since 2.1.0
+     */
+    public static List<Object> exportParameterValues(String sql) {
+        return exportParameterValues(parse(sql));
+    }
+
+    /**
+     * 导出字面量参数值。
+     *
+     * @param statement 语句
+     * @return 值列表（不修改 AST）
+     * @since 2.1.0
+     */
+    public static List<Object> exportParameterValues(SqlStatement statement) {
+        return SqlParameterizer.exportParameterValues(statement);
+    }
+
+    /**
+     * WallFilter 子集检测（默认不拦截解析；仅显式调用）。
+     *
+     * @param sql SQL
+     * @return 检测结果
+     * @since 2.1.0
+     */
+    public static SqlWallResult wall(String sql) {
+        return wall(sql, SqlDialect.MYSQL);
+    }
+
+    /**
+     * WallFilter 子集检测。
+     *
+     * @param sql SQL
+     * @param dialect 方言
+     * @return 检测结果
+     * @since 2.1.0
+     */
+    public static SqlWallResult wall(String sql, SqlDialect dialect) {
+        return SqlWall.check(sql, dialect);
+    }
+
+    /**
+     * 对已解析语句做 Wall AST 侧检查。
+     *
+     * @param statement 语句
+     * @return 检测结果
+     * @since 2.1.0
+     */
+    public static SqlWallResult wall(SqlStatement statement) {
+        return SqlWall.check(statement);
+    }
+
+    /**
+     * 字面量常量折叠（EvalVisitor 子集）。
+     *
+     * @param expr 表达式
+     * @return 求值结果；不可求值时 {@code null}
+     * @since 2.1.0
+     */
+    public static Object eval(SqlExpr expr) {
+        return SqlEval.eval(expr);
     }
 }
