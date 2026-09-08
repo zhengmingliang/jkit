@@ -40,6 +40,7 @@
         <module>jkit-curl-codegen</module>
         <module>jkit-notify</module>
         <module>jkit-notify-extra</module>
+        <module>jkit-sql</module>
     </modules>
 
     <properties>

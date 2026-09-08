@@ -59,7 +59,19 @@ Slack / Telegram / ntfy / 短信（阿里云、腾讯云、云片、华为云）
 
 用法见 [docs/notify.md](docs/notify.md)。
 
-本仓库是多模块工程：根 POM 为 `jkit-parent`，运行时库在 `jkit-core`（发布坐标仍是 `com.alianga:jkit`），代码生成在 `jkit-curl-codegen`，消息通知在 `jkit-notify`，可选扩展渠道在 `jkit-notify-extra`。根目录 `mvn test` 会构建全部模块。
+需要解析 / 格式化 / 抽表列 / 给 SELECT 补 LIMIT 时，另加：
+
+```xml
+<dependency>
+    <groupId>com.alianga</groupId>
+    <artifactId>jkit-sql</artifactId>
+    <version>2.0.1</version>
+</dependency>
+```
+
+零依赖手写 SQL 解析器，对标 Druid SQL Parser 与 JSqlParser 的常用入口。用法见 [docs/sql.md](docs/sql.md)。后续完善计划见 [docs/next-plan.md](docs/next-plan.md)。
+
+本仓库是多模块工程：根 POM 为 `jkit-parent`，运行时库在 `jkit-core`（发布坐标仍是 `com.alianga:jkit`），代码生成在 `jkit-curl-codegen`，消息通知在 `jkit-notify`，可选扩展渠道在 `jkit-notify-extra`，SQL 解析在 `jkit-sql`。根目录 `mvn test` 会构建全部模块。
 
 本库接替 [ZmlTools](https://github.com/wuyongshi/ZmlTools)（`top.wuyongshi:ZmlTools`）。**新项目请只用上面的坐标。** 已经依赖 ZmlTools 的工程有两种迁法：
 
