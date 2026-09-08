@@ -51,6 +51,12 @@ public enum SqlTokenType {
     CAST_OP,
     JSON_OP,
     TILDE,
+    /** PostgreSQL {@code @>} / {@code <@} 等包含运算符 */
+    AT_OP,
+    /** PostgreSQL {@code ~} / {@code ~*} / {@code !~} / {@code !~*} 正则运算符 */
+    REGEX_OP,
+    /** MySQL {@code <=>} 空安全相等 */
+    NULL_SAFE_EQ,
     QUESTION,
 
     /** 优化器提示（slash-star-plus ... star-slash） */

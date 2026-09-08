@@ -1391,6 +1391,85 @@ public class SqlParserTest {
     }
 
     /**
+     * PG {@code @>} / {@code <@} 包含运算符；勿再被词法当成 VARIABLE。
+     */
+    @Test
+    public void postgresContainsOperators() {
+        SqlSelect s1 = (SqlSelect) SQL.parse(
+                "SELECT * FROM t WHERE tags @> ARRAY['vip']", SqlDialect.POSTGRES);
+        assertEquals(SqlBinaryOp.CONTAINS,
+                ((SqlBinaryExpr) s1.where()).operator());
+        String f1 = SQL.toSqlString(s1, SqlDialect.POSTGRES);
+        assertTrue(f1, f1.contains("@>"));
+
+        SqlSelect s2 = (SqlSelect) SQL.parse(
+                "SELECT * FROM t WHERE tsrange(a, b) @> NOW()", SqlDialect.POSTGRES);
+        assertEquals(SqlBinaryOp.CONTAINS,
+                ((SqlBinaryExpr) s2.where()).operator());
+
+        SqlSelect s3 = (SqlSelect) SQL.parse(
+                "SELECT * FROM t WHERE ARRAY['vip'] <@ tags", SqlDialect.POSTGRES);
+        assertEquals(SqlBinaryOp.CONTAINED_BY,
+                ((SqlBinaryExpr) s3.where()).operator());
+        assertTrue(SQL.toSqlString(s3, SqlDialect.POSTGRES).contains("<@"));
+    }
+
+    /**
+     * PG {@code ~} / {@code ~*} / {@code !~} 正则运算符（对比 MySQL 一元 {@code ~}）。
+     */
+    @Test
+    public void postgresRegexOperators() {
+        SqlSelect s1 = (SqlSelect) SQL.parse(
+                "SELECT * FROM t WHERE name ~ '^[A-Z]'", SqlDialect.POSTGRES);
+        assertEquals(SqlBinaryOp.REGEX_MATCH,
+                ((SqlBinaryExpr) s1.where()).operator());
+
+        SqlSelect s2 = (SqlSelect) SQL.parse(
+                "SELECT * FROM t WHERE name ~* 'foo'", SqlDialect.POSTGRES);
+        assertEquals(SqlBinaryOp.REGEX_MATCH_CI,
+                ((SqlBinaryExpr) s2.where()).operator());
+
+        SqlSelect s3 = (SqlSelect) SQL.parse(
+                "SELECT * FROM t WHERE name !~ 'bar'", SqlDialect.POSTGRES);
+        assertEquals(SqlBinaryOp.REGEX_NOT_MATCH,
+                ((SqlBinaryExpr) s3.where()).operator());
+
+        SqlSelect s4 = (SqlSelect) SQL.parse(
+                "SELECT * FROM t WHERE name !~* 'baz'", SqlDialect.POSTGRES);
+        assertEquals(SqlBinaryOp.REGEX_NOT_MATCH_CI,
+                ((SqlBinaryExpr) s4.where()).operator());
+
+        // MySQL 仍把 ~ 当按位取反
+        SqlSelect mysql = (SqlSelect) SQL.parse("SELECT ~1 FROM dual");
+        assertTrue(mysql.selectItems().get(0).expr() instanceof com.alianga.jkit.sql.ast.SqlUnaryExpr);
+    }
+
+    /**
+     * MySQL {@code FORCE/USE/IGNORE INDEX FOR JOIN|ORDER BY|GROUP BY}，勿误吃进 FOR UPDATE。
+     */
+    @Test
+    public void mysqlForceIndexForJoin() {
+        SqlSelect s = (SqlSelect) SQL.parse(
+                "SELECT * FROM t FORCE INDEX FOR JOIN (idx) WHERE id = 1");
+        SqlTable table = (SqlTable) s.from();
+        assertNotNull(table.indexHint());
+        assertTrue(table.indexHint(), table.indexHint().toUpperCase().contains("FOR JOIN"));
+        assertTrue(table.indexHint(), table.indexHint().contains("idx"));
+        assertNotNull(s.where());
+        assertFalse(s.forUpdate());
+        String out = SQL.toSqlString(s);
+        assertTrue(out, out.toUpperCase().contains("FOR JOIN"));
+
+        SqlSelect order = (SqlSelect) SQL.parse(
+                "SELECT * FROM t USE INDEX FOR ORDER BY (idx_a) ORDER BY a");
+        assertTrue(((SqlTable) order.from()).indexHint().toUpperCase().contains("ORDER BY"));
+
+        SqlSelect group = (SqlSelect) SQL.parse(
+                "SELECT a, COUNT(*) FROM t IGNORE INDEX FOR GROUP BY (idx_a) GROUP BY a");
+        assertTrue(((SqlTable) group.from()).indexHint().toUpperCase().contains("GROUP BY"));
+    }
+
+    /**
      * P3.1：|| 按 AST 回写 — MySQL 默认 OR；pipesAsConcat / PG 为 CONCAT→||。
      */
     @Test

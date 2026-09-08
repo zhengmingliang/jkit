@@ -1366,6 +1366,20 @@ public final class SqlParser {
                 sb.append(' ').append(token.text());
                 next();
             }
+            // MySQL: FORCE/USE/IGNORE INDEX FOR JOIN|ORDER BY|GROUP BY (idx)
+            if (match(SqlTokenType.FOR)) {
+                sb.append(" FOR");
+                if (is(SqlTokenType.JOIN)) {
+                    sb.append(' ').append(token.text());
+                    next();
+                } else if (is(SqlTokenType.ORDER) || is(SqlTokenType.GROUP)) {
+                    sb.append(' ').append(token.text());
+                    next();
+                    if (match(SqlTokenType.BY)) {
+                        sb.append(" BY");
+                    }
+                }
+            }
             if (match(SqlTokenType.LPAREN)) {
                 sb.append('(');
                 sb.append(consumeRawUntilType(SqlTokenType.RPAREN));
@@ -1610,6 +1624,19 @@ public final class SqlParser {
             } else if (is(SqlTokenType.GE)) {
                 next();
                 left = SqlBinaryExpr.of(left, SqlBinaryOp.GE, parseBit());
+            } else if (is(SqlTokenType.NULL_SAFE_EQ)) {
+                next();
+                left = SqlBinaryExpr.of(left, SqlBinaryOp.NULL_SAFE_EQ, parseBit());
+            } else if (is(SqlTokenType.AT_OP)) {
+                String opText = token.text();
+                next();
+                left = SqlBinaryExpr.of(left, atOp(opText), parseBit());
+            } else if (is(SqlTokenType.REGEX_OP)
+                    || ((dialect == SqlDialect.POSTGRES || dialect == SqlDialect.H2)
+                    && is(SqlTokenType.TILDE))) {
+                String opText = token.text();
+                next();
+                left = SqlBinaryExpr.of(left, regexOp(opText), parseBit());
             } else if (is(SqlTokenType.IS)) {
                 next();
                 boolean not = match(SqlTokenType.NOT);
@@ -2059,6 +2086,26 @@ public final class SqlParser {
             return SqlBinaryOp.JSON_ARROW;
         }
         return SqlBinaryOp.JSON;
+    }
+
+    private static SqlBinaryOp atOp(String text) {
+        if ("<@".equals(text)) {
+            return SqlBinaryOp.CONTAINED_BY;
+        }
+        return SqlBinaryOp.CONTAINS;
+    }
+
+    private static SqlBinaryOp regexOp(String text) {
+        if ("~*".equals(text)) {
+            return SqlBinaryOp.REGEX_MATCH_CI;
+        }
+        if ("!~*".equals(text)) {
+            return SqlBinaryOp.REGEX_NOT_MATCH_CI;
+        }
+        if ("!~".equals(text)) {
+            return SqlBinaryOp.REGEX_NOT_MATCH;
+        }
+        return SqlBinaryOp.REGEX_MATCH;
     }
 
     private SqlExpr parseExtract(SqlIdentifier name) {

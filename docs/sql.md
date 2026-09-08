@@ -187,7 +187,7 @@ List<Object> literals = SQL.exportParameterValues("SELECT * FROM t WHERE name = 
 - DDL：CREATE/DROP/ALTER TABLE|VIEW|INDEX|DATABASE|PROCEDURE|FUNCTION|TRIGGER|EVENT（抽对象名；`CREATE OR REPLACE`；VIEW/CTAS 的 AS query；过程参数与 BEGIN…END 体进 tail；CREATE TABLE ENGINE/CHARSET/COLLATE/COMMENT；ALTER ADD/DROP INDEX、RENAME TO）
 - EXPLAIN / DESC、SET、USE、SHOW、CALL（实参进 AST）、TRUNCATE、GRANT
 - 过程块 / 维护：`BEGIN … END`、`DECLARE`（OTHER）；`ANALYZE` / `VACUUM` / `OPTIMIZE|REPAIR|CHECK TABLE`；`COMMENT ON TABLE/COLUMN`；SQL Server `GO` 批分隔
-- 表达式：字面量、绑定 `?` / `:name` / `@var`、算术比较、AND/OR/XOR/NOT、IN/BETWEEN/LIKE/ILIKE/REGEXP、IS NULL、`IS DISTINCT FROM` / `IS NOT DISTINCT FROM`、CASE、CAST / `::`、函数、EXISTS、子查询、`INTERVAL '1 day'` / `INTERVAL 1 DAY`、`X'FF'` / `0xFF`、行构造 `(a,b)`、JSON `->` `->>` `#>` `#>>`、数组下标 `arr[1]`、`= ANY/SOME/ALL (...)`
+- 表达式：字面量、绑定 `?` / `:name` / `@var`、算术比较、AND/OR/XOR/NOT、IN/BETWEEN/LIKE/ILIKE/REGEXP、IS NULL、`IS DISTINCT FROM` / `IS NOT DISTINCT FROM`、CASE、CAST / `::`、函数、EXISTS、子查询、`INTERVAL '1 day'` / `INTERVAL 1 DAY`、`X'FF'` / `0xFF`、行构造 `(a,b)`、JSON `->` `->>` `#>` `#>>`、数组下标 `arr[1]`、`= ANY/SOME/ALL (...)`；另含 PG `@>`/`<@`/`~`/`~*`、MySQL `FORCE INDEX FOR …`
 - 注释：`--`、`/* */`、MySQL `#`；MySQL 可执行注释 `/*!40101 … */` 展开为内部 SQL（不整段丢弃）；优化器 hint `/*+ … */` 挂到 SELECT / 表并可 format 回写
 - 解析选项：`SqlParseOptions.keepComments(true)`（默认 false）时普通注释进入 `SqlStatement.comments()`，热路径默认仍丢弃；`SqlParseOptions.pipesAsConcat(true)` 让 MySQL 方言下 `||` 按拼接解析（等同 `PIPES_AS_CONCAT`）；`SQL.parseAll(sql, dialect, true)` 容错多语句（失败占位 + `parseError`，供审计）
 

@@ -224,6 +224,12 @@ public final class SqlLexer {
             return;
         }
         if (c == '@') {
+            // PG jsonb/range：@> ；其余仍按 MySQL/SQL Server 变量 @var / @@var
+            if (pos + 1 < limit && src[pos + 1] == '>') {
+                pos += 2;
+                token.set(SqlTokenType.AT_OP, src, tStart, pos, tLine, tCol);
+                return;
+            }
             pos++;
             if (pos < limit && src[pos] == '@') {
                 pos++;
@@ -464,11 +470,17 @@ public final class SqlLexer {
                 break;
             case '<':
                 if (match('=')) {
-                    type = SqlTokenType.LE;
+                    if (match('>')) {
+                        type = SqlTokenType.NULL_SAFE_EQ;
+                    } else {
+                        type = SqlTokenType.LE;
+                    }
                 } else if (match('>')) {
                     type = SqlTokenType.NE;
                 } else if (match('<')) {
                     type = SqlTokenType.SHIFT_LEFT;
+                } else if (match('@')) {
+                    type = SqlTokenType.AT_OP;
                 } else {
                     type = SqlTokenType.LT;
                 }
@@ -485,6 +497,9 @@ public final class SqlLexer {
             case '!':
                 if (match('=')) {
                     type = SqlTokenType.NE;
+                } else if (match('~')) {
+                    match('*');
+                    type = SqlTokenType.REGEX_OP;
                 } else {
                     type = SqlTokenType.NOT_OP;
                 }
@@ -508,7 +523,12 @@ public final class SqlLexer {
                 type = SqlTokenType.BIT_XOR;
                 break;
             case '~':
-                type = SqlTokenType.TILDE;
+                if (match('*')) {
+                    type = SqlTokenType.REGEX_OP;
+                } else {
+                    // PG 二元正则与按位取反同形；词法保留 TILDE，解析器按方言/位置区分
+                    type = SqlTokenType.TILDE;
+                }
                 break;
             case '#':
                 if (match('>') && match('>')) {
