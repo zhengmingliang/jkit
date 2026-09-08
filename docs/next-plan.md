@@ -52,13 +52,13 @@
 | `SqlFormatter.java` / `SqlRewriter.java` / `SqlSchemaStat.java` | 回写、改写、抽表列 |
 | `docs/sql.md` | 用户文档 |
 
-已知对比结果（`tools-test` 的 `SqlParserCompareTest`，37 条）：
+已知对比结果（`tools-test` 的 `SqlParserCompareTest`，43 条，含 WINDOW/LATERAL/APPLY）：
 
 | | 成功率 | simple ns/op | join | window |
 | --- | --- | --- | --- | --- |
-| jkit-sql | 37/37 | ~1.3µs | ~1.8µs | ~0.8µs |
-| Druid 1.2.23 | 36/37 | ~5µs | ~6µs | ~4.5µs |
-| JSqlParser 4.9 | 35/37 | ~200µs | ~240µs | ~300µs |
+| jkit-sql | 43/43 | ~1.7µs | ~2.3µs | ~1.2µs |
+| Druid 1.2.23 | 42/43 | ~6µs | ~6.7µs | ~5.8µs |
+| JSqlParser 4.9 | 41/43 | ~240µs | ~276µs | ~325µs |
 
 Druid 挂 `DISTINCT ON`；JSqlParser 挂 `LOCK IN SHARE MODE`、`[dbo].[user]`。吞吐是 warmup 后 2 万次墙钟，**不是 JMH**。
 
@@ -126,18 +126,18 @@ HTTP（含 SSE merge、curl 执行、负载均衡、Nacos）、JSON、YAML、配
 
 每加一类语法：黄金集 + `tools-test` corpus 至少加 2 条。
 
-#### P1.1 SELECT 级 `WINDOW w AS (...)`
+#### P1.1 SELECT 级 `WINDOW w AS (...)` ✅ 完成（2026-09-09）
 
 ```sql
 SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 ```
 
-现在只支持内联 `OVER (...)` 和 `OVER w` 名字，没有 WINDOW 子句定义。
+现已支持 SELECT 级命名窗口定义（可多个）；内联 `OVER (...)` 与 `OVER w` 保留。黄金集 + 单测覆盖 format 往返。未做：WINDOW 继承另一窗口名。
 
 #### P1.2 更多 JOIN / 表源
 
-- `CROSS APPLY` / `OUTER APPLY`（SQL Server）
-- `LATERAL` 子查询（PG，词法已有 LATERAL，FROM 侧要接完整）
+- `CROSS APPLY` / `OUTER APPLY`（SQL Server）✅
+- `LATERAL` 子查询（PG）✅（`SqlSubqueryTable.lateral`；JOIN LATERAL / 逗号 LATERAL）
 - `TABLE(fn())` / `UNNEST`
 - `FROM (VALUES (1),(2)) AS v(id)` 列清单
 - Oracle `(+)` 外连接

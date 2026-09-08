@@ -38,6 +38,8 @@
 
 ### 变更
 
+- `jkit-sql` P1.1：SELECT 级 `WINDOW w AS (PARTITION BY … ORDER BY …)`（可多个）；保留内联 `OVER (…)` 与 `OVER w`；format 往返。
+- `jkit-sql` P1.2：`LATERAL` 子查询（`SqlSubqueryTable.lateral`）；SQL Server `CROSS APPLY` / `OUTER APPLY`。
 - `jkit-sql` P0.2：`parse → format → parse` 语义往返。修 `CREATE INDEX … ON t (cols)`、`SHOW COLUMNS/INDEX/CREATE TABLE`、`SET NAMES`（无等号）、`EXTRACT`/`TRIM`/`SUBSTRING`/`POSITION` 的 FROM/FOR/IN 回写；`SqlGoldenCorpusTest` 每条断言 type / tables（忽略大小写）/ isReadOnly。
 - `jkit-sql` P0.3：`SqlSchemaStat.getConditions()` / `getOrderByColumns()` / `getGroupByColumns()` 从 WHERE、JOIN ON、HAVING、ORDER BY、GROUP BY 收集紧凑 SQL；`getTables()` 改为 `Map<String, SqlTableAccess>`，同表可合并多种访问类型（`INSERT INTO t SELECT * FROM t` → `INSERT+SELECT`；嵌套 SELECT 记读）。
 - `jkit-sql` P0.4（验收最小集）：`FOR UPDATE OF … NOWAIT/SKIP LOCKED` 结构化（`forUpdateOf` + `forUpdateWait`）；CREATE TABLE `ENGINE` / `CHARSET` / `COLLATE` / `COMMENT` 进 AST（PARTITION 等仍 tail）；ALTER `ADD/DROP INDEX`、`RENAME TO` 结构化并可 format 回写。

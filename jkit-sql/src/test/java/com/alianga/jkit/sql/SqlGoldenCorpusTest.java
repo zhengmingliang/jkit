@@ -140,6 +140,13 @@ public class SqlGoldenCorpusTest {
                 {"sqlserver", "SELECT TOP 10 * FROM t ORDER BY id"},
                 {"sqlserver", "SELECT * FROM [dbo].[user] WHERE [id] = 1"},
                 {"ansi", "SELECT * FROM \"User\" WHERE \"Id\" = 1"},
+                {"mysql", "SELECT id, SUM(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)"},
+                {"mysql", "SELECT SUM(x) OVER w1, AVG(x) OVER w2 FROM t "
+                        + "WINDOW w1 AS (PARTITION BY a), w2 AS (ORDER BY b)"},
+                {"postgres", "SELECT * FROM t, LATERAL (SELECT id FROM s WHERE s.tid = t.id) x"},
+                {"postgres", "SELECT * FROM t LEFT JOIN LATERAL (SELECT 1 AS n) x ON true"},
+                {"sqlserver", "SELECT * FROM a CROSS APPLY (SELECT TOP 1 id FROM b WHERE b.aid = a.id) x"},
+                {"sqlserver", "SELECT * FROM a OUTER APPLY (SELECT id FROM b WHERE b.aid = a.id) x"},
         });
     }
 

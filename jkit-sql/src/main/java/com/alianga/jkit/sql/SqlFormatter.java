@@ -31,6 +31,7 @@ import com.alianga.jkit.sql.ast.SqlTable;
 import com.alianga.jkit.sql.ast.SqlTableSource;
 import com.alianga.jkit.sql.ast.SqlUnaryExpr;
 import com.alianga.jkit.sql.ast.SqlUpdate;
+import com.alianga.jkit.sql.ast.SqlWindowDefinition;
 import com.alianga.jkit.sql.ast.SqlWithItem;
 
 import java.util.List;
@@ -204,6 +205,24 @@ public final class SqlFormatter {
             kw("HAVING");
             sp();
             writeExpr(select.having());
+        }
+        if (!select.windows().isEmpty()) {
+            nl();
+            kw("WINDOW");
+            sp();
+            List<SqlWindowDefinition> windows = select.windows();
+            for (int i = 0; i < windows.size(); i++) {
+                if (i > 0) {
+                    out.append(',');
+                    sp();
+                }
+                SqlWindowDefinition window = windows.get(i);
+                writeExpr(window.name());
+                sp();
+                kw("AS");
+                sp();
+                writeOver(window.spec());
+            }
         }
         if (!select.orderBy().isEmpty()) {
             nl();
@@ -647,8 +666,13 @@ public final class SqlFormatter {
                 out.append(')');
             }
         } else if (source instanceof SqlSubqueryTable) {
+            SqlSubqueryTable sub = (SqlSubqueryTable) source;
+            if (sub.lateral()) {
+                kw("LATERAL");
+                sp();
+            }
             out.append('(');
-            writeNode(((SqlSubqueryTable) source).query());
+            writeNode(sub.query());
             out.append(')');
         }
         if (source.alias() != null) {
@@ -693,6 +717,16 @@ public final class SqlFormatter {
                 kw("NATURAL");
                 sp();
                 kw("JOIN");
+                break;
+            case CROSS_APPLY:
+                kw("CROSS");
+                sp();
+                kw("APPLY");
+                break;
+            case OUTER_APPLY:
+                kw("OUTER");
+                sp();
+                kw("APPLY");
                 break;
             default:
                 kw("JOIN");

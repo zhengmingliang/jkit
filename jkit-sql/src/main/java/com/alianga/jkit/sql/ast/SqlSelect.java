@@ -32,6 +32,7 @@ public final class SqlSelect extends SqlStatement {
     private String unionOp;
     private SqlExpr connectBy;
     private SqlExpr startWith;
+    private final List<SqlWindowDefinition> windows = new ArrayList<SqlWindowDefinition>(2);
 
     /**
      * {@inheritDoc}
@@ -297,6 +298,14 @@ public final class SqlSelect extends SqlStatement {
     }
 
     /**
+     * @return SELECT 级 {@code WINDOW} 定义列表
+     * @since 2.1.0
+     */
+    public List<SqlWindowDefinition> windows() {
+        return windows;
+    }
+
+    /**
      * {@inheritDoc}
      */
     @Override
@@ -313,6 +322,7 @@ public final class SqlSelect extends SqlStatement {
         child(visitor, limit);
         child(visitor, connectBy);
         child(visitor, startWith);
+        children(visitor, windows);
         child(visitor, union);
     }
 }

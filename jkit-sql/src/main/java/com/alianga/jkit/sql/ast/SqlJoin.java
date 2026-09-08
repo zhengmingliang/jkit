@@ -22,7 +22,11 @@ public final class SqlJoin extends SqlTableSource {
         CROSS,
         COMMA,
         STRAIGHT,
-        NATURAL
+        NATURAL,
+        /** SQL Server CROSS APPLY */
+        CROSS_APPLY,
+        /** SQL Server OUTER APPLY */
+        OUTER_APPLY
     }
 
     private Type joinType;

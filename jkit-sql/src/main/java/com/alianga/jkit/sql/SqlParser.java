@@ -31,6 +31,7 @@ import com.alianga.jkit.sql.ast.SqlTable;
 import com.alianga.jkit.sql.ast.SqlTableSource;
 import com.alianga.jkit.sql.ast.SqlUnaryExpr;
 import com.alianga.jkit.sql.ast.SqlUpdate;
+import com.alianga.jkit.sql.ast.SqlWindowDefinition;
 import com.alianga.jkit.sql.ast.SqlWithItem;
 
 import java.util.ArrayList;
@@ -227,6 +228,15 @@ public final class SqlParser {
         }
         if (match(SqlTokenType.HAVING)) {
             select.setHaving(parseExpr());
+        }
+        if (match(SqlTokenType.WINDOW)) {
+            do {
+                SqlWindowDefinition window = new SqlWindowDefinition();
+                window.setName(parseName());
+                expect(SqlTokenType.AS);
+                window.setSpec(parseOver());
+                select.windows().add(window);
+            } while (match(SqlTokenType.COMMA));
         }
         if (match(SqlTokenType.ORDER)) {
             expect(SqlTokenType.BY);
@@ -881,8 +891,15 @@ public final class SqlParser {
                 expect(SqlTokenType.JOIN);
                 type = SqlJoin.Type.FULL;
             } else if (match(SqlTokenType.CROSS)) {
-                expect(SqlTokenType.JOIN);
-                type = SqlJoin.Type.CROSS;
+                if (match(SqlTokenType.APPLY)) {
+                    type = SqlJoin.Type.CROSS_APPLY;
+                } else {
+                    expect(SqlTokenType.JOIN);
+                    type = SqlJoin.Type.CROSS;
+                }
+            } else if (match(SqlTokenType.OUTER)) {
+                expect(SqlTokenType.APPLY);
+                type = SqlJoin.Type.OUTER_APPLY;
             } else if (match(SqlTokenType.NATURAL)) {
                 match(SqlTokenType.LEFT);
                 match(SqlTokenType.RIGHT);
@@ -914,21 +931,26 @@ public final class SqlParser {
     }
 
     private SqlTableSource parseTableSource() {
-        if (match(SqlTokenType.LATERAL)) {
-            // fall through to subquery
-        }
+        boolean lateral = match(SqlTokenType.LATERAL);
         if (match(SqlTokenType.LPAREN)) {
             SqlTableSource source;
             if (isQueryStart() || is(SqlTokenType.WITH) || is(SqlTokenType.VALUES)) {
                 SqlSubqueryTable sub = new SqlSubqueryTable();
                 sub.setQuery(parseStatement());
+                sub.setLateral(lateral);
                 source = sub;
             } else {
+                if (lateral) {
+                    throw error("LATERAL requires a subquery");
+                }
                 source = parseJoinedTable();
             }
             expect(SqlTokenType.RPAREN);
             source.setAlias(parseAlias(true));
             return source;
+        }
+        if (lateral) {
+            throw error("LATERAL requires a subquery");
         }
         SqlTable table = SqlTable.of(parseName());
         parseTableHints(table);
@@ -991,8 +1013,10 @@ public final class SqlParser {
             case RIGHT:
             case FULL:
             case CROSS:
+            case OUTER:
             case NATURAL:
             case STRAIGHT_JOIN:
+            case LATERAL:
             case ON:
             case USING:
             case SET:
@@ -1010,6 +1034,8 @@ public final class SqlParser {
             case SHARE:
             case MODE:
             case FROM:
+            case WINDOW:
+            case APPLY:
                 return true;
             default:
                 return false;

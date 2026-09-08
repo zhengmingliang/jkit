@@ -4,12 +4,15 @@ import com.alianga.jkit.sql.ast.SqlDdlStatement;
 import com.alianga.jkit.sql.ast.SqlDelete;
 import com.alianga.jkit.sql.ast.SqlFunctionExpr;
 import com.alianga.jkit.sql.ast.SqlInsert;
+import com.alianga.jkit.sql.ast.SqlJoin;
 import com.alianga.jkit.sql.ast.SqlOverExpr;
 import com.alianga.jkit.sql.ast.SqlSelect;
 import com.alianga.jkit.sql.ast.SqlSelectItem;
 import com.alianga.jkit.sql.ast.SqlStatement;
 import com.alianga.jkit.sql.ast.SqlStatementType;
+import com.alianga.jkit.sql.ast.SqlSubqueryTable;
 import com.alianga.jkit.sql.ast.SqlUpdate;
+import com.alianga.jkit.sql.ast.SqlWindowDefinition;
 
 import org.junit.Test;
 
@@ -437,5 +440,90 @@ public class SqlParserTest {
         assertEquals("NOWAIT", nowait.forUpdateWait());
         assertTrue(SQL.toSqlString(nowait).contains("NOWAIT"));
     }
+
+    /**
+     * SELECT 级 WINDOW 子句：命名窗口定义 + OVER 引用，format 往返。
+     */
+    @Test
+    public void parseSelectLevelWindow() {
+        String sql = "SELECT id, SUM(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)";
+        SqlSelect select = (SqlSelect) SQL.parse(sql);
+        assertEquals(1, select.windows().size());
+        SqlWindowDefinition window = select.windows().get(0);
+        assertEquals("w", window.name().simpleName());
+        assertNotNull(window.spec());
+        assertEquals(1, window.spec().partitionBy().size());
+        assertEquals(1, window.spec().orderBy().size());
+        SqlFunctionExpr fn = (SqlFunctionExpr) select.selectItems().get(1).expr();
+        SqlOverExpr over = (SqlOverExpr) fn.over();
+        assertEquals("w", over.windowName().simpleName());
+        String formatted = SQL.toSqlString(select);
+        assertTrue(formatted, formatted.contains("WINDOW"));
+        assertTrue(formatted, formatted.contains("OVER"));
+        SqlSelect again = (SqlSelect) SQL.parse(formatted);
+        assertEquals(1, again.windows().size());
+        assertEquals("w", again.windows().get(0).name().simpleName());
+    }
+
+    /**
+     * 多个 WINDOW 定义。
+     */
+    @Test
+    public void parseMultipleWindows() {
+        SqlSelect select = (SqlSelect) SQL.parse(
+                "SELECT SUM(x) OVER w1, AVG(x) OVER w2 FROM t "
+                        + "WINDOW w1 AS (PARTITION BY a), w2 AS (ORDER BY b)");
+        assertEquals(2, select.windows().size());
+        assertEquals("w1", select.windows().get(0).name().simpleName());
+        assertEquals("w2", select.windows().get(1).name().simpleName());
+    }
+
+    /**
+     * PostgreSQL LATERAL 子查询。
+     */
+    @Test
+    public void parseLateralSubquery() {
+        SqlSelect select = (SqlSelect) SQL.parse(
+                "SELECT * FROM t, LATERAL (SELECT id FROM s WHERE s.tid = t.id) x",
+                SqlDialect.POSTGRES);
+        assertTrue(select.from() instanceof SqlJoin);
+        SqlJoin join = (SqlJoin) select.from();
+        assertEquals(SqlJoin.Type.COMMA, join.joinType());
+        assertTrue(join.right() instanceof SqlSubqueryTable);
+        SqlSubqueryTable sub = (SqlSubqueryTable) join.right();
+        assertTrue(sub.lateral());
+        assertEquals("x", sub.alias());
+        String formatted = SQL.toSqlString(select, SqlDialect.POSTGRES);
+        assertTrue(formatted, formatted.contains("LATERAL"));
+        SqlSelect again = (SqlSelect) SQL.parse(formatted, SqlDialect.POSTGRES);
+        SqlJoin join2 = (SqlJoin) again.from();
+        assertTrue(((SqlSubqueryTable) join2.right()).lateral());
+    }
+
+    /**
+     * SQL Server CROSS APPLY / OUTER APPLY。
+     */
+    @Test
+    public void parseApplyJoins() {
+        SqlSelect cross = (SqlSelect) SQL.parse(
+                "SELECT * FROM a CROSS APPLY (SELECT TOP 1 id FROM b WHERE b.aid = a.id) x",
+                SqlDialect.SQLSERVER);
+        SqlJoin j1 = (SqlJoin) cross.from();
+        assertEquals(SqlJoin.Type.CROSS_APPLY, j1.joinType());
+        assertTrue(j1.right() instanceof SqlSubqueryTable);
+        String f1 = SQL.toSqlString(cross, SqlDialect.SQLSERVER);
+        assertTrue(f1, f1.contains("CROSS APPLY") || (f1.contains("CROSS") && f1.contains("APPLY")));
+        SqlSelect again1 = (SqlSelect) SQL.parse(f1, SqlDialect.SQLSERVER);
+        assertEquals(SqlJoin.Type.CROSS_APPLY, ((SqlJoin) again1.from()).joinType());
+
+        SqlSelect outer = (SqlSelect) SQL.parse(
+                "SELECT * FROM a OUTER APPLY (SELECT id FROM b WHERE b.aid = a.id) x",
+                SqlDialect.SQLSERVER);
+        assertEquals(SqlJoin.Type.OUTER_APPLY, ((SqlJoin) outer.from()).joinType());
+        String f2 = SQL.toSqlString(outer, SqlDialect.SQLSERVER);
+        SqlSelect again2 = (SqlSelect) SQL.parse(f2, SqlDialect.SQLSERVER);
+        assertEquals(SqlJoin.Type.OUTER_APPLY, ((SqlJoin) again2.from()).joinType());
+    }
+
 
 }

@@ -157,6 +157,7 @@ final class SqlKeywords {
         put("RESTRICT", SqlTokenType.RESTRICT);
         put("MATERIALIZED", SqlTokenType.MATERIALIZED);
         put("LATERAL", SqlTokenType.LATERAL);
+        put("APPLY", SqlTokenType.APPLY);
         put("ARRAY", SqlTokenType.ARRAY);
         put("CURRENT", SqlTokenType.CURRENT);
         put("FOLLOWING", SqlTokenType.FOLLOWING);

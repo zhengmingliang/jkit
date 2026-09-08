@@ -196,6 +196,7 @@ public enum SqlTokenType {
     RESTRICT,
     MATERIALIZED,
     LATERAL,
+    APPLY,
     ARRAY,
     CURRENT,
     FOLLOWING,
