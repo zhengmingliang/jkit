@@ -9,7 +9,7 @@ import java.util.List;
  * 行构造或括号列表 {@code (a, b)}。
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public final class SqlListExpr extends SqlExpr {
     private final List<SqlExpr> items = new ArrayList<SqlExpr>(2);

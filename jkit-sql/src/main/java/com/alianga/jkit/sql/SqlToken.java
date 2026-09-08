@@ -4,7 +4,7 @@ package com.alianga.jkit.sql;
  * 可复用词法记号。文本在首次 {@link #text()} 时从源缓冲切片。
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public final class SqlToken {
     SqlTokenType type;

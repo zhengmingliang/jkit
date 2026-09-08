@@ -8,7 +8,7 @@ import java.util.List;
  * {@link SQL#wall(String)} 检测结果。
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public final class SqlWallResult {
     private final List<String> violations;

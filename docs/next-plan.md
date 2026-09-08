@@ -13,7 +13,7 @@
 1. **零第三方依赖**：`jkit-core`、`jkit-sql`、`jkit-notify` 的运行时 `<dependencies>` 不得引入 Druid、JSqlParser、POI、Hibernate Validator 等。JUnit 仅 test。
 2. **JDK 8**：无 `var`、`List.of`、`String.isBlank`、switch 表达式。
 3. Checkstyle：`checkstyle/check-style.xml`。行宽 160 error / 120 warning；ImportOrder 组 `*,javax,java`；禁止 tab；NeedBraces；字段不要显式赋默认值（`= null` / `= 0` / `= false`）。
-4. 公开 API 中文 javadoc，`@author 郑明亮`，新 API `@since 2.0.2`（2.0.1 已发布，不要把未发布能力标成 2.0.1，jkit-sql 除外，这个是新增模块，继续从 2.0.1 开始）。
+4. 公开 API 中文 javadoc，`@author 郑明亮`。**`jkit-sql` 收口为 `@since 2.0.1`**（新模块随父 POM 2.0.1 交付，勿改标其它版本号）。其它模块在已发布的 2.0.1 之上若再加未发布公开 API，等真正升版时再标对应 `@since`，不要回写进历史 2.0.1。
 5. 对比测试、JMH、引入 Druid/JSqlParser **只允许**在 `/opt/workspace/zml/tools-test`，禁止写进 `jkit-sql` 的 POM。
 6. 改 SQL 解析器后：`mvn -pl jkit-sql test` 必须绿；再 `mvn -pl jkit-sql,jkit-core install -DskipTests`，然后 `cd ../tools-test && mvn -Dtest=SqlParserCompareTest test`。
 
@@ -39,7 +39,7 @@
 - SHOW CREATE TABLE / SHOW COLUMNS FROM / SHOW INDEX FROM 抽表名
 - 类型字面量：`DATE '2020-01-01'`
 - `SqlParseException` 带行号/列号/片段
-- 模块内测试：`SqlParserTest` + `SqlGoldenCorpusTest`（约 90+ 条黄金 SQL）
+- 模块内测试：`SqlParserTest` + `SqlGoldenCorpusTest`（黄金集约 206 条 + 模块测试合计约 613）
 
 关键文件：
 
@@ -75,7 +75,7 @@ HTTP（含 SSE merge、curl 执行、负载均衡、Nacos）、JSON、YAML、配
 - `SqlParser`：语句分发 + WITH + 杂项语句 + 记号工具
 - `SqlSelectParser` / `SqlDmlParser` / `SqlDdlParser` / `SqlExprParser`
 
-验收：`mvn -pl jkit-sql test` 全绿（606）；公开 API 不变；纯重构无语法变更。
+验收：`mvn -pl jkit-sql test` 全绿（613）；公开 API 不变；纯重构无语法变更。
 
 #### P0.2 parse → format → parse 语义往返 ✅ 完成（2026-09-09）
 
@@ -219,8 +219,7 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 - `SqlFormatter` 按方言输出反引号 / 双引号 / `[]`，`||` 按 AST 回写 ✅（P3.1，2026-09-09）。
 - `parseAlias` 删除未使用的 `inFrom` ✅（P3.1）。
 - 多语句：`SQL.parseAll(sql, dialect, true)` 容错 ✅（P3.1）；失败记 `SqlSimpleStatement` + `parseError`，继续下一条。
-- 发布：父版本仍是 2.0.1。`jkit-sql` 若要发 Central，应随 **2.0.1** 一起发，不要用已发布的 2.0.1 坐标抢发（artifactId 虽新，但和 BOM/文档版本会乱）。发布前补 
-  `@since`、README 版本号。
+- 发布（已定）：父版本 **2.0.1**；新模块 `jkit-sql` **随 2.0.1 一并交付**（同 parent 版本下的新 artifact）。javadoc / CHANGELOG / README 依赖示例一律 `2.0.1`。
 
 ---
 
@@ -302,4 +301,4 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 4. 余量（可选）：SHOW CREATE VIEW/DATABASE；其它聚合的 WITHIN GROUP/`aggOption`。~~OUTPUT INTO~~ ✅；~~SqlBuilder rightJoin/union/with/distinct~~ ✅。
 5. 对比工程：语料成功率 ✅；~~表名集合差分~~ ✅；改解析器后记得 `install` 再跑 tools-test。
 
-每完成一块：补 `@since 2.1.0`、更新 `docs/sql.md` 覆盖表、在 `CHANGELOG.md` 的 `2.1.0 - unreleased` 追加条目。不要把父 POM 版本改成 2.1.0，除非用户明确说要发版。
+**发版叙事已定（sql-only）**：`jkit-sql` 随父 POM **2.0.1** 收口（`CHANGELOG` 顶栏 `## 2.0.1 - 2026-09-09`，javadoc `@since 2.0.1`）。每完成一块：补 `@since 2.0.1`（仅 sql 模块）、更新 `docs/sql.md` 覆盖表、在 `CHANGELOG.md` 的 `2.0.1 - 2026-09-09` 追加条目。父 POM 保持 2.0.1，不要擅自升版。

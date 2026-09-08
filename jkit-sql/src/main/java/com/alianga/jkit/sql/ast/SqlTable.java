@@ -9,7 +9,7 @@ import java.util.List;
  * 物理表或视图。
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public final class SqlTable extends SqlTableSource {
     private SqlIdentifier name;
@@ -58,7 +58,7 @@ public final class SqlTable extends SqlTableSource {
 
     /**
      * @return 表级优化器提示原文（slash-star-plus），可空
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public String optimizerHint() {
         return optimizerHint;
@@ -66,7 +66,7 @@ public final class SqlTable extends SqlTableSource {
 
     /**
      * @param optimizerHint 表级优化器提示
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public void setOptimizerHint(String optimizerHint) {
         this.optimizerHint = optimizerHint;
@@ -74,7 +74,7 @@ public final class SqlTable extends SqlTableSource {
 
     /**
      * @return {@code TABLESAMPLE …} / Oracle {@code SAMPLE(…)} 原文，可空
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public String sampleClause() {
         return sampleClause;
@@ -82,7 +82,7 @@ public final class SqlTable extends SqlTableSource {
 
     /**
      * @param sampleClause 采样子句原文
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public void setSampleClause(String sampleClause) {
         this.sampleClause = sampleClause;
@@ -90,7 +90,7 @@ public final class SqlTable extends SqlTableSource {
 
     /**
      * @return MySQL {@code PARTITION (p0, p1)} 分区名列表，可空
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public List<SqlIdentifier> partitions() {
         return partitions;

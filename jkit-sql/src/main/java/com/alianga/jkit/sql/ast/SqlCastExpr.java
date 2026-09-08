@@ -6,7 +6,7 @@ import com.alianga.jkit.sql.visitor.SqlVisitor;
  * CAST(expr AS type) 或 expr::type。
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public final class SqlCastExpr extends SqlExpr {
     private SqlExpr expr;

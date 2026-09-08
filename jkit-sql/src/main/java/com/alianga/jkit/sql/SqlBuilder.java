@@ -42,7 +42,7 @@ import java.util.List;
  * }</pre>
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public final class SqlBuilder {
     private enum Kind {
@@ -226,7 +226,7 @@ public final class SqlBuilder {
      * @param table 右表
      * @param onSql ON 谓词，如 {@code a.id = b.aid}
      * @return this
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public SqlBuilder leftJoin(String table, String onSql) {
         return join(SqlJoin.Type.LEFT, table, null, onSql);
@@ -238,7 +238,7 @@ public final class SqlBuilder {
      * @param table 右表
      * @param onSql ON 谓词
      * @return this
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public SqlBuilder rightJoin(String table, String onSql) {
         return join(SqlJoin.Type.RIGHT, table, null, onSql);
@@ -250,7 +250,7 @@ public final class SqlBuilder {
      * @param table 右表
      * @param onSql ON 谓词
      * @return this
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public SqlBuilder fullJoin(String table, String onSql) {
         return join(SqlJoin.Type.FULL, table, null, onSql);
@@ -261,7 +261,7 @@ public final class SqlBuilder {
      *
      * @param table 右表
      * @return this
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public SqlBuilder crossJoin(String table) {
         return join(SqlJoin.Type.CROSS, table, null, null);
@@ -273,7 +273,7 @@ public final class SqlBuilder {
      * @param table 右表
      * @param onSql ON 谓词
      * @return this
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public SqlBuilder join(String table, String onSql) {
         return join(SqlJoin.Type.INNER, table, null, onSql);
@@ -287,7 +287,7 @@ public final class SqlBuilder {
      * @param alias 右表别名，可空
      * @param onSql ON 谓词
      * @return this
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public SqlBuilder join(SqlJoin.Type type, String table, String alias, String onSql) {
         SqlTable right = SqlTable.of(ident(table));
@@ -309,7 +309,7 @@ public final class SqlBuilder {
      * {@code SELECT DISTINCT}。
      *
      * @return this
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public SqlBuilder distinct() {
         this.distinct = true;
@@ -322,7 +322,7 @@ public final class SqlBuilder {
      * @param name CTE 名
      * @param subquerySql 子查询 SQL（不含外层括号）
      * @return this
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public SqlBuilder with(String name, String subquerySql) {
         SqlWithItem item = new SqlWithItem();
@@ -338,7 +338,7 @@ public final class SqlBuilder {
      * @param name CTE 名
      * @param subquery SELECT 构建器
      * @return this
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public SqlBuilder with(String name, SqlBuilder subquery) {
         SqlWithItem item = new SqlWithItem();
@@ -353,7 +353,7 @@ public final class SqlBuilder {
      *
      * @param other 右侧
      * @return this
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public SqlBuilder union(SqlBuilder other) {
         return appendUnion("UNION", other);
@@ -364,7 +364,7 @@ public final class SqlBuilder {
      *
      * @param other 右侧
      * @return this
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public SqlBuilder unionAll(SqlBuilder other) {
         return appendUnion("UNION ALL", other);
@@ -384,7 +384,7 @@ public final class SqlBuilder {
      *
      * @param columns 列名
      * @return this
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public SqlBuilder groupBy(String... columns) {
         if (columns == null) {
@@ -401,7 +401,7 @@ public final class SqlBuilder {
      *
      * @param predicateSql 谓词片段
      * @return this
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public SqlBuilder having(String predicateSql) {
         this.having = parsePredicate(predicateSql);

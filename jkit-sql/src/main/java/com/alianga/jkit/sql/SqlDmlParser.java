@@ -20,7 +20,7 @@ import java.util.List;
  * INSERT / UPDATE / DELETE / MERGE 解析协作类，共享 {@link SqlParser} 记号游标。
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 final class SqlDmlParser {
     private final SqlParser p;

@@ -6,7 +6,7 @@ import com.alianga.jkit.sql.visitor.SqlVisitor;
  * SELECT 级命名窗口：{@code WINDOW w AS (PARTITION BY ... ORDER BY ...)}。
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public final class SqlWindowDefinition extends SqlNode {
     private SqlIdentifier name;

@@ -31,7 +31,7 @@ import java.util.Set;
  * 同一张表可合并多种访问类型（如 INSERT…SELECT 同源表记 {@code INSERT+SELECT}）。</p>
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public final class SqlSchemaStat {
     private final Map<String, SqlTableAccess> tables = new LinkedHashMap<String, SqlTableAccess>();

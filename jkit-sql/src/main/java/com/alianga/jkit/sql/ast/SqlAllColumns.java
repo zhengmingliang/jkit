@@ -6,7 +6,7 @@ import com.alianga.jkit.sql.visitor.SqlVisitor;
  * {@code *} 或 {@code t.*}。
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public final class SqlAllColumns extends SqlExpr {
     private SqlIdentifier owner;

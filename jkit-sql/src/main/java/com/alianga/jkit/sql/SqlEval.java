@@ -14,7 +14,7 @@ import java.math.BigDecimal;
  * <p>无法求值时返回 {@code null}（与 {@code Boolean.FALSE} 区分）。</p>
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public final class SqlEval {
     private SqlEval() {

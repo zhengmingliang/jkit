@@ -4,7 +4,7 @@ package com.alianga.jkit.sql.ast;
  * 字面量：字符串、数字、NULL、TRUE/FALSE、绑定变量。
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public final class SqlLiteral extends SqlExpr {
     /**

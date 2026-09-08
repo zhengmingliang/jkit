@@ -6,7 +6,7 @@ import com.alianga.jkit.sql.visitor.SqlVisitor;
  * SELECT 列表项。
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public final class SqlSelectItem extends SqlNode {
     private SqlExpr expr;

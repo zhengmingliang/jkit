@@ -6,7 +6,7 @@ package com.alianga.jkit.sql;
  * <p>记号对象来自长度为 8 的环形池，解析器 {@link #next()} / {@link #peek()} 都走同一套。</p>
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public final class SqlLexer {
     private char[] src;
@@ -717,7 +717,7 @@ public final class SqlLexer {
      * @param from 起始下标（含）
      * @param to 结束下标（不含）
      * @return 原文切片，越界时裁剪；空区间返回空串
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public String rawSlice(int from, int to) {
         if (src == null || to <= from) {

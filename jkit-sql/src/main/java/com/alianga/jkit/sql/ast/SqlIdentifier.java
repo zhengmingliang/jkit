@@ -8,7 +8,7 @@ import java.util.List;
  * 标识符，可带限定名 {@code catalog.schema.table} 或 {@code t.col}。
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public final class SqlIdentifier extends SqlExpr {
     private List<String> names;

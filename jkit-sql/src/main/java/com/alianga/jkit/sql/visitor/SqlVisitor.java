@@ -6,7 +6,7 @@ import com.alianga.jkit.sql.ast.SqlNode;
  * AST 访问者。返回 false 时跳过该节点的子树（与 Druid 一致）。
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public interface SqlVisitor {
     /**

@@ -10,7 +10,7 @@ import java.util.List;
  * ANALYZE 等相对扁平的语句；{@link SqlStatementType#OTHER} 用于过程块与维护语句。
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public final class SqlSimpleStatement extends SqlStatement {
     private SqlStatementType statementType = SqlStatementType.OTHER;
@@ -106,7 +106,7 @@ public final class SqlSimpleStatement extends SqlStatement {
 
     /**
      * @return CALL 实参列表
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public List<SqlExpr> arguments() {
         return arguments;
@@ -114,7 +114,7 @@ public final class SqlSimpleStatement extends SqlStatement {
 
     /**
      * @return CALL 是否带括号（区分 {@code CALL p} 与 {@code CALL p()}）
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public boolean withArguments() {
         return withArguments;
@@ -122,7 +122,7 @@ public final class SqlSimpleStatement extends SqlStatement {
 
     /**
      * @param withArguments 是否带括号
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public void setWithArguments(boolean withArguments) {
         this.withArguments = withArguments;
@@ -132,7 +132,7 @@ public final class SqlSimpleStatement extends SqlStatement {
      * 容错 {@code parseAll(..., true)} 时单条失败的错误信息；成功解析时为 null。
      *
      * @return 错误信息，无则 null
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public String parseError() {
         return parseError;
@@ -140,7 +140,7 @@ public final class SqlSimpleStatement extends SqlStatement {
 
     /**
      * @param parseError 解析错误信息
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public void setParseError(String parseError) {
         this.parseError = parseError;
@@ -148,7 +148,7 @@ public final class SqlSimpleStatement extends SqlStatement {
 
     /**
      * @return 是否为容错解析留下的失败占位
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public boolean hasParseError() {
         return parseError != null;
@@ -156,7 +156,7 @@ public final class SqlSimpleStatement extends SqlStatement {
 
     /**
      * @return GRANT 权限列表原文，如 {@code SELECT, INSERT} / {@code ALL PRIVILEGES}
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public String privileges() {
         return privileges;
@@ -164,7 +164,7 @@ public final class SqlSimpleStatement extends SqlStatement {
 
     /**
      * @param privileges 权限原文
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public void setPrivileges(String privileges) {
         this.privileges = privileges;

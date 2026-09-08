@@ -9,7 +9,7 @@ import java.util.List;
  * Oracle {@code INSERT ALL/FIRST} 的一条 {@code [WHEN … THEN] INTO … VALUES …} / {@code ELSE INTO …} 分支。
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public final class SqlInsertBranch extends SqlNode {
     private SqlExpr when;

@@ -6,7 +6,7 @@ import com.alianga.jkit.sql.visitor.SqlVisitor;
  * FROM 子查询。
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public final class SqlSubqueryTable extends SqlTableSource {
     private SqlStatement query;
@@ -28,7 +28,7 @@ public final class SqlSubqueryTable extends SqlTableSource {
 
     /**
      * @return 是否 {@code LATERAL} 子查询
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public boolean lateral() {
         return lateral;
@@ -36,7 +36,7 @@ public final class SqlSubqueryTable extends SqlTableSource {
 
     /**
      * @param lateral {@code LATERAL}
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public void setLateral(boolean lateral) {
         this.lateral = lateral;

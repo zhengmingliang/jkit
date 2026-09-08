@@ -4,7 +4,7 @@ package com.alianga.jkit.sql;
  * 关键字开地址哈希表。查找时对源 {@code char[]} 做大小写折叠，不分配字符串。
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 final class SqlKeywords {
     private static final int MASK = 1023;

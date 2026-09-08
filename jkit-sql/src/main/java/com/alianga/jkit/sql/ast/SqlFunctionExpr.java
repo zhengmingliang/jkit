@@ -9,7 +9,7 @@ import java.util.List;
  * 函数调用，含 {@code COUNT(*)}、聚合 DISTINCT、OVER、GROUP_CONCAT ORDER BY/SEPARATOR、MATCH AGAINST。
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public final class SqlFunctionExpr extends SqlExpr {
     private SqlIdentifier name;

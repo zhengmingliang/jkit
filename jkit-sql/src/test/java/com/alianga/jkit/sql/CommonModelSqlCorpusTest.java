@@ -23,7 +23,7 @@ import static org.junit.Assert.fail;
  * 已知非 SQL / 截断 / 数字开头裸标识符等已从资源剔除，见 {@link CommonModelSqlKnownGapsTest}。
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 @RunWith(Parameterized.class)
 public class CommonModelSqlCorpusTest {

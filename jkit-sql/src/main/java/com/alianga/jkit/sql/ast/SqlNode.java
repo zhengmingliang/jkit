@@ -10,7 +10,7 @@ import java.util.List;
  * AST 节点。{@link #toString()} 输出紧凑 SQL（经 {@link SqlFormatter}），便于调试。
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public abstract class SqlNode {
     /**

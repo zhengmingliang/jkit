@@ -6,7 +6,7 @@ import com.alianga.jkit.sql.ast.SqlNode;
  * 空访问者，默认遍历整棵树。
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public class SqlVisitorAdapter implements SqlVisitor {
     /**

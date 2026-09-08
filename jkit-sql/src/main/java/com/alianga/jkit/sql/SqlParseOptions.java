@@ -4,7 +4,7 @@ package com.alianga.jkit.sql;
  * SQL 解析选项。默认全部关闭，保证热路径与旧行为一致。
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public final class SqlParseOptions {
     private boolean keepComments;

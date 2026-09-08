@@ -10,7 +10,7 @@ import java.util.List;
  * 以及括号内继承 {@code OVER (w ORDER BY ...)} / {@code WINDOW w2 AS (w)}。
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public final class SqlOverExpr extends SqlExpr {
     private SqlIdentifier windowName;
@@ -37,7 +37,7 @@ public final class SqlOverExpr extends SqlExpr {
 
     /**
      * @return 括号内继承的已有窗口名，如 {@code (w ORDER BY b)} 中的 {@code w}；与 {@link #windowName()}（无括号的 {@code OVER w}）不同
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public SqlIdentifier existingWindowName() {
         return existingWindowName;
@@ -45,7 +45,7 @@ public final class SqlOverExpr extends SqlExpr {
 
     /**
      * @param existingWindowName 继承的窗口名
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public void setExistingWindowName(SqlIdentifier existingWindowName) {
         this.existingWindowName = existingWindowName;

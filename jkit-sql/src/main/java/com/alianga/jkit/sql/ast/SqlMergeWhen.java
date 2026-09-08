@@ -6,7 +6,7 @@ import com.alianga.jkit.sql.visitor.SqlVisitor;
  * MERGE 的一条 {@code WHEN [NOT] MATCHED [BY SOURCE|TARGET] [AND pred] THEN …} 子句。
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public final class SqlMergeWhen extends SqlNode {
     /**

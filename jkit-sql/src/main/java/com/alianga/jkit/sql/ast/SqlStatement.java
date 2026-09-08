@@ -8,7 +8,7 @@ import java.util.List;
  * SQL 语句。
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public abstract class SqlStatement extends SqlNode {
     private List<SqlWithItem> withItems;
@@ -72,7 +72,7 @@ public abstract class SqlStatement extends SqlNode {
 
     /**
      * @return 语句前保留的普通注释（仅 keepComments 时有值），可能为空列表
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public List<String> comments() {
         if (comments == null) {
@@ -83,7 +83,7 @@ public abstract class SqlStatement extends SqlNode {
 
     /**
      * @param comments 语句前注释
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public void setComments(List<String> comments) {
         this.comments = comments;
@@ -91,7 +91,7 @@ public abstract class SqlStatement extends SqlNode {
 
     /**
      * @param comment 追加一条注释原文
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public void addComment(String comment) {
         if (comment == null || comment.isEmpty()) {

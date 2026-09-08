@@ -6,7 +6,7 @@ import com.alianga.jkit.sql.visitor.SqlVisitor;
  * 标量子查询或 FROM 以外出现的查询。
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public final class SqlQueryExpr extends SqlExpr {
     private SqlStatement query;

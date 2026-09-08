@@ -28,7 +28,7 @@ import java.util.List;
  * }</pre>
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public final class SQL {
     private static final ThreadLocal<SqlParser> PARSER = new ThreadLocal<SqlParser>() {
@@ -46,7 +46,7 @@ public final class SQL {
 
     /**
      * @return 新的 SELECT {@link SqlBuilder}（默认 {@code SELECT *}）
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public static SqlBuilder builder() {
         return SqlBuilder.select();
@@ -57,7 +57,7 @@ public final class SQL {
      *
      * @param predicates 谓词
      * @return 合并表达式
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public static SqlExpr and(SqlExpr... predicates) {
         return SqlBuilder.andAll(predicates);
@@ -68,7 +68,7 @@ public final class SQL {
      *
      * @param predicates 谓词
      * @return 合并表达式
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public static SqlExpr or(SqlExpr... predicates) {
         return SqlBuilder.orAll(predicates);
@@ -79,7 +79,7 @@ public final class SQL {
      *
      * @param statements 语句列表
      * @return 紧凑 SQL
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public static String concat(List<SqlStatement> statements) {
         return SqlBuilder.concatStatements(statements, SqlDialect.MYSQL);
@@ -91,7 +91,7 @@ public final class SQL {
      * @param statements 语句列表
      * @param dialect 方言
      * @return 紧凑 SQL
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public static String concat(List<SqlStatement> statements, SqlDialect dialect) {
         return SqlBuilder.concatStatements(statements, dialect);
@@ -125,7 +125,7 @@ public final class SQL {
      * @param dialect 方言
      * @param options 解析选项，null 视为默认
      * @return 第一条语句
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public static SqlStatement parse(String sql, SqlDialect dialect, SqlParseOptions options) {
         List<SqlStatement> all = parseAll(sql, dialect, options);
@@ -167,7 +167,7 @@ public final class SQL {
      * @param dialect 方言
      * @param options 解析选项，null 视为默认
      * @return 语句列表，无语句时为空列表
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public static List<SqlStatement> parseAll(String sql, SqlDialect dialect, SqlParseOptions options) {
         return parseAll(sql, dialect, options, false);
@@ -184,7 +184,7 @@ public final class SQL {
      * @param dialect 方言
      * @param tolerant 是否容错
      * @return 语句列表，无语句时为空列表
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public static List<SqlStatement> parseAll(String sql, SqlDialect dialect, boolean tolerant) {
         return parseAll(sql, dialect, SqlParseOptions.defaults(), tolerant);
@@ -198,7 +198,7 @@ public final class SQL {
      * @param options 解析选项，null 视为默认
      * @param tolerant 是否容错
      * @return 语句列表，无语句时为空列表
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public static List<SqlStatement> parseAll(String sql, SqlDialect dialect,
             SqlParseOptions options, boolean tolerant) {
@@ -353,7 +353,7 @@ public final class SQL {
      *
      * @param statement 语句
      * @return 行数，无或非数字字面量时 null
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public static Long getLimit(SqlStatement statement) {
         return SqlRewriter.getLimit(statement);
@@ -364,7 +364,7 @@ public final class SQL {
      *
      * @param statement 语句
      * @return 偏移，无则 null
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public static Long getOffset(SqlStatement statement) {
         return SqlRewriter.getOffset(statement);
@@ -376,7 +376,7 @@ public final class SQL {
      * @param statement 语句
      * @param rowCount 行数
      * @return 新语句
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public static SqlStatement setLimit(SqlStatement statement, long rowCount) {
         return setLimit(statement, rowCount, SqlDialect.MYSQL);
@@ -389,7 +389,7 @@ public final class SQL {
      * @param rowCount 行数
      * @param dialect 方言
      * @return 新语句
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public static SqlStatement setLimit(SqlStatement statement, long rowCount, SqlDialect dialect) {
         SqlDialect d = dialect == null ? SqlDialect.MYSQL : dialect;
@@ -403,7 +403,7 @@ public final class SQL {
      * @param statement 语句
      * @param offset 偏移
      * @return 新语句
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public static SqlStatement setOffset(SqlStatement statement, long offset) {
         return setOffset(statement, offset, SqlDialect.MYSQL);
@@ -416,7 +416,7 @@ public final class SQL {
      * @param offset 偏移
      * @param dialect 方言
      * @return 新语句
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public static SqlStatement setOffset(SqlStatement statement, long offset, SqlDialect dialect) {
         SqlDialect d = dialect == null ? SqlDialect.MYSQL : dialect;
@@ -431,7 +431,7 @@ public final class SQL {
      * @param pageNo 页码
      * @param pageSize 页大小
      * @return 新语句
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public static SqlStatement setPage(SqlStatement statement, long pageNo, long pageSize) {
         return setPage(statement, pageNo, pageSize, SqlDialect.MYSQL);
@@ -446,7 +446,7 @@ public final class SQL {
      * @param pageSize 页大小
      * @param dialect 方言
      * @return 新语句
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public static SqlStatement setPage(SqlStatement statement, long pageNo, long pageSize,
             SqlDialect dialect) {
@@ -458,7 +458,7 @@ public final class SQL {
     /**
      * 解析谓词并 AND 到顶层 WHERE（先 {@link #clone(SqlStatement) 深拷贝} 再改，不污染原树）。
      *
-     * <p><b>破坏性变更（2.1.0）</b>：旧实现就地修改并返回原对象；现与 {@link #addLimit}/{@link #setPage}
+     * <p><b>破坏性变更（2.0.1）</b>：旧实现就地修改并返回原对象；现与 {@link #addLimit}/{@link #setPage}
      * 一致，返回新语句，原 AST 不变。调用方需使用返回值。
      *
      * @param statement 语句
@@ -477,7 +477,7 @@ public final class SQL {
     /**
      * 替换物理表名（先深拷贝再改，不污染原树）。
      *
-     * <p><b>破坏性变更（2.1.0）</b>：旧实现就地修改；现返回新语句，原 AST 不变。
+     * <p><b>破坏性变更（2.0.1）</b>：旧实现就地修改；现返回新语句，原 AST 不变。
      *
      * @param statement 语句
      * @param from 原简单名
@@ -492,13 +492,13 @@ public final class SQL {
     /**
      * 替换列名（忽略大小写），对称 {@link #replaceTable}（先深拷贝再改）。
      *
-     * <p><b>破坏性变更（2.1.0）</b>：旧实现就地修改；现返回新语句，原 AST 不变。
+     * <p><b>破坏性变更（2.0.1）</b>：旧实现就地修改；现返回新语句，原 AST 不变。
      *
      * @param statement 语句
      * @param from 原列简单名
      * @param to 新列简单名
      * @return 替换后的拷贝
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public static SqlStatement replaceColumn(SqlStatement statement, String from, String to) {
         SqlStatement copy = clone(statement);
@@ -552,7 +552,7 @@ public final class SQL {
      *
      * @param statement 语句
      * @return 新 AST，null 入参返回 null
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public static SqlStatement clone(SqlStatement statement) {
         return clone(statement, SqlDialect.MYSQL);
@@ -564,7 +564,7 @@ public final class SQL {
      * @param statement 语句
      * @param dialect 方言
      * @return 新 AST，null 入参返回 null
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public static SqlStatement clone(SqlStatement statement, SqlDialect dialect) {
         if (statement == null) {
@@ -579,7 +579,7 @@ public final class SQL {
      *
      * @param sql SQL
      * @return 参数化后的紧凑 SQL
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public static String parameterize(String sql) {
         return parameterize(sql, SqlDialect.MYSQL);
@@ -591,7 +591,7 @@ public final class SQL {
      * @param sql SQL
      * @param dialect 方言
      * @return 参数化后的紧凑 SQL
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public static String parameterize(String sql, SqlDialect dialect) {
         return SqlParameterizer.parameterize(parse(sql, dialect), dialect);
@@ -602,7 +602,7 @@ public final class SQL {
      *
      * @param statement 语句
      * @return 参数化后的紧凑 SQL
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public static String parameterize(SqlStatement statement) {
         return SqlParameterizer.parameterize(statement, SqlDialect.MYSQL);
@@ -613,7 +613,7 @@ public final class SQL {
      *
      * @param sql SQL
      * @return 值列表
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public static List<Object> exportParameterValues(String sql) {
         return exportParameterValues(parse(sql));
@@ -624,7 +624,7 @@ public final class SQL {
      *
      * @param statement 语句
      * @return 值列表（不修改 AST）
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public static List<Object> exportParameterValues(SqlStatement statement) {
         return SqlParameterizer.exportParameterValues(statement);
@@ -635,7 +635,7 @@ public final class SQL {
      *
      * @param sql SQL
      * @return 检测结果
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public static SqlWallResult wall(String sql) {
         return wall(sql, SqlDialect.MYSQL);
@@ -647,7 +647,7 @@ public final class SQL {
      * @param sql SQL
      * @param dialect 方言
      * @return 检测结果
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public static SqlWallResult wall(String sql, SqlDialect dialect) {
         return SqlWall.check(sql, dialect);
@@ -658,7 +658,7 @@ public final class SQL {
      *
      * @param statement 语句
      * @return 检测结果
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public static SqlWallResult wall(SqlStatement statement) {
         return SqlWall.check(statement);
@@ -669,7 +669,7 @@ public final class SQL {
      *
      * @param expr 表达式
      * @return 求值结果；不可求值时 {@code null}
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public static Object eval(SqlExpr expr) {
         return SqlEval.eval(expr);

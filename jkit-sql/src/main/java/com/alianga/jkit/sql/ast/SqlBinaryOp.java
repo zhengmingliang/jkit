@@ -4,7 +4,7 @@ package com.alianga.jkit.sql.ast;
  * 二元运算符。
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public enum SqlBinaryOp {
     EQ("="),

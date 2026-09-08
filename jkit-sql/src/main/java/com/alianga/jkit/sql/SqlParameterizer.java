@@ -14,7 +14,7 @@ import java.util.List;
  * 参数化归一与字面量导出（对标 Druid ParameterizedOutputVisitor / ExportParameterVisitor）。
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public final class SqlParameterizer {
     private SqlParameterizer() {

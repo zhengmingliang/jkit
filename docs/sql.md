@@ -216,11 +216,11 @@ mvn -Dtest=SqlParserCompareTest test
 
 | | 解析成功率（文件语料） | 备注 |
 | --- | --- | --- |
-| **jkit-sql** | **379/379 (100%)** | 模块内黄金集约 203 条（含往返） |
+| **jkit-sql** | **379/379 (100%)** | 模块内黄金集约 206 条（含往返）；`mvn -pl jkit-sql test` 约 **613** 条 |
 | Druid 1.2.23 | 低于 jkit（缺口见 `target/sql-compare-fail.txt`） | 对比不进本库依赖 |
 | JSqlParser 4.9 | 低于 jkit | 同上 |
 
 ## 语料与对比
 
-- 模块内：`SqlGoldenCorpusTest`（约 **203** 条，含往返）、`CommonModelSqlCorpusTest`（从 `icell/common-model` 收获，87 条可解析）。
+- 模块内：`SqlGoldenCorpusTest`（约 **206** 条，含往返）、`CommonModelSqlCorpusTest`（从 `icell/common-model` 收获，87 条可解析）。
 - 与 Druid / JSqlParser 对比只在上级工程 `tools-test` 的 `SqlParserCompareTest`（成功率 + 表名集合差分 + JMH；不进本库依赖）。

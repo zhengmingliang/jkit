@@ -13,7 +13,7 @@ import java.util.List;
  * 递归下降 SQL 解析器。实例可 {@link #reset} 后复用，配合 {@link ThreadLocal} 降低分配。
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public final class SqlParser {
     /** 共享词法器（包内协作类直接读写）。 */
@@ -58,7 +58,7 @@ public final class SqlParser {
      * @param sql SQL
      * @param dialect 方言
      * @param options 选项，null 视为默认
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public void reset(String sql, SqlDialect dialect, SqlParseOptions options) {
         this.dialect = dialect == null ? SqlDialect.MYSQL : dialect;
@@ -87,7 +87,7 @@ public final class SqlParser {
      *
      * @param tolerant {@code true} 时单条失败记为带 {@link SqlSimpleStatement#parseError()} 的占位并继续
      * @return 语句列表
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public List<SqlStatement> parseAll(boolean tolerant) {
         List<SqlStatement> list = new ArrayList<SqlStatement>(1);

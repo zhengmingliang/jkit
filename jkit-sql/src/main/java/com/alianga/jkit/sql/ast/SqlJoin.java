@@ -8,7 +8,7 @@ import java.util.List;
  * JOIN。
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public final class SqlJoin extends SqlTableSource {
     /**

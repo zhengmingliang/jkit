@@ -6,7 +6,7 @@ import com.alianga.jkit.sql.visitor.SqlVisitor;
  * FROM 表函数：{@code UNNEST(...)}、{@code generate_series(...)}、{@code OPENJSON(...) [WITH (...)]}，或 {@code TABLE(fn(...))}。
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public final class SqlFunctionTable extends SqlTableSource {
     private SqlExpr function;
@@ -60,7 +60,7 @@ public final class SqlFunctionTable extends SqlTableSource {
      * SQL Server {@code OPENJSON(...) WITH (...)} 等表函数的 WITH 子句原文（含括号内）。
      *
      * @return WITH 定义，无则 null
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public String withDefinition() {
         return withDefinition;
@@ -68,7 +68,7 @@ public final class SqlFunctionTable extends SqlTableSource {
 
     /**
      * @param withDefinition WITH 子句内容（建议含外层括号内原文）
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public void setWithDefinition(String withDefinition) {
         this.withDefinition = withDefinition;

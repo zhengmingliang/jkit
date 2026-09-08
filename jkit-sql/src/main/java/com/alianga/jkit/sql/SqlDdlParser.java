@@ -10,7 +10,7 @@ import com.alianga.jkit.sql.ast.SqlStatementType;
  * CREATE / DROP / ALTER / TRUNCATE / GRANT / COMMENT 解析协作类，共享 {@link SqlParser} 记号游标。
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 final class SqlDdlParser {
     private final SqlParser p;

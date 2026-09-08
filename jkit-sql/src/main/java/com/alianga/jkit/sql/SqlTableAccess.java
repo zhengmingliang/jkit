@@ -10,7 +10,7 @@ import java.util.Set;
  * 单表访问类型集合。同一张表可同时被写入与读取（如 {@code INSERT INTO t SELECT * FROM t}）。
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public final class SqlTableAccess {
     private final Set<SqlStatementType> types = new LinkedHashSet<SqlStatementType>(2);

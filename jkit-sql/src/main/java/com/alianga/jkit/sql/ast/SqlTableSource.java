@@ -7,7 +7,7 @@ import java.util.List;
  * FROM 项：表、连接、子查询、表函数、VALUES。
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public abstract class SqlTableSource extends SqlNode {
     private String alias;
@@ -29,7 +29,7 @@ public abstract class SqlTableSource extends SqlNode {
 
     /**
      * @return 列别名清单，如 {@code AS v(id, name)} 中的 {@code id, name}
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public List<SqlIdentifier> columnAliases() {
         return columnAliases;

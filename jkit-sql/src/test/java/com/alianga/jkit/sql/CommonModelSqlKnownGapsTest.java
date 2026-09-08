@@ -8,7 +8,7 @@ import static org.junit.Assert.fail;
  * 登记从 common-model 语料中剔除或仍不支持的样本，避免静默 skip。
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public class CommonModelSqlKnownGapsTest {
 

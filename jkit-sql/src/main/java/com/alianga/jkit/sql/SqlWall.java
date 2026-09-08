@@ -20,7 +20,7 @@ import java.util.List;
  * <p>默认不接入解析路径，仅显式 {@link SQL#wall(String)} 调用。</p>
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public final class SqlWall {
     private SqlWall() {

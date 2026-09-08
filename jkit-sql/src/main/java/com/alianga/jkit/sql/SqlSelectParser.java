@@ -23,7 +23,7 @@ import java.util.List;
  * SELECT / 表源 / JOIN / ORDER BY / LIMIT 解析协作类，共享 {@link SqlParser} 记号游标。
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 final class SqlSelectParser {
     private final SqlParser p;

@@ -4,7 +4,7 @@ package com.alianga.jkit.sql;
  * 词法记号。关键字与符号共用一套枚举，便于 switch。
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public enum SqlTokenType {
     EOF,

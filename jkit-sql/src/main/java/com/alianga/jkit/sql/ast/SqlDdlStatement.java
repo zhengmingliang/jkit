@@ -12,7 +12,7 @@ import java.util.List;
  * 过程体等可留在 {@link #tail()}。
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public final class SqlDdlStatement extends SqlStatement {
     private SqlStatementType statementType = SqlStatementType.CREATE;
@@ -78,7 +78,7 @@ public final class SqlDdlStatement extends SqlStatement {
 
     /**
      * @return {@code CREATE OR REPLACE}
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public boolean orReplace() {
         return orReplace;
@@ -86,7 +86,7 @@ public final class SqlDdlStatement extends SqlStatement {
 
     /**
      * @param orReplace OR REPLACE
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public void setOrReplace(boolean orReplace) {
         this.orReplace = orReplace;
@@ -150,7 +150,7 @@ public final class SqlDdlStatement extends SqlStatement {
 
     /**
      * @return CREATE TABLE {@code ENGINE}
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public String engine() {
         return engine;
@@ -158,7 +158,7 @@ public final class SqlDdlStatement extends SqlStatement {
 
     /**
      * @param engine ENGINE 值
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public void setEngine(String engine) {
         this.engine = engine;
@@ -166,7 +166,7 @@ public final class SqlDdlStatement extends SqlStatement {
 
     /**
      * @return CREATE TABLE {@code CHARSET} / {@code CHARACTER SET}
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public String charset() {
         return charset;
@@ -174,7 +174,7 @@ public final class SqlDdlStatement extends SqlStatement {
 
     /**
      * @param charset 字符集
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public void setCharset(String charset) {
         this.charset = charset;
@@ -182,7 +182,7 @@ public final class SqlDdlStatement extends SqlStatement {
 
     /**
      * @return COLLATE
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public String collate() {
         return collate;
@@ -190,7 +190,7 @@ public final class SqlDdlStatement extends SqlStatement {
 
     /**
      * @param collate 排序规则
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public void setCollate(String collate) {
         this.collate = collate;
@@ -198,7 +198,7 @@ public final class SqlDdlStatement extends SqlStatement {
 
     /**
      * @return 表 COMMENT 字面量（含引号）
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public String comment() {
         return comment;
@@ -206,7 +206,7 @@ public final class SqlDdlStatement extends SqlStatement {
 
     /**
      * @param comment COMMENT 字面量
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public void setComment(String comment) {
         this.comment = comment;
@@ -214,7 +214,7 @@ public final class SqlDdlStatement extends SqlStatement {
 
     /**
      * @return ALTER 动作，如 {@code ADD INDEX} / {@code DROP INDEX} / {@code RENAME TO}
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public String alterAction() {
         return alterAction;
@@ -222,7 +222,7 @@ public final class SqlDdlStatement extends SqlStatement {
 
     /**
      * @param alterAction ALTER 动作
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public void setAlterAction(String alterAction) {
         this.alterAction = alterAction;
@@ -230,7 +230,7 @@ public final class SqlDdlStatement extends SqlStatement {
 
     /**
      * @return ADD/DROP INDEX 的索引名
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public SqlIdentifier indexName() {
         return indexName;
@@ -238,7 +238,7 @@ public final class SqlDdlStatement extends SqlStatement {
 
     /**
      * @param indexName 索引名
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public void setIndexName(SqlIdentifier indexName) {
         this.indexName = indexName;
@@ -246,7 +246,7 @@ public final class SqlDdlStatement extends SqlStatement {
 
     /**
      * @return ADD INDEX 列清单
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public List<SqlIdentifier> indexColumns() {
         return indexColumns;
@@ -254,7 +254,7 @@ public final class SqlDdlStatement extends SqlStatement {
 
     /**
      * @return {@code RENAME TO} 新表名
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public SqlIdentifier renameTo() {
         return renameTo;
@@ -262,7 +262,7 @@ public final class SqlDdlStatement extends SqlStatement {
 
     /**
      * @param renameTo 新表名
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public void setRenameTo(SqlIdentifier renameTo) {
         this.renameTo = renameTo;
@@ -270,7 +270,7 @@ public final class SqlDdlStatement extends SqlStatement {
 
     /**
      * @return CHANGE/MODIFY/ADD COLUMN 的类型与列属性原文（不含列名）
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public String columnDefinition() {
         return columnDefinition;
@@ -278,7 +278,7 @@ public final class SqlDdlStatement extends SqlStatement {
 
     /**
      * @param columnDefinition 列定义原文
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public void setColumnDefinition(String columnDefinition) {
         this.columnDefinition = columnDefinition;
@@ -286,7 +286,7 @@ public final class SqlDdlStatement extends SqlStatement {
 
     /**
      * @return CREATE TABLE 列定义/表约束原文列表（含类型与约束关键字）
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public List<String> columnDefinitions() {
         return columnDefinitions;
@@ -294,7 +294,7 @@ public final class SqlDdlStatement extends SqlStatement {
 
     /**
      * @return ADD CONSTRAINT 约束名，可空
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public SqlIdentifier constraintName() {
         return constraintName;
@@ -302,7 +302,7 @@ public final class SqlDdlStatement extends SqlStatement {
 
     /**
      * @param constraintName 约束名
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public void setConstraintName(SqlIdentifier constraintName) {
         this.constraintName = constraintName;
@@ -310,7 +310,7 @@ public final class SqlDdlStatement extends SqlStatement {
 
     /**
      * @return 约束类型，如 {@code FOREIGN KEY} / {@code PRIMARY KEY} / {@code UNIQUE} / {@code CHECK}
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public String constraintType() {
         return constraintType;
@@ -318,7 +318,7 @@ public final class SqlDdlStatement extends SqlStatement {
 
     /**
      * @param constraintType 约束类型
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public void setConstraintType(String constraintType) {
         this.constraintType = constraintType;
@@ -326,7 +326,7 @@ public final class SqlDdlStatement extends SqlStatement {
 
     /**
      * @return 表级 / ALTER FOREIGN KEY 引用的外表名
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public List<SqlIdentifier> referencedTables() {
         return referencedTables;

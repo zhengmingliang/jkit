@@ -41,7 +41,7 @@ import com.alianga.jkit.sql.ast.SqlWithItem;
  * {@code visitXxx} 即可；返回 false 跳过该节点子树。</p>
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public class SqlAstVisitor implements SqlVisitor {
     /**

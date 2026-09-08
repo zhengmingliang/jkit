@@ -17,7 +17,7 @@ package com.alianga.jkit.sql;
  * <p>名称别名见 {@link #fromName(String)}：无法识别时默认 {@link #MYSQL}。</p>
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public enum SqlDialect {
     /**

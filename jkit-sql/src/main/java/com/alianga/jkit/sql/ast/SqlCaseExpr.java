@@ -9,7 +9,7 @@ import java.util.List;
  * CASE 表达式。
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public final class SqlCaseExpr extends SqlExpr {
     private SqlExpr value;

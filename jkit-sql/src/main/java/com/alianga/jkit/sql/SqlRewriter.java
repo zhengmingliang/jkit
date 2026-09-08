@@ -18,7 +18,7 @@ import com.alianga.jkit.sql.visitor.SqlVisitorAdapter;
  * 常见改写：补/读/改分页（LIMIT/TOP/FETCH）、AND WHERE、换表名。
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public final class SqlRewriter {
     private SqlRewriter() {

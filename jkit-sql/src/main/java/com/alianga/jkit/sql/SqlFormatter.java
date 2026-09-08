@@ -47,7 +47,7 @@ import java.util.List;
  * {@code ||} 按 AST 运算符回写（{@link SqlBinaryOp#CONCAT}→{@code ||}，{@link SqlBinaryOp#OR}→{@code OR}）。
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public final class SqlFormatter {
     private final StringBuilder out = new StringBuilder(128);

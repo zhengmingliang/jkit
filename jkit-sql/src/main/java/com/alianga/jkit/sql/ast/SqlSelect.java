@@ -10,7 +10,7 @@ import java.util.List;
  * SELECT，含 UNION 链。
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public final class SqlSelect extends SqlStatement {
     private boolean distinct;
@@ -48,7 +48,7 @@ public final class SqlSelect extends SqlStatement {
 
     /**
      * @return 优化器提示原文列表（含 slash-star-plus 包装），可能为空列表
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public List<String> hints() {
         if (hints == null) {
@@ -59,7 +59,7 @@ public final class SqlSelect extends SqlStatement {
 
     /**
      * @param hint 优化器提示原文
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public void addHint(String hint) {
         if (hint == null || hint.isEmpty()) {
@@ -73,7 +73,7 @@ public final class SqlSelect extends SqlStatement {
 
     /**
      * @return 是否为顶层 {@code VALUES (...), (...)} 行构造查询（非 {@code SELECT} 关键字）
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public boolean valuesClause() {
         return valuesClause;
@@ -81,7 +81,7 @@ public final class SqlSelect extends SqlStatement {
 
     /**
      * @param valuesClause {@code VALUES} 查询
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public void setValuesClause(boolean valuesClause) {
         this.valuesClause = valuesClause;
@@ -124,7 +124,7 @@ public final class SqlSelect extends SqlStatement {
 
     /**
      * @return SQL Server {@code TOP … WITH TIES}
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public boolean topWithTies() {
         return topWithTies;
@@ -132,7 +132,7 @@ public final class SqlSelect extends SqlStatement {
 
     /**
      * @param topWithTies {@code WITH TIES}
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public void setTopWithTies(boolean topWithTies) {
         this.topWithTies = topWithTies;
@@ -280,7 +280,7 @@ public final class SqlSelect extends SqlStatement {
 
     /**
      * @return {@code FOR UPDATE OF} 列列表
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public List<SqlIdentifier> forUpdateOf() {
         return forUpdateOf;
@@ -288,7 +288,7 @@ public final class SqlSelect extends SqlStatement {
 
     /**
      * @return 锁等待策略：{@code NOWAIT} / {@code SKIP LOCKED}，可空
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public String forUpdateWait() {
         return forUpdateWait;
@@ -296,7 +296,7 @@ public final class SqlSelect extends SqlStatement {
 
     /**
      * @param forUpdateWait {@code NOWAIT} / {@code SKIP LOCKED}
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public void setForUpdateWait(String forUpdateWait) {
         this.forUpdateWait = forUpdateWait;
@@ -360,7 +360,7 @@ public final class SqlSelect extends SqlStatement {
 
     /**
      * @return SELECT 级 {@code WINDOW} 定义列表
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public List<SqlWindowDefinition> windows() {
         return windows;

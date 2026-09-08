@@ -9,7 +9,7 @@ import java.util.List;
  * FROM 行构造：{@code (VALUES (1), (2)) AS v(id)}。
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public final class SqlValuesTable extends SqlTableSource {
     private final List<SqlExpr> rows = new ArrayList<SqlExpr>(2);

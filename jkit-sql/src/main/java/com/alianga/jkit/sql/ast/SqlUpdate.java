@@ -9,7 +9,7 @@ import java.util.List;
  * UPDATE。
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public final class SqlUpdate extends SqlStatement {
     private SqlTableSource table;
@@ -135,7 +135,7 @@ public final class SqlUpdate extends SqlStatement {
 
     /**
      * @return SQL Server {@code OUTPUT … INTO} 目标表/表变量（可 {@code @out} / {@code #tmp}）
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public SqlTable outputInto() {
         return outputInto;
@@ -143,7 +143,7 @@ public final class SqlUpdate extends SqlStatement {
 
     /**
      * @param outputInto INTO 目标
-     * @since 2.1.0
+     * @since 2.0.1
      */
     public void setOutputInto(SqlTable outputInto) {
         this.outputInto = outputInto;

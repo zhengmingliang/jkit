@@ -4,7 +4,7 @@ package com.alianga.jkit.sql;
  * SQL 解析失败。带行号、列号和出错附近的原文片段，不返回半棵树。
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public class SqlParseException extends RuntimeException {
     private final int line;

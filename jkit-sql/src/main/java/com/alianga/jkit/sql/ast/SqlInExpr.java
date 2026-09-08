@@ -8,7 +8,7 @@ import java.util.List;
  * {@code expr IN ( ... )} 或 {@code expr IN (subquery)}。
  *
  * @author 郑明亮
- * @since 2.1.0
+ * @since 2.0.1
  */
 public final class SqlInExpr extends SqlExpr {
     private SqlExpr expr;
