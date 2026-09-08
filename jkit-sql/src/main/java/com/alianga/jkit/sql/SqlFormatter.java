@@ -9,6 +9,7 @@ import com.alianga.jkit.sql.ast.SqlDdlStatement;
 import com.alianga.jkit.sql.ast.SqlDelete;
 import com.alianga.jkit.sql.ast.SqlExpr;
 import com.alianga.jkit.sql.ast.SqlFunctionExpr;
+import com.alianga.jkit.sql.ast.SqlFunctionTable;
 import com.alianga.jkit.sql.ast.SqlIdentifier;
 import com.alianga.jkit.sql.ast.SqlInExpr;
 import com.alianga.jkit.sql.ast.SqlInsert;
@@ -31,6 +32,7 @@ import com.alianga.jkit.sql.ast.SqlTable;
 import com.alianga.jkit.sql.ast.SqlTableSource;
 import com.alianga.jkit.sql.ast.SqlUnaryExpr;
 import com.alianga.jkit.sql.ast.SqlUpdate;
+import com.alianga.jkit.sql.ast.SqlValuesTable;
 import com.alianga.jkit.sql.ast.SqlWindowDefinition;
 import com.alianga.jkit.sql.ast.SqlWithItem;
 
@@ -123,6 +125,16 @@ public final class SqlFormatter {
 
     private void writeSelect(SqlSelect select) {
         writeWith(select);
+        if (select.valuesClause()) {
+            writeValuesClause(select);
+            if (select.union() != null) {
+                nl();
+                kw(select.unionOp() == null ? "UNION" : select.unionOp());
+                nl();
+                writeSelect(select.union());
+            }
+            return;
+        }
         kw("SELECT");
         if (select.distinct()) {
             sp();
@@ -272,6 +284,38 @@ public final class SqlFormatter {
             nl();
             writeSelect(select.union());
         }
+    }
+
+    private void writeValuesClause(SqlSelect select) {
+        kw("VALUES");
+        sp();
+        if (select.selectItems().isEmpty()) {
+            return;
+        }
+        SqlExpr expr = select.selectItems().get(0).expr();
+        if (expr instanceof SqlFunctionExpr
+                && equalsIgnoreCase(((SqlFunctionExpr) expr).name().simpleName(), "VALUES")) {
+            List<SqlExpr> rows = ((SqlFunctionExpr) expr).arguments();
+            for (int i = 0; i < rows.size(); i++) {
+                if (i > 0) {
+                    out.append(',');
+                    sp();
+                }
+                writeValuesRow(rows.get(i));
+            }
+            return;
+        }
+        writeExpr(expr);
+    }
+
+    private void writeValuesRow(SqlExpr row) {
+        if (row instanceof SqlListExpr) {
+            writeExpr(row);
+            return;
+        }
+        out.append('(');
+        writeExpr(row);
+        out.append(')');
     }
 
     private void writeInsert(SqlInsert insert) {
@@ -674,10 +718,43 @@ public final class SqlFormatter {
             out.append('(');
             writeNode(sub.query());
             out.append(')');
+        } else if (source instanceof SqlFunctionTable) {
+            SqlFunctionTable ft = (SqlFunctionTable) source;
+            if (ft.lateral()) {
+                kw("LATERAL");
+                sp();
+            }
+            if (ft.tableKeyword()) {
+                kw("TABLE");
+                out.append('(');
+                writeExpr(ft.function());
+                out.append(')');
+            } else {
+                writeExpr(ft.function());
+            }
+        } else if (source instanceof SqlValuesTable) {
+            SqlValuesTable vt = (SqlValuesTable) source;
+            out.append('(');
+            kw("VALUES");
+            sp();
+            List<SqlExpr> rows = vt.rows();
+            for (int i = 0; i < rows.size(); i++) {
+                if (i > 0) {
+                    out.append(',');
+                    sp();
+                }
+                writeValuesRow(rows.get(i));
+            }
+            out.append(')');
         }
         if (source.alias() != null) {
             sp();
             out.append(source.alias());
+            if (!source.columnAliases().isEmpty()) {
+                out.append('(');
+                commaIdents(source.columnAliases());
+                out.append(')');
+            }
         }
     }
 
@@ -976,7 +1053,14 @@ public final class SqlFormatter {
         }
         out.append('(');
         boolean need = false;
+        if (over.existingWindowName() != null) {
+            writeExpr(over.existingWindowName());
+            need = true;
+        }
         if (!over.partitionBy().isEmpty()) {
+            if (need) {
+                sp();
+            }
             kw("PARTITION");
             sp();
             kw("BY");

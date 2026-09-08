@@ -10,6 +10,7 @@ import com.alianga.jkit.sql.ast.SqlDdlStatement;
 import com.alianga.jkit.sql.ast.SqlDelete;
 import com.alianga.jkit.sql.ast.SqlExpr;
 import com.alianga.jkit.sql.ast.SqlFunctionExpr;
+import com.alianga.jkit.sql.ast.SqlFunctionTable;
 import com.alianga.jkit.sql.ast.SqlIdentifier;
 import com.alianga.jkit.sql.ast.SqlInExpr;
 import com.alianga.jkit.sql.ast.SqlInsert;
@@ -31,6 +32,7 @@ import com.alianga.jkit.sql.ast.SqlTable;
 import com.alianga.jkit.sql.ast.SqlTableSource;
 import com.alianga.jkit.sql.ast.SqlUnaryExpr;
 import com.alianga.jkit.sql.ast.SqlUpdate;
+import com.alianga.jkit.sql.ast.SqlValuesTable;
 import com.alianga.jkit.sql.ast.SqlWindowDefinition;
 import com.alianga.jkit.sql.ast.SqlWithItem;
 
@@ -291,6 +293,7 @@ public final class SqlParser {
 
     private SqlSelect parseValuesSelect() {
         SqlSelect select = new SqlSelect();
+        select.setValuesClause(true);
         SqlFunctionExpr values = new SqlFunctionExpr();
         values.setName(SqlIdentifier.of("VALUES"));
         expect(SqlTokenType.VALUES);
@@ -932,30 +935,80 @@ public final class SqlParser {
 
     private SqlTableSource parseTableSource() {
         boolean lateral = match(SqlTokenType.LATERAL);
+        // Oracle / SQL 标准：TABLE(fn(...))
+        if (is(SqlTokenType.TABLE) && lexer.peek().type() == SqlTokenType.LPAREN) {
+            next();
+            expect(SqlTokenType.LPAREN);
+            SqlFunctionTable ft = new SqlFunctionTable();
+            ft.setTableKeyword(true);
+            ft.setLateral(lateral);
+            ft.setFunction(parseExpr());
+            expect(SqlTokenType.RPAREN);
+            parseTableAlias(ft);
+            return ft;
+        }
         if (match(SqlTokenType.LPAREN)) {
             SqlTableSource source;
-            if (isQueryStart() || is(SqlTokenType.WITH) || is(SqlTokenType.VALUES)) {
+            if (is(SqlTokenType.VALUES)) {
+                source = parseValuesTable();
+            } else if (isQueryStart() || is(SqlTokenType.WITH)) {
                 SqlSubqueryTable sub = new SqlSubqueryTable();
                 sub.setQuery(parseStatement());
                 sub.setLateral(lateral);
                 source = sub;
             } else {
                 if (lateral) {
-                    throw error("LATERAL requires a subquery");
+                    throw error("LATERAL requires a subquery or table function");
                 }
                 source = parseJoinedTable();
             }
             expect(SqlTokenType.RPAREN);
-            source.setAlias(parseAlias(true));
+            parseTableAlias(source);
             return source;
         }
-        if (lateral) {
-            throw error("LATERAL requires a subquery");
+        if (identLike() || (token.type() != null && token.type().keyword()
+                && !is(SqlTokenType.SELECT) && !is(SqlTokenType.WITH)
+                && !is(SqlTokenType.VALUES))) {
+            SqlIdentifier name = parseName();
+            if (is(SqlTokenType.LPAREN)) {
+                SqlFunctionTable ft = new SqlFunctionTable();
+                ft.setLateral(lateral);
+                ft.setFunction(parseFunction(name));
+                parseTableAlias(ft);
+                return ft;
+            }
+            if (lateral) {
+                throw error("LATERAL requires a subquery or table function");
+            }
+            SqlTable table = SqlTable.of(name);
+            parseTableHints(table);
+            parseTableAlias(table);
+            return table;
         }
-        SqlTable table = SqlTable.of(parseName());
-        parseTableHints(table);
-        table.setAlias(parseAlias(true));
-        return table;
+        if (lateral) {
+            throw error("LATERAL requires a subquery or table function");
+        }
+        throw error("expected table source");
+    }
+
+    private SqlValuesTable parseValuesTable() {
+        SqlValuesTable values = new SqlValuesTable();
+        expect(SqlTokenType.VALUES);
+        do {
+            values.rows().add(parsePrimary());
+        } while (match(SqlTokenType.COMMA));
+        return values;
+    }
+
+    private void parseTableAlias(SqlTableSource source) {
+        String alias = parseAlias(true);
+        source.setAlias(alias);
+        if (alias != null && match(SqlTokenType.LPAREN)) {
+            do {
+                source.columnAliases().add(parseName());
+            } while (match(SqlTokenType.COMMA));
+            expect(SqlTokenType.RPAREN);
+        }
     }
 
     private void parseTableHints(SqlTable table) {
@@ -1579,6 +1632,15 @@ public final class SqlParser {
             return over;
         }
         expect(SqlTokenType.LPAREN);
+        // 继承已有窗口：WINDOW w2 AS (w) / (w ORDER BY b) / (w PARTITION BY ... 非法但留给方言)
+        if (identLike()
+                && !is(SqlTokenType.PARTITION)
+                && !is(SqlTokenType.ORDER)
+                && !is(SqlTokenType.ROWS)
+                && !isIdent("RANGE")
+                && !isIdent("GROUPS")) {
+            over.setExistingWindowName(parseName());
+        }
         if (match(SqlTokenType.PARTITION)) {
             expect(SqlTokenType.BY);
             do {

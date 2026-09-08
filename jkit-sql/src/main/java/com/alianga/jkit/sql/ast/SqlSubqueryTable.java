@@ -48,5 +48,6 @@ public final class SqlSubqueryTable extends SqlTableSource {
     @Override
     protected void acceptChildren(SqlVisitor visitor) {
         child(visitor, query);
+        children(visitor, columnAliases());
     }
 }

@@ -33,6 +33,7 @@ public final class SqlSelect extends SqlStatement {
     private SqlExpr connectBy;
     private SqlExpr startWith;
     private final List<SqlWindowDefinition> windows = new ArrayList<SqlWindowDefinition>(2);
+    private boolean valuesClause;
 
     /**
      * {@inheritDoc}
@@ -40,6 +41,22 @@ public final class SqlSelect extends SqlStatement {
     @Override
     public SqlStatementType type() {
         return SqlStatementType.SELECT;
+    }
+
+    /**
+     * @return 是否为顶层 {@code VALUES (...), (...)} 行构造查询（非 {@code SELECT} 关键字）
+     * @since 2.1.0
+     */
+    public boolean valuesClause() {
+        return valuesClause;
+    }
+
+    /**
+     * @param valuesClause {@code VALUES} 查询
+     * @since 2.1.0
+     */
+    public void setValuesClause(boolean valuesClause) {
+        this.valuesClause = valuesClause;
     }
 
     /**

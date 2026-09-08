@@ -32,7 +32,7 @@
 - 手写 lexer（`char[]` + `SqlKeywords` 开地址哈希）+ `ThreadLocal` 复用 `SqlParser`
 - 方言：MYSQL（默认，GBase/MariaDB/TiDB 映射过来）、POSTGRES、ORACLE、SQLSERVER、ANSI、H2
 - SELECT：JOIN（INNER/LEFT/RIGHT/FULL/CROSS/NATURAL/STRAIGHT/逗号）、UNION 族、WITH/RECURSIVE、DISTINCT ON、LIMIT/OFFSET/FETCH、TOP、FOR UPDATE、LOCK IN SHARE MODE、CONNECT BY / START WITH / PRIOR、`t.*`
-- 窗口：`OVER (PARTITION BY … ORDER BY … ROWS/RANGE BETWEEN …)`、命名窗口、`FILTER (WHERE …)`
+- 窗口：`OVER (PARTITION BY … ORDER BY … ROWS/RANGE BETWEEN …)`、命名窗口、SELECT 级 WINDOW、窗口继承、`FILTER (WHERE …)`
 - DML：INSERT/REPLACE（VALUES 多行、INSERT SELECT、INSERT SET、ON DUPLICATE KEY、ON CONFLICT DO UPDATE/NOTHING、RETURNING）、UPDATE/DELETE（JOIN、LIMIT、RETURNING）、MERGE 基本形态
 - 表达式：CASE、CAST / `::`、IN/BETWEEN/LIKE/ILIKE/REGEXP、`?` / `:name` / `@var`、EXTRACT/TRIM/SUBSTRING/POSITION、行构造 `(a,b) IN ((?,?))`
 - DDL：CREATE/DROP/ALTER/TRUNCATE 抽对象名；ALTER ADD/DROP/MODIFY/CHANGE 抽列名；其余进 `SqlDdlStatement.tail`
@@ -52,15 +52,15 @@
 | `SqlFormatter.java` / `SqlRewriter.java` / `SqlSchemaStat.java` | 回写、改写、抽表列 |
 | `docs/sql.md` | 用户文档 |
 
-已知对比结果（`tools-test` 的 `SqlParserCompareTest`，43 条，含 WINDOW/LATERAL/APPLY）：
+已知对比结果（`tools-test` 的 `SqlParserCompareTest`，49 条，含 WINDOW/继承/LATERAL/APPLY/UNNEST/TABLE/VALUES）：
 
 | | 成功率 | simple ns/op | join | window |
 | --- | --- | --- | --- | --- |
-| jkit-sql | 43/43 | ~1.7µs | ~2.3µs | ~1.2µs |
-| Druid 1.2.23 | 42/43 | ~6µs | ~6.7µs | ~5.8µs |
-| JSqlParser 4.9 | 41/43 | ~240µs | ~276µs | ~325µs |
+| jkit-sql | 49/49 | ~1.7µs | ~2.3µs | ~1.2µs |
+| Druid 1.2.23 | 45/49 | ~6µs | ~6.7µs | ~5.8µs |
+| JSqlParser 4.9 | 45/49 | ~240µs | ~276µs | ~325µs |
 
-Druid 挂 `DISTINCT ON`；JSqlParser 挂 `LOCK IN SHARE MODE`、`[dbo].[user]`。吞吐是 warmup 后 2 万次墙钟，**不是 JMH**。
+Druid 挂 `DISTINCT ON`、WINDOW 继承、UNNEST；JSqlParser 挂 `LOCK IN SHARE MODE`、`[dbo].[user]`、WINDOW 继承。吞吐是 warmup 后 2 万次墙钟，**不是 JMH**。
 
 ### 1.2 本仓库其它已有能力（不要当成新需求）
 
@@ -132,16 +132,18 @@ HTTP（含 SSE merge、curl 执行、负载均衡、Nacos）、JSON、YAML、配
 SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 ```
 
-现已支持 SELECT 级命名窗口定义（可多个）；内联 `OVER (...)` 与 `OVER w` 保留。黄金集 + 单测覆盖 format 往返。未做：WINDOW 继承另一窗口名。
+现已支持 SELECT 级命名窗口定义（可多个）；内联 `OVER (...)` 与 `OVER w` 保留。黄金集 + 单测覆盖 format 往返。
+
+**WINDOW 继承** ✅（2026-09-09）：`WINDOW w2 AS (w)` / `w2 AS (w ORDER BY b)`（`SqlOverExpr.existingWindowName`）。
 
 #### P1.2 更多 JOIN / 表源
 
 - `CROSS APPLY` / `OUTER APPLY`（SQL Server）✅
 - `LATERAL` 子查询（PG）✅（`SqlSubqueryTable.lateral`；JOIN LATERAL / 逗号 LATERAL）
-- `TABLE(fn())` / `UNNEST`
-- `FROM (VALUES (1),(2)) AS v(id)` 列清单
-- Oracle `(+)` 外连接
-- MySQL `PARTITION (p0, p1)` 表分区限定
+- `TABLE(fn())` / `UNNEST` ✅（`SqlFunctionTable`；一般 `fn(...)` 表函数；可 `LATERAL`）
+- `FROM (VALUES (1),(2)) AS v(id)` 列清单 ✅（`SqlValuesTable` + `columnAliases`）
+- Oracle `(+)` 外连接（本 pass 跳过）
+- MySQL `PARTITION (p0, p1)` 表分区限定（本 pass 跳过）
 
 #### P1.3 函数与表达式
 

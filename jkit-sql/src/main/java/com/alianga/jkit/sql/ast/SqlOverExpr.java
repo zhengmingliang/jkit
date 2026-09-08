@@ -6,13 +6,15 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 窗口定义：{@code OVER (PARTITION BY ... ORDER BY ... ROWS/RANGE ...)}。
+ * 窗口定义：{@code OVER (PARTITION BY ... ORDER BY ... ROWS/RANGE ...)}，
+ * 以及括号内继承 {@code OVER (w ORDER BY ...)} / {@code WINDOW w2 AS (w)}。
  *
  * @author 郑明亮
  * @since 2.1.0
  */
 public final class SqlOverExpr extends SqlExpr {
     private SqlIdentifier windowName;
+    private SqlIdentifier existingWindowName;
     private final List<SqlExpr> partitionBy = new ArrayList<SqlExpr>(2);
     private final List<SqlOrderByItem> orderBy = new ArrayList<SqlOrderByItem>(2);
     private String frameUnit;
@@ -31,6 +33,22 @@ public final class SqlOverExpr extends SqlExpr {
      */
     public void setWindowName(SqlIdentifier windowName) {
         this.windowName = windowName;
+    }
+
+    /**
+     * @return 括号内继承的已有窗口名，如 {@code (w ORDER BY b)} 中的 {@code w}；与 {@link #windowName()}（无括号的 {@code OVER w}）不同
+     * @since 2.1.0
+     */
+    public SqlIdentifier existingWindowName() {
+        return existingWindowName;
+    }
+
+    /**
+     * @param existingWindowName 继承的窗口名
+     * @since 2.1.0
+     */
+    public void setExistingWindowName(SqlIdentifier existingWindowName) {
+        this.existingWindowName = existingWindowName;
     }
 
     /**
@@ -95,6 +113,7 @@ public final class SqlOverExpr extends SqlExpr {
     @Override
     protected void acceptChildren(SqlVisitor visitor) {
         child(visitor, windowName);
+        child(visitor, existingWindowName);
         children(visitor, partitionBy);
         children(visitor, orderBy);
     }

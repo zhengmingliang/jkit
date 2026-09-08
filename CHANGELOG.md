@@ -38,6 +38,7 @@
 
 ### 变更
 
+- `jkit-sql` P1.2+：WINDOW 继承另一窗口名（`WINDOW w2 AS (w)` / `w2 AS (w ORDER BY …)`，`SqlOverExpr.existingWindowName`）；`UNNEST(...)` / 一般表函数 / `TABLE(fn(...))`（`SqlFunctionTable`，可 `LATERAL`）；`FROM (VALUES …) AS v(cols)`（`SqlValuesTable` + `SqlTableSource.columnAliases`）；顶层 `VALUES` 回写不再误加 `SELECT`。
 - `jkit-sql` P1.1：SELECT 级 `WINDOW w AS (PARTITION BY … ORDER BY …)`（可多个）；保留内联 `OVER (…)` 与 `OVER w`；format 往返。
 - `jkit-sql` P1.2：`LATERAL` 子查询（`SqlSubqueryTable.lateral`）；SQL Server `CROSS APPLY` / `OUTER APPLY`。
 - `jkit-sql` P0.2：`parse → format → parse` 语义往返。修 `CREATE INDEX … ON t (cols)`、`SHOW COLUMNS/INDEX/CREATE TABLE`、`SET NAMES`（无等号）、`EXTRACT`/`TRIM`/`SUBSTRING`/`POSITION` 的 FROM/FOR/IN 回写；`SqlGoldenCorpusTest` 每条断言 type / tables（忽略大小写）/ isReadOnly。

@@ -56,5 +56,6 @@ public final class SqlTable extends SqlTableSource {
     @Override
     protected void acceptChildren(SqlVisitor visitor) {
         child(visitor, name);
+        children(visitor, columnAliases());
     }
 }

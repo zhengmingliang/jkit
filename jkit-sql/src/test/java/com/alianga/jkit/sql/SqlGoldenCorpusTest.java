@@ -147,6 +147,12 @@ public class SqlGoldenCorpusTest {
                 {"postgres", "SELECT * FROM t LEFT JOIN LATERAL (SELECT 1 AS n) x ON true"},
                 {"sqlserver", "SELECT * FROM a CROSS APPLY (SELECT TOP 1 id FROM b WHERE b.aid = a.id) x"},
                 {"sqlserver", "SELECT * FROM a OUTER APPLY (SELECT id FROM b WHERE b.aid = a.id) x"},
+                {"mysql", "SELECT SUM(x) OVER w2 FROM t WINDOW w AS (PARTITION BY a), w2 AS (w ORDER BY b)"},
+                {"postgres", "SELECT RANK() OVER w2 FROM t WINDOW w AS (ORDER BY a), w2 AS (w)"},
+                {"postgres", "SELECT * FROM UNNEST(arr) AS u(x)"},
+                {"oracle", "SELECT * FROM TABLE(fn(1, 2)) t"},
+                {"postgres", "SELECT * FROM (VALUES (1), (2)) AS v(id)"},
+                {"postgres", "SELECT * FROM (VALUES (1, 'a'), (2, 'b')) AS v(id, name)"},
         });
     }
 

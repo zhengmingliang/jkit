@@ -3,6 +3,7 @@ package com.alianga.jkit.sql;
 import com.alianga.jkit.sql.ast.SqlDdlStatement;
 import com.alianga.jkit.sql.ast.SqlDelete;
 import com.alianga.jkit.sql.ast.SqlFunctionExpr;
+import com.alianga.jkit.sql.ast.SqlFunctionTable;
 import com.alianga.jkit.sql.ast.SqlInsert;
 import com.alianga.jkit.sql.ast.SqlJoin;
 import com.alianga.jkit.sql.ast.SqlOverExpr;
@@ -12,6 +13,7 @@ import com.alianga.jkit.sql.ast.SqlStatement;
 import com.alianga.jkit.sql.ast.SqlStatementType;
 import com.alianga.jkit.sql.ast.SqlSubqueryTable;
 import com.alianga.jkit.sql.ast.SqlUpdate;
+import com.alianga.jkit.sql.ast.SqlValuesTable;
 import com.alianga.jkit.sql.ast.SqlWindowDefinition;
 
 import org.junit.Test;
@@ -525,5 +527,105 @@ public class SqlParserTest {
         assertEquals(SqlJoin.Type.OUTER_APPLY, ((SqlJoin) again2.from()).joinType());
     }
 
+
+
+    /**
+     * WINDOW 继承另一窗口名：{@code w2 AS (w ORDER BY b)} / {@code w3 AS (w)}。
+     */
+    @Test
+    public void parseWindowInheritName() {
+        SqlSelect select = (SqlSelect) SQL.parse(
+                "SELECT SUM(x) OVER w2 FROM t "
+                        + "WINDOW w AS (PARTITION BY a), w2 AS (w ORDER BY b)");
+        assertEquals(2, select.windows().size());
+        SqlOverExpr w2 = select.windows().get(1).spec();
+        assertEquals("w", w2.existingWindowName().simpleName());
+        assertEquals(1, w2.orderBy().size());
+        assertTrue(w2.partitionBy().isEmpty());
+        String formatted = SQL.toSqlString(select);
+        assertTrue(formatted, formatted.contains("w2"));
+        SqlSelect again = (SqlSelect) SQL.parse(formatted);
+        assertEquals("w", again.windows().get(1).spec().existingWindowName().simpleName());
+        assertEquals(1, again.windows().get(1).spec().orderBy().size());
+
+        SqlSelect only = (SqlSelect) SQL.parse(
+                "SELECT RANK() OVER w2 FROM t WINDOW w AS (ORDER BY a), w2 AS (w)");
+        assertEquals("w", only.windows().get(1).spec().existingWindowName().simpleName());
+        String f2 = SQL.toSqlString(only);
+        SqlSelect again2 = (SqlSelect) SQL.parse(f2);
+        assertEquals("w", again2.windows().get(1).spec().existingWindowName().simpleName());
+    }
+
+    /**
+     * FROM UNNEST / TABLE(...) 表函数。
+     */
+    @Test
+    public void parseTableFunctions() {
+        SqlSelect unnest = (SqlSelect) SQL.parse(
+                "SELECT * FROM UNNEST(arr) AS u(x)", SqlDialect.POSTGRES);
+        assertTrue(unnest.from() instanceof SqlFunctionTable);
+        SqlFunctionTable ft = (SqlFunctionTable) unnest.from();
+        assertFalse(ft.tableKeyword());
+        assertEquals("u", ft.alias());
+        assertEquals(1, ft.columnAliases().size());
+        assertEquals("x", ft.columnAliases().get(0).simpleName());
+        assertTrue(ft.function() instanceof SqlFunctionExpr);
+        assertEquals("UNNEST", ((SqlFunctionExpr) ft.function()).name().simpleName());
+        String f1 = SQL.toSqlString(unnest, SqlDialect.POSTGRES);
+        assertTrue(f1, f1.contains("UNNEST"));
+        assertTrue(f1, f1.contains("u(x)") || (f1.contains("u") && f1.contains("(x)")));
+        SqlSelect again1 = (SqlSelect) SQL.parse(f1, SqlDialect.POSTGRES);
+        assertTrue(again1.from() instanceof SqlFunctionTable);
+        assertEquals("x", ((SqlFunctionTable) again1.from()).columnAliases().get(0).simpleName());
+
+        SqlSelect tableFn = (SqlSelect) SQL.parse(
+                "SELECT * FROM TABLE(fn(1, 2)) t", SqlDialect.ORACLE);
+        assertTrue(tableFn.from() instanceof SqlFunctionTable);
+        SqlFunctionTable oft = (SqlFunctionTable) tableFn.from();
+        assertTrue(oft.tableKeyword());
+        assertEquals("t", oft.alias());
+        String f2 = SQL.toSqlString(tableFn, SqlDialect.ORACLE);
+        assertTrue(f2, f2.contains("TABLE"));
+        SqlSelect again2 = (SqlSelect) SQL.parse(f2, SqlDialect.ORACLE);
+        assertTrue(((SqlFunctionTable) again2.from()).tableKeyword());
+
+        SqlSelect lateral = (SqlSelect) SQL.parse(
+                "SELECT * FROM t, LATERAL UNNEST(t.arr) u", SqlDialect.POSTGRES);
+        SqlJoin join = (SqlJoin) lateral.from();
+        assertTrue(join.right() instanceof SqlFunctionTable);
+        assertTrue(((SqlFunctionTable) join.right()).lateral());
+    }
+
+    /**
+     * FROM (VALUES ...) AS v(cols) 行构造与列别名。
+     */
+    @Test
+    public void parseValuesTableWithColumnAliases() {
+        SqlSelect select = (SqlSelect) SQL.parse(
+                "SELECT * FROM (VALUES (1), (2)) AS v(id)", SqlDialect.POSTGRES);
+        assertTrue(select.from() instanceof SqlValuesTable);
+        SqlValuesTable vt = (SqlValuesTable) select.from();
+        assertEquals(2, vt.rows().size());
+        assertEquals("v", vt.alias());
+        assertEquals(1, vt.columnAliases().size());
+        assertEquals("id", vt.columnAliases().get(0).simpleName());
+        String formatted = SQL.toSqlString(select, SqlDialect.POSTGRES);
+        assertTrue(formatted, formatted.contains("VALUES"));
+        assertTrue(formatted, formatted.contains("v"));
+        SqlSelect again = (SqlSelect) SQL.parse(formatted, SqlDialect.POSTGRES);
+        assertTrue(again.from() instanceof SqlValuesTable);
+        SqlValuesTable vt2 = (SqlValuesTable) again.from();
+        assertEquals(2, vt2.rows().size());
+        assertEquals("id", vt2.columnAliases().get(0).simpleName());
+
+        SqlSelect multi = (SqlSelect) SQL.parse(
+                "SELECT * FROM (VALUES (1, 'a'), (2, 'b')) AS v(id, name)", SqlDialect.POSTGRES);
+        SqlValuesTable m = (SqlValuesTable) multi.from();
+        assertEquals(2, m.rows().size());
+        assertEquals(2, m.columnAliases().size());
+        String f2 = SQL.toSqlString(multi, SqlDialect.POSTGRES);
+        SqlSelect again2 = (SqlSelect) SQL.parse(f2, SqlDialect.POSTGRES);
+        assertEquals(2, ((SqlValuesTable) again2.from()).columnAliases().size());
+    }
 
 }
