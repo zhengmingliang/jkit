@@ -277,7 +277,6 @@ public class SqlParserTest {
         assertEquals("1", SQL.parseExpr("1").toString().replace(" ", ""));
         assertTrue(SQL.parseExpr("42").toString().contains("42"));
         assertTrue(SQL.parseExpr("'hello'").toString().contains("hello"));
-
         SqlExpr col = SQL.parseExpr("users.id");
         assertTrue(col instanceof SqlIdentifier);
         assertEquals("users.id", ((SqlIdentifier) col).qualifiedName());
@@ -2062,6 +2061,54 @@ public class SqlParserTest {
         SqlSelect lit = (SqlSelect) SQL.parse("SELECT 32, 32.5, 32e1, 0xFF FROM t");
         assertEquals(SqlStatementType.SELECT, lit.type());
         assertEquals("t", SQL.tables(lit).iterator().next());
+
+        // 前导小数点仍为 NUMBER
+        SqlSelect leadDot = (SqlSelect) SQL.parse("SELECT .5, .52, .52e1 FROM t");
+        assertEquals(SqlStatementType.SELECT, leadDot.type());
+        assertEquals("SELECT .5, .52, .52e1 FROM t", SQL.toSqlString(leadDot).replace("\n", " ").replace("  ", " ").trim()
+                .replaceAll("\\s+", " "));
+    }
+
+    /**
+     * 限定名中点号后的数字开头标识符（t.1_id / test.52_user），勿把 .52 当成小数。
+     */
+    @Test
+    public void digitLeadingQualifiedIdentifiers() {
+        String userSql = "select 1_id,`name` from test.52_user t where age > 20 and t.1_id is not null";
+        SqlSelect user = (SqlSelect) SQL.parse(userSql);
+        assertEquals(SqlStatementType.SELECT, user.type());
+        assertTrue(SQL.tables(user).toString(), SQL.tables(user).contains("test.52_user"));
+        String roundTrip = SQL.toSqlString(user);
+        assertTrue(roundTrip, roundTrip.contains("1_id") || roundTrip.contains("`1_id`"));
+        assertTrue(roundTrip, roundTrip.contains("52_user") || roundTrip.contains("`52_user`"));
+        // 再 parse 一次确认 format 往返
+        assertEquals(SqlStatementType.SELECT, SQL.parse(roundTrip).type());
+
+        SqlSelect col = (SqlSelect) SQL.parse("select t.1_id from t");
+        assertEquals(SqlStatementType.SELECT, col.type());
+        assertTrue(SQL.toSqlString(col), SQL.toSqlString(col).contains("1_id"));
+
+        SqlSelect tbl = (SqlSelect) SQL.parse("select * from test.52_user");
+        assertEquals(SqlStatementType.SELECT, tbl.type());
+        assertTrue(SQL.tables(tbl).toString(), SQL.tables(tbl).contains("test.52_user"));
+
+        SqlSelect cjk = (SqlSelect) SQL.parse("select a.32强国 from t a");
+        assertEquals(SqlStatementType.SELECT, cjk.type());
+        assertTrue(SQL.toSqlString(cjk), SQL.toSqlString(cjk).contains("32强国"));
+
+        // 反引号形式原本就可解析
+        SqlSelect quoted = (SqlSelect) SQL.parse("select * from `test`.`52_user`");
+        assertEquals(SqlStatementType.SELECT, quoted.type());
+        assertTrue(SQL.tables(quoted).toString(), SQL.tables(quoted).contains("test.52_user")
+                || SQL.tables(quoted).toString().contains("52_user"));
+
+        // 裸数字开头标识符仍 OK
+        SqlSelect bare = (SqlSelect) SQL.parse("select 1_id from t");
+        assertEquals(SqlStatementType.SELECT, bare.type());
+
+        // 纯小数字面量仍为 NUMBER
+        assertEquals(SqlStatementType.SELECT, SQL.parse("SELECT .5").type());
+        assertEquals(SqlStatementType.SELECT, SQL.parse("SELECT 1.5").type());
     }
 
     /**

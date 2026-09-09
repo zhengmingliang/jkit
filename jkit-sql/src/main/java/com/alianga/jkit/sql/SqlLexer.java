@@ -226,6 +226,12 @@ public final class SqlLexer {
             return;
         }
         if (c == '.' && pos + 1 < limit && src[pos + 1] >= '0' && src[pos + 1] <= '9') {
+            // 点号后若是「数字开头标识符」（如 t.1_id / test.52_user），只发 DOT，数字留给下次扫描提升为 IDENT。
+            // 纯小数（.5 / .52 / .52e1）仍走 scanNumber。
+            if (looksLikeDottedDigitLeadingIdent(pos + 1)) {
+                scanOperator(token, tLine, tCol, tStart, c);
+                return;
+            }
             scanNumber(token, tLine, tCol, tStart);
             return;
         }
@@ -751,6 +757,27 @@ public final class SqlLexer {
 
     private int col() {
         return pos - lineStart + 1;
+    }
+
+    /**
+     * 从 {@code at}（应为首个数字）向前窥探：数字串之后若紧跟标识符起始字符，且不是合法科学计数指数，
+     * 则视为「点号后的数字开头标识符」（如 {@code .52_user}），调用方应只消费 DOT。
+     */
+    private boolean looksLikeDottedDigitLeadingIdent(int at) {
+        int p = at;
+        while (p < limit && src[p] >= '0' && src[p] <= '9') {
+            p++;
+        }
+        if (p < limit && (src[p] == 'e' || src[p] == 'E')) {
+            int exp = p + 1;
+            if (exp < limit && (src[exp] == '+' || src[exp] == '-')) {
+                exp++;
+            }
+            if (exp < limit && src[exp] >= '0' && src[exp] <= '9') {
+                return false; // .52e1 / .52E+10 等纯小数
+            }
+        }
+        return p < limit && isIdentStart(src[p]);
     }
 
     private boolean isIdentStart(char c) {
