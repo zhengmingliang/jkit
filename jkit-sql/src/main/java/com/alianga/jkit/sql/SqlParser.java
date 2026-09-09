@@ -70,6 +70,13 @@ public final class SqlParser {
         lexer.reset(sql, this.dialect);
         lexer.setKeepComments(this.keepComments);
         lexer.setPipesAsConcat(options.pipesAsConcat());
+        SqlPlaceholders ph = options.placeholders();
+        if (ph == null || ph.isEmpty()) {
+            lexer.setPlaceholderPatterns(null);
+        } else {
+            List<SqlPlaceholderPattern> list = ph.patterns();
+            lexer.setPlaceholderPatterns(list.toArray(new SqlPlaceholderPattern[list.size()]));
+        }
         next();
     }
 

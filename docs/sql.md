@@ -74,7 +74,39 @@ SqlDialect.MYSQL.quoteIdent("user");      // `user`
 
 非法 SQL 抛 `SqlParseException`，带行号、列号和附近原文，不返回半棵树。
 
+## 模板占位符（可选）
+
+common-model 一类**模板 SQL**会用 `@age@`、`%s`、`<sheet>`、`<-sheet->` 等占位槽。默认解析**关闭**占位符（保持严格）；需要时通过 `SqlParseOptions.placeholders()` 显式打开：
+
+```java
+SqlParseOptions opt = SqlParseOptions.defaults()
+        .placeholders(SqlPlaceholders.create()
+                .atWrapped()    // @name@
+                .printf()       // %s / %d / %f …
+                .angle()        // <sheet>
+                .arrowAngle()   // <-sheet->
+                .add("{{*}}")); // 自定义：恰好一个 * 表示正文
+
+SqlStatement stmt = SQL.parse(
+        "select * from <20241230.1> where age > @age@ and name in (%s)",
+        SqlDialect.MYSQL, opt);
+```
+
+也可用 `SqlPlaceholders.create().commonModelTemplates()` 一次打开上述四类内置预设。
+
+规则摘要：
+
+| 模式 | 含义 | 词法结果 |
+|------|------|----------|
+| `@*@` | 前后 `@` 包裹的标识体 | `IDENT`（可作列/值原子） |
+| printf | `%` + 一个字母 | `IDENT` |
+| `<*>` / `<-*->` | 表名占位（允许 `.` `-`） | `IDENT`（可作表名） |
+| 自定义 `{{*}}` 等 | 非空前后缀 + 正文 | `IDENT` |
+
+未配置时 `@age@` / `%s` / `<sheet>` 仍按原行为失败或拆成运算符。故意残缺的语句（如 `select * from`）即使开启占位符也会失败。
+
 ## 统计与改写
+
 
 ```java
 SqlSchemaStat stat = SQL.stat(sql);
@@ -202,7 +234,7 @@ List<Object> literals = SQL.exportParameterValues("SELECT * FROM t WHERE name = 
 - 表达式：字面量、绑定 `?` / `:name` / `@var`、算术比较、AND/OR/XOR/NOT、IN（含 `IN :name` / `IN ?` 无括号绑定列表）/BETWEEN/LIKE/ILIKE/REGEXP、IS NULL、`IS DISTINCT FROM` / `IS NOT DISTINCT FROM`、CASE、CAST / `::`、函数、EXISTS、子查询、`INTERVAL '1 day'` / `INTERVAL 1 DAY`、`X'FF'` / `0xFF`、行构造 `(a,b)`、JSON `->` `->>` `#>` `#>>`、数组下标 `arr[1]`、`= ANY/SOME/ALL (...)`；另含 PG `@>`/`<@`/`~`/`~*`、MySQL `FORCE INDEX FOR …`/`<=>`/`INSERT DELAYED`/`BINARY`、SQL Server `TOP WITH TIES`、`TABLESAMPLE`/`SAMPLE`、Oracle `(+)` 外连接后缀
 - 注释：`--`、`/* */`、MySQL `#`；仅注释/空白的输入解析为 `OTHER` 空语句（不抛 empty SQL）；MySQL 可执行注释 `/*!40101 … */` 展开为内部 SQL（不整段丢弃）；优化器 hint `/*+ … */` 挂到 SELECT / 表并可 format 回写
 - 标识符：MySQL 裸标识符允许数字开头（如 `32强国` / `1019使用`），整段不能只是数字；`32` / `32.5` / `32e1` / `0xFF` 仍为字面量；反引号形式原本即可
-- 解析选项：`SqlParseOptions.keepComments(true)`（默认 false）时普通注释进入 `SqlStatement.comments()`，热路径默认仍丢弃；`SqlParseOptions.pipesAsConcat(true)` 让 MySQL 方言下 `||` 按拼接解析（等同 `PIPES_AS_CONCAT`）；`SQL.parseAll(sql, dialect, true)` 容错多语句（失败占位 + `parseError`，供审计）
+- 解析选项：`SqlParseOptions.keepComments(true)`（默认 false）时普通注释进入 `SqlStatement.comments()`，热路径默认仍丢弃；`SqlParseOptions.pipesAsConcat(true)` 让 MySQL 方言下 `||` 按拼接解析（等同 `PIPES_AS_CONCAT`）；`SqlParseOptions.placeholders()` 可配置模板占位（默认关闭，见「模板占位符」）；`SQL.parseAll(sql, dialect, true)` 容错多语句（失败占位 + `parseError`，供审计）
 
 明确未做：过程体结构化执行、执行引擎、完整 Wall 规则集（仅提供 `SQL.wall` 子集）。CREATE TABLE 列类型/约束已进 `columnDefinitions` 并可 format 往返。未知函数按普通函数调用解析，不失败。
 

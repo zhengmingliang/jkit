@@ -67,6 +67,7 @@
 
 
 ### 新增
+- `jkit-sql`：可配置模板占位符（`SqlParseOptions.placeholders()` / `SqlPlaceholders`：`atWrapped`/`printf`/`angle`/`arrowAngle`/`add("@*@")`）；默认关闭，启用后按 IDENT 解析以便抽表列；见 `docs/sql.md`「模板占位符」。
 
 - `jkit-sql`：补 common-model 审计 A 类缺口 — 数字开头裸标识符（`32强国`/`1019使用`，不破坏数值字面量）；`IN :types` / `IN ?` 无括号绑定列表；`LOAD DATA [LOCAL] INFILE … INTO TABLE`（OTHER + 抽表名）；顶层匿名 `DECLARE … BEGIN … END;`（OTHER，BEGIN/END 内允许分号）。
 - `jkit-sql`：补 `REVOKE`（镜像 GRANT：权限 + ON 对象 + FROM 用户）、`FLUSH PRIVILEGES|TABLES|LOGS`（OTHER）、`START TRANSACTION` / `BEGIN WORK` / 裸 `BEGIN;` / `COMMIT` / `ROLLBACK` / `SAVEPOINT`（OTHER，不破坏 `BEGIN…END` 过程块）、`SELECT … INTO` 表 / `@var` / `OUTFILE`（目标表计入 `tables` 为 INSERT）；`parseAll` 可批 `UPDATE …; FLUSH PRIVILEGES`。

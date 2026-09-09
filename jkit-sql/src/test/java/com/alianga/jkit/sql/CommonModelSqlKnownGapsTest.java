@@ -13,10 +13,11 @@ import static org.junit.Assert.fail;
 public class CommonModelSqlKnownGapsTest {
 
     /**
-     * 电子表格 {@code <sheet>} 占位不是标准 SQL（数字开头裸标识符已支持）。
+     * 默认关闭模板占位时，电子表格 {@code <sheet>} 仍应失败；
+     * 启用见 {@link SqlTemplatePlaceholderTest} / {@link SqlPlaceholders#angle()}。
      */
     @Test
-    public void sheetMarkupStillFails() {
+    public void sheetMarkupStillFailsByDefault() {
         assertStillFails(SqlDialect.MYSQL, "select * from <20241230.1>");
     }
 

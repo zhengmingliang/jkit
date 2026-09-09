@@ -9,9 +9,10 @@ package com.alianga.jkit.sql;
 public final class SqlParseOptions {
     private boolean keepComments;
     private boolean pipesAsConcat;
+    private SqlPlaceholders placeholders = SqlPlaceholders.none();
 
     /**
-     * @return 默认选项（不保留普通注释；MySQL {@code ||} 仍为 OR）
+     * @return 默认选项（不保留普通注释；MySQL {@code ||} 仍为 OR；模板占位符关闭）
      */
     public static SqlParseOptions defaults() {
         return new SqlParseOptions();
@@ -50,6 +51,32 @@ public final class SqlParseOptions {
      */
     public SqlParseOptions pipesAsConcat(boolean pipesAsConcat) {
         this.pipesAsConcat = pipesAsConcat;
+        return this;
+    }
+
+    /**
+     * 模板占位符配置；默认空（关闭）。未配置时 {@code @age@} / {@code %s} / {@code <sheet>}
+     * 仍按原严格词法失败或拆成运算符。
+     *
+     * @return 占位符配置（可直接链式 {@code options.placeholders().atWrapped()}）
+     * @since 2.0.1
+     */
+    public SqlPlaceholders placeholders() {
+        if (placeholders == null) {
+            placeholders = SqlPlaceholders.none();
+        }
+        return placeholders;
+    }
+
+    /**
+     * 替换整份占位符配置。
+     *
+     * @param placeholders 配置，null 视为关闭
+     * @return this
+     * @since 2.0.1
+     */
+    public SqlParseOptions placeholders(SqlPlaceholders placeholders) {
+        this.placeholders = placeholders == null ? SqlPlaceholders.none() : placeholders;
         return this;
     }
 }

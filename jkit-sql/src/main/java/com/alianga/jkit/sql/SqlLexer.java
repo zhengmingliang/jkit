@@ -18,6 +18,7 @@ public final class SqlLexer {
     private SqlDialect dialect;
     private boolean keepComments;
     private boolean pipesAsConcat;
+    private SqlPlaceholderPattern[] placeholderPatterns;
     private int executableDepth;
 
     private final SqlToken tokA = new SqlToken();
@@ -100,6 +101,28 @@ public final class SqlLexer {
     }
 
     /**
+     * 设置模板占位符匹配器；null 或空数组表示关闭（默认）。
+     *
+     * @param patterns 匹配器
+     * @since 2.0.1
+     */
+    public void setPlaceholderPatterns(SqlPlaceholderPattern[] patterns) {
+        if (patterns == null || patterns.length == 0) {
+            this.placeholderPatterns = null;
+        } else {
+            this.placeholderPatterns = patterns;
+        }
+    }
+
+    /**
+     * @return 当前占位符匹配器，未启用时为 null
+     * @since 2.0.1
+     */
+    public SqlPlaceholderPattern[] placeholderPatterns() {
+        return placeholderPatterns;
+    }
+
+    /**
      * @return 当前方言
      */
     public SqlDialect dialect() {
@@ -150,6 +173,9 @@ public final class SqlLexer {
         int tLine = line;
         int tCol = col();
         int tStart = pos;
+        if (tryScanPlaceholder(token, tLine, tCol, tStart)) {
+            return;
+        }
         char c = src[pos];
         if (c == '/' && pos + 1 < limit && src[pos + 1] == '*'
                 && pos + 2 < limit && src[pos + 2] == '+') {
@@ -259,6 +285,25 @@ public final class SqlLexer {
             return;
         }
         scanOperator(token, tLine, tCol, tStart, c);
+    }
+
+    /**
+     * 按配置尝试匹配模板占位符，成功则发出 IDENT。
+     */
+    private boolean tryScanPlaceholder(SqlToken token, int tLine, int tCol, int tStart) {
+        SqlPlaceholderPattern[] patterns = this.placeholderPatterns;
+        if (patterns == null) {
+            return false;
+        }
+        for (int p = 0; p < patterns.length; p++) {
+            int end = patterns[p].tryMatch(src, pos, limit);
+            if (end > pos) {
+                pos = end;
+                token.set(SqlTokenType.IDENT, src, tStart, pos, tLine, tCol);
+                return true;
+            }
+        }
+        return false;
     }
 
     private SqlToken scanIdent(SqlToken token, int tLine, int tCol, int tStart) {
