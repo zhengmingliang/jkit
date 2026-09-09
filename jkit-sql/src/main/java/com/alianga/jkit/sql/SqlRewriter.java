@@ -144,7 +144,8 @@ public final class SqlRewriter {
             if (lim < 1L) {
                 lim = 1L;
             }
-            applyRowNumBounds(page, off, lim);
+            // 与 applyPagination 一致：经典单层 ROWNUM 在 offset>0 时扩成双层
+            applyPagination(select, off, lim, d, true);
             return statement;
         }
         Long limit = getLimit(statement);
@@ -188,7 +189,8 @@ public final class SqlRewriter {
         return statement;
     }
 
-    private static void applyPagination(SqlSelect root, long offset, long rowCount,
+    /** 按方言就地挂/改分页（包内供 {@link SqlBuilder} 复用）。 */
+    static void applyPagination(SqlSelect root, long offset, long rowCount,
             SqlDialect dialect, boolean withOffset) {
         RowNumPage page = detectRowNumPage(root);
         if (page != null) {

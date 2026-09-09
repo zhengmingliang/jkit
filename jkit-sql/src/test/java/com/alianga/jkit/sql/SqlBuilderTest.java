@@ -163,4 +163,70 @@ public class SqlBuilderTest {
         assertTrue(withBuilder.toUpperCase(), withBuilder.toUpperCase().contains("FULL"));
         SQL.parse(withBuilder);
     }
+
+    @Test
+    public void limitOffsetDialectAwareOracleRownum() {
+        // 用户复现：无先验 dialect，仅 toSql(ORACLE)
+        String sql = SqlBuilder.select("id", "name", "age").from("t_user", "t")
+                .where("id > 1").and("name like '%明%'").limit(10).offset(20)
+                .toSql(SqlDialect.ORACLE);
+        String upper = sql.toUpperCase();
+        assertFalse("must not emit MySQL LIMIT for Oracle: " + sql, upper.contains("LIMIT"));
+        assertTrue(sql, upper.contains("ROWNUM"));
+        assertTrue(sql, upper.contains("RN") && upper.contains(">"));
+        assertTrue(sql, upper.contains("ROWNUM") && (upper.contains("<=") || upper.contains("<")));
+        // 与 SQL.setPage 同精神：offset 20 + limit 10 → RN > 20 且 ROWNUM <= 30
+        assertTrue(sql, upper.contains("20"));
+        assertTrue(sql, upper.contains("30"));
+        SQL.parse(sql, SqlDialect.ORACLE);
+    }
+
+    @Test
+    public void limitOffsetDialectAwareOracle12Fetch() {
+        String sql = SqlBuilder.select("id", "name", "age").from("t_user", "t")
+                .where("id > 1").and("name like '%明%'").limit(10).offset(20)
+                .toSql(SqlDialect.ORACLE12);
+        String upper = sql.toUpperCase();
+        assertFalse("ORACLE12 must not use LIMIT keyword: " + sql, upper.contains("LIMIT"));
+        assertTrue(sql, upper.contains("OFFSET"));
+        assertTrue(sql, upper.contains("FETCH"));
+        assertTrue(sql, upper.contains("20"));
+        assertTrue(sql, upper.contains("10"));
+        SQL.parse(sql, SqlDialect.ORACLE12);
+    }
+
+    @Test
+    public void limitOffsetMysqlStillCommaOrLimitOffset() {
+        String sql = SqlBuilder.select("id", "name", "age").from("t_user", "t")
+                .where("id > 1").and("name like '%明%'").limit(10).offset(20)
+                .toSql(SqlDialect.MYSQL);
+        String upper = sql.toUpperCase();
+        assertTrue(sql, upper.contains("LIMIT"));
+        assertTrue(sql, sql.contains("20") && sql.contains("10"));
+        SQL.parse(sql, SqlDialect.MYSQL);
+    }
+
+    @Test
+    public void limitOffsetSqlServerUsesFetch() {
+        String sql = SqlBuilder.select("id").from("t").limit(10).offset(20)
+                .toSql(SqlDialect.SQLSERVER);
+        String upper = sql.toUpperCase();
+        assertTrue(sql, upper.contains("OFFSET"));
+        assertTrue(sql, upper.contains("FETCH"));
+        assertFalse(sql, upper.contains("LIMIT"));
+        SQL.parse(sql, SqlDialect.SQLSERVER);
+    }
+
+    @Test
+    public void dialectOracleThenToSqlWithoutArg() {
+        String sql = SqlBuilder.select("id", "name").from("t_user", "t")
+                .where("id > 1").limit(10).offset(20)
+                .dialect(SqlDialect.ORACLE)
+                .toSql();
+        String upper = sql.toUpperCase();
+        assertFalse(sql, upper.contains("LIMIT"));
+        assertTrue(sql, upper.contains("ROWNUM"));
+        SQL.parse(sql, SqlDialect.ORACLE);
+    }
+
 }

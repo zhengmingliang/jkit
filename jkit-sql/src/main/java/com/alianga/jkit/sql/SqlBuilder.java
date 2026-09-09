@@ -8,7 +8,6 @@ import com.alianga.jkit.sql.ast.SqlExpr;
 import com.alianga.jkit.sql.ast.SqlIdentifier;
 import com.alianga.jkit.sql.ast.SqlInsert;
 import com.alianga.jkit.sql.ast.SqlJoin;
-import com.alianga.jkit.sql.ast.SqlLimit;
 import com.alianga.jkit.sql.ast.SqlLiteral;
 import com.alianga.jkit.sql.ast.SqlOrderByItem;
 import com.alianga.jkit.sql.ast.SqlSelect;
@@ -150,7 +149,7 @@ public final class SqlBuilder {
     }
 
     /**
-     * @param dialect 方言（影响 {@link #toSql()}）
+     * @param dialect 方言（影响 {@link #toSql()} / {@link #build()} 分页形态）
      * @return this
      */
     public SqlBuilder dialect(SqlDialect dialect) {
@@ -513,12 +512,24 @@ public final class SqlBuilder {
     }
 
     /**
-     * @return 构建好的语句 AST
+     * @return 构建好的语句 AST（分页按 {@link #dialect(SqlDialect)}）
      */
     public SqlStatement build() {
+        return build(this.dialect);
+    }
+
+    /**
+     * 按指定方言构建 AST（覆盖 builder 方言，用于 {@link #toSql(SqlDialect)}）。
+     *
+     * @param dialect 有效方言；null 时回落 builder 方言
+     * @return 语句 AST
+     * @since 2.0.1
+     */
+    public SqlStatement build(SqlDialect dialect) {
+        SqlDialect d = dialect == null ? this.dialect : dialect;
         switch (kind) {
             case SELECT:
-                return buildSelect();
+                return buildSelect(d);
             case INSERT:
                 return buildInsert();
             case UPDATE:
@@ -531,9 +542,17 @@ public final class SqlBuilder {
     }
 
     /**
-     * @return SELECT AST
+     * @return SELECT AST（分页按 {@link #dialect(SqlDialect)}）
      */
     public SqlSelect buildSelect() {
+        return buildSelect(this.dialect);
+    }
+
+    /**
+     * @param effectiveDialect 分页所用方言
+     * @return SELECT AST
+     */
+    private SqlSelect buildSelect(SqlDialect effectiveDialect) {
         if (kind != Kind.SELECT) {
             throw new IllegalStateException("not a SELECT builder");
         }
@@ -561,7 +580,7 @@ public final class SqlBuilder {
         for (int i = 0; i < orderBy.size(); i++) {
             select.orderBy().add(orderBy.get(i));
         }
-        applyLimit(select);
+        applyLimit(select, effectiveDialect);
         if (!unionSelects.isEmpty()) {
             SqlSelect cursor = select;
             for (int i = 0; i < unionSelects.size(); i++) {
@@ -574,20 +593,24 @@ public final class SqlBuilder {
     }
 
     /**
-     * 紧凑 SQL（当前方言）。
+     * 紧凑 SQL（当前方言）。分页按 builder 方言生成。
      *
      * @return SQL 文本
      */
     public String toSql() {
-        return SQL.toSqlString(build(), dialect);
+        return SQL.toSqlString(build(this.dialect), this.dialect);
     }
 
     /**
-     * @param dialect 方言
+     * 按指定方言生成紧凑 SQL。参数方言覆盖 builder 方言，并用于分页改写
+     *（如 Oracle ROWNUM、Oracle12/SQL Server OFFSET FETCH）。
+     *
+     * @param dialect 方言；null 时回落 builder 方言
      * @return 紧凑 SQL
      */
     public String toSql(SqlDialect dialect) {
-        return SQL.toSqlString(build(), dialect == null ? this.dialect : dialect);
+        SqlDialect d = dialect == null ? this.dialect : dialect;
+        return SQL.toSqlString(build(d), d);
     }
 
     /**
@@ -725,32 +748,31 @@ public final class SqlBuilder {
         return id;
     }
 
-    private void applyLimit(SqlSelect select) {
+    /**
+     * 按有效方言挂分页：不写裸 LIMIT 再靠 formatter 猜，而是复用
+     * {@link SQL#setOffset}/{@link SQL#setLimit}/{@link SQL#setPage} 同一套
+     * {@link SqlRewriter#applyPagination} 路径（Oracle ROWNUM、Oracle12/SQL Server
+     * OFFSET FETCH、MySQL LIMIT 等）。
+     */
+    private void applyLimit(SqlSelect select, SqlDialect effectiveDialect) {
         if (limitRows == null && offsetRows == null) {
             return;
         }
-        if (dialect.supportsTop() && (offsetRows == null || offsetRows.longValue() == 0L)
-                && limitRows != null) {
-            select.setTop(SqlLiteral.of(SqlLiteral.Kind.NUMBER, Long.toString(limitRows.longValue())));
+        SqlDialect d = effectiveDialect == null ? this.dialect : effectiveDialect;
+        if (d == null) {
+            d = SqlDialect.MYSQL;
+        }
+        long off = offsetRows == null ? 0L : offsetRows.longValue();
+        if (off < 0L) {
+            off = 0L;
+        }
+        boolean withOffset = offsetRows != null;
+        if (limitRows != null) {
+            SqlRewriter.applyPagination(select, off, limitRows.longValue(), d, withOffset);
             return;
         }
-        SqlLimit limit = new SqlLimit();
-        if (limitRows != null) {
-            limit.setRowCount(SqlLiteral.of(SqlLiteral.Kind.NUMBER, Long.toString(limitRows.longValue())));
-        }
-        if (offsetRows != null && offsetRows.longValue() > 0L) {
-            limit.setOffset(SqlLiteral.of(SqlLiteral.Kind.NUMBER, Long.toString(offsetRows.longValue())));
-            if (dialect == SqlDialect.MYSQL && limitRows != null) {
-                limit.setMysqlCommaStyle(true);
-            }
-            if (dialect.supportsTop()
-                    || (dialect.supportsFetchFirst() && !dialect.supportsLimitOffset())) {
-                limit.setFetchStyle(true);
-            }
-        } else if (dialect.supportsFetchFirst() && !dialect.supportsLimitOffset() && limitRows != null) {
-            limit.setFetchStyle(true);
-        }
-        select.setLimit(limit);
+        // 仅 offset：与 SQL.setOffset 一致
+        SqlRewriter.setOffset(select, off, d);
     }
 
     private SqlInsert buildInsert() {
