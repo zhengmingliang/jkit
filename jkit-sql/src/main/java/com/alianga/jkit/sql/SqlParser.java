@@ -152,6 +152,10 @@ public final class SqlParser {
     }
 
     private SqlStatement parseStatementNoWith() {
+        // MySQL 客户端命令：不参与服务端语法，吞掉以免批语料在 DELIMITER 行失败
+        if (isIdent("DELIMITER")) {
+            return parseDelimiter();
+        }
         SqlTokenType t = token.type();
         switch (t) {
             case SELECT:
@@ -201,6 +205,10 @@ public final class SqlParser {
                 return parseTxControl();
             case FLUSH:
                 return parseFlush();
+            case LOCK:
+                return parseLockTables();
+            case UNLOCK:
+                return parseUnlockTables();
             case DECLARE:
                 return parseDeclare();
             case ANALYZE:
@@ -285,6 +293,19 @@ public final class SqlParser {
         match(SqlTokenType.SESSION);
         match(SqlTokenType.GLOBAL);
         match(SqlTokenType.LOCAL);
+        // SET PASSWORD [FOR user] = '…'：吞尾，避免 FOR 残留成下一条语句
+        if (isIdent("PASSWORD")) {
+            StringBuilder text = new StringBuilder("PASSWORD");
+            next();
+            if (!atStmtBreak()) {
+                String rest = consumeRawUntilSemi();
+                if (!rest.isEmpty()) {
+                    text.append(' ').append(rest);
+                }
+            }
+            stmt.setText(text.toString());
+            return stmt;
+        }
         if (match(SqlTokenType.NAMES)) {
             stmt.setName(SqlIdentifier.of("NAMES"));
             stmt.setValue(exprParser.parsePrimary());
@@ -448,6 +469,76 @@ public final class SqlParser {
         stmt.setStatementType(SqlStatementType.OTHER);
         StringBuilder text = new StringBuilder("FLUSH");
         if (!atStmtBreak()) {
+            String rest = consumeRawUntilSemi();
+            if (!rest.isEmpty()) {
+                text.append(' ').append(rest);
+            }
+        }
+        stmt.setText(text.toString());
+        return stmt;
+    }
+
+    /**
+     * MySQL {@code LOCK TABLES t READ, u WRITE, …}：OTHER + 全文，抽第一张表名。
+     */
+    private SqlStatement parseLockTables() {
+        expect(SqlTokenType.LOCK);
+        SqlSimpleStatement stmt = new SqlSimpleStatement();
+        stmt.setStatementType(SqlStatementType.OTHER);
+        StringBuilder text = new StringBuilder("LOCK");
+        if (is(SqlTokenType.TABLES) || is(SqlTokenType.TABLE) || isIdent("TABLES") || isIdent("TABLE")) {
+            text.append(' ').append(token.text().toUpperCase());
+            next();
+        }
+        if (identLike()) {
+            stmt.setName(parseName());
+            text.append(' ').append(stmt.name().qualifiedName());
+        }
+        if (!atStmtBreak()) {
+            String rest = consumeRawUntilSemi();
+            if (!rest.isEmpty()) {
+                text.append(' ').append(rest);
+            }
+        }
+        stmt.setText(text.toString());
+        return stmt;
+    }
+
+    /**
+     * MySQL {@code UNLOCK TABLES}。
+     */
+    private SqlStatement parseUnlockTables() {
+        expect(SqlTokenType.UNLOCK);
+        SqlSimpleStatement stmt = new SqlSimpleStatement();
+        stmt.setStatementType(SqlStatementType.OTHER);
+        StringBuilder text = new StringBuilder("UNLOCK");
+        if (is(SqlTokenType.TABLES) || is(SqlTokenType.TABLE) || isIdent("TABLES") || isIdent("TABLE")) {
+            text.append(' ').append(token.text().toUpperCase());
+            next();
+        }
+        if (!atStmtBreak()) {
+            String rest = consumeRawUntilSemi();
+            if (!rest.isEmpty()) {
+                text.append(' ').append(rest);
+            }
+        }
+        stmt.setText(text.toString());
+        return stmt;
+    }
+
+    /**
+     * MySQL 客户端 {@code DELIMITER ;;} / {@code DELIMITER ;} / {@code DELIMITER $}：OTHER 占位。
+     * 新定界符若为分号族，留给 {@link #parseAll} 的语句分隔吞掉，不在此消费。
+     */
+    private SqlStatement parseDelimiter() {
+        // 调用方已确认当前为 IDENT DELIMITER
+        next();
+        SqlSimpleStatement stmt = new SqlSimpleStatement();
+        stmt.setStatementType(SqlStatementType.OTHER);
+        StringBuilder text = new StringBuilder("DELIMITER");
+        // DELIMITER ;; / DELIMITER ; → 下一记号已是分号，text 仅 DELIMITER
+        if (!atStmtBreak()) {
+            // DELIMITER $ / DELIMITER // 等：吃到语句分隔前的定界符原文
             String rest = consumeRawUntilSemi();
             if (!rest.isEmpty()) {
                 text.append(' ').append(rest);

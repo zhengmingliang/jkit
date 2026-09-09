@@ -271,6 +271,36 @@ final class SqlDdlParser {
         return stmt;
     }
 
+    /**
+     * MySQL {@code CREATE DEFINER = user PROCEDURE|FUNCTION|TRIGGER|EVENT|VIEW …}：跳过 DEFINER 子句。
+     * {@code user} 形如 {@code `root`@`localhost`} / {@code 'u'@'%'} / {@code CURRENT_USER}。
+     */
+    private void skipDefinerClause() {
+        if (!p.isIdent("DEFINER")) {
+            return;
+        }
+        p.next();
+        p.match(SqlTokenType.EQ);
+        if (p.isIdent("CURRENT_USER")) {
+            p.next();
+            if (p.match(SqlTokenType.LPAREN)) {
+                p.expect(SqlTokenType.RPAREN);
+            }
+            return;
+        }
+        // user [@ host]；词法上 `@` 常为单独 VARIABLE，host 为下一 IDENT/STRING
+        if (p.identLike() || p.is(SqlTokenType.STRING) || p.is(SqlTokenType.VARIABLE)) {
+            p.next();
+        }
+        if (p.is(SqlTokenType.VARIABLE)) {
+            String v = p.token.text();
+            p.next();
+            if ("@".equals(v) && (p.identLike() || p.is(SqlTokenType.STRING))) {
+                p.next();
+            }
+        }
+    }
+
     SqlStatement parseCreate() {
         p.expect(SqlTokenType.CREATE);
         boolean orReplace = false;
@@ -282,6 +312,7 @@ final class SqlDdlParser {
         p.match(SqlTokenType.TEMP);
         p.match(SqlTokenType.UNIQUE);
         p.match(SqlTokenType.MATERIALIZED);
+        skipDefinerClause();
         SqlDdlStatement ddl = new SqlDdlStatement();
         ddl.setStatementType(SqlStatementType.CREATE);
         ddl.setOrReplace(orReplace);

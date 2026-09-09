@@ -2047,6 +2047,155 @@ public class SqlParserTest {
         assertTrue(beginTx.text().toUpperCase().contains("WORK"));
     }
 
+    /**
+     * LOCK TABLES / UNLOCK TABLES → OTHER；抽第一张表名。
+     */
+    @Test
+    public void lockUnlockTables() {
+        SqlSimpleStatement lock = (SqlSimpleStatement) SQL.parse(
+                "LOCK TABLES t READ, u WRITE");
+        assertEquals(SqlStatementType.OTHER, lock.type());
+        assertNotNull(lock.text());
+        assertTrue(lock.text().toUpperCase().startsWith("LOCK"));
+        assertTrue(lock.text().toUpperCase().contains("TABLES"));
+        assertEquals("t", lock.name().qualifiedName());
+        assertTrue(SQL.tables(lock).toString(), SQL.tables(lock).contains("t"));
+        assertTrue(SQL.toSqlString(lock).toUpperCase().contains("LOCK"));
+
+        SqlSimpleStatement lockAs = (SqlSimpleStatement) SQL.parse(
+                "LOCK TABLES db.t AS a READ LOCAL");
+        assertEquals("db.t", lockAs.name().qualifiedName());
+        assertTrue(lockAs.text().toUpperCase().contains("READ"));
+
+        SqlSimpleStatement unlock = (SqlSimpleStatement) SQL.parse("UNLOCK TABLES");
+        assertEquals(SqlStatementType.OTHER, unlock.type());
+        assertTrue(unlock.text().toUpperCase().startsWith("UNLOCK"));
+        assertTrue(unlock.text().toUpperCase().contains("TABLES"));
+
+        java.util.List<SqlStatement> batch = SQL.parseAll(
+                "LOCK TABLES t WRITE; UPDATE t SET a = 1; UNLOCK TABLES");
+        assertEquals(3, batch.size());
+        assertEquals(SqlStatementType.OTHER, batch.get(0).type());
+        assertEquals(SqlStatementType.UPDATE, batch.get(1).type());
+        assertEquals(SqlStatementType.OTHER, batch.get(2).type());
+    }
+
+    /**
+     * SELECT … FROM … INTO @var / OUTFILE / DUMPFILE（INTO 在 FROM 之后）。
+     */
+    @Test
+    public void selectFromThenInto() {
+        SqlSelect intoVar = (SqlSelect) SQL.parse(
+                "SELECT id, name FROM t WHERE id = 1 INTO @id, @name");
+        assertNull(intoVar.intoTable());
+        assertEquals(2, intoVar.intoVariables().size());
+        assertEquals("t", ((com.alianga.jkit.sql.ast.SqlTable) intoVar.from()).name().qualifiedName());
+        String varOut = SQL.toSqlString(intoVar);
+        assertTrue(varOut.toUpperCase().contains("INTO"));
+        SqlSelect againVar = (SqlSelect) SQL.parse(varOut);
+        assertEquals(2, againVar.intoVariables().size());
+
+        SqlSelect outfile = (SqlSelect) SQL.parse(
+                "SELECT a, b FROM t ORDER BY a INTO OUTFILE '/tmp/b.csv'");
+        assertEquals("OUTFILE", outfile.intoFileKind());
+        assertNotNull(outfile.intoOutfile());
+        assertTrue(outfile.intoOutfile().contains("/tmp/b.csv")
+                || outfile.intoOutfile().contains("tmp"));
+        assertTrue(SQL.toSqlString(outfile).toUpperCase().contains("OUTFILE"));
+
+        SqlSelect dump = (SqlSelect) SQL.parse(
+                "SELECT * FROM t LIMIT 10 INTO DUMPFILE '/tmp/c.bin'");
+        assertEquals("DUMPFILE", dump.intoFileKind());
+        assertNotNull(dump.intoOutfile());
+    }
+
+    /**
+     * MySQL 客户端 DELIMITER：OTHER 占位，批中不因 DELIMITER 行失败。
+     */
+    @Test
+    public void delimiterClientCommand() {
+        SqlSimpleStatement d1 = (SqlSimpleStatement) SQL.parse("DELIMITER ;;");
+        assertEquals(SqlStatementType.OTHER, d1.type());
+        assertTrue(d1.text().toUpperCase().startsWith("DELIMITER"));
+
+        SqlSimpleStatement d2 = (SqlSimpleStatement) SQL.parse("DELIMITER ;");
+        assertEquals(SqlStatementType.OTHER, d2.type());
+        assertTrue(d2.text().toUpperCase().startsWith("DELIMITER"));
+
+        SqlSimpleStatement d3 = (SqlSimpleStatement) SQL.parse("DELIMITER $");
+        assertEquals(SqlStatementType.OTHER, d3.type());
+        assertTrue(d3.text().toUpperCase().contains("DELIMITER"));
+        assertTrue(d3.text().contains("$"));
+
+        java.util.List<SqlStatement> batch = SQL.parseAll(
+                "DELIMITER ;; SELECT 1; DELIMITER ;");
+        assertTrue(batch.size() >= 2);
+        assertEquals(SqlStatementType.OTHER, batch.get(0).type());
+        assertTrue(((SqlSimpleStatement) batch.get(0)).text().toUpperCase().startsWith("DELIMITER"));
+        boolean sawSelect = false;
+        for (SqlStatement s : batch) {
+            if (s.type() == SqlStatementType.SELECT) {
+                sawSelect = true;
+            }
+        }
+        assertTrue(sawSelect);
+    }
+
+    /**
+     * SET PASSWORD [FOR user] = '…' 可解析（SET + text）。
+     */
+    /**
+     * CREATE DEFINER=… PROCEDURE + DELIMITER 批（Joplin 存储过程语料最小集）。
+     */
+    @Test
+    public void createDefinerProcedureWithDelimiter() {
+        java.util.List<SqlStatement> batch = SQL.parseAll(
+                "DROP PROCEDURE IF EXISTS `proc_adder`;\n"
+                        + "DELIMITER ;;\n"
+                        + "CREATE DEFINER=`root`@`localhost` PROCEDURE `proc_adder`"
+                        + "(IN a int, IN b int, OUT sum int)\n"
+                        + "BEGIN\n"
+                        + "    DECLARE c int;\n"
+                        + "    set sum = a + b;\n"
+                        + "END\n"
+                        + ";;\n"
+                        + "DELIMITER ;");
+        assertTrue(batch.size() >= 3);
+        assertEquals(SqlStatementType.DROP, batch.get(0).type());
+        assertEquals(SqlStatementType.OTHER, batch.get(1).type());
+        assertTrue(((SqlSimpleStatement) batch.get(1)).text().toUpperCase().startsWith("DELIMITER"));
+        boolean sawCreate = false;
+        for (SqlStatement s : batch) {
+            if (s.type() == SqlStatementType.CREATE) {
+                sawCreate = true;
+                com.alianga.jkit.sql.ast.SqlDdlStatement ddl =
+                        (com.alianga.jkit.sql.ast.SqlDdlStatement) s;
+                assertEquals("PROCEDURE", ddl.objectType());
+                assertEquals("proc_adder", ddl.names().get(0).simpleName());
+            }
+        }
+        assertTrue(sawCreate);
+    }
+
+    @Test
+    public void setPassword() {
+        SqlSimpleStatement forUser = (SqlSimpleStatement) SQL.parse(
+                "SET PASSWORD FOR myuser = 'mypass'");
+        assertEquals(SqlStatementType.SET, forUser.type());
+        assertNotNull(forUser.text());
+        assertTrue(forUser.text().toUpperCase().contains("PASSWORD"));
+        assertTrue(forUser.text().toUpperCase().contains("FOR"));
+        String out = SQL.toSqlString(forUser);
+        assertTrue(out.toUpperCase().startsWith("SET"));
+        assertTrue(out.toUpperCase().contains("PASSWORD"));
+
+        SqlSimpleStatement plain = (SqlSimpleStatement) SQL.parse(
+                "SET PASSWORD = 'secret'");
+        assertEquals(SqlStatementType.SET, plain.type());
+        assertTrue(plain.text().toUpperCase().contains("PASSWORD"));
+        assertTrue(SQL.toSqlString(plain).toUpperCase().contains("PASSWORD"));
+    }
+
 
 }
 

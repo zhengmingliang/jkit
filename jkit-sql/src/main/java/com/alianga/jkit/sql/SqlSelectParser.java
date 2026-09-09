@@ -278,6 +278,8 @@ final class SqlSelectParser {
             parseOrderBy(select.orderBy());
         }
         parseLimitFetch(select);
+        // MySQL：INTO 也可出现在 FROM/WHERE/ORDER/LIMIT 之后（与 SELECT 列表后 INTO 二选一）
+        parseSelectInto(select);
         if (p.match(SqlTokenType.FOR)) {
             p.expect(SqlTokenType.UPDATE);
             select.setForUpdate(true);
@@ -310,7 +312,8 @@ final class SqlSelectParser {
     }
 
     /**
-     * MySQL {@code SELECT cols INTO dest FROM src} / {@code INTO @var} / {@code INTO OUTFILE}。
+     * MySQL {@code SELECT cols INTO dest FROM src} / {@code INTO @var} / {@code INTO OUTFILE}，
+     * 以及 {@code SELECT … FROM … INTO @var|OUTFILE|DUMPFILE}（INTO 在 FROM 之后）。
      */
     private void parseSelectInto(SqlSelect select) {
         if (!p.match(SqlTokenType.INTO)) {

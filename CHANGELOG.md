@@ -67,6 +67,7 @@
 
 
 ### 新增
+- `jkit-sql`：补 Joplin 实语法缺口 — `LOCK TABLES` / `UNLOCK TABLES`（OTHER + 抽首表）、`SELECT … FROM … INTO @var|OUTFILE|DUMPFILE`（FROM 后置 INTO，镜像既有 SELECT INTO）、MySQL 客户端 `DELIMITER`（OTHER 占位）、`SET PASSWORD [FOR user] = …`（SET + text）；`CREATE DEFINER=user PROCEDURE|FUNCTION|…` 跳过 DEFINER 子句以便 DELIMITER 批可解析。
 - `jkit-sql`：可配置模板占位符（`SqlParseOptions.placeholders()` / `SqlPlaceholders`：`atWrapped`/`printf`/`angle`/`arrowAngle`/`add("@*@")`）；默认关闭，启用后按 IDENT 解析以便抽表列；见 `docs/sql.md`「模板占位符」。
 
 - `jkit-sql`：补 common-model 审计 A 类缺口 — 数字开头裸标识符（`32强国`/`1019使用`，不破坏数值字面量）；`IN :types` / `IN ?` 无括号绑定列表；`LOAD DATA [LOCAL] INFILE … INTO TABLE`（OTHER + 抽表名）；顶层匿名 `DECLARE … BEGIN … END;`（OTHER，BEGIN/END 内允许分号）。
