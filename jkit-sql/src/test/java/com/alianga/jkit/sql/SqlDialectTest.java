@@ -26,6 +26,11 @@ public class SqlDialectTest {
         assertEquals(SqlDialect.POSTGRES, SqlDialect.fromName("opengauss"));
         assertEquals(SqlDialect.ORACLE, SqlDialect.fromName("dameng"));
         assertEquals(SqlDialect.ORACLE, SqlDialect.fromName("oceanbase_oracle"));
+        assertEquals(SqlDialect.ORACLE, SqlDialect.fromName("oracle11"));
+        assertEquals(SqlDialect.ORACLE, SqlDialect.fromName("11g"));
+        assertEquals(SqlDialect.ORACLE12, SqlDialect.fromName("oracle12"));
+        assertEquals(SqlDialect.ORACLE12, SqlDialect.fromName("oracle12c"));
+        assertEquals(SqlDialect.ORACLE12, SqlDialect.fromName("19c"));
         assertEquals(SqlDialect.SQLSERVER, SqlDialect.fromName("sybase"));
         assertEquals(SqlDialect.SQLSERVER, SqlDialect.fromName("azuresql"));
         assertEquals(SqlDialect.ANSI, SqlDialect.fromName("sqlite"));
@@ -50,9 +55,14 @@ public class SqlDialectTest {
         assertTrue(SqlDialect.POSTGRES.pipesAreConcat());
 
         assertFalse(SqlDialect.ORACLE.supportsLimitOffset());
-        assertTrue(SqlDialect.ORACLE.supportsFetchFirst());
+        assertFalse(SqlDialect.ORACLE.supportsFetchFirst());
         assertTrue(SqlDialect.ORACLE.supportsRownum());
-        assertEquals("LIMIT", SqlDialect.ORACLE.preferredLimitStyle());
+        assertEquals("ROWNUM", SqlDialect.ORACLE.preferredLimitStyle());
+
+        assertFalse(SqlDialect.ORACLE12.supportsLimitOffset());
+        assertTrue(SqlDialect.ORACLE12.supportsFetchFirst());
+        assertTrue(SqlDialect.ORACLE12.supportsRownum());
+        assertEquals("LIMIT", SqlDialect.ORACLE12.preferredLimitStyle());
 
         assertTrue(SqlDialect.SQLSERVER.supportsTop());
         assertFalse(SqlDialect.SQLSERVER.supportsLimitOffset());

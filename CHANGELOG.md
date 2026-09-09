@@ -68,6 +68,7 @@
 
 ### 新增
 
+- `jkit-sql`：`SqlDialect.ORACLE` 表示 12c 以下分页（裸 SELECT 改写为 ROWNUM 包装，不写 OFFSET/FETCH）；新增 `ORACLE12`（12c+）可用 `OFFSET … FETCH`；`fromName` 支持 `oracle12`/`19c` 等。
 - `jkit-sql`：`SqlBuilder` 补 `rightJoin` / `fullJoin` / `crossJoin`、`union` / `unionAll`、`with` CTE、`distinct()`。
 
 - `jkit-sql`：SQL Server `OUTPUT … INTO` 目标表（`dbo.archive` / `@out` / `#tmp`）进 AST（`outputInto`）并计入 `tables()`；SQL Server 下 `#tmp`/`##g` 不再被词法当成 JSON 运算符。

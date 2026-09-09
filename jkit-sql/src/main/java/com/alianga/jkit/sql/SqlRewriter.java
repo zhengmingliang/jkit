@@ -41,22 +41,11 @@ public final class SqlRewriter {
         if (select == null) {
             return statement;
         }
-        SqlSelect owner = paginationOwner(select);
         if (getLimit(statement) != null) {
             return statement;
         }
         SqlDialect d = dialect == null ? SqlDialect.MYSQL : dialect;
-        if (d.supportsTop()) {
-            if (owner.top() == null) {
-                owner.setTop(number(rowCount));
-            }
-            return statement;
-        }
-        if (owner.limit() == null) {
-            SqlLimit limit = new SqlLimit();
-            limit.setRowCount(number(rowCount));
-            owner.setLimit(limit);
-        }
+        applyPagination(select, 0L, rowCount, d, false);
         return statement;
     }
 
@@ -210,6 +199,11 @@ public final class SqlRewriter {
             }
             return;
         }
+        // 经典 Oracle（≤11g）：裸 SELECT 一律 ROWNUM 包装，禁止 OFFSET/FETCH
+        if (dialect.supportsRownum() && !dialect.supportsFetchFirst()) {
+            wrapOracleRownum(root, offset, rowCount);
+            return;
+        }
         SqlSelect select = paginationOwner(root);
         clearPagination(select);
         // SQL Server 无偏移（或 offset=0）用 TOP
@@ -224,12 +218,115 @@ public final class SqlRewriter {
         }
         if (dialect.supportsTop()
                 || (dialect.supportsFetchFirst() && !dialect.supportsLimitOffset())) {
-            // SQL Server（有偏移）或 Oracle：OFFSET/FETCH
+            // SQL Server（有偏移）或 Oracle 12c+：OFFSET/FETCH
             limit.setFetchStyle(true);
         } else if (dialect.supportsLimitOffset() && offset > 0L && dialect == SqlDialect.MYSQL) {
             limit.setMysqlCommaStyle(true);
         }
         select.setLimit(limit);
+    }
+
+    /**
+     * 把裸 SELECT（含 UNION 链）包成 ROWNUM 分页；offset=0 用单层，否则双层。
+     * WITH 留在外层。
+     */
+    private static void wrapOracleRownum(SqlSelect root, long offset, long rowCount) {
+        long off = offset < 0L ? 0L : offset;
+        long end = off + rowCount;
+        if (end < 1L) {
+            end = 1L;
+        }
+        SqlSelect core = detachSelectBody(root);
+        if (off == 0L) {
+            SqlSubqueryTable from = new SqlSubqueryTable();
+            from.setQuery(core);
+            from.setAlias("XX");
+            SqlSelectItem star = new SqlSelectItem();
+            star.setExpr(new SqlAllColumns());
+            root.addSelectItem(star);
+            root.setFrom(from);
+            root.setWhere(SqlBinaryExpr.of(SqlIdentifier.of("ROWNUM"), SqlBinaryOp.LE, number(end)));
+            return;
+        }
+        SqlSelect middle = new SqlSelect();
+        SqlSelectItem midStar = new SqlSelectItem();
+        SqlAllColumns all = new SqlAllColumns();
+        all.setOwner(SqlIdentifier.of("XX"));
+        midStar.setExpr(all);
+        middle.addSelectItem(midStar);
+        SqlSelectItem rnItem = new SqlSelectItem();
+        rnItem.setExpr(SqlIdentifier.of("ROWNUM"));
+        rnItem.setAlias("RN");
+        middle.addSelectItem(rnItem);
+        SqlSubqueryTable midFrom = new SqlSubqueryTable();
+        midFrom.setQuery(core);
+        midFrom.setAlias("XX");
+        middle.setFrom(midFrom);
+        middle.setWhere(SqlBinaryExpr.of(SqlIdentifier.of("ROWNUM"), SqlBinaryOp.LE, number(end)));
+
+        SqlSubqueryTable outerFrom = new SqlSubqueryTable();
+        outerFrom.setQuery(middle);
+        outerFrom.setAlias("XXX");
+        SqlSelectItem outerStar = new SqlSelectItem();
+        outerStar.setExpr(new SqlAllColumns());
+        root.addSelectItem(outerStar);
+        root.setFrom(outerFrom);
+        root.setWhere(SqlBinaryExpr.of(SqlIdentifier.of("RN"), SqlBinaryOp.GT, number(off)));
+    }
+
+    /**
+     * 将 root 的 SELECT 体挪到新节点（WITH/注释留在 root）。
+     */
+    private static SqlSelect detachSelectBody(SqlSelect root) {
+        SqlSelect core = new SqlSelect();
+        core.setDistinct(root.distinct());
+        root.setDistinct(false);
+        core.distinctOn().addAll(root.distinctOn());
+        root.distinctOn().clear();
+        core.setTop(root.top());
+        root.setTop(null);
+        core.setTopWithTies(root.topWithTies());
+        root.setTopWithTies(false);
+        core.selectItems().addAll(root.selectItems());
+        root.selectItems().clear();
+        core.setFrom(root.from());
+        root.setFrom(null);
+        core.setWhere(root.where());
+        root.setWhere(null);
+        core.groupBy().addAll(root.groupBy());
+        root.groupBy().clear();
+        core.setGroupByRollup(root.groupByRollup());
+        root.setGroupByRollup(false);
+        core.setHaving(root.having());
+        root.setHaving(null);
+        core.orderBy().addAll(root.orderBy());
+        root.orderBy().clear();
+        core.setLimit(root.limit());
+        root.setLimit(null);
+        core.setForUpdate(root.forUpdate());
+        root.setForUpdate(false);
+        core.setLockInShare(root.lockInShare());
+        root.setLockInShare(false);
+        core.setForUpdateTail(root.forUpdateTail());
+        root.setForUpdateTail(null);
+        core.forUpdateOf().addAll(root.forUpdateOf());
+        root.forUpdateOf().clear();
+        core.setForUpdateWait(root.forUpdateWait());
+        root.setForUpdateWait(null);
+        core.setUnion(root.union());
+        root.setUnion(null);
+        core.setUnionOp(root.unionOp());
+        root.setUnionOp(null);
+        core.setConnectBy(root.connectBy());
+        root.setConnectBy(null);
+        core.setStartWith(root.startWith());
+        root.setStartWith(null);
+        core.windows().addAll(root.windows());
+        root.windows().clear();
+        core.setValuesClause(root.valuesClause());
+        root.setValuesClause(false);
+        // 优化器 hint / WITH 留在外层 root
+        return core;
     }
 
     private static void ensureLimitNode(SqlSelect select, SqlDialect dialect, boolean fetchIfNeeded) {

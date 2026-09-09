@@ -49,20 +49,24 @@ List<SqlStatement> audit = SQL.parseAll(sql, SqlDialect.MYSQL, true);
 
 ```java
 SQL.parse(sql, SqlDialect.POSTGRES);
-SQL.parse(sql, SqlDialect.ORACLE);
+SQL.parse(sql, SqlDialect.ORACLE);    // 12c 以下：分页改写用 ROWNUM
+SQL.parse(sql, SqlDialect.ORACLE12);  // 12c+：可用 OFFSET/FETCH
 SQL.parse(sql, SqlDialect.SQLSERVER);
 SQL.parse(sql, SqlDialect.ANSI);
 
 SqlDialect.fromName("gbase");     // MYSQL
 SqlDialect.fromName("gaussdb");   // POSTGRES
-SqlDialect.fromName("dm");        // ORACLE
+SqlDialect.fromName("dm");        // ORACLE（ROWNUM）
+SqlDialect.fromName("oracle12");  // ORACLE12
+SqlDialect.fromName("19c");       // ORACLE12
 SqlDialect.fromName("tidb");      // MYSQL
 SqlDialect.fromName("sqlite");    // ANSI
 
 // 能力查询（改写/格式化单一事实来源）
 SqlDialect.MYSQL.supportsLimitOffset();   // true
 SqlDialect.SQLSERVER.supportsTop();       // true
-SqlDialect.ORACLE.supportsFetchFirst();   // true
+SqlDialect.ORACLE.supportsFetchFirst();   // false（12c 以下）
+SqlDialect.ORACLE12.supportsFetchFirst(); // true
 SqlDialect.ORACLE.supportsRownum();       // true
 SqlDialect.POSTGRES.pipesAreConcat();     // true
 SqlDialect.MYSQL.quoteIdent("user");      // `user`

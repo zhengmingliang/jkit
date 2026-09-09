@@ -9,7 +9,8 @@ package com.alianga.jkit.sql;
  * <ul>
  *   <li>{@link #MYSQL}：反引号、{@code ||}=OR、LIMIT/OFFSET；别名含 MariaDB/GBase/TiDB 等</li>
  *   <li>{@link #POSTGRES}：双引号、{@code ||}=拼接、LIMIT/OFFSET 与 FETCH；别名含 Gauss/Greenplum</li>
- *   <li>{@link #ORACLE}：双引号、拼接、FETCH FIRST 与 ROWNUM；别名含达梦/Oscar</li>
+ *   <li>{@link #ORACLE}：经典 Oracle ≤11g / 达梦 / Oscar — 双引号、拼接、仅 ROWNUM 分页（无 OFFSET/FETCH）</li>
+ *   <li>{@link #ORACLE12}：Oracle 12c+ — 同引号/拼接，裸 SELECT 可用 OFFSET/FETCH，仍识别 ROWNUM 包装</li>
  *   <li>{@link #SQLSERVER}：方括号、TOP 与 OFFSET FETCH；别名含 mssql/tsql</li>
  *   <li>{@link #ANSI} / {@link #H2}：双引号、拼接、LIMIT/OFFSET（H2 兼认 {@code #} 注释）</li>
  * </ul>
@@ -33,9 +34,15 @@ public enum SqlDialect {
      */
     POSTGRES,
     /**
-     * Oracle / 达梦：双引号标识符，{@code ||} 拼接，ROWNUM / FETCH。
+     * 经典 Oracle（11g 及以下）/ 达梦 / Oscar：双引号标识符，{@code ||} 拼接；
+     * 分页一律 ROWNUM 包装，不生成 {@code OFFSET … FETCH}。
      */
     ORACLE,
+    /**
+     * Oracle 12c 及以上：引号与 {@code ||} 同 {@link #ORACLE}；
+     * 裸 SELECT 分页可用 {@code OFFSET … FETCH FIRST … ROWS ONLY}，仍识别已有 ROWNUM 包装。
+     */
+    ORACLE12,
     /**
      * SQL Server：方括号标识符，TOP / OFFSET FETCH。
      */
@@ -69,7 +76,13 @@ public enum SqlDialect {
                 || "cockroachdb".equals(n) || "redshift".equals(n)) {
             return POSTGRES;
         }
-        if ("oracle".equals(n) || "dm".equals(n) || "dameng".equals(n) || "oscar".equals(n)
+        if ("oracle12".equals(n) || "oracle12c".equals(n) || "12c".equals(n)
+                || "oracle18".equals(n) || "oracle19".equals(n) || "oracle21".equals(n)
+                || "19c".equals(n) || "21c".equals(n)) {
+            return ORACLE12;
+        }
+        if ("oracle".equals(n) || "oracle11".equals(n) || "oracle10".equals(n) || "11g".equals(n)
+                || "dm".equals(n) || "dameng".equals(n) || "oscar".equals(n)
                 || "oceanbase_oracle".equals(n)) {
             return ORACLE;
         }
@@ -100,6 +113,7 @@ public enum SqlDialect {
             case ANSI:
             case POSTGRES:
             case ORACLE:
+            case ORACLE12:
             case H2:
             default:
                 return '"';
@@ -185,27 +199,34 @@ public enum SqlDialect {
      * @return true 时分页可用 FETCH 风格
      */
     public boolean supportsFetchFirst() {
-        return this == ORACLE || this == POSTGRES || this == SQLSERVER
+        return this == ORACLE12 || this == POSTGRES || this == SQLSERVER
                 || this == ANSI || this == H2;
     }
 
     /**
-     * 是否习惯用 Oracle {@code ROWNUM} 伪列分页（解析器仍接受，改写优先 FETCH）。
+     * 是否习惯用 Oracle {@code ROWNUM} 伪列分页。
+     * {@link #ORACLE} 改写裸 SELECT 时生成 ROWNUM 包装；{@link #ORACLE12} 仍识别/改写已有包装。
      *
-     * @return true 表示 Oracle 族
+     * @return true 表示 Oracle 族（含 12c+）
      */
     public boolean supportsRownum() {
-        return this == ORACLE;
+        return this == ORACLE || this == ORACLE12;
     }
 
     /**
      * {@link com.alianga.jkit.sql.SqlRewriter#addLimit} 一类「只补行数」的首选形态。
-     * SQL Server → {@code TOP}；其余（含 Oracle）→ {@code LIMIT}。带 offset 的分页见
-     * {@link #supportsFetchFirst()} / {@link #supportsLimitOffset()}。
+     * SQL Server → {@code TOP}；经典 Oracle → {@code ROWNUM}；其余 → {@code LIMIT}。
+     * 带 offset 的分页见 {@link #supportsFetchFirst()} / {@link #supportsLimitOffset()}。
      *
-     * @return {@code "TOP"} 或 {@code "LIMIT"}
+     * @return {@code "TOP"}、{@code "ROWNUM"} 或 {@code "LIMIT"}
      */
     public String preferredLimitStyle() {
-        return supportsTop() ? "TOP" : "LIMIT";
+        if (supportsTop()) {
+            return "TOP";
+        }
+        if (supportsRownum() && !supportsFetchFirst()) {
+            return "ROWNUM";
+        }
+        return "LIMIT";
     }
 }

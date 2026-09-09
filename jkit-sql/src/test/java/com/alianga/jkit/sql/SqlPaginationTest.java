@@ -27,6 +27,14 @@ public class SqlPaginationTest {
         SqlStatement comma = SQL.parse("SELECT * FROM t LIMIT 5, 15");
         assertEquals(Long.valueOf(15L), SQL.getLimit(comma));
         assertEquals(Long.valueOf(5L), SQL.getOffset(comma));
+        String sql = "SELECT id, name FROM users WHERE age > 25\n" +
+                "            UNION\n" +
+                "            SELECT id, name FROM customers WHERE status = 'active'\n" +
+                "            ORDER BY name\n" +
+                "            LIMIT 100";
+        System.out.println(sql);
+        Long limit = SQL.getLimit(SQL.parse(sql, SqlDialect.MYSQL));
+        assertEquals(Long.valueOf(100L), limit);
     }
 
     @Test
@@ -36,7 +44,7 @@ public class SqlPaginationTest {
         assertNull(SQL.getOffset(top));
 
         SqlStatement fetch = SQL.parse(
-                "SELECT * FROM t OFFSET 3 ROWS FETCH FIRST 9 ROWS ONLY", SqlDialect.ORACLE);
+                "SELECT * FROM t OFFSET 3 ROWS FETCH FIRST 9 ROWS ONLY", SqlDialect.ORACLE12);
         assertEquals(Long.valueOf(9L), SQL.getLimit(fetch));
         assertEquals(Long.valueOf(3L), SQL.getOffset(fetch));
     }
@@ -86,12 +94,24 @@ public class SqlPaginationTest {
     @Test
     public void setPageOracleFetchFirst() {
         SqlStatement page = SQL.setPage(
+                SQL.parse("SELECT * FROM emp", SqlDialect.ORACLE12), 2, 8, SqlDialect.ORACLE12);
+        assertEquals(Long.valueOf(8L), SQL.getLimit(page));
+        assertEquals(Long.valueOf(8L), SQL.getOffset(page));
+        String sql = SQL.toSqlString(page, SqlDialect.ORACLE12).toUpperCase();
+        assertTrue(sql, sql.contains("FETCH"));
+        assertTrue(sql, sql.contains("OFFSET"));
+        SQL.parse(SQL.toSqlString(page, SqlDialect.ORACLE12), SqlDialect.ORACLE12);
+    }
+
+    @Test
+    public void setPageOracleClassicUsesRownum() {
+        SqlStatement page = SQL.setPage(
                 SQL.parse("SELECT * FROM emp", SqlDialect.ORACLE), 2, 8, SqlDialect.ORACLE);
         assertEquals(Long.valueOf(8L), SQL.getLimit(page));
         assertEquals(Long.valueOf(8L), SQL.getOffset(page));
         String sql = SQL.toSqlString(page, SqlDialect.ORACLE).toUpperCase();
-        assertTrue(sql, sql.contains("FETCH"));
-        assertTrue(sql, sql.contains("OFFSET"));
+        assertFalse("pre-12c must not use OFFSET/FETCH", sql.contains("FETCH") || sql.contains("OFFSET"));
+        assertTrue(sql, sql.contains("ROWNUM"));
         SQL.parse(SQL.toSqlString(page, SqlDialect.ORACLE), SqlDialect.ORACLE);
     }
 
