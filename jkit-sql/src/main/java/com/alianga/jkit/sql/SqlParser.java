@@ -26,6 +26,11 @@ public final class SqlParser {
     boolean keepComments;
     /** 待挂到下一条语句的注释。 */
     List<String> pendingComments;
+    /**
+     * 当前批处理语句终止符（MySQL 客户端 {@code DELIMITER} 切换；默认 {@code ;}）。
+     * SQL Server {@code GO} 始终可作为分隔，不受此字段影响。
+     */
+    String stmtDelimiter = ";";
 
     final SqlExprParser exprParser;
     final SqlSelectParser selectParser;
@@ -67,6 +72,7 @@ public final class SqlParser {
         }
         this.keepComments = options.keepComments();
         this.pendingComments = null;
+        this.stmtDelimiter = ";";
         lexer.reset(sql, this.dialect);
         lexer.setKeepComments(this.keepComments);
         lexer.setPipesAsConcat(options.pipesAsConcat());
@@ -100,7 +106,7 @@ public final class SqlParser {
         List<SqlStatement> list = new ArrayList<SqlStatement>(1);
         while (!is(SqlTokenType.EOF)) {
             while (isStmtSeparator()) {
-                next();
+                consumeStmtSeparator();
             }
             if (is(SqlTokenType.EOF)) {
                 break;
@@ -123,7 +129,7 @@ public final class SqlParser {
                 list.add(parseStatement());
             }
             if (isStmtSeparator()) {
-                next();
+                consumeStmtSeparator();
             }
         }
         return list;
@@ -527,25 +533,53 @@ public final class SqlParser {
     }
 
     /**
-     * MySQL 客户端 {@code DELIMITER ;;} / {@code DELIMITER ;} / {@code DELIMITER $}：OTHER 占位。
-     * 新定界符若为分号族，留给 {@link #parseAll} 的语句分隔吞掉，不在此消费。
+     * MySQL 客户端 {@code DELIMITER ;;} / {@code DELIMITER ;} / {@code DELIMITER $}：OTHER 占位，
+     * 并切换 {@link #stmtDelimiter}，使后续 {@link #parseAll} / 过程体尾部按新终止符切分。
      */
     private SqlStatement parseDelimiter() {
         // 调用方已确认当前为 IDENT DELIMITER
         next();
         SqlSimpleStatement stmt = new SqlSimpleStatement();
         stmt.setStatementType(SqlStatementType.OTHER);
-        StringBuilder text = new StringBuilder("DELIMITER");
-        // DELIMITER ;; / DELIMITER ; → 下一记号已是分号，text 仅 DELIMITER
-        if (!atStmtBreak()) {
-            // DELIMITER $ / DELIMITER // 等：吃到语句分隔前的定界符原文
-            String rest = consumeRawUntilSemi();
-            if (!rest.isEmpty()) {
-                text.append(' ').append(rest);
-            }
+        String delim = extractAndConsumeDelimiterArg();
+        if (delim == null || delim.isEmpty()) {
+            delim = ";";
         }
-        stmt.setText(text.toString());
+        this.stmtDelimiter = delim;
+        if (";".equals(delim)) {
+            stmt.setText("DELIMITER");
+        } else {
+            stmt.setText("DELIMITER " + delim);
+        }
         return stmt;
+    }
+
+    /**
+     * 读取 {@code DELIMITER} 后第一个非空白连续串作为新终止符，并推进词法游标越过该串。
+     */
+    private String extractAndConsumeDelimiterArg() {
+        if (is(SqlTokenType.EOF)) {
+            return ";";
+        }
+        int start = token.start();
+        String chunk = lexer.rawSlice(start, start + 64);
+        int len = 0;
+        while (len < chunk.length()) {
+            char c = chunk.charAt(len);
+            if (c == ' ' || c == '\t' || c == '\r' || c == '\n') {
+                break;
+            }
+            len++;
+        }
+        if (len == 0) {
+            return ";";
+        }
+        String delim = chunk.substring(0, len);
+        int end = start + len;
+        while (!is(SqlTokenType.EOF) && token.start() < end) {
+            next();
+        }
+        return delim;
     }
 
     private SqlStatement parseDeclare() {
@@ -855,7 +889,38 @@ public final class SqlParser {
     }
 
     private boolean isStmtSeparator() {
-        return is(SqlTokenType.SEMICOLON) || is(SqlTokenType.GO);
+        if (is(SqlTokenType.GO)) {
+            return true;
+        }
+        if (is(SqlTokenType.EOF)) {
+            return false;
+        }
+        String d = stmtDelimiter;
+        if (d == null || d.isEmpty() || ";".equals(d)) {
+            return is(SqlTokenType.SEMICOLON);
+        }
+        int start = token.start();
+        int end = start + d.length();
+        return d.equals(lexer.rawSlice(start, end));
+    }
+
+    /**
+     * 消费当前语句终止符（含自定义多字符定界符如 {@code ;;} / {@code //}）。
+     */
+    private void consumeStmtSeparator() {
+        if (is(SqlTokenType.GO)) {
+            next();
+            return;
+        }
+        String d = stmtDelimiter;
+        if (d == null || d.isEmpty() || ";".equals(d)) {
+            next();
+            return;
+        }
+        int end = token.start() + d.length();
+        while (!is(SqlTokenType.EOF) && token.start() < end) {
+            next();
+        }
     }
 
     boolean atStmtBreak() {

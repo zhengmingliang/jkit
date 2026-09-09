@@ -2110,13 +2110,14 @@ public class SqlParserTest {
     }
 
     /**
-     * MySQL 客户端 DELIMITER：OTHER 占位，批中不因 DELIMITER 行失败。
+     * MySQL 客户端 DELIMITER：OTHER 占位，并切换批处理终止符（;; ↔ ; / $）。
      */
     @Test
     public void delimiterClientCommand() {
         SqlSimpleStatement d1 = (SqlSimpleStatement) SQL.parse("DELIMITER ;;");
         assertEquals(SqlStatementType.OTHER, d1.type());
         assertTrue(d1.text().toUpperCase().startsWith("DELIMITER"));
+        assertTrue(d1.text().contains(";;"));
 
         SqlSimpleStatement d2 = (SqlSimpleStatement) SQL.parse("DELIMITER ;");
         assertEquals(SqlStatementType.OTHER, d2.type());
@@ -2127,18 +2128,38 @@ public class SqlParserTest {
         assertTrue(d3.text().toUpperCase().contains("DELIMITER"));
         assertTrue(d3.text().contains("$"));
 
+        // DELIMITER ;; 后单分号不再切分；须以 ;; 结束语句，再切回 ;
         java.util.List<SqlStatement> batch = SQL.parseAll(
-                "DELIMITER ;; SELECT 1; DELIMITER ;");
-        assertTrue(batch.size() >= 2);
+                "DELIMITER ;;\n"
+                        + "SELECT 1;;\n"
+                        + "DELIMITER ;\n"
+                        + "SELECT 2;");
+        assertEquals(4, batch.size());
         assertEquals(SqlStatementType.OTHER, batch.get(0).type());
-        assertTrue(((SqlSimpleStatement) batch.get(0)).text().toUpperCase().startsWith("DELIMITER"));
-        boolean sawSelect = false;
-        for (SqlStatement s : batch) {
-            if (s.type() == SqlStatementType.SELECT) {
-                sawSelect = true;
-            }
-        }
-        assertTrue(sawSelect);
+        assertTrue(((SqlSimpleStatement) batch.get(0)).text().contains(";;"));
+        assertEquals(SqlStatementType.SELECT, batch.get(1).type());
+        assertEquals(SqlStatementType.OTHER, batch.get(2).type());
+        assertEquals(SqlStatementType.SELECT, batch.get(3).type());
+
+        // 定界符前留空白，避免 1$ 被词法粘成 IDENT（$ 是 identPart）
+        java.util.List<SqlStatement> dollar = SQL.parseAll(
+                "DELIMITER $\n"
+                        + "SELECT 1 $\n"
+                        + "DELIMITER ;\n"
+                        + "SELECT 2;");
+        assertEquals(4, dollar.size());
+        assertEquals(SqlStatementType.SELECT, dollar.get(1).type());
+        assertEquals(SqlStatementType.SELECT, dollar.get(3).type());
+
+        // // 前须留空白，避免 1// 被当成除法
+        java.util.List<SqlStatement> slash = SQL.parseAll(
+                "DELIMITER //\n"
+                        + "SELECT 1 //\n"
+                        + "DELIMITER ;\n"
+                        + "SELECT 2;");
+        assertEquals(4, slash.size());
+        assertEquals(SqlStatementType.SELECT, slash.get(1).type());
+        assertEquals(SqlStatementType.SELECT, slash.get(3).type());
     }
 
     /**
@@ -2160,21 +2181,20 @@ public class SqlParserTest {
                         + "END\n"
                         + ";;\n"
                         + "DELIMITER ;");
-        assertTrue(batch.size() >= 3);
+        // DROP ; + DELIMITER ;; + CREATE…END;; + DELIMITER ;
+        assertEquals(4, batch.size());
         assertEquals(SqlStatementType.DROP, batch.get(0).type());
         assertEquals(SqlStatementType.OTHER, batch.get(1).type());
-        assertTrue(((SqlSimpleStatement) batch.get(1)).text().toUpperCase().startsWith("DELIMITER"));
-        boolean sawCreate = false;
-        for (SqlStatement s : batch) {
-            if (s.type() == SqlStatementType.CREATE) {
-                sawCreate = true;
-                com.alianga.jkit.sql.ast.SqlDdlStatement ddl =
-                        (com.alianga.jkit.sql.ast.SqlDdlStatement) s;
-                assertEquals("PROCEDURE", ddl.objectType());
-                assertEquals("proc_adder", ddl.names().get(0).simpleName());
-            }
-        }
-        assertTrue(sawCreate);
+        assertTrue(((SqlSimpleStatement) batch.get(1)).text().contains(";;"));
+        assertEquals(SqlStatementType.CREATE, batch.get(2).type());
+        com.alianga.jkit.sql.ast.SqlDdlStatement ddl =
+                (com.alianga.jkit.sql.ast.SqlDdlStatement) batch.get(2);
+        assertEquals("PROCEDURE", ddl.objectType());
+        assertEquals("proc_adder", ddl.names().get(0).simpleName());
+        assertNotNull(ddl.tail());
+        assertTrue(ddl.tail().toUpperCase().contains("BEGIN"));
+        assertEquals(SqlStatementType.OTHER, batch.get(3).type());
+        assertTrue(((SqlSimpleStatement) batch.get(3)).text().toUpperCase().startsWith("DELIMITER"));
     }
 
     @Test

@@ -490,8 +490,9 @@ final class SqlExprParser {
 
     private SqlExpr parseMul() {
         SqlExpr left = parseUnary();
-        while (p.is(SqlTokenType.STAR) || p.is(SqlTokenType.SLASH) || p.is(SqlTokenType.PERCENT)
-                || p.is(SqlTokenType.DIV) || p.is(SqlTokenType.MOD)) {
+        // 自定义 DELIMITER（如 //）与除法同形：语句终止处不再当二元运算符
+        while (!p.atStmtBreak() && (p.is(SqlTokenType.STAR) || p.is(SqlTokenType.SLASH)
+                || p.is(SqlTokenType.PERCENT) || p.is(SqlTokenType.DIV) || p.is(SqlTokenType.MOD))) {
             SqlBinaryOp op;
             if (p.is(SqlTokenType.STAR)) {
                 op = SqlBinaryOp.MUL;
