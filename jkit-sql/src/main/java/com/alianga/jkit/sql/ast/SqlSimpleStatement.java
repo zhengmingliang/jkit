@@ -6,7 +6,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * EXPLAIN / SET / USE / SHOW / CALL / TRUNCATE / GRANT / BEGIN / DECLARE /
+ * EXPLAIN / SET / USE / SHOW / CALL / TRUNCATE / GRANT / REVOKE / BEGIN / DECLARE /
  * ANALYZE 等相对扁平的语句；{@link SqlStatementType#OTHER} 用于过程块与维护语句。
  *
  * @author 郑明亮
@@ -155,7 +155,7 @@ public final class SqlSimpleStatement extends SqlStatement {
     }
 
     /**
-     * @return GRANT 权限列表原文，如 {@code SELECT, INSERT} / {@code ALL PRIVILEGES}
+     * @return GRANT/REVOKE 权限列表原文，如 {@code SELECT, INSERT} / {@code ALL PRIVILEGES}
      * @since 2.0.1
      */
     public String privileges() {

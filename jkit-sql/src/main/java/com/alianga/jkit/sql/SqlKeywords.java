@@ -232,6 +232,13 @@ final class SqlKeywords {
         put("PREPARE", SqlTokenType.PREPARE);
         put("EXECUTE", SqlTokenType.EXECUTE);
         put("DEALLOCATE", SqlTokenType.DEALLOCATE);
+        put("FLUSH", SqlTokenType.FLUSH);
+        put("COMMIT", SqlTokenType.COMMIT);
+        put("ROLLBACK", SqlTokenType.ROLLBACK);
+        put("SAVEPOINT", SqlTokenType.SAVEPOINT);
+        put("TRANSACTION", SqlTokenType.TRANSACTION);
+        put("OUTFILE", SqlTokenType.OUTFILE);
+        put("DUMPFILE", SqlTokenType.DUMPFILE);
         put("GO", SqlTokenType.GO);
     }
 

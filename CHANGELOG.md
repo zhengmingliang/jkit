@@ -49,7 +49,7 @@
 
 ### 变更
 
-- `docs/sql.md` / `docs/next-plan.md`：对齐语料成功率（379/100%、黄金集约 206）、JMH 说明；§6 去掉已完成的 P0.1/列定义回写/表名差分等过时项。
+- `docs/sql.md` / `docs/next-plan.md`：对齐语料成功率（379/100%、黄金集约 216）、JMH 说明；§6 去掉已完成的 P0.1/列定义回写/表名差分等过时项。
 - `jkit-sql`：P0.1 重构 — 拆分 `SqlParser` 为 `SqlSelectParser` / `SqlDmlParser` / `SqlDdlParser` / `SqlExprParser`（包内协作共享记号游标）；公开 API 与语法行为不变。
 - `jkit-sql`：**破坏性** — `SQL.andWhere` / `replaceTable` / `replaceColumn` 改为与 `addLimit`/`setPage` 一致的 clone-then-mutate（返回新 AST，不污染原树）；调用方须使用返回值。
 - `jkit-sql` P1.7 方言矩阵：`SqlParseOptions.pipesAsConcat`（MySQL `||` 改拼接）；PG `RETURNING` 多列列表（`SqlListExpr`，format 无外层括号）；Oracle `FETCH FIRST n ROWS ONLY` 保留 `SqlLimit.fetchStyle` 并按 FETCH 回写；验收已有 `ON CONFLICT ON CONSTRAINT`、`MINUS`、SQL Server `OUTPUT`/`APPLY`、达梦→ORACLE / GBase→MYSQL。未发明 Hive/ClickHouse/ODPS 方言。
@@ -67,6 +67,8 @@
 
 
 ### 新增
+
+- `jkit-sql`：补 `REVOKE`（镜像 GRANT：权限 + ON 对象 + FROM 用户）、`FLUSH PRIVILEGES|TABLES|LOGS`（OTHER）、`START TRANSACTION` / `BEGIN WORK` / 裸 `BEGIN;` / `COMMIT` / `ROLLBACK` / `SAVEPOINT`（OTHER，不破坏 `BEGIN…END` 过程块）、`SELECT … INTO` 表 / `@var` / `OUTFILE`（目标表计入 `tables` 为 INSERT）；`parseAll` 可批 `UPDATE …; FLUSH PRIVILEGES`。
 
 - `jkit-sql`：`SqlDialect.ORACLE` 表示 12c 以下分页（裸 SELECT 改写为 ROWNUM 包装，不写 OFFSET/FETCH）；新增 `ORACLE12`（12c+）可用 `OFFSET … FETCH`；`fromName` 支持 `oracle12`/`19c` 等。
 - `jkit-sql`：`SqlBuilder` 补 `rightJoin` / `fullJoin` / `crossJoin`、`union` / `unionAll`、`with` CTE、`distinct()`。

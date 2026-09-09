@@ -37,6 +37,14 @@ public final class SqlSelect extends SqlStatement {
     private final List<SqlWindowDefinition> windows = new ArrayList<SqlWindowDefinition>(2);
     private boolean valuesClause;
     private List<String> hints;
+    /** SELECT … INTO 目标表（备份风格 / 临时表） */
+    private SqlTable intoTable;
+    /** INTO @var [, @var2…] */
+    private final List<SqlExpr> intoVariables = new ArrayList<SqlExpr>(2);
+    /** INTO OUTFILE / DUMPFILE 路径原文（含引号） */
+    private String intoOutfile;
+    /** {@code OUTFILE} 或 {@code DUMPFILE}，可空 */
+    private String intoFileKind;
 
     /**
      * {@inheritDoc}
@@ -367,6 +375,62 @@ public final class SqlSelect extends SqlStatement {
     }
 
     /**
+     * @return {@code SELECT … INTO tbl} 目标表，可空
+     * @since 2.0.1
+     */
+    public SqlTable intoTable() {
+        return intoTable;
+    }
+
+    /**
+     * @param intoTable INTO 目标表
+     * @since 2.0.1
+     */
+    public void setIntoTable(SqlTable intoTable) {
+        this.intoTable = intoTable;
+    }
+
+    /**
+     * @return {@code INTO @var} 变量列表
+     * @since 2.0.1
+     */
+    public List<SqlExpr> intoVariables() {
+        return intoVariables;
+    }
+
+    /**
+     * @return {@code INTO OUTFILE/DUMPFILE} 路径原文，可空
+     * @since 2.0.1
+     */
+    public String intoOutfile() {
+        return intoOutfile;
+    }
+
+    /**
+     * @param intoOutfile 文件路径原文
+     * @since 2.0.1
+     */
+    public void setIntoOutfile(String intoOutfile) {
+        this.intoOutfile = intoOutfile;
+    }
+
+    /**
+     * @return {@code OUTFILE} 或 {@code DUMPFILE}
+     * @since 2.0.1
+     */
+    public String intoFileKind() {
+        return intoFileKind;
+    }
+
+    /**
+     * @param intoFileKind OUTFILE / DUMPFILE
+     * @since 2.0.1
+     */
+    public void setIntoFileKind(String intoFileKind) {
+        this.intoFileKind = intoFileKind;
+    }
+
+    /**
      * {@inheritDoc}
      */
     @Override
@@ -375,6 +439,7 @@ public final class SqlSelect extends SqlStatement {
         children(visitor, distinctOn);
         child(visitor, top);
         children(visitor, selectItems);
+        children(visitor, intoVariables);
         child(visitor, from);
         child(visitor, where);
         children(visitor, groupBy);

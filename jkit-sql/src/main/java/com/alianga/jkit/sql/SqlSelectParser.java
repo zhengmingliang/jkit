@@ -236,6 +236,7 @@ final class SqlSelectParser {
         do {
             select.addSelectItem(parseSelectItem());
         } while (p.match(SqlTokenType.COMMA));
+        parseSelectInto(select);
         if (p.match(SqlTokenType.FROM)) {
             select.setFrom(parseJoinedTable());
         }
@@ -306,6 +307,66 @@ final class SqlSelectParser {
         }
         parseSelectTail(select);
         return select;
+    }
+
+    /**
+     * MySQL {@code SELECT cols INTO dest FROM src} / {@code INTO @var} / {@code INTO OUTFILE}。
+     */
+    private void parseSelectInto(SqlSelect select) {
+        if (!p.match(SqlTokenType.INTO)) {
+            return;
+        }
+        if (p.is(SqlTokenType.OUTFILE) || p.is(SqlTokenType.DUMPFILE)) {
+            select.setIntoFileKind(p.token.text().toUpperCase());
+            p.next();
+            if (p.is(SqlTokenType.STRING)) {
+                select.setIntoOutfile(p.token.text());
+                p.next();
+            } else {
+                StringBuilder sb = new StringBuilder();
+                while (!p.atStmtBreak() && !p.is(SqlTokenType.FROM) && !p.is(SqlTokenType.WHERE)
+                        && !p.is(SqlTokenType.GROUP) && !p.is(SqlTokenType.ORDER)
+                        && !p.is(SqlTokenType.LIMIT) && !p.is(SqlTokenType.HAVING)
+                        && !p.is(SqlTokenType.UNION) && !p.is(SqlTokenType.INTERSECT)
+                        && !p.is(SqlTokenType.EXCEPT) && !p.is(SqlTokenType.MINUS)
+                        && !p.is(SqlTokenType.FOR) && !p.is(SqlTokenType.LOCK)
+                        && !p.is(SqlTokenType.START) && !p.is(SqlTokenType.CONNECT)
+                        && !p.is(SqlTokenType.WINDOW)) {
+                    if (sb.length() > 0) {
+                        sb.append(' ');
+                    }
+                    sb.append(p.token.text());
+                    p.next();
+                }
+                select.setIntoOutfile(sb.toString());
+            }
+            if (!p.is(SqlTokenType.FROM) && !p.atStmtBreak()) {
+                StringBuilder rest = new StringBuilder();
+                while (!p.atStmtBreak() && !p.is(SqlTokenType.FROM) && !p.is(SqlTokenType.UNION)
+                        && !p.is(SqlTokenType.INTERSECT) && !p.is(SqlTokenType.EXCEPT)
+                        && !p.is(SqlTokenType.MINUS)) {
+                    if (rest.length() > 0) {
+                        rest.append(' ');
+                    }
+                    rest.append(p.token.text());
+                    p.next();
+                }
+                if (rest.length() > 0) {
+                    String prev = select.intoOutfile() == null ? "" : select.intoOutfile();
+                    select.setIntoOutfile((prev + " " + rest.toString()).trim());
+                }
+            }
+            return;
+        }
+        if (p.is(SqlTokenType.VARIABLE)) {
+            do {
+                select.intoVariables().add(p.exprParser.parsePrimary());
+            } while (p.match(SqlTokenType.COMMA));
+            return;
+        }
+        p.match(SqlTokenType.TABLE);
+        SqlTable into = SqlTable.of(p.parseName());
+        select.setIntoTable(into);
     }
 
     private SqlSelectItem parseSelectItem() {

@@ -217,6 +217,7 @@ public final class SqlFormatter {
             }
             writeSelectItem(items.get(i));
         }
+        writeSelectInto(select);
         if (select.from() != null) {
             nl();
             kw("FROM");
@@ -868,7 +869,7 @@ public final class SqlFormatter {
             }
             return;
         }
-        if (stmt.type() == SqlStatementType.GRANT) {
+        if (stmt.type() == SqlStatementType.GRANT || stmt.type() == SqlStatementType.REVOKE) {
             if (stmt.privileges() != null && !stmt.privileges().isEmpty()) {
                 sp();
                 out.append(stmt.privileges());
@@ -1134,6 +1135,33 @@ public final class SqlFormatter {
                 sp();
             }
             writeOrderByItem(items.get(i));
+        }
+    }
+
+    private void writeSelectInto(SqlSelect select) {
+        if (select.intoTable() == null && select.intoVariables().isEmpty()
+                && select.intoOutfile() == null) {
+            return;
+        }
+        sp();
+        kw("INTO");
+        if (select.intoFileKind() != null) {
+            sp();
+            kw(select.intoFileKind());
+            if (select.intoOutfile() != null) {
+                sp();
+                out.append(select.intoOutfile());
+            }
+            return;
+        }
+        if (!select.intoVariables().isEmpty()) {
+            sp();
+            commaExprs(select.intoVariables());
+            return;
+        }
+        if (select.intoTable() != null) {
+            sp();
+            writeFrom(select.intoTable());
         }
     }
 

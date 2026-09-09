@@ -3,6 +3,7 @@ package com.alianga.jkit.sql;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -1819,4 +1820,142 @@ public class SqlParserTest {
         assertEquals("*.*", all.name().qualifiedName());
     }
 
+    /**
+     * REVOKE 镜像 GRANT：权限 + ON 对象 + FROM 用户。
+     */
+    @Test
+    public void revokePrivilegesAndObject() {
+        SqlSimpleStatement r = (SqlSimpleStatement) SQL.parse(
+                "REVOKE SELECT, INSERT ON db.t FROM 'u'@'%'");
+        assertEquals(com.alianga.jkit.sql.ast.SqlStatementType.REVOKE, r.type());
+        assertNotNull(r.privileges());
+        assertTrue(r.privileges(), r.privileges().toUpperCase().contains("SELECT"));
+        assertTrue(r.privileges(), r.privileges().toUpperCase().contains("INSERT"));
+        assertEquals("db.t", r.name().qualifiedName());
+        assertNotNull(r.text());
+        assertTrue(r.text(), r.text().toUpperCase().contains("FROM"));
+        String out = SQL.toSqlString(r);
+        assertTrue(out, out.toUpperCase().startsWith("REVOKE"));
+        assertTrue(out, out.contains("'u'@'%'"));
+        assertFalse(out, out.contains("'u' @"));
+        SqlSimpleStatement again = (SqlSimpleStatement) SQL.parse(out);
+        assertEquals(com.alianga.jkit.sql.ast.SqlStatementType.REVOKE, again.type());
+        assertEquals("db.t", again.name().qualifiedName());
+
+        SqlSimpleStatement all = (SqlSimpleStatement) SQL.parse(
+                "REVOKE ALL PRIVILEGES ON *.* FROM admin");
+        assertTrue(all.privileges().toUpperCase().contains("ALL"));
+        assertEquals("*.*", all.name().qualifiedName());
+        assertTrue(all.text().toUpperCase().contains("FROM"));
+    }
+
+    /**
+     * FLUSH PRIVILEGES / TABLES 等 → OTHER + 完整 text。
+     */
+    @Test
+    public void flushPrivilegesAndTables() {
+        SqlSimpleStatement flush = (SqlSimpleStatement) SQL.parse("FLUSH PRIVILEGES");
+        assertEquals(com.alianga.jkit.sql.ast.SqlStatementType.OTHER, flush.type());
+        assertTrue(flush.text(), flush.text().toUpperCase().startsWith("FLUSH"));
+        assertTrue(flush.text().toUpperCase().contains("PRIVILEGES"));
+        assertTrue(SQL.toSqlString(flush).toUpperCase().contains("FLUSH"));
+
+        SqlSimpleStatement tables = (SqlSimpleStatement) SQL.parse("FLUSH TABLES");
+        assertEquals(com.alianga.jkit.sql.ast.SqlStatementType.OTHER, tables.type());
+        assertTrue(tables.text().toUpperCase().contains("TABLES"));
+
+        SqlSimpleStatement logs = (SqlSimpleStatement) SQL.parse("FLUSH LOGS");
+        assertTrue(logs.text().toUpperCase().contains("LOGS"));
+    }
+
+    /**
+     * START TRANSACTION / COMMIT / ROLLBACK / SAVEPOINT；BEGIN…END 过程块不破坏。
+     */
+    @Test
+    public void transactionAndBeginBlock() {
+        SqlSimpleStatement start = (SqlSimpleStatement) SQL.parse("START TRANSACTION");
+        assertEquals(com.alianga.jkit.sql.ast.SqlStatementType.OTHER, start.type());
+        assertTrue(start.text().toUpperCase().contains("START"));
+        assertTrue(start.text().toUpperCase().contains("TRANSACTION"));
+
+        SqlSimpleStatement beginTx = (SqlSimpleStatement) SQL.parse("BEGIN WORK");
+        assertEquals(com.alianga.jkit.sql.ast.SqlStatementType.OTHER, beginTx.type());
+        assertTrue(beginTx.text().toUpperCase().startsWith("BEGIN"));
+
+        SqlSimpleStatement commit = (SqlSimpleStatement) SQL.parse("COMMIT");
+        assertTrue(commit.text().equalsIgnoreCase("COMMIT")
+                || commit.text().toUpperCase().startsWith("COMMIT"));
+
+        SqlSimpleStatement rollback = (SqlSimpleStatement) SQL.parse("ROLLBACK TO SAVEPOINT sp1");
+        assertTrue(rollback.text().toUpperCase().startsWith("ROLLBACK"));
+        assertTrue(rollback.text().toUpperCase().contains("SAVEPOINT"));
+
+        SqlSimpleStatement sp = (SqlSimpleStatement) SQL.parse("SAVEPOINT sp1");
+        assertEquals("sp1", sp.name().simpleName());
+        assertTrue(sp.text().toUpperCase().contains("SAVEPOINT"));
+
+        // 过程块仍可用
+        SqlSimpleStatement block = (SqlSimpleStatement) SQL.parse("BEGIN SELECT 1; END");
+        assertTrue(block.text(), block.text().toUpperCase().contains("SELECT"));
+        assertTrue(block.text().toUpperCase().contains("END"));
+
+        java.util.List<SqlStatement> batch = SQL.parseAll(
+                "UPDATE t SET a = 1; FLUSH PRIVILEGES");
+        assertEquals(2, batch.size());
+        assertEquals(com.alianga.jkit.sql.ast.SqlStatementType.UPDATE, batch.get(0).type());
+        assertEquals(com.alianga.jkit.sql.ast.SqlStatementType.OTHER, batch.get(1).type());
+        assertTrue(((SqlSimpleStatement) batch.get(1)).text().toUpperCase().contains("FLUSH"));
+
+        java.util.List<SqlStatement> txBatch = SQL.parseAll(
+                "START TRANSACTION; INSERT INTO t (id) VALUES (1); COMMIT");
+        assertEquals(3, txBatch.size());
+        assertEquals(com.alianga.jkit.sql.ast.SqlStatementType.OTHER, txBatch.get(0).type());
+        assertEquals(com.alianga.jkit.sql.ast.SqlStatementType.INSERT, txBatch.get(1).type());
+        assertEquals(com.alianga.jkit.sql.ast.SqlStatementType.OTHER, txBatch.get(2).type());
+    }
+
+    /**
+     * SELECT … INTO table FROM … / INTO @var / INTO OUTFILE。
+     */
+    @Test
+    public void selectIntoTableVarAndOutfile() {
+        SqlSelect intoTbl = (SqlSelect) SQL.parse("SELECT id, name INTO dest FROM src WHERE id > 0");
+        assertNotNull(intoTbl.intoTable());
+        assertEquals("dest", intoTbl.intoTable().name().qualifiedName());
+        assertEquals("src", intoTbl.from() instanceof com.alianga.jkit.sql.ast.SqlTable
+                ? ((com.alianga.jkit.sql.ast.SqlTable) intoTbl.from()).name().qualifiedName()
+                : null);
+        java.util.List<String> tables = SQL.tables(intoTbl);
+        assertTrue(tables.toString(), tables.contains("dest"));
+        assertTrue(tables.toString(), tables.contains("src"));
+        SqlSchemaStat stat = SQL.stat(intoTbl);
+        assertTrue(stat.getTables().get("dest").toString(),
+                stat.getTables().get("dest").contains(
+                        com.alianga.jkit.sql.ast.SqlStatementType.INSERT));
+        assertTrue(stat.getTables().get("src").toString(),
+                stat.getTables().get("src").contains(
+                        com.alianga.jkit.sql.ast.SqlStatementType.SELECT));
+        String formatted = SQL.toSqlString(intoTbl);
+        assertTrue(formatted.toUpperCase().contains("INTO"));
+        assertTrue(formatted.toUpperCase().contains("DEST"));
+        SqlSelect again = (SqlSelect) SQL.parse(formatted);
+        assertEquals("dest", again.intoTable().name().qualifiedName());
+
+        SqlSelect intoVar = (SqlSelect) SQL.parse("SELECT id INTO @id FROM t LIMIT 1");
+        assertNull(intoVar.intoTable());
+        assertEquals(1, intoVar.intoVariables().size());
+        String varOut = SQL.toSqlString(intoVar);
+        assertTrue(varOut, varOut.contains("@id") || varOut.toUpperCase().contains("INTO"));
+
+        SqlSelect outfile = (SqlSelect) SQL.parse(
+                "SELECT a, b INTO OUTFILE '/tmp/a.csv' FROM t");
+        assertEquals("OUTFILE", outfile.intoFileKind());
+        assertNotNull(outfile.intoOutfile());
+        assertTrue(outfile.intoOutfile().contains("/tmp/a.csv")
+                || outfile.intoOutfile().contains("tmp"));
+        String of = SQL.toSqlString(outfile);
+        assertTrue(of.toUpperCase().contains("OUTFILE"));
+    }
+
 }
+

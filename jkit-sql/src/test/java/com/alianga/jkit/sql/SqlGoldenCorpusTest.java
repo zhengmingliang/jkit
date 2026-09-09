@@ -50,6 +50,16 @@ public class SqlGoldenCorpusTest {
                 {"mysql", "ALTER TABLE t CHANGE COLUMN old_c new_c INT NOT NULL"},
                 {"mysql", "ALTER TABLE child ADD CONSTRAINT fk_p FOREIGN KEY (pid) REFERENCES parent (id)"},
                 {"mysql", "GRANT SELECT, INSERT ON db.t TO u"},
+                {"mysql", "REVOKE SELECT, INSERT ON db.t FROM u"},
+                {"mysql", "REVOKE ALL PRIVILEGES ON *.* FROM admin"},
+                {"mysql", "FLUSH PRIVILEGES"},
+                {"mysql", "FLUSH TABLES"},
+                {"mysql", "START TRANSACTION"},
+                {"mysql", "COMMIT"},
+                {"mysql", "ROLLBACK"},
+                {"mysql", "SAVEPOINT sp1"},
+                {"mysql", "SELECT id, name INTO dest FROM src"},
+                {"mysql", "SELECT id INTO @id FROM t"},
 
                 {"mysql", "SELECT a FROM emp PARTITION (p2020) e WHERE e.id = 1"},
                 

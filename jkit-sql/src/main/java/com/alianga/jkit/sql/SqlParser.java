@@ -186,6 +186,14 @@ public final class SqlParser {
                 return ddlParser.parseGrant();
             case BEGIN:
                 return parseBeginBlock();
+            case START:
+                return parseStartTransaction();
+            case COMMIT:
+            case ROLLBACK:
+            case SAVEPOINT:
+                return parseTxControl();
+            case FLUSH:
+                return parseFlush();
             case DECLARE:
                 return parseDeclare();
             case ANALYZE:
@@ -358,8 +366,85 @@ public final class SqlParser {
         expect(SqlTokenType.BEGIN);
         SqlSimpleStatement stmt = new SqlSimpleStatement();
         stmt.setStatementType(SqlStatementType.OTHER);
+        // BEGIN WORK / BEGIN TRANSACTION / 裸 BEGIN; → 事务，不吞后续批语句
+        if (is(SqlTokenType.TRANSACTION) || isIdent("WORK")) {
+            StringBuilder text = new StringBuilder("BEGIN");
+            text.append(' ').append(token.text().toUpperCase());
+            next();
+            if (!atStmtBreak()) {
+                String rest = consumeRawUntilSemi();
+                if (!rest.isEmpty()) {
+                    text.append(' ').append(rest);
+                }
+            }
+            stmt.setText(text.toString());
+            return stmt;
+        }
+        if (atStmtBreak()) {
+            stmt.setText("BEGIN");
+            return stmt;
+        }
         String body = trailingRawAllowingBeginEnd(1);
         stmt.setText(body.isEmpty() ? "BEGIN" : "BEGIN " + body);
+        return stmt;
+    }
+
+    private SqlStatement parseStartTransaction() {
+        expect(SqlTokenType.START);
+        SqlSimpleStatement stmt = new SqlSimpleStatement();
+        stmt.setStatementType(SqlStatementType.OTHER);
+        StringBuilder text = new StringBuilder("START");
+        if (is(SqlTokenType.TRANSACTION) || isIdent("TRANSACTION")) {
+            text.append(' ').append(token.text().toUpperCase());
+            next();
+        } else if (is(SqlTokenType.WITH)) {
+            // 不应把 SELECT 的 START WITH 当语句；此处仅顶层 START
+            text.append(' ').append(consumeRawUntilSemi());
+            stmt.setText(text.toString().trim());
+            return stmt;
+        }
+        if (!atStmtBreak()) {
+            String rest = consumeRawUntilSemi();
+            if (!rest.isEmpty()) {
+                text.append(' ').append(rest);
+            }
+        }
+        stmt.setText(text.toString());
+        return stmt;
+    }
+
+    private SqlStatement parseTxControl() {
+        String kind = token.text().toUpperCase();
+        next();
+        SqlSimpleStatement stmt = new SqlSimpleStatement();
+        stmt.setStatementType(SqlStatementType.OTHER);
+        StringBuilder text = new StringBuilder(kind);
+        if ("SAVEPOINT".equals(kind) && identLike()) {
+            stmt.setName(parseName());
+            text.append(' ').append(stmt.name().qualifiedName());
+        }
+        if (!atStmtBreak()) {
+            String rest = consumeRawUntilSemi();
+            if (!rest.isEmpty()) {
+                text.append(' ').append(rest);
+            }
+        }
+        stmt.setText(text.toString());
+        return stmt;
+    }
+
+    private SqlStatement parseFlush() {
+        expect(SqlTokenType.FLUSH);
+        SqlSimpleStatement stmt = new SqlSimpleStatement();
+        stmt.setStatementType(SqlStatementType.OTHER);
+        StringBuilder text = new StringBuilder("FLUSH");
+        if (!atStmtBreak()) {
+            String rest = consumeRawUntilSemi();
+            if (!rest.isEmpty()) {
+                text.append(' ').append(rest);
+            }
+        }
+        stmt.setText(text.toString());
         return stmt;
     }
 

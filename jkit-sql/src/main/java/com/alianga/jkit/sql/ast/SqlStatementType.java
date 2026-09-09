@@ -23,5 +23,6 @@ public enum SqlStatementType {
     SHOW,
     CALL,
     GRANT,
+    REVOKE,
     OTHER
 }

@@ -282,6 +282,13 @@ public enum SqlTokenType {
     PREPARE,
     EXECUTE,
     DEALLOCATE,
+    FLUSH,
+    COMMIT,
+    ROLLBACK,
+    SAVEPOINT,
+    TRANSACTION,
+    OUTFILE,
+    DUMPFILE,
     GO;
 
     /**

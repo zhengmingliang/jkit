@@ -7,7 +7,7 @@ import com.alianga.jkit.sql.ast.SqlStatement;
 import com.alianga.jkit.sql.ast.SqlStatementType;
 
 /**
- * CREATE / DROP / ALTER / TRUNCATE / GRANT / COMMENT 解析协作类，共享 {@link SqlParser} 记号游标。
+ * CREATE / DROP / ALTER / TRUNCATE / GRANT / REVOKE / COMMENT 解析协作类，共享 {@link SqlParser} 记号游标。
  *
  * @author 郑明亮
  * @since 2.0.1
@@ -444,13 +444,21 @@ final class SqlDdlParser {
         return ddl;
     }
 
+    /**
+     * GRANT / REVOKE：权限列表 + ON 对象 + TO/FROM 收件人（收件人进 text，{@code user@host} 紧凑）。
+     */
     SqlStatement parseGrant() {
-        p.expect(SqlTokenType.GRANT);
+        boolean revoke = p.is(SqlTokenType.REVOKE);
+        if (revoke) {
+            p.expect(SqlTokenType.REVOKE);
+        } else {
+            p.expect(SqlTokenType.GRANT);
+        }
         SqlSimpleStatement stmt = new SqlSimpleStatement();
-        stmt.setStatementType(SqlStatementType.GRANT);
+        stmt.setStatementType(revoke ? SqlStatementType.REVOKE : SqlStatementType.GRANT);
         StringBuilder priv = new StringBuilder();
-        while (!p.is(SqlTokenType.ON) && !p.is(SqlTokenType.TO) && !p.is(SqlTokenType.EOF)
-                && !p.is(SqlTokenType.SEMICOLON) && !p.is(SqlTokenType.GO)) {
+        while (!p.is(SqlTokenType.ON) && !p.is(SqlTokenType.TO) && !p.is(SqlTokenType.FROM)
+                && !p.is(SqlTokenType.EOF) && !p.is(SqlTokenType.SEMICOLON) && !p.is(SqlTokenType.GO)) {
             if (priv.length() > 0) {
                 priv.append(' ');
             }

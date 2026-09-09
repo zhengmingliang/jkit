@@ -138,6 +138,9 @@ public final class SqlSchemaStat {
             if (node instanceof SqlSelect) {
                 accessStack.push(SqlStatementType.SELECT);
                 SqlSelect select = (SqlSelect) node;
+                if (select.intoTable() != null && select.intoTable().name() != null) {
+                    addTable(select.intoTable().name(), SqlStatementType.INSERT);
+                }
                 addCondition(select.where());
                 addCondition(select.having());
                 addExprList(groupByColumns, select.groupBy());
