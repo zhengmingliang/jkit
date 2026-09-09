@@ -43,6 +43,12 @@ List<SqlStatement> batch = SQL.parseAll("SELECT 1; DELETE FROM t WHERE id=1");
 
 // 容错多语句（审计）：失败条目为 SqlSimpleStatement，parseError() 有值，继续下一条
 List<SqlStatement> audit = SQL.parseAll(sql, SqlDialect.MYSQL, true);
+
+// 裸表达式（须消费完整输入；尾部垃圾抛 SqlParseException）
+SqlExpr pred = SQL.parseExpr("tenant_id = ?");
+SqlExpr fn = SQL.parseExpr("REPLACE(email, '@', '^-^')");
+SqlExpr withOpt = SQL.parseExpr("age > @age@", SqlDialect.MYSQL,
+        SqlParseOptions.defaults().placeholders(SqlPlaceholders.create().atWrapped()));
 ```
 
 默认方言是 **MySQL**（GBase / MariaDB / TiDB 走同一套）。其它方言：
@@ -123,7 +129,7 @@ SQL.getOffset(stmt);
 SqlStatement page = SQL.setPage(stmt, 2, 20, SqlDialect.MYSQL); // clone；offset=20
 SQL.setLimit(stmt, 50, SqlDialect.POSTGRES);
 SQL.setOffset(stmt, 10, SqlDialect.POSTGRES);
-SqlStatement w = SQL.andWhere(stmt, "tenant_id = ?"); // clone 后再 AND WHERE
+SqlStatement w = SQL.andWhere(stmt, "tenant_id = ?"); // 内部 parseExpr + clone 后再 AND WHERE
 SqlStatement t2 = SQL.replaceTable(w, "users", "users_archive"); // clone
 SqlStatement c2 = SQL.replaceColumn(t2, "name", "user_name");   // clone；跳过表名/表别名
 SqlStatement copy = SQL.clone(stmt);

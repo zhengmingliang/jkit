@@ -1,5 +1,6 @@
 package com.alianga.jkit.sql;
 
+import com.alianga.jkit.sql.ast.SqlExpr;
 import com.alianga.jkit.sql.ast.SqlIdentifier;
 import com.alianga.jkit.sql.ast.SqlSimpleStatement;
 import com.alianga.jkit.sql.ast.SqlStatement;
@@ -139,6 +140,23 @@ public final class SqlParser {
         while (!is(SqlTokenType.EOF) && !isStmtSeparator()) {
             next();
         }
+    }
+
+    /**
+     * 解析一条表达式，要求消费完整输入（词法层已跳过尾部空白/注释；多余记号抛错）。
+     *
+     * @return 表达式
+     * @since 2.0.1
+     */
+    public SqlExpr parseExpression() {
+        if (is(SqlTokenType.EOF)) {
+            throw error("empty expression");
+        }
+        SqlExpr expr = exprParser.parseExpr();
+        if (!is(SqlTokenType.EOF)) {
+            throw error("unexpected token after expression: " + token.type());
+        }
+        return expr;
     }
 
     /**

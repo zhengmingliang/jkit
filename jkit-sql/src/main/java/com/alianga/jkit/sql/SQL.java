@@ -3,7 +3,6 @@ package com.alianga.jkit.sql;
 import com.alianga.jkit.sql.ast.SqlExpr;
 import com.alianga.jkit.sql.ast.SqlLiteral;
 import com.alianga.jkit.sql.ast.SqlNode;
-import com.alianga.jkit.sql.ast.SqlSelect;
 import com.alianga.jkit.sql.ast.SqlSimpleStatement;
 import com.alianga.jkit.sql.ast.SqlStatement;
 import com.alianga.jkit.sql.ast.SqlStatementType;
@@ -208,6 +207,49 @@ public final class SQL {
         SqlParser parser = PARSER.get();
         parser.reset(sql, dialect, options);
         return parser.parseAll(tolerant);
+    }
+
+    /**
+     * 解析一条表达式（方言默认 MySQL）。
+     *
+     * <p>须消费完整输入；尾部多余记号抛 {@link SqlParseException}（空白/注释由词法跳过）。</p>
+     *
+     * @param expr 表达式 SQL，如 {@code a = 1 AND b > ?}、{@code REPLACE(email, '@', '^-^')}
+     * @return 表达式 AST
+     * @since 2.0.1
+     */
+    public static SqlExpr parseExpr(String expr) {
+        return parseExpr(expr, SqlDialect.MYSQL);
+    }
+
+    /**
+     * 解析一条表达式。
+     *
+     * @param expr 表达式 SQL
+     * @param dialect 方言
+     * @return 表达式 AST
+     * @since 2.0.1
+     */
+    public static SqlExpr parseExpr(String expr, SqlDialect dialect) {
+        return parseExpr(expr, dialect, SqlParseOptions.defaults());
+    }
+
+    /**
+     * 解析一条表达式（带选项；复用与 {@link #parse} 相同的词法/占位符配置）。
+     *
+     * @param expr 表达式 SQL
+     * @param dialect 方言
+     * @param options 解析选项，null 视为默认
+     * @return 表达式 AST
+     * @since 2.0.1
+     */
+    public static SqlExpr parseExpr(String expr, SqlDialect dialect, SqlParseOptions options) {
+        if (expr == null || expr.trim().isEmpty()) {
+            throw new SqlParseException("empty expression", 1, 1, "");
+        }
+        SqlParser parser = PARSER.get();
+        parser.reset(expr, dialect, options);
+        return parser.parseExpression();
     }
 
     /**
@@ -469,9 +511,9 @@ public final class SQL {
         if (predicateSql == null || predicateSql.trim().isEmpty()) {
             return statement;
         }
-        SqlSelect tmp = (SqlSelect) parse("SELECT 1 WHERE " + predicateSql);
+        SqlExpr predicate = parseExpr(predicateSql);
         SqlStatement copy = clone(statement);
-        return SqlRewriter.andWhere(copy, tmp.where());
+        return SqlRewriter.andWhere(copy, predicate);
     }
 
     /**

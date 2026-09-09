@@ -9,8 +9,10 @@ import static org.junit.Assert.fail;
 
 import com.alianga.jkit.sql.ast.SqlBinaryExpr;
 import com.alianga.jkit.sql.ast.SqlBinaryOp;
+import com.alianga.jkit.sql.ast.SqlCaseExpr;
 import com.alianga.jkit.sql.ast.SqlDdlStatement;
 import com.alianga.jkit.sql.ast.SqlDelete;
+import com.alianga.jkit.sql.ast.SqlExpr;
 import com.alianga.jkit.sql.ast.SqlFunctionExpr;
 import com.alianga.jkit.sql.ast.SqlFunctionTable;
 import com.alianga.jkit.sql.ast.SqlInExpr;
@@ -265,6 +267,88 @@ public class SqlParserTest {
         String sql = SQL.toSqlString(stmt);
         assertTrue(sql, sql.contains("COUNT"));
         assertTrue(sql, sql.contains("CASE"));
+    }
+
+    /**
+     * {@link SQL#parseExpr}：裸表达式入口（字面量/列/运算/函数/CASE/绑定；拒残缺与尾部垃圾）。
+     */
+    @Test
+    public void parseBareExpr() {
+        assertEquals("1", SQL.parseExpr("1").toString().replace(" ", ""));
+        assertTrue(SQL.parseExpr("42").toString().contains("42"));
+        assertTrue(SQL.parseExpr("'hello'").toString().contains("hello"));
+
+        SqlExpr col = SQL.parseExpr("users.id");
+        assertTrue(col instanceof SqlIdentifier);
+        assertEquals("users.id", ((SqlIdentifier) col).qualifiedName());
+
+        SqlExpr bin = SQL.parseExpr("a + b * 2");
+        assertTrue(bin instanceof SqlBinaryExpr);
+        assertTrue(SQL.parseExpr("x > 0 AND y IS NULL").toString().toUpperCase().contains("AND"));
+
+        SqlExpr fn = SQL.parseExpr("REPLACE(email, '@', '^-^')");
+        assertTrue(fn instanceof SqlFunctionExpr);
+        SqlFunctionExpr replace = (SqlFunctionExpr) fn;
+        assertEquals("REPLACE", replace.name().simpleName().toUpperCase());
+        assertEquals(3, replace.arguments().size());
+        String fnSql = fn.toString();
+        assertTrue(fnSql, fnSql.contains("REPLACE"));
+        assertTrue(fnSql, fnSql.contains("email"));
+
+        SqlExpr lookbehind = SQL.parseExpr("REPLACE(email, '(?<=.).*(?=com)', '*')");
+        assertTrue(lookbehind instanceof SqlFunctionExpr);
+        assertEquals(3, ((SqlFunctionExpr) lookbehind).arguments().size());
+        String lb = lookbehind.toString();
+        assertTrue(lb, lb.contains("REPLACE"));
+        assertTrue(lb, lb.contains("email"));
+
+        SqlExpr cse = SQL.parseExpr("CASE WHEN x > 0 THEN 'a' ELSE 'b' END");
+        assertTrue(cse instanceof SqlCaseExpr);
+
+        SqlExpr named = SQL.parseExpr("name = :name");
+        assertTrue(named.toString().contains(":name") || named.toString().contains("name"));
+        SqlExpr qmark = SQL.parseExpr("id = ?");
+        assertTrue(qmark.toString().contains("?"));
+
+        SqlExpr withDialect = SQL.parseExpr("a || b", SqlDialect.POSTGRES);
+        assertNotNull(withDialect);
+        SqlParseOptions opt = SqlParseOptions.defaults()
+                .placeholders(SqlPlaceholders.create().atWrapped());
+        SqlExpr withOpt = SQL.parseExpr("age > @age@", SqlDialect.MYSQL, opt);
+        assertNotNull(withOpt);
+        assertTrue(withOpt.toString().contains("age") || withOpt.toString().contains("@age@"));
+
+        try {
+            SQL.parseExpr("a +");
+            fail("expected incomplete expr");
+        } catch (SqlParseException expected) {
+            assertTrue(expected.getMessage(), expected.line() >= 1);
+        }
+        try {
+            SQL.parseExpr("a + b FROM t");
+            fail("expected trailing garbage");
+        } catch (SqlParseException expected) {
+            assertTrue(expected.getMessage(), expected.getMessage().contains("unexpected")
+                    || expected.getMessage().contains("FROM"));
+        }
+        try {
+            SQL.parseExpr("1; SELECT 2");
+            fail("expected trailing junk after expr");
+        } catch (SqlParseException expected) {
+            // ok
+        }
+        try {
+            SQL.parseExpr("   ");
+            fail("expected empty");
+        } catch (SqlParseException expected) {
+            assertTrue(expected.getMessage(), expected.getMessage().contains("empty"));
+        }
+
+        // andWhere 经 parseExpr 路径行为不变
+        SqlStatement stmt = SQL.parse("SELECT * FROM t WHERE a = 1");
+        SqlStatement with = SQL.andWhere(stmt, "tenant_id = ?");
+        assertTrue(SQL.toSqlString(with).contains("tenant_id"));
+        assertFalse(SQL.toSqlString(stmt).contains("tenant_id"));
     }
 
     /**

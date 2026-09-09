@@ -640,8 +640,7 @@ public final class SqlBuilder {
         if (predicateSql == null || predicateSql.trim().isEmpty()) {
             return null;
         }
-        SqlSelect tmp = (SqlSelect) SQL.parse("SELECT 1 WHERE " + predicateSql);
-        return tmp.where();
+        return SQL.parseExpr(predicateSql);
     }
 
     /**
