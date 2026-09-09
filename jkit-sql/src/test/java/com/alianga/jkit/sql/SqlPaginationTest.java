@@ -124,7 +124,6 @@ public class SqlPaginationTest {
         SqlStatement del = SQL.parse("DELETE FROM t WHERE id = 1");
         assertNull(SQL.getLimit(del));
         assertNull(SQL.getOffset(del));
-        assertTrue(SQL.setPage(del, 1, 10) instanceof com.alianga.jkit.sql.ast.SqlDelete
-                || SQL.setPage(del, 1, 10) != null);
+        assertNotNull(SQL.setPage(del, 1, 10));
     }
 }

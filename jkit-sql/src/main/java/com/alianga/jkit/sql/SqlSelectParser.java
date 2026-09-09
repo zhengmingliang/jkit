@@ -192,6 +192,16 @@ final class SqlSelectParser {
             SqlSelect inner = parseSelect();
             p.expect(SqlTokenType.RPAREN);
             parseSelectTail(inner);
+            // (SELECT ...) UNION (SELECT ...) ORDER BY / LIMIT 挂在集合运算链末端
+            SqlSelect owner = inner;
+            while (owner.union() != null) {
+                owner = owner.union();
+            }
+            if (p.match(SqlTokenType.ORDER)) {
+                p.expect(SqlTokenType.BY);
+                parseOrderBy(owner.orderBy());
+            }
+            parseLimitFetch(owner);
             return inner;
         }
         if (p.is(SqlTokenType.VALUES)) {

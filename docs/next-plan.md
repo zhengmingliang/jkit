@@ -206,7 +206,7 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 
 - ✅ AST `toString()` → 紧凑 SQL（`SqlNode` + formatter 覆盖 SelectItem/Limit/Join 等）
 - ✅ `SqlDialect` 别名 + `supportsLimitOffset/Top/FetchFirst/Rownum` / `pipesAreConcat` / `quoteIdent`
-- ✅ 分页 get/set/setPage（方言感知）
+- ✅ 分页 get/set/setPage（方言感知；含 ROWNUM/row_number 识别与边界改写、UNION 末端）
 - ✅ `SqlBuilder` + `SQL.and`/`or`/`concat`
 
 ### P3 — 工程与性能（P3.1 / P3.2 已完成；lexer intern 延期）

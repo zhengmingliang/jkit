@@ -40,6 +40,7 @@
 
 ### 修复
 
+- `jkit-sql`：`getLimit`/`getOffset`/`setPage` 识别并改写 Oracle ROWNUM 双层包装与 SQL Server `row_number` 边界（对齐 common-model `PagerUtils`）；UNION 分页作用于集合运算链末端；括号 UNION 后置 `ORDER BY` 可解析。
 - `jkit-sql`：`CREATE TABLE` format 往返保留列类型/约束原文（`columnDefinitions`，不再只回写列名）；`GRANT` 收件人 `'u'@'%'` / `u@localhost` 不再被 raw 拼接拆成 `'u' @ '%'`。
 - `jkit-sql`：仅注释/空白输入不再抛 `empty SQL`，归为 `SqlSimpleStatement.OTHER`（空 text）。
 - `jkit-sql`：PostgreSQL `@>` / `<@` 不再被词法误判为 `VARIABLE`；`~` / `~*` / `!~` / `!~*` 按方言解析为正则比较（MySQL 仍保留一元 `~`）。
