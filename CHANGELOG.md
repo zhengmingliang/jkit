@@ -43,7 +43,8 @@
 - `jkit-sql`：修复词法 `peek()` 污染当前记号（`next()` 消费预读后应拷贝到 `tokA`），使 `date()`/`datetime()`/`DATE()`/`MIN(Date)`/`IIF(timestamp=…)` 等可解析；允许词形式 `PERCENT` 作标识符（与 `%` 运算符共用 token）；支持 SQLite `trim(X, Y)` 逗号多参。
 
 - `jkit-sql`：算术仅认符号 `-`/`%`（`isSymbolOp`），词形式 `MINUS` 可作集合运算；Oracle 聚合 `KEEP (DENSE_RANK …)` 可解析。- `jkit-sql`：限定名中点号后的数字开头标识符可解析（如 `t.1_id` / `test.52_user` / `a.32强国`）；`.5` / `.52e1` 等前导小数仍为 NUMBER，裸 `1_id` 行为不变。
-- `jkit-sql`：`SqlBuilder.limit/offset` 按**有效方言**生成分页——`toSql(dialect)` 的参数覆盖 builder 方言；经典 `ORACLE` 走 ROWNUM 包装（同 `SQL.setPage`），`ORACLE12`/`SQLSERVER` 走 `OFFSET/FETCH`，MySQL 仍 `LIMIT`；修复原先一律输出 `LIMIT offset,count` 的问题。
+
+- `jkit-sql`：SELECT 列表别名支持点号限定名（`AS a.b`，含无 AS 隐式形式）。- `jkit-sql`：`SqlBuilder.limit/offset` 按**有效方言**生成分页——`toSql(dialect)` 的参数覆盖 builder 方言；经典 `ORACLE` 走 ROWNUM 包装（同 `SQL.setPage`），`ORACLE12`/`SQLSERVER` 走 `OFFSET/FETCH`，MySQL 仍 `LIMIT`；修复原先一律输出 `LIMIT offset,count` 的问题。
 - `jkit-sql`：`getLimit`/`getOffset`/`setPage` 识别并改写 Oracle ROWNUM 双层包装与 SQL Server `row_number` 边界（对齐 common-model `PagerUtils`）；UNION 分页作用于集合运算链末端；括号 UNION 后置 `ORDER BY` 可解析。
 - `jkit-sql`：`CREATE TABLE` format 往返保留列类型/约束原文（`columnDefinitions`，不再只回写列名）；`GRANT` 收件人 `'u'@'%'` / `u@localhost` 不再被 raw 拼接拆成 `'u' @ '%'`。
 - `jkit-sql`：仅注释/空白输入不再抛 `empty SQL`，归为 `SqlSimpleStatement.OTHER`（空 text）。

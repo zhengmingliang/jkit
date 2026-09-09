@@ -2375,6 +2375,19 @@ public class SqlParserTest {
                 SQL.parse("SELECT 1 - 2 FROM t").type());
     }
 
+
+    /**
+     * SELECT 列表别名允许点号限定名（AS a.b / 隐式 a.b）。
+     */
+    @Test
+    public void dottedSelectAlias() {
+        SqlSelect s = (SqlSelect) SQL.parse("SELECT T2.NAME AS MUSICAL.NAME FROM MUSICAL.ACTOR T2");
+        assertEquals(SqlStatementType.SELECT, s.type());
+        assertEquals("MUSICAL.NAME", s.selectItems().get(0).alias());
+        assertEquals(SqlStatementType.SELECT,
+                SQL.parse("SELECT a AS b.c FROM t").type());
+    }
+
     @Test
     public void setPassword() {
         SqlSimpleStatement forUser = (SqlSimpleStatement) SQL.parse(

@@ -782,6 +782,10 @@ public final class SqlParser {
             if (is(SqlTokenType.STRING)) {
                 return unquote(consumeStringRaw());
             }
+            // 允许 AS schema.name 这类点号别名（Spider 语料常见）
+            if (identLike() || (token.type() != null && token.type().keyword())) {
+                return parseName().qualifiedName();
+            }
             return unquote(consumeIdentRaw());
         }
         if (is(SqlTokenType.STRING)) {
@@ -792,6 +796,10 @@ public final class SqlParser {
                 && !isIdent("TABLESAMPLE") && !isIdent("SAMPLE")
                 && !is(SqlTokenType.FORCE) && !is(SqlTokenType.USE)
                 && !is(SqlTokenType.IGNORE) && !is(SqlTokenType.PARTITION)) {
+            // 无 AS 时也允许多段限定别名
+            if (lexer.peek().type() == SqlTokenType.DOT) {
+                return parseName().qualifiedName();
+            }
             return unquote(consumeIdentRaw());
         }
         return null;
