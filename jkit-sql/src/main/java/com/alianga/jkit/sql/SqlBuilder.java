@@ -53,6 +53,7 @@ public final class SqlBuilder {
 
     private final Kind kind;
     private SqlDialect dialect = SqlDialect.MYSQL;
+    private boolean quoteIdentifiers;
 
     private final List<SqlSelectItem> selectItems = new ArrayList<SqlSelectItem>(4);
     private SqlTable table;
@@ -155,6 +156,27 @@ public final class SqlBuilder {
     public SqlBuilder dialect(SqlDialect dialect) {
         this.dialect = dialect == null ? SqlDialect.MYSQL : dialect;
         return this;
+    }
+
+    /**
+     * 是否在 {@link #toSql()} / {@link #toSql(SqlDialect)} 时强制用方言引号包裹标识符。
+     * 默认 false（与旧行为一致）；可开可关。
+     *
+     * @param quoteIdentifiers true 强制加引号
+     * @return this
+     * @since 2.0.1
+     */
+    public SqlBuilder quoteIdentifiers(boolean quoteIdentifiers) {
+        this.quoteIdentifiers = quoteIdentifiers;
+        return this;
+    }
+
+    /**
+     * @return 当前是否强制标识符引号
+     * @since 2.0.1
+     */
+    public boolean quoteIdentifiers() {
+        return quoteIdentifiers;
     }
 
     /**
@@ -598,19 +620,23 @@ public final class SqlBuilder {
      * @return SQL 文本
      */
     public String toSql() {
-        return SQL.toSqlString(build(this.dialect), this.dialect);
+        return toSql(this.dialect);
     }
 
     /**
      * 按指定方言生成紧凑 SQL。参数方言覆盖 builder 方言，并用于分页改写
      *（如 Oracle ROWNUM、Oracle12/SQL Server OFFSET FETCH）。
+     * 是否强制标识符引号见 {@link #quoteIdentifiers(boolean)}。
      *
      * @param dialect 方言；null 时回落 builder 方言
      * @return 紧凑 SQL
      */
     public String toSql(SqlDialect dialect) {
         SqlDialect d = dialect == null ? this.dialect : dialect;
-        return SQL.toSqlString(build(d), d);
+        SqlFormatOptions opts = quoteIdentifiers
+                ? SqlFormatOptions.defaults().quoteIdentifiers(true)
+                : null;
+        return SQL.toSqlString(build(d), d, opts);
     }
 
     /**

@@ -292,7 +292,35 @@ public final class SQL {
      * @return SQL 文本
      */
     public static String format(SqlStatement statement, SqlDialect dialect, boolean pretty) {
-        return new SqlFormatter(pretty, dialect).format(statement);
+        return format(statement, dialect, pretty, null);
+    }
+
+    /**
+     * 格式化语句（可指定是否强制标识符引号等）。
+     *
+     * @param statement 语句
+     * @param dialect 方言
+     * @param pretty 是否换行缩进
+     * @param options 格式化选项；null 视为默认（不强制引号）
+     * @return SQL 文本
+     * @since 2.0.1
+     */
+    public static String format(SqlStatement statement, SqlDialect dialect, boolean pretty,
+                                SqlFormatOptions options) {
+        return new SqlFormatter(pretty, dialect, options).format(statement);
+    }
+
+    /**
+     * 格式化语句（pretty=true）。
+     *
+     * @param statement 语句
+     * @param dialect 方言
+     * @param options 格式化选项；null 视为默认
+     * @return SQL 文本
+     * @since 2.0.1
+     */
+    public static String format(SqlStatement statement, SqlDialect dialect, SqlFormatOptions options) {
+        return format(statement, dialect, true, options);
     }
 
     /**
@@ -314,6 +342,19 @@ public final class SQL {
      */
     public static String toSqlString(SqlStatement statement, SqlDialect dialect) {
         return format(statement, dialect, false);
+    }
+
+    /**
+     * 紧凑输出（可指定是否强制标识符引号等）。
+     *
+     * @param statement 语句
+     * @param dialect 方言
+     * @param options 格式化选项；null 视为默认（不强制引号）
+     * @return SQL 文本
+     * @since 2.0.1
+     */
+    public static String toSqlString(SqlStatement statement, SqlDialect dialect, SqlFormatOptions options) {
+        return format(statement, dialect, false, options);
     }
 
     /**

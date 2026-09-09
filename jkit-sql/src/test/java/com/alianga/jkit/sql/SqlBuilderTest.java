@@ -229,4 +229,89 @@ public class SqlBuilderTest {
         SQL.parse(sql, SqlDialect.ORACLE);
     }
 
+
+    @Test
+    public void quoteIdentifiersDefaultOff() {
+        String sql = SqlBuilder.select("id", "name").from("t_user", "t")
+                .where("id > 1").toSql(SqlDialect.MYSQL);
+        assertFalse(sql, sql.contains("`"));
+        assertTrue(sql, sql.contains("t_user"));
+        assertTrue(sql, sql.contains("id"));
+    }
+
+    @Test
+    public void quoteIdentifiersMysql() {
+        String sql = SqlBuilder.select("id", "name").from("t_user", "t")
+                .where("id > 1")
+                .quoteIdentifiers(true)
+                .toSql(SqlDialect.MYSQL);
+        assertTrue(sql, sql.contains("`id`"));
+        assertTrue(sql, sql.contains("`name`"));
+        assertTrue(sql, sql.contains("`t_user`"));
+        assertTrue(sql, sql.contains("`t`"));
+        assertFalse("string literals must stay unquoted-as-ident: " + sql, sql.contains("`%"));
+        SQL.parse(sql, SqlDialect.MYSQL);
+    }
+
+    @Test
+    public void quoteIdentifiersOracleAndSqlServer() {
+        String ora = SqlBuilder.select("id").from("t_user")
+                .quoteIdentifiers(true)
+                .toSql(SqlDialect.ORACLE12);
+        assertTrue(ora, ora.contains("\"id\""));
+        assertTrue(ora, ora.contains("\"t_user\""));
+
+        String ss = SqlBuilder.select("id").from("t_user")
+                .quoteIdentifiers(true)
+                .toSql(SqlDialect.SQLSERVER);
+        assertTrue(ss, ss.contains("[id]"));
+        assertTrue(ss, ss.contains("[t_user]"));
+    }
+
+    @Test
+    public void quoteIdentifiersToggleOnThenOff() {
+        SqlBuilder b = SqlBuilder.select("id", "name").from("t_user", "t").where("id > 1");
+        String on = b.quoteIdentifiers(true).toSql(SqlDialect.MYSQL);
+        assertTrue(on, on.contains("`id`") && on.contains("`t_user`"));
+        String off = b.quoteIdentifiers(false).toSql(SqlDialect.MYSQL);
+        assertFalse(off, off.contains("`"));
+        assertTrue(off, off.contains("t_user") && off.contains("id"));
+    }
+
+    @Test
+    public void quoteIdentifiersViaToSqlStringOptions() {
+        SqlStatement stmt = SqlBuilder.select("id").from("t_user").where("id > 1").build();
+        String bare = SQL.toSqlString(stmt, SqlDialect.MYSQL);
+        assertFalse(bare, bare.contains("`"));
+        SqlFormatOptions opts = SqlFormatOptions.defaults().quoteIdentifiers(true);
+        String quoted = SQL.toSqlString(stmt, SqlDialect.MYSQL, opts);
+        assertTrue(quoted, quoted.contains("`id`") && quoted.contains("`t_user`"));
+        String pretty = SQL.format(stmt, SqlDialect.POSTGRES, opts);
+        assertTrue(pretty, pretty.contains("\"id\"") && pretty.contains("\"t_user\""));
+    }
+
+    @Test
+    public void parsedQuotedIdentsRemainQuotedWhenOptionOff() {
+        SqlStatement stmt = SQL.parse("SELECT `id` FROM `t_user`", SqlDialect.MYSQL);
+        String sql = SQL.toSqlString(stmt, SqlDialect.MYSQL);
+        assertTrue(sql, sql.contains("`id`"));
+        assertTrue(sql, sql.contains("`t_user`"));
+        // option off is default — still keep parse-time quoted flag
+        String again = SQL.toSqlString(stmt, SqlDialect.MYSQL, SqlFormatOptions.defaults());
+        assertTrue(again, again.contains("`id`") && again.contains("`t_user`"));
+    }
+
+    @Test
+    public void quoteIdentifiersRespectsParsedPredicateIdents() {
+        String sql = SqlBuilder.select("id", "name").from("t_user", "t")
+                .where("id > 1").and("name like '%明%'")
+                .quoteIdentifiers(true)
+                .toSql(SqlDialect.MYSQL);
+        assertTrue(sql, sql.contains("`id`"));
+        assertTrue(sql, sql.contains("`name`"));
+        assertTrue(sql, sql.contains("'%明%'"));
+        assertFalse(sql, sql.contains("`%明%`"));
+        SQL.parse(sql, SqlDialect.MYSQL);
+    }
+
 }

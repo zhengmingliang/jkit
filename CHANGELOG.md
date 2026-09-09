@@ -68,6 +68,7 @@
 
 
 ### 新增
+- `jkit-sql`：拼接/回写可开关标识符引号 — `SqlFormatOptions.quoteIdentifiers`（默认 false）；`SqlFormatter`/`SQL.toSqlString`/`SQL.format` 重载；`SqlBuilder.quoteIdentifiers(boolean)` 可开可关；开启后按方言强制引用（MySQL `` ` ``、PG/Oracle `"`、SQL Server `[]`），不影响字面量/关键字/`*`。
 - `jkit-sql`：新增 `SQL.parseExpr` / `SQL.parseExpr(expr, dialect)` / `SQL.parseExpr(expr, dialect, options)`，经 `SqlParser.parseExpression()` 解析裸表达式为 `SqlExpr`（须 EOF；支持方言与占位符选项）；`andWhere` / `SqlBuilder.parsePredicate` 改为走 `parseExpr`。
 - `jkit-sql`：补 Joplin 实语法缺口 — `LOCK TABLES` / `UNLOCK TABLES`（OTHER + 抽首表）、`SELECT … FROM … INTO @var|OUTFILE|DUMPFILE`（FROM 后置 INTO，镜像既有 SELECT INTO）、MySQL 客户端 `DELIMITER`（OTHER 占位）、`SET PASSWORD [FOR user] = …`（SET + text）；`CREATE DEFINER=user PROCEDURE|FUNCTION|…` 跳过 DEFINER 子句以便 DELIMITER 批可解析。
 - `jkit-sql`：`DELIMITER xx` 切换 `parseAll` / 过程体尾部的批处理终止符（`;`/`;;`/`$`/`//` 等）；`//` 与除法同形时在终止处不再当二元运算符；Joplin《SQL语法合集》约 65/67。

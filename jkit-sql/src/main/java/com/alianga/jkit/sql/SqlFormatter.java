@@ -44,6 +44,8 @@ import java.util.List;
 /**
  * 把 AST 打回 SQL。pretty 模式换行缩进；compact 模式只保留必要空格。
  * 标识符引号按 {@link SqlDialect#identQuoteOpen()} / {@link SqlDialect#identQuoteClose()} 输出；
+ * 默认仅当 {@link SqlIdentifier#quoted()} 为 true 时加引号；
+ * {@link SqlFormatOptions#quoteIdentifiers(boolean)} 为 true 时强制给每个标识符段加方言引号。
  * {@code ||} 按 AST 运算符回写（{@link SqlBinaryOp#CONCAT}→{@code ||}，{@link SqlBinaryOp#OR}→{@code OR}）。
  *
  * @author 郑明亮
@@ -53,6 +55,7 @@ public final class SqlFormatter {
     private final StringBuilder out = new StringBuilder(128);
     private final boolean pretty;
     private final SqlDialect dialect;
+    private final SqlFormatOptions options;
     private int indent;
 
     /**
@@ -60,8 +63,19 @@ public final class SqlFormatter {
      * @param dialect 方言（影响 LIMIT / 引号）
      */
     public SqlFormatter(boolean pretty, SqlDialect dialect) {
+        this(pretty, dialect, null);
+    }
+
+    /**
+     * @param pretty 是否换行缩进
+     * @param dialect 方言（影响 LIMIT / 引号）
+     * @param options 格式化选项；null 视为 {@link SqlFormatOptions#defaults()}
+     * @since 2.0.1
+     */
+    public SqlFormatter(boolean pretty, SqlDialect dialect, SqlFormatOptions options) {
         this.pretty = pretty;
         this.dialect = dialect == null ? SqlDialect.MYSQL : dialect;
+        this.options = options == null ? SqlFormatOptions.defaults() : options;
     }
 
     /**
@@ -1005,7 +1019,7 @@ public final class SqlFormatter {
         }
         if (source.alias() != null) {
             sp();
-            out.append(source.alias());
+            writeIdentPart(source.alias(), options.quoteIdentifiers());
             if (!source.columnAliases().isEmpty()) {
                 out.append('(');
                 commaIdents(source.columnAliases());
@@ -1171,7 +1185,7 @@ public final class SqlFormatter {
             sp();
             kw("AS");
             sp();
-            out.append(item.alias());
+            writeIdentPart(item.alias(), options.quoteIdentifiers());
         }
     }
 
@@ -1314,15 +1328,17 @@ public final class SqlFormatter {
 
     /**
      * 按方言输出标识符引号：MySQL 反引号、SQL Server {@code []}、其余双引号。
-     * 仅当 {@link SqlIdentifier#quoted()} 为 true 时加引号（解析时带引号的名字）。
+     * 默认仅当 {@link SqlIdentifier#quoted()} 为 true 时加引号；
+     * {@link SqlFormatOptions#quoteIdentifiers()} 为 true 时强制加引号。
      */
     private void writeIdentifier(SqlIdentifier id) {
         List<String> names = id.names();
+        boolean force = options.quoteIdentifiers();
         for (int i = 0; i < names.size(); i++) {
             if (i > 0) {
                 out.append('.');
             }
-            writeIdentPart(names.get(i), id.quoted());
+            writeIdentPart(names.get(i), force || id.quoted());
         }
     }
 
