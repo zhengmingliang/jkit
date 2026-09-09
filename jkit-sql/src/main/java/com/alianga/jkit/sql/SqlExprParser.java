@@ -364,8 +364,11 @@ final class SqlExprParser {
         if (p.match(SqlTokenType.DISTINCT)) {
             fn.setDistinct(true);
         }
-        if (!p.is(SqlTokenType.RPAREN)) {
+        if (!p.is(SqlTokenType.RPAREN) && !p.is(SqlTokenType.ORDER)) {
             do {
+                if (p.is(SqlTokenType.ORDER)) {
+                    break;
+                }
                 if (p.is(SqlTokenType.STAR)) {
                     fn.addArgument(parsePrimary());
                 } else if (p.isQueryStart()) {
@@ -374,6 +377,11 @@ final class SqlExprParser {
                     fn.addArgument(parseExpr());
                 }
             } while (p.match(SqlTokenType.COMMA));
+        }
+        // PG/标准：ARRAY_AGG(x ORDER BY y) / STRING_AGG 已走专用路径
+        if (p.match(SqlTokenType.ORDER)) {
+            p.expect(SqlTokenType.BY);
+            p.selectParser.parseOrderBy(fn.orderBy());
         }
         p.expect(SqlTokenType.RPAREN);
         if (SqlParser.equalsIgnoreCase(fnName, "MATCH")) {
@@ -593,11 +601,12 @@ final class SqlExprParser {
                 }
                 return all;
             }
+            String part = p.consumeIdentPartRaw();
             if (expr instanceof SqlIdentifier) {
-                ((SqlIdentifier) expr).addName(SqlParser.unquote(p.consumeIdentRaw()));
+                ((SqlIdentifier) expr).addName(SqlParser.unquote(part));
             } else {
                 SqlIdentifier id = new SqlIdentifier();
-                id.addName(SqlParser.unquote(p.consumeIdentRaw()));
+                id.addName(SqlParser.unquote(part));
                 expr = id;
             }
         }
@@ -698,10 +707,8 @@ final class SqlExprParser {
             } else {
                 fn.addArgument(parsePrimary());
             }
-            // 仅吸收 DAY/HOUR/MINUTE 等单位；勿吞 THEN/ELSE（CASE 内 INTERVAL '30 minutes'）
-            if (p.identLike() && !p.is(SqlTokenType.THEN) && !p.is(SqlTokenType.ELSE)
-                    && !p.is(SqlTokenType.END) && !p.is(SqlTokenType.WHEN)
-                    && !p.is(SqlTokenType.FROM) && !p.is(SqlTokenType.WHERE)) {
+            // 仅吸收 DAY/HOUR/MINUTE 等单位；勿吞 OR/AND/THEN（CASE 内 INTERVAL '30 min' OR …）
+            if (isIntervalUnitToken()) {
                 fn.addArgument(SqlIdentifier.of(p.consumeIdentRaw()));
             }
             return fn;
@@ -729,6 +736,32 @@ final class SqlExprParser {
             return p.parseName();
         }
         throw p.error("unexpected token " + p.token.type());
+    }
+
+    private boolean isIntervalUnitToken() {
+        if (!p.identLike()) {
+            return false;
+        }
+        String t = p.token.text();
+        if (t == null) {
+            return false;
+        }
+        return SqlParser.equalsIgnoreCase(t, "YEAR")
+                || SqlParser.equalsIgnoreCase(t, "YEARS")
+                || SqlParser.equalsIgnoreCase(t, "MONTH")
+                || SqlParser.equalsIgnoreCase(t, "MONTHS")
+                || SqlParser.equalsIgnoreCase(t, "WEEK")
+                || SqlParser.equalsIgnoreCase(t, "WEEKS")
+                || SqlParser.equalsIgnoreCase(t, "DAY")
+                || SqlParser.equalsIgnoreCase(t, "DAYS")
+                || SqlParser.equalsIgnoreCase(t, "HOUR")
+                || SqlParser.equalsIgnoreCase(t, "HOURS")
+                || SqlParser.equalsIgnoreCase(t, "MINUTE")
+                || SqlParser.equalsIgnoreCase(t, "MINUTES")
+                || SqlParser.equalsIgnoreCase(t, "SECOND")
+                || SqlParser.equalsIgnoreCase(t, "SECONDS")
+                || SqlParser.equalsIgnoreCase(t, "MICROSECOND")
+                || SqlParser.equalsIgnoreCase(t, "MICROSECONDS");
     }
 
     private SqlExpr parseSubstring(SqlIdentifier name) {

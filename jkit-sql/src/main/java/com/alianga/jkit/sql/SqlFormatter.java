@@ -24,6 +24,7 @@ import com.alianga.jkit.sql.ast.SqlMergeWhen;
 import com.alianga.jkit.sql.ast.SqlNode;
 import com.alianga.jkit.sql.ast.SqlOrderByItem;
 import com.alianga.jkit.sql.ast.SqlOverExpr;
+import com.alianga.jkit.sql.ast.SqlPivotTable;
 import com.alianga.jkit.sql.ast.SqlQueryExpr;
 import com.alianga.jkit.sql.ast.SqlSelect;
 import com.alianga.jkit.sql.ast.SqlSelectItem;
@@ -260,7 +261,14 @@ public final class SqlFormatter {
             sp();
             writeExpr(select.connectBy());
         }
-        if (!select.groupBy().isEmpty()) {
+        if (select.groupByExtension() != null) {
+            nl();
+            kw("GROUP");
+            sp();
+            kw("BY");
+            sp();
+            out.append(select.groupByExtension());
+        } else if (!select.groupBy().isEmpty()) {
             nl();
             kw("GROUP");
             sp();
@@ -296,10 +304,38 @@ public final class SqlFormatter {
         if (!select.orderBy().isEmpty()) {
             nl();
             kw("ORDER");
+            if (select.orderSiblings()) {
+                sp();
+                kw("SIBLINGS");
+            }
             sp();
             kw("BY");
             sp();
             writeOrder(select.orderBy());
+        }
+        if (select.distributeBy() != null) {
+            nl();
+            out.append("DISTRIBUTE");
+            sp();
+            kw("BY");
+            sp();
+            out.append(select.distributeBy());
+        }
+        if (select.clusterBy() != null) {
+            nl();
+            out.append("CLUSTER");
+            sp();
+            kw("BY");
+            sp();
+            out.append(select.clusterBy());
+        }
+        if (select.sortBy() != null) {
+            nl();
+            out.append("SORT");
+            sp();
+            kw("BY");
+            sp();
+            out.append(select.sortBy());
         }
         if (select.limit() != null) {
             nl();
@@ -962,23 +998,60 @@ public final class SqlFormatter {
             }
         } else if (source instanceof SqlJoin) {
             SqlJoin join = (SqlJoin) source;
-            writeFrom(join.left());
-            sp();
-            writeJoinType(join.joinType());
-            sp();
-            writeFrom(join.right());
-            if (join.condition() != null) {
+            if (join.joinType() == SqlJoin.Type.LATERAL_VIEW
+                    && join.right() instanceof SqlFunctionTable) {
+                writeFrom(join.left());
                 sp();
-                kw("ON");
+                kw("LATERAL");
                 sp();
-                writeExpr(join.condition());
-            } else if (join.using() != null && !join.using().isEmpty()) {
+                kw("VIEW");
                 sp();
-                kw("USING");
-                out.append('(');
-                commaIdents(join.using());
-                out.append(')');
+                SqlFunctionTable lvf = (SqlFunctionTable) join.right();
+                if ("OUTER".equals(lvf.withDefinition())) {
+                    kw("OUTER");
+                    sp();
+                }
+                writeExpr(lvf.function());
+                if (lvf.alias() != null) {
+                    sp();
+                    out.append(lvf.alias());
+                }
+                if (!lvf.columnAliases().isEmpty()) {
+                    sp();
+                    kw("AS");
+                    sp();
+                    commaIdents(lvf.columnAliases());
+                }
+            } else {
+                writeFrom(join.left());
+                sp();
+                writeJoinType(join.joinType());
+                sp();
+                writeFrom(join.right());
+                if (join.condition() != null) {
+                    sp();
+                    kw("ON");
+                    sp();
+                    writeExpr(join.condition());
+                } else if (join.using() != null && !join.using().isEmpty()) {
+                    sp();
+                    kw("USING");
+                    out.append('(');
+                    commaIdents(join.using());
+                    out.append(')');
+                }
             }
+        } else if (source instanceof SqlPivotTable) {
+            SqlPivotTable pivot = (SqlPivotTable) source;
+            writeFrom(pivot.input());
+            sp();
+            kw(pivot.unpivot() ? "UNPIVOT" : "PIVOT");
+            sp();
+            out.append('(');
+            if (pivot.definition() != null) {
+                out.append(pivot.definition());
+            }
+            out.append(')');
         } else if (source instanceof SqlSubqueryTable) {
             SqlSubqueryTable sub = (SqlSubqueryTable) source;
             if (sub.lateral()) {
@@ -1080,6 +1153,12 @@ public final class SqlFormatter {
                 kw("OUTER");
                 sp();
                 kw("APPLY");
+                break;
+            case LATERAL_VIEW:
+                // right 侧已是表函数；左侧 writeFrom 后直接写 LATERAL VIEW 由专用分支处理
+                kw("LATERAL");
+                sp();
+                kw("VIEW");
                 break;
             default:
                 kw("JOIN");

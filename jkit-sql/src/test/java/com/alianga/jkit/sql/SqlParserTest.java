@@ -2426,5 +2426,80 @@ public class SqlParserTest {
     }
 
 
+
+    /**
+     * MySQL 语料：点号后单引号名当作引用标识符（{@code T.'Group'}）。
+     */
+    @Test
+    public void singleQuotedNameAfterDot() {
+        SqlSelect s = (SqlSelect) SQL.parse(
+                "SELECT T3.'Group', T2.Name FROM SalesTerritory AS T3", SqlDialect.MYSQL);
+        assertEquals(SqlStatementType.SELECT, s.type());
+        assertTrue(SQL.format(s).toUpperCase().contains("GROUP"));
+    }
+
+    /**
+     * INTERVAL 单位白名单，勿把 OR/AND 吞成单位。
+     */
+    @Test
+    public void intervalDoesNotSwallowOr() {
+        SQL.parse("SELECT CASE WHEN ts - LAG(ts) OVER (PARTITION BY u ORDER BY ts)"
+                + " > INTERVAL '30 min' OR LAG(ts) OVER (PARTITION BY u ORDER BY ts) IS NULL"
+                + " THEN 1 ELSE 0 END FROM e", SqlDialect.POSTGRES);
+    }
+
+    /**
+     * 聚合内 ORDER BY：ARRAY_AGG(x ORDER BY y)。
+     */
+    @Test
+    public void arrayAggOrderByInside() {
+        SqlSelect s = (SqlSelect) SQL.parse(
+                "SELECT ARRAY_AGG(p.name ORDER BY p.name) FROM products p", SqlDialect.POSTGRES);
+        String f = SQL.format(s);
+        assertTrue(f, f.toUpperCase().contains("ORDER"));
+    }
+
+    /**
+     * SQL Server / Oracle PIVOT、UNPIVOT。
+     */
+    @Test
+    public void pivotAndUnpivot() {
+        SQL.parse("SELECT * FROM (SELECT yr, status, amt FROM t) s "
+                + "PIVOT (SUM(amt) FOR status IN ([a],[b])) p", SqlDialect.SQLSERVER);
+        SQL.parse("SELECT * FROM (SELECT yr, status, amt FROM t) "
+                + "PIVOT (SUM(amt) FOR status IN ('a' AS a, 'b' AS b))", SqlDialect.ORACLE);
+        SQL.parse("SELECT product_id, period, amount FROM sales_pivot "
+                + "UNPIVOT (amount FOR period IN (q1,q2,q3,q4)) u", SqlDialect.SQLSERVER);
+    }
+
+    /**
+     * Hive LATERAL VIEW / DISTRIBUTE BY / SORT BY。
+     */
+    @Test
+    public void hiveLateralViewAndDistribute() {
+        SQL.parse("SELECT o.order_id, p_id, qty FROM orders o "
+                + "LATERAL VIEW explode(item_ids) items AS p_id, qty", SqlDialect.MYSQL);
+        SqlSelect s = (SqlSelect) SQL.parse(
+                "SELECT category, user_id FROM t WHERE rn <= 3 "
+                        + "DISTRIBUTE BY category SORT BY category, user_amt DESC",
+                SqlDialect.MYSQL);
+        assertNotNull(s.distributeBy());
+        assertNotNull(s.sortBy());
+    }
+
+    /**
+     * GROUPING SETS 与 ORDER SIBLINGS BY。
+     */
+    @Test
+    public void groupingSetsAndOrderSiblings() {
+        SQL.parse("SELECT a, b, SUM(x) FROM t GROUP BY GROUPING SETS ((a),(b),(a,b),())",
+                SqlDialect.POSTGRES);
+        SqlSelect s = (SqlSelect) SQL.parse(
+                "SELECT LEVEL, name FROM categories START WITH parent_id IS NULL "
+                        + "CONNECT BY PRIOR category_id = parent_id ORDER SIBLINGS BY name",
+                SqlDialect.ORACLE);
+        assertTrue(s.orderSiblings());
+    }
+
 }
 

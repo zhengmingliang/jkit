@@ -40,6 +40,8 @@
 
 ### 修复
 
+- `jkit-sql`：点号后单引号名可作引用标识符（`T.'Group'`）；`INTERVAL` 仅吸收时间单位（不吞 `OR`/`AND`）；聚合内 `ORDER BY`（`ARRAY_AGG(x ORDER BY y)`）；`PIVOT`/`UNPIVOT`；Hive `LATERAL VIEW` / `DISTRIBUTE BY` / `SORT BY` / `CLUSTER BY`；`GROUP BY GROUPING SETS|CUBE|ROLLUP(...)`；Oracle `ORDER SIBLINGS BY`。
+
 - `jkit-sql`：修复词法 `peek()` 污染当前记号（`next()` 消费预读后应拷贝到 `tokA`），使 `date()`/`datetime()`/`DATE()`/`MIN(Date)`/`IIF(timestamp=…)` 等可解析；允许词形式 `PERCENT` 作标识符（与 `%` 运算符共用 token）；支持 SQLite `trim(X, Y)` 逗号多参。
 
 - `jkit-sql`：算术仅认符号 `-`/`%`（`isSymbolOp`），词形式 `MINUS` 可作集合运算；Oracle 聚合 `KEEP (DENSE_RANK …)` 可解析。- `jkit-sql`：限定名中点号后的数字开头标识符可解析（如 `t.1_id` / `test.52_user` / `a.32强国`）；`.5` / `.52e1` 等前导小数仍为 NUMBER，裸 `1_id` 行为不变。

@@ -8,6 +8,7 @@ import com.alianga.jkit.sql.ast.SqlIdentifier;
 import com.alianga.jkit.sql.ast.SqlJoin;
 import com.alianga.jkit.sql.ast.SqlLimit;
 import com.alianga.jkit.sql.ast.SqlOrderByItem;
+import com.alianga.jkit.sql.ast.SqlPivotTable;
 import com.alianga.jkit.sql.ast.SqlSelect;
 import com.alianga.jkit.sql.ast.SqlSelectItem;
 import com.alianga.jkit.sql.ast.SqlSubqueryTable;
@@ -56,7 +57,14 @@ final class SqlSelectParser {
 
     SqlTableSource parseJoinedTable() {
         SqlTableSource left = parseTableSource();
+        left = parsePivotUnpivotChain(left);
         while (true) {
+            // Hive: t LATERAL VIEW explode(a) x AS c1, c2
+            if (p.is(SqlTokenType.LATERAL) && p.lexer.peek().type() == SqlTokenType.VIEW) {
+                left = parseLateralView(left);
+                left = parsePivotUnpivotChain(left);
+                continue;
+            }
             SqlJoin.Type type = null;
             if (p.match(SqlTokenType.COMMA)) {
                 type = SqlJoin.Type.COMMA;
@@ -116,6 +124,7 @@ final class SqlSelectParser {
                 join.setUsing(using);
             }
             left = join;
+            left = parsePivotUnpivotChain(left);
         }
         return left;
     }
@@ -254,11 +263,24 @@ final class SqlSelectParser {
         }
         if (p.match(SqlTokenType.GROUP)) {
             p.expect(SqlTokenType.BY);
-            do {
-                select.groupBy().add(p.exprParser.parseExpr());
-            } while (p.match(SqlTokenType.COMMA));
-            if (p.match(SqlTokenType.WITH) && p.match(SqlTokenType.ROLLUP)) {
-                select.setGroupByRollup(true);
+            if (p.is(SqlTokenType.GROUPING) || p.is(SqlTokenType.CUBE) || p.is(SqlTokenType.ROLLUP)) {
+                StringBuilder sb = new StringBuilder();
+                sb.append(p.token.text().toUpperCase());
+                p.next();
+                if (p.is(SqlTokenType.SETS)) {
+                    sb.append(' ').append(p.token.text().toUpperCase());
+                    p.next();
+                }
+                p.expect(SqlTokenType.LPAREN);
+                sb.append('(').append(p.skipBalancedParensContent()).append(')');
+                select.setGroupByExtension(sb.toString());
+            } else {
+                do {
+                    select.groupBy().add(p.exprParser.parseExpr());
+                } while (p.match(SqlTokenType.COMMA));
+                if (p.match(SqlTokenType.WITH) && p.match(SqlTokenType.ROLLUP)) {
+                    select.setGroupByRollup(true);
+                }
             }
         }
         if (p.match(SqlTokenType.HAVING)) {
@@ -274,9 +296,13 @@ final class SqlSelectParser {
             } while (p.match(SqlTokenType.COMMA));
         }
         if (p.match(SqlTokenType.ORDER)) {
+            if (p.match(SqlTokenType.SIBLINGS)) {
+                select.setOrderSiblings(true);
+            }
             p.expect(SqlTokenType.BY);
             parseOrderBy(select.orderBy());
         }
+        parseHiveDistributeSort(select);
         parseLimitFetch(select);
         // MySQL：INTO 也可出现在 FROM/WHERE/ORDER/LIMIT 之后（与 SELECT 列表后 INTO 二选一）
         parseSelectInto(select);
@@ -598,6 +624,81 @@ final class SqlSelectParser {
             throw p.error("LATERAL requires a subquery or table function");
         }
         throw p.error("expected table source");
+    }
+
+    private SqlTableSource parsePivotUnpivotChain(SqlTableSource source) {
+        while (p.is(SqlTokenType.PIVOT) || p.is(SqlTokenType.UNPIVOT)) {
+            boolean unpivot = p.is(SqlTokenType.UNPIVOT);
+            p.next();
+            p.expect(SqlTokenType.LPAREN);
+            String body = p.skipBalancedParensContent();
+            SqlPivotTable pivot = new SqlPivotTable();
+            pivot.setInput(source);
+            pivot.setUnpivot(unpivot);
+            pivot.setDefinition(body);
+            parseTableAlias(pivot);
+            source = pivot;
+        }
+        return source;
+    }
+
+    private SqlTableSource parseLateralView(SqlTableSource left) {
+        p.expect(SqlTokenType.LATERAL);
+        p.expect(SqlTokenType.VIEW);
+        boolean outer = false;
+        if (p.isIdent("OUTER")) {
+            outer = true;
+            p.next();
+        }
+        SqlIdentifier fnName = p.parseName();
+        SqlFunctionTable ft = new SqlFunctionTable();
+        ft.setLateral(true);
+        ft.setFunction(p.exprParser.parseFunction(fnName));
+        if (outer) {
+            ft.setWithDefinition("OUTER");
+        }
+        if (p.identLike() && !p.is(SqlTokenType.AS) && !SqlParser.isAliasStop(p.token.type())) {
+            ft.setAlias(SqlParser.unquote(p.consumeIdentRaw()));
+        }
+        if (p.match(SqlTokenType.AS)) {
+            do {
+                ft.columnAliases().add(p.parseName());
+            } while (p.match(SqlTokenType.COMMA));
+        }
+        SqlJoin join = new SqlJoin();
+        join.setJoinType(SqlJoin.Type.LATERAL_VIEW);
+        join.setLeft(left);
+        join.setRight(ft);
+        return join;
+    }
+
+    private void parseHiveDistributeSort(SqlSelect select) {
+        if (p.isIdent("DISTRIBUTE")) {
+            p.next();
+            p.expect(SqlTokenType.BY);
+            select.setDistributeBy(consumeCommaExprListRaw());
+        }
+        if (p.isIdent("CLUSTER")) {
+            p.next();
+            p.expect(SqlTokenType.BY);
+            select.setClusterBy(consumeCommaExprListRaw());
+        }
+        if (p.isIdent("SORT")) {
+            p.next();
+            p.expect(SqlTokenType.BY);
+            int start = p.token.start();
+            java.util.ArrayList<SqlOrderByItem> tmp = new java.util.ArrayList<SqlOrderByItem>(2);
+            parseOrderBy(tmp);
+            select.setSortBy(p.lexer.rawSlice(start, p.token.start()).trim());
+        }
+    }
+
+    private String consumeCommaExprListRaw() {
+        int start = p.token.start();
+        do {
+            p.exprParser.parseExpr();
+        } while (p.match(SqlTokenType.COMMA));
+        return p.lexer.rawSlice(start, p.token.start()).trim();
     }
 
     private SqlSelect parseValuesSelect() {

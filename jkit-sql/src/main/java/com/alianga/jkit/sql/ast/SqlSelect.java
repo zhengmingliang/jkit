@@ -22,6 +22,12 @@ public final class SqlSelect extends SqlStatement {
     private SqlExpr where;
     private final List<SqlExpr> groupBy = new ArrayList<SqlExpr>(2);
     private boolean groupByRollup;
+    /** GROUP BY 扩展：GROUPING SETS/CUBE/ROLLUP(...) 原文（含关键字） */
+    private String groupByExtension;
+    private boolean orderSiblings;
+    private String distributeBy;
+    private String sortBy;
+    private String clusterBy;
     private SqlExpr having;
     private final List<SqlOrderByItem> orderBy = new ArrayList<SqlOrderByItem>(2);
     private SqlLimit limit;
@@ -210,6 +216,86 @@ public final class SqlSelect extends SqlStatement {
      */
     public void setGroupByRollup(boolean groupByRollup) {
         this.groupByRollup = groupByRollup;
+    }
+
+    /**
+     * @return {@code GROUP BY GROUPING SETS/CUBE/ROLLUP(...)} 扩展原文
+     * @since 2.0.1
+     */
+    public String groupByExtension() {
+        return groupByExtension;
+    }
+
+    /**
+     * @param groupByExtension 扩展原文
+     * @since 2.0.1
+     */
+    public void setGroupByExtension(String groupByExtension) {
+        this.groupByExtension = groupByExtension;
+    }
+
+    /**
+     * @return Oracle {@code ORDER SIBLINGS BY}
+     * @since 2.0.1
+     */
+    public boolean orderSiblings() {
+        return orderSiblings;
+    }
+
+    /**
+     * @param orderSiblings {@code ORDER SIBLINGS BY}
+     * @since 2.0.1
+     */
+    public void setOrderSiblings(boolean orderSiblings) {
+        this.orderSiblings = orderSiblings;
+    }
+
+    /**
+     * @return Hive {@code DISTRIBUTE BY} 原文
+     * @since 2.0.1
+     */
+    public String distributeBy() {
+        return distributeBy;
+    }
+
+    /**
+     * @param distributeBy {@code DISTRIBUTE BY} 原文
+     * @since 2.0.1
+     */
+    public void setDistributeBy(String distributeBy) {
+        this.distributeBy = distributeBy;
+    }
+
+    /**
+     * @return Hive {@code SORT BY} 原文
+     * @since 2.0.1
+     */
+    public String sortBy() {
+        return sortBy;
+    }
+
+    /**
+     * @param sortBy {@code SORT BY} 原文
+     * @since 2.0.1
+     */
+    public void setSortBy(String sortBy) {
+        this.sortBy = sortBy;
+    }
+
+    /**
+     * @return Hive {@code CLUSTER BY} 原文
+     * @since 2.0.1
+     */
+    public String clusterBy() {
+        return clusterBy;
+    }
+
+    /**
+     * @param clusterBy {@code CLUSTER BY} 原文
+     * @since 2.0.1
+     */
+    public void setClusterBy(String clusterBy) {
+        this.clusterBy = clusterBy;
     }
 
     /**

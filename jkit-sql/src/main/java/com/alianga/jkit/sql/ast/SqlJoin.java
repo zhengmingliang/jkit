@@ -26,7 +26,9 @@ public final class SqlJoin extends SqlTableSource {
         /** SQL Server CROSS APPLY */
         CROSS_APPLY,
         /** SQL Server OUTER APPLY */
-        OUTER_APPLY
+        OUTER_APPLY,
+        /** Hive LATERAL VIEW */
+        LATERAL_VIEW
     }
 
     private Type joinType;

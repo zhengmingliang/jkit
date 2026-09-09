@@ -22,6 +22,7 @@ import com.alianga.jkit.sql.ast.SqlMergeWhen;
 import com.alianga.jkit.sql.ast.SqlNode;
 import com.alianga.jkit.sql.ast.SqlOrderByItem;
 import com.alianga.jkit.sql.ast.SqlOverExpr;
+import com.alianga.jkit.sql.ast.SqlPivotTable;
 import com.alianga.jkit.sql.ast.SqlQueryExpr;
 import com.alianga.jkit.sql.ast.SqlSelect;
 import com.alianga.jkit.sql.ast.SqlSelectItem;
@@ -75,6 +76,9 @@ public class SqlAstVisitor implements SqlVisitor {
         }
         if (node instanceof SqlJoin) {
             return visitJoin((SqlJoin) node);
+        }
+        if (node instanceof SqlPivotTable) {
+            return visitPivotTable((SqlPivotTable) node);
         }
         if (node instanceof SqlSubqueryTable) {
             return visitSubqueryTable((SqlSubqueryTable) node);
@@ -205,6 +209,14 @@ public class SqlAstVisitor implements SqlVisitor {
 
     /** @param node JOIN @return 是否继续子节点 */
     protected boolean visitJoin(SqlJoin node) {
+        return true;
+    }
+
+    /**
+     * @param node PIVOT/UNPIVOT 表源
+     * @return 是否继续子节点
+     */
+    protected boolean visitPivotTable(SqlPivotTable node) {
         return true;
     }
 

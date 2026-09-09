@@ -854,6 +854,8 @@ public final class SqlParser {
             case WHEN:
             case MATCHED:
             case WITH:
+            case PIVOT:
+            case UNPIVOT:
                 return true;
             default:
                 return false;
@@ -869,7 +871,7 @@ public final class SqlParser {
 
     SqlIdentifier parseName() {
         SqlIdentifier id = new SqlIdentifier();
-        String raw = consumeIdentRaw();
+        String raw = consumeIdentPartRaw();
         if (isQuoted(raw)) {
             id.setQuoted(true);
         }
@@ -879,9 +881,23 @@ public final class SqlParser {
                 break;
             }
             next();
-            id.addName(unquote(consumeIdentRaw()));
+            String part = consumeIdentPartRaw();
+            if (isQuoted(part)) {
+                id.setQuoted(true);
+            }
+            id.addName(unquote(part));
         }
         return id;
+    }
+
+    /**
+     * 标识符或点号后的单引号名（MySQL 语料常见 {@code T.'Group'}；字符串记号当引用标识符）。
+     */
+    String consumeIdentPartRaw() {
+        if (is(SqlTokenType.STRING)) {
+            return consumeStringRaw();
+        }
+        return consumeIdentRaw();
     }
 
     boolean isQueryStart() {
@@ -930,7 +946,7 @@ public final class SqlParser {
         return raw;
     }
 
-    private String consumeStringRaw() {
+    String consumeStringRaw() {
         if (!is(SqlTokenType.STRING)) {
             throw error("expected string");
         }
