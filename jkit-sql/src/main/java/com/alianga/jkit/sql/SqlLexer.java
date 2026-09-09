@@ -411,6 +411,16 @@ public final class SqlLexer {
                 pos = save;
             }
         }
+        // MySQL：裸标识符可以数字开头，但不能整段只是数字。数字后紧跟字母/CJK/_/$ 时整段作 IDENT
+        //（保留 32 / 32.5 / 32e1 / 0xFF；反引号形式原本就可解析）。
+        if (!seenDot && pos < limit && isIdentStart(src[pos])) {
+            while (pos < limit && isIdentPart(src[pos])) {
+                pos++;
+            }
+            SqlTokenType type = SqlKeywords.lookup(src, tStart, pos - tStart);
+            token.set(type, src, tStart, pos, tLine, tCol);
+            return token;
+        }
         token.set(SqlTokenType.NUMBER, src, tStart, pos, tLine, tCol);
         return token;
     }

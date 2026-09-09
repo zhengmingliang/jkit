@@ -68,6 +68,7 @@
 
 ### 新增
 
+- `jkit-sql`：补 common-model 审计 A 类缺口 — 数字开头裸标识符（`32强国`/`1019使用`，不破坏数值字面量）；`IN :types` / `IN ?` 无括号绑定列表；`LOAD DATA [LOCAL] INFILE … INTO TABLE`（OTHER + 抽表名）；顶层匿名 `DECLARE … BEGIN … END;`（OTHER，BEGIN/END 内允许分号）。
 - `jkit-sql`：补 `REVOKE`（镜像 GRANT：权限 + ON 对象 + FROM 用户）、`FLUSH PRIVILEGES|TABLES|LOGS`（OTHER）、`START TRANSACTION` / `BEGIN WORK` / 裸 `BEGIN;` / `COMMIT` / `ROLLBACK` / `SAVEPOINT`（OTHER，不破坏 `BEGIN…END` 过程块）、`SELECT … INTO` 表 / `@var` / `OUTFILE`（目标表计入 `tables` 为 INSERT）；`parseAll` 可批 `UPDATE …; FLUSH PRIVILEGES`。
 
 - `jkit-sql`：`SqlDialect.ORACLE` 表示 12c 以下分页（裸 SELECT 改写为 ROWNUM 包装，不写 OFFSET/FETCH）；新增 `ORACLE12`（12c+）可用 `OFFSET … FETCH`；`fromName` 支持 `oracle12`/`19c` 等。
@@ -84,7 +85,7 @@
 - `tools-test` P3.2：JMH `SqlParseBenchmark`（simple/join/window × jkit/druid/jsql，fork≥2）；`sql-corpus.txt`（~379 条）+ `SqlParserCompareTest#corpusFileSuccessRates`（缺口写 `target/sql-compare-fail.txt`）。Lexer 短 ident intern 仍延期。
 - `jkit-sql` P3.1：`SqlFormatter` 按方言回写标识符引号（MySQL 反引号 / PG·Oracle·ANSI·H2 双引号 / SQL Server `[]`）；`||` 按 AST 运算符回写（`CONCAT`→`||`，`OR`→`OR`，配合 `pipesAsConcat`）；`SQL.parseAll(sql, dialect, true)` 容错多语句（失败记 `SqlSimpleStatement` + `parseError` 继续）；清理 `parseAlias` 未使用的 `inFrom` 参数。Lexer 短 ident intern 仍延期（需 profiling）；tools-test JMH/corpus 已在 P3.2 完成。
 - `jkit-sql` P2 能力对标（零依赖，入口在 `SQL`）：`parameterize` / `exportParameterValues`（字面量指纹与导出，区别于绑定 `parameters`）；`wall` → `SqlWallResult`（多语句、注释绕过、永远真条件、`SLEEP`、无 WHERE 的 DELETE/UPDATE）；`clone`（format→parse 深拷贝）；`eval`（字面量算术/比较子集）；`SqlAstVisitor` 类型分发（并存不破坏 `SqlVisitorAdapter`）；`replaceColumn` 对称 `replaceTable`。`addLimit` 改为 clone-then-mutate。
-- `jkit-sql`：从 `icell/common-model` 测试收获语料 `common-model-sql-corpus.txt`（87 条可解析）+ `CommonModelSqlCorpusTest`；已知缺口见 `CommonModelSqlKnownGapsTest`（数字开头裸标识符、`<sheet>` 占位表名）。
+- `jkit-sql`：从 `icell/common-model` 测试收获语料 `common-model-sql-corpus.txt`（87 条可解析）+ `CommonModelSqlCorpusTest`；已知缺口见 `CommonModelSqlKnownGapsTest`（`<sheet>` 占位表名等）；数字开头裸标识符已支持。
 - 新模块 `com.alianga:jkit-sql`：零依赖手写 SQL 解析器（词法 `char[]` + 关键字开地址哈希，递归下降 AST）。入口 `SQL.parse` / `parseAll` / `format` / `toSqlString` / `tables` / `stat` / `addLimit` / `andWhere` / `replaceTable` / `parameters`。方言 MYSQL（默认，含 GBase/MariaDB）、POSTGRES、ORACLE、SQLSERVER、ANSI、H2。覆盖 DML（含 JOIN/UNION/CTE/ON DUPLICATE/ON CONFLICT）、窗口函数 `OVER`/`FILTER`、EXTRACT/TRIM/SUBSTRING、SHOW CREATE/COLUMNS 抽表名、常见 DDL。非法 SQL 抛 `SqlParseException`。模块内黄金集；与 Druid / JSqlParser 的对比在上级 `tools-test` 的 `SqlParserCompareTest`（不进本库依赖）。用法见 `docs/sql.md`。
 
 

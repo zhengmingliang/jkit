@@ -1957,5 +1957,96 @@ public class SqlParserTest {
         assertTrue(of.toUpperCase().contains("OUTFILE"));
     }
 
+    /**
+     * 数字开头裸标识符（MySQL：可数字开头但不能纯数字）；不破坏字面量。
+     */
+    @Test
+    public void digitLeadingBareIdentifiers() {
+        SqlSelect s = (SqlSelect) SQL.parse(
+                "SELECT DISTINCT 1019使用.年 FROM 1019使用 WHERE 1 = 1 ORDER BY 1019使用.省份 DESC");
+        assertEquals(SqlStatementType.SELECT, s.type());
+        assertTrue(SQL.tables(s).toString(), SQL.tables(s).contains("1019使用"));
+
+        SqlSelect join = (SqlSelect) SQL.parse(
+                "select 32强国.* from 32强国 left join 32强国家 on 32强国.国家= 32强国家.国家 "
+                        + "where 32强国家.分组 = 'A' or 32强国家.计算2 > ? limit 5");
+        assertEquals(SqlStatementType.SELECT, join.type());
+        assertTrue(SQL.tables(join).toString(), SQL.tables(join).contains("32强国"));
+        assertTrue(SQL.tables(join).toString(), SQL.tables(join).contains("32强国家"));
+
+        // 纯数字 / 小数 / 科学计数 / 十六进制仍为字面量
+        SqlSelect lit = (SqlSelect) SQL.parse("SELECT 32, 32.5, 32e1, 0xFF FROM t");
+        assertEquals(SqlStatementType.SELECT, lit.type());
+        assertEquals("t", SQL.tables(lit).iterator().next());
+    }
+
+    /**
+     * IN :name / IN ? 可不写括号（单一绑定即整个列表）；IN (:name) 仍可用。
+     */
+    @Test
+    public void inBindWithoutParentheses() {
+        SqlSelect named = (SqlSelect) SQL.parse(
+                "select * from table where (type in :types and source = :source) "
+                        + "or ( source != :source and price >= :minPrice and price <= :maxPrice)");
+        assertEquals(SqlStatementType.SELECT, named.type());
+        assertNotNull(named.where());
+
+        SqlSelect pos = (SqlSelect) SQL.parse("SELECT * FROM t WHERE id IN ?");
+        assertEquals(SqlStatementType.SELECT, pos.type());
+
+        SqlSelect paren = (SqlSelect) SQL.parse("SELECT * FROM t WHERE id IN (:ids)");
+        assertEquals(SqlStatementType.SELECT, paren.type());
+        String formatted = SQL.toSqlString(named);
+        assertTrue(formatted.toUpperCase().contains("IN"));
+    }
+
+    /**
+     * MySQL LOAD DATA [LOCAL] INFILE … INTO TABLE … → OTHER，抽表名。
+     */
+    @Test
+    public void loadDataInfile() {
+        SqlSimpleStatement load = (SqlSimpleStatement) SQL.parse(
+                "LOAD DATA INFILE '/tmp/a.csv' INTO TABLE stg.foo "
+                        + "FIELDS TERMINATED BY ','");
+        assertEquals(SqlStatementType.OTHER, load.type());
+        assertNotNull(load.name());
+        assertEquals("stg.foo", load.name().qualifiedName());
+        assertTrue(load.text().toUpperCase().startsWith("LOAD"));
+        assertTrue(load.text().toUpperCase().contains("INFILE"));
+
+        SqlSimpleStatement local = (SqlSimpleStatement) SQL.parse(
+                "LOAD DATA LOCAL INFILE 'x.dat' INTO TABLE t");
+        assertEquals(SqlStatementType.OTHER, local.type());
+        assertEquals("t", local.name().simpleName());
+    }
+
+    /**
+     * 顶层匿名 DECLARE BEGIN … END;（PL/SQL）；不破坏 DECLARE x INT / BEGIN WORK。
+     */
+    @Test
+    public void anonymousDeclareBeginEnd() {
+        SqlSimpleStatement anon = (SqlSimpleStatement) SQL.parse(
+                "declare\n"
+                + "begin\n"
+                + "  test_procedure();\n"
+                + "end;");
+        assertEquals(SqlStatementType.OTHER, anon.type());
+        assertTrue(anon.text().toUpperCase().contains("DECLARE"));
+        assertTrue(anon.text().toUpperCase().contains("BEGIN"));
+        assertTrue(anon.text().toUpperCase().contains("END"));
+
+        SqlSimpleStatement compact = (SqlSimpleStatement) SQL.parse(
+                "DECLARE BEGIN NULL; END;");
+        assertEquals(SqlStatementType.OTHER, compact.type());
+        assertTrue(compact.text().toUpperCase().contains("BEGIN"));
+
+        SqlSimpleStatement decl = (SqlSimpleStatement) SQL.parse("DECLARE x INT DEFAULT 1");
+        assertEquals("x", decl.name().simpleName());
+
+        SqlSimpleStatement beginTx = (SqlSimpleStatement) SQL.parse("BEGIN WORK");
+        assertTrue(beginTx.text().toUpperCase().contains("WORK"));
+    }
+
+
 }
 

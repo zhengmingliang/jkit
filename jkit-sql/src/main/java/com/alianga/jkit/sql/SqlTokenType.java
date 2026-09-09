@@ -278,6 +278,7 @@ public enum SqlTokenType {
     DECLARE,
     VACUUM,
     COPY,
+    LOAD,
     HANDLER,
     PREPARE,
     EXECUTE,

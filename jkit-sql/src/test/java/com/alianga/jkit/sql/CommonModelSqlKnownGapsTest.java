@@ -13,11 +13,10 @@ import static org.junit.Assert.fail;
 public class CommonModelSqlKnownGapsTest {
 
     /**
-     * 数字开头裸标识符须加引号；电子表格 {@code <sheet>} 占位不是标准 SQL。
+     * 电子表格 {@code <sheet>} 占位不是标准 SQL（数字开头裸标识符已支持）。
      */
     @Test
-    public void digitLeadingIdentAndSheetMarkupStillFail() {
-        assertStillFails(SqlDialect.MYSQL, "SELECT DISTINCT 1019使用.年 FROM 1019使用");
+    public void sheetMarkupStillFails() {
         assertStillFails(SqlDialect.MYSQL, "select * from <20241230.1>");
     }
 

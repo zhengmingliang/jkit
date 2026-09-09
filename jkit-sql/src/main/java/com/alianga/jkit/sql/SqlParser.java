@@ -206,6 +206,8 @@ public final class SqlParser {
                 return ddlParser.parseCommentOn();
             case COPY:
                 return parseCopy();
+            case LOAD:
+                return parseLoad();
             case HANDLER:
                 return parseHandler();
             case PREPARE:
@@ -452,10 +454,12 @@ public final class SqlParser {
         expect(SqlTokenType.DECLARE);
         SqlSimpleStatement stmt = new SqlSimpleStatement();
         stmt.setStatementType(SqlStatementType.OTHER);
-        if (identLike()) {
+        // BEGIN 虽 keyword 且 identLike，但不能当变量名吃掉，否则匿名块在首个分号处截断
+        if (identLike() && !is(SqlTokenType.BEGIN)) {
             stmt.setName(parseName());
         }
-        String rest = consumeRawUntilSemi();
+        // PL/SQL 匿名块 DECLARE … BEGIN … END; 内部分号不截断；无 BEGIN 时仍止于首个分号
+        String rest = consumeRawAllowingBeginEnd();
         StringBuilder text = new StringBuilder("DECLARE");
         if (stmt.name() != null) {
             text.append(' ').append(stmt.name().qualifiedName());
@@ -507,6 +511,53 @@ public final class SqlParser {
         if (identLike()) {
             stmt.setName(parseName());
             text.append(' ').append(stmt.name().qualifiedName());
+        }
+        if (!atStmtBreak()) {
+            String rest = consumeRawUntilSemi();
+            if (!rest.isEmpty()) {
+                text.append(' ').append(rest);
+            }
+        }
+        stmt.setText(text.toString());
+        return stmt;
+    }
+
+    /**
+     * MySQL {@code LOAD DATA [LOCAL] INFILE … INTO TABLE …}：OTHER + 全文，抽目标表名。
+     */
+    private SqlStatement parseLoad() {
+        expect(SqlTokenType.LOAD);
+        SqlSimpleStatement stmt = new SqlSimpleStatement();
+        stmt.setStatementType(SqlStatementType.OTHER);
+        StringBuilder text = new StringBuilder("LOAD");
+        // LOAD DATA [LOCAL] INFILE 'path' INTO TABLE t …
+        if (isIdent("DATA")) {
+            text.append(' ').append(token.text().toUpperCase());
+            next();
+        }
+        if (is(SqlTokenType.LOCAL) || isIdent("LOCAL")) {
+            text.append(' ').append(token.text().toUpperCase());
+            next();
+        }
+        if (isIdent("INFILE")) {
+            text.append(' ').append(token.text().toUpperCase());
+            next();
+        }
+        if (is(SqlTokenType.STRING)) {
+            text.append(' ').append(token.text());
+            next();
+        }
+        if (is(SqlTokenType.INTO)) {
+            text.append(' ').append(token.text().toUpperCase());
+            next();
+            if (is(SqlTokenType.TABLE)) {
+                text.append(' ').append(token.text().toUpperCase());
+                next();
+            }
+            if (identLike()) {
+                stmt.setName(parseName());
+                text.append(' ').append(stmt.name().qualifiedName());
+            }
         }
         if (!atStmtBreak()) {
             String rest = consumeRawUntilSemi();

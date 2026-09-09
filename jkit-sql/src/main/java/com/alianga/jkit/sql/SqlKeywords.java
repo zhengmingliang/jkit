@@ -228,6 +228,7 @@ final class SqlKeywords {
         put("DECLARE", SqlTokenType.DECLARE);
         put("VACUUM", SqlTokenType.VACUUM);
         put("COPY", SqlTokenType.COPY);
+        put("LOAD", SqlTokenType.LOAD);
         put("HANDLER", SqlTokenType.HANDLER);
         put("PREPARE", SqlTokenType.PREPARE);
         put("EXECUTE", SqlTokenType.EXECUTE);

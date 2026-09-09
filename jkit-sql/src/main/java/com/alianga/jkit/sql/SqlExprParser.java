@@ -448,6 +448,13 @@ final class SqlExprParser {
         SqlInExpr in = new SqlInExpr();
         in.setExpr(left);
         in.setNot(not);
+        // MyBatis 等：IN :types / IN ? 可不写括号（单一绑定即整个列表）
+        if (p.is(SqlTokenType.NAMED_BIND) || p.is(SqlTokenType.BIND)) {
+            List<SqlExpr> values = new ArrayList<SqlExpr>(1);
+            values.add(parsePrimary());
+            in.setValues(values);
+            return in;
+        }
         p.expect(SqlTokenType.LPAREN);
         if (p.isQueryStart()) {
             in.setSubquery(p.parseStatement());
