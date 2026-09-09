@@ -747,6 +747,11 @@ final class SqlExprParser {
             fn.addArgument(parseExpr());
             if (p.match(SqlTokenType.FROM)) {
                 fn.addArgument(parseExpr());
+            } else if (p.match(SqlTokenType.COMMA)) {
+                // SQLite：trim(X, Y) 去掉两端出现在 Y 中的字符
+                do {
+                    fn.addArgument(parseExpr());
+                } while (p.match(SqlTokenType.COMMA));
             }
         }
         p.expect(SqlTokenType.RPAREN);

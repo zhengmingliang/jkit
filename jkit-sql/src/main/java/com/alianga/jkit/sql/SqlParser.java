@@ -880,8 +880,24 @@ public final class SqlParser {
     }
 
     boolean identLike() {
-        return is(SqlTokenType.IDENT) || (token.type() != null && token.type().keyword()
+        return is(SqlTokenType.IDENT) || isWordOperatorIdent()
+                || (token.type() != null && token.type().keyword()
                 && !isAliasStop(token.type()));
+    }
+
+    /**
+     * {@code PERCENT} 关键字与 {@code %} 运算符共用 {@link SqlTokenType#PERCENT}，
+     * 后者 {@code keyword()==false}；词形式（长度大于 1）在标识符位置应可作列名。
+     */
+    boolean isWordOperatorIdent() {
+        if (token == null || token.type() == null) {
+            return false;
+        }
+        if (token.type() != SqlTokenType.PERCENT) {
+            return false;
+        }
+        String t = token.text();
+        return t != null && t.length() > 1;
     }
 
     boolean isIdent(String word) {
@@ -889,7 +905,7 @@ public final class SqlParser {
     }
 
     String consumeIdentRaw() {
-        if (!(is(SqlTokenType.IDENT) || token.type().keyword())) {
+        if (!(is(SqlTokenType.IDENT) || isWordOperatorIdent() || token.type().keyword())) {
             throw error("expected identifier");
         }
         String raw = token.text();

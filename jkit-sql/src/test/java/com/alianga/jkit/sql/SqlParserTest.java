@@ -2328,6 +2328,35 @@ public class SqlParserTest {
         assertTrue(((SqlSimpleStatement) batch.get(3)).text().toUpperCase().startsWith("DELIMITER"));
     }
 
+    /**
+     * 词法 peek 不得污染 parser 当前记号：DATE/TIMESTAMP 函数、MIN(Date)、列名 percent、SQLite trim(X,Y)。
+     */
+    @Test
+    public void dateTimestampFunctionAndPercentIdentAndSqliteTrim() {
+        assertEquals(SqlStatementType.SELECT,
+                SQL.parse("SELECT date(rental_date) FROM rental").type());
+        assertEquals(SqlStatementType.SELECT,
+                SQL.parse("SELECT DATE() FROM t").type());
+        assertEquals(SqlStatementType.SELECT,
+                SQL.parse("SELECT datetime(x, 'localtime') FROM t").type());
+        assertEquals(SqlStatementType.SELECT,
+                SQL.parse("SELECT MIN(Date) FROM works").type());
+        assertEquals(SqlStatementType.SELECT,
+                SQL.parse("SELECT T2.percent FROM Vote AS T2").type());
+        assertEquals(SqlStatementType.SELECT,
+                SQL.parse("SELECT SUM(IIF(timestamp = 'x', 1, 0)) FROM events").type());
+        assertEquals(SqlStatementType.SELECT,
+                SQL.parse("SELECT REPLACE(trim(total_gross, '$'), ',', '') FROM movies").type());
+        assertEquals(SqlStatementType.SELECT,
+                SQL.parse("SELECT strftime('%J', date('now')) FROM t").type());
+        // 类型字面量 DATE '...' 仍可用
+        assertEquals(SqlStatementType.SELECT,
+                SQL.parse("SELECT DATE '2020-01-01' FROM dual", SqlDialect.POSTGRES).type());
+        // TOP n PERCENT 仍可用
+        assertEquals(SqlStatementType.SELECT,
+                SQL.parse("SELECT TOP 10 PERCENT id FROM t", SqlDialect.SQLSERVER).type());
+    }
+
     @Test
     public void setPassword() {
         SqlSimpleStatement forUser = (SqlSimpleStatement) SQL.parse(

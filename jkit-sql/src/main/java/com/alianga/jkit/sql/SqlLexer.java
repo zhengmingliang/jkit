@@ -144,7 +144,12 @@ public final class SqlLexer {
     public SqlToken next() {
         if (peeked) {
             peeked = false;
-            return peekBuf;
+            // 复制到 tokA：parser.token 可能仍引用上次返回的 peekBuf(tokB)，
+            // 若直接返回 tokB，后续 peek() 的 scanInto(tokB) 会就地污染当前记号
+            // （典型症状：DATE/TIMESTAMP 函数调用、MIN(Date) 等被打成 unexpected token）。
+            tokA.copyFrom(peekBuf);
+            peekBuf = null;
+            return tokA;
         }
         scanInto(tokA);
         return tokA;
