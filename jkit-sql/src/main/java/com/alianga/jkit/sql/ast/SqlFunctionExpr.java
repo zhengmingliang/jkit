@@ -13,6 +13,8 @@ import java.util.List;
  */
 public final class SqlFunctionExpr extends SqlExpr {
     private SqlIdentifier name;
+    /** ClickHouse 参数化聚合首组括号：{@code windowFunnel(n)(...)} 中的 {@code n}。 */
+    private List<SqlExpr> parameters;
     private List<SqlExpr> arguments;
     private boolean distinct;
     private SqlExpr over;
@@ -40,6 +42,33 @@ public final class SqlFunctionExpr extends SqlExpr {
      */
     public void setName(SqlIdentifier name) {
         this.name = name;
+    }
+
+    /**
+     * @return ClickHouse 参数化函数首组参数，可空
+     * @since 2.0.1
+     */
+    public List<SqlExpr> parameters() {
+        if (parameters == null) {
+            parameters = new ArrayList<SqlExpr>(2);
+        }
+        return parameters;
+    }
+
+    /**
+     * @param parameters 首组参数
+     * @since 2.0.1
+     */
+    public void setParameters(List<SqlExpr> parameters) {
+        this.parameters = parameters;
+    }
+
+    /**
+     * @return 是否含参数化首组括号
+     * @since 2.0.1
+     */
+    public boolean hasParameters() {
+        return parameters != null && !parameters.isEmpty();
     }
 
     /**
@@ -215,6 +244,7 @@ public final class SqlFunctionExpr extends SqlExpr {
     @Override
     protected void acceptChildren(SqlVisitor visitor) {
         child(visitor, name);
+        children(visitor, parameters);
         children(visitor, arguments);
         children(visitor, orderBy);
         child(visitor, separator);

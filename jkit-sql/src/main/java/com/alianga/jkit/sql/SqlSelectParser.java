@@ -249,6 +249,10 @@ final class SqlSelectParser {
         if (p.match(SqlTokenType.FROM)) {
             select.setFrom(parseJoinedTable());
         }
+        // Oracle MODEL 子句（FROM 之后、WHERE 之前）
+        if (p.isIdent("MODEL")) {
+            select.setModelClause(consumeModelClause());
+        }
         if (p.match(SqlTokenType.WHERE)) {
             select.setWhere(p.exprParser.parseExpr());
         }
@@ -307,23 +311,28 @@ final class SqlSelectParser {
         // MySQL：INTO 也可出现在 FROM/WHERE/ORDER/LIMIT 之后（与 SELECT 列表后 INTO 二选一）
         parseSelectInto(select);
         if (p.match(SqlTokenType.FOR)) {
-            p.expect(SqlTokenType.UPDATE);
-            select.setForUpdate(true);
-            if (p.match(SqlTokenType.OF)) {
-                do {
-                    select.forUpdateOf().add(p.parseName());
-                } while (p.match(SqlTokenType.COMMA));
-            }
-            if (p.match(SqlTokenType.NOWAIT)) {
-                select.setForUpdateWait("NOWAIT");
-            } else if (p.match(SqlTokenType.SKIP)) {
-                p.expect(SqlTokenType.LOCKED);
-                select.setForUpdateWait("SKIP LOCKED");
-            } else if (!p.is(SqlTokenType.SEMICOLON) && !p.is(SqlTokenType.EOF)
-                    && !p.is(SqlTokenType.UNION) && !p.is(SqlTokenType.INTERSECT)
-                    && !p.is(SqlTokenType.EXCEPT) && !p.is(SqlTokenType.MINUS)
-                    && !p.is(SqlTokenType.LOCK) && !SqlParser.isAliasStop(p.token.type())) {
-                select.setForUpdateTail(p.consumeRawUntilClause());
+            if (p.isIdent("SYSTEM_TIME")) {
+                // 时态表查询更常见于表级；此处兜底吞掉残留 FOR SYSTEM_TIME …
+                select.setForUpdateTail("SYSTEM_TIME " + consumeSystemTimeBody());
+            } else {
+                p.expect(SqlTokenType.UPDATE);
+                select.setForUpdate(true);
+                if (p.match(SqlTokenType.OF)) {
+                    do {
+                        select.forUpdateOf().add(p.parseName());
+                    } while (p.match(SqlTokenType.COMMA));
+                }
+                if (p.match(SqlTokenType.NOWAIT)) {
+                    select.setForUpdateWait("NOWAIT");
+                } else if (p.match(SqlTokenType.SKIP)) {
+                    p.expect(SqlTokenType.LOCKED);
+                    select.setForUpdateWait("SKIP LOCKED");
+                } else if (!p.is(SqlTokenType.SEMICOLON) && !p.is(SqlTokenType.EOF)
+                        && !p.is(SqlTokenType.UNION) && !p.is(SqlTokenType.INTERSECT)
+                        && !p.is(SqlTokenType.EXCEPT) && !p.is(SqlTokenType.MINUS)
+                        && !p.is(SqlTokenType.LOCK) && !SqlParser.isAliasStop(p.token.type())) {
+                    select.setForUpdateTail(p.consumeRawUntilClause());
+                }
             }
         }
         if (p.is(SqlTokenType.LOCK)) {
@@ -616,8 +625,18 @@ final class SqlSelectParser {
             SqlTable table = SqlTable.of(name);
             parseTablePartition(table);
             parseTableHints(table);
-            parseTableAlias(table);
+            if (p.is(SqlTokenType.FOR) && p.lexer.peek().textEqualsIgnoreCase("SYSTEM_TIME")) {
+                table.setTemporalClause(consumeForSystemTimeClause());
+                parseTableAlias(table);
+            } else if (p.is(SqlTokenType.AS) && p.lexer.peek().textEqualsIgnoreCase("OF")) {
+                table.setTemporalClause(consumeAsOfClause());
+                // AS OF 不是别名；其后仍可能有别名
+                parseTableAlias(table);
+            } else {
+                parseTableAlias(table);
+            }
             parseTableSample(table);
+            parseMatchRecognize(table);
             return table;
         }
         if (lateral) {
@@ -670,6 +689,122 @@ final class SqlSelectParser {
         join.setLeft(left);
         join.setRight(ft);
         return join;
+    }
+
+    private void parseMatchRecognize(SqlTable table) {
+        if (!p.isIdent("MATCH_RECOGNIZE")) {
+            return;
+        }
+        p.next();
+        p.expect(SqlTokenType.LPAREN);
+        table.setMatchRecognize(p.skipBalancedParensContent());
+        parseTableAlias(table);
+    }
+
+    private String consumeAsOfClause() {
+        int start = p.token.start();
+        p.next(); // AS
+        // OF
+        p.next();
+        // TIMESTAMP | SCN | 其他
+        if (p.is(SqlTokenType.TIMESTAMP) || p.isIdent("SCN") || p.identLike()) {
+            p.next();
+        }
+        if (p.match(SqlTokenType.LPAREN)) {
+            p.skipBalancedParensContent();
+        } else if (!p.is(SqlTokenType.EOF) && !p.is(SqlTokenType.SEMICOLON)
+                && !SqlParser.isAliasStop(p.token.type())) {
+            p.exprParser.parseExpr();
+        }
+        return p.lexer.rawSlice(start, p.token.start()).trim();
+    }
+
+    private String consumeForSystemTimeClause() {
+        int start = p.token.start();
+        p.next(); // FOR
+        p.next(); // SYSTEM_TIME
+        consumeSystemTimeBody();
+        return p.lexer.rawSlice(start, p.token.start()).trim();
+    }
+
+    /** SYSTEM_TIME 之后：AS OF expr / BETWEEN … / FROM … TO … / ALL */
+    private String consumeSystemTimeBody() {
+        int start = p.token.start();
+        if (p.isIdent("ALL")) {
+            p.next();
+        } else if (p.match(SqlTokenType.AS)) {
+            // OF 是关键字 SqlTokenType.OF
+            boolean of = p.match(SqlTokenType.OF);
+            if (!of && p.isIdent("OF")) {
+                p.next();
+                of = true;
+            }
+            if (of) {
+                if (p.match(SqlTokenType.LPAREN)) {
+                    p.skipBalancedParensContent();
+                } else {
+                    p.exprParser.parseExpr();
+                }
+            }
+        } else if (p.isIdent("BETWEEN") || p.is(SqlTokenType.FROM)) {
+            int depth = 0;
+            while (!p.is(SqlTokenType.EOF) && !p.is(SqlTokenType.SEMICOLON)) {
+                if (depth == 0 && isTemporalStop()) {
+                    break;
+                }
+                if (p.is(SqlTokenType.LPAREN)) {
+                    depth++;
+                } else if (p.is(SqlTokenType.RPAREN)) {
+                    depth--;
+                }
+                p.next();
+            }
+        }
+        return p.lexer.rawSlice(start, p.token.start()).trim();
+    }
+
+    private boolean isTemporalStop() {
+        return p.is(SqlTokenType.WHERE) || p.is(SqlTokenType.GROUP) || p.is(SqlTokenType.HAVING)
+                || p.is(SqlTokenType.ORDER) || p.is(SqlTokenType.LIMIT) || p.is(SqlTokenType.OFFSET)
+                || p.is(SqlTokenType.FETCH) || p.is(SqlTokenType.UNION) || p.is(SqlTokenType.INTERSECT)
+                || p.is(SqlTokenType.EXCEPT) || p.is(SqlTokenType.MINUS) || p.is(SqlTokenType.WINDOW)
+                || p.is(SqlTokenType.FOR) || p.is(SqlTokenType.LOCK) || p.is(SqlTokenType.START)
+                || p.is(SqlTokenType.CONNECT) || p.isIdent("MODEL") || p.isIdent("DISTRIBUTE")
+                || p.isIdent("CLUSTER") || p.isIdent("SORT")
+                || (p.is(SqlTokenType.IDENT) && p.token.textEqualsIgnoreCase("OPTION"));
+    }
+
+    private String consumeModelClause() {
+        int start = p.token.start();
+        p.next(); // MODEL
+        int depthParen = 0;
+        int depthBracket = 0;
+        while (!p.is(SqlTokenType.EOF) && !p.is(SqlTokenType.SEMICOLON)) {
+            if (depthParen == 0 && depthBracket == 0 && isModelStop()) {
+                break;
+            }
+            if (p.is(SqlTokenType.LPAREN)) {
+                depthParen++;
+            } else if (p.is(SqlTokenType.RPAREN)) {
+                depthParen--;
+            } else if (p.is(SqlTokenType.LBRACKET)) {
+                depthBracket++;
+            } else if (p.is(SqlTokenType.RBRACKET)) {
+                depthBracket--;
+            }
+            p.next();
+        }
+        return p.lexer.rawSlice(start, p.token.start()).trim();
+    }
+
+    private boolean isModelStop() {
+        return p.is(SqlTokenType.WHERE) || p.is(SqlTokenType.GROUP) || p.is(SqlTokenType.HAVING)
+                || p.is(SqlTokenType.ORDER) || p.is(SqlTokenType.LIMIT) || p.is(SqlTokenType.OFFSET)
+                || p.is(SqlTokenType.FETCH) || p.is(SqlTokenType.UNION) || p.is(SqlTokenType.INTERSECT)
+                || p.is(SqlTokenType.EXCEPT) || p.is(SqlTokenType.MINUS) || p.is(SqlTokenType.WINDOW)
+                || p.is(SqlTokenType.FOR) || p.is(SqlTokenType.LOCK) || p.is(SqlTokenType.START)
+                || p.is(SqlTokenType.CONNECT)
+                || (p.is(SqlTokenType.IDENT) && p.token.textEqualsIgnoreCase("OPTION"));
     }
 
     private void parseHiveDistributeSort(SqlSelect select) {

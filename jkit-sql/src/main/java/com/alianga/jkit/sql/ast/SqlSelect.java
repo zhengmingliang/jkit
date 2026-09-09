@@ -28,6 +28,8 @@ public final class SqlSelect extends SqlStatement {
     private String distributeBy;
     private String sortBy;
     private String clusterBy;
+    /** Oracle {@code MODEL …} 子句原文（含 MODEL 关键字）。 */
+    private String modelClause;
     private SqlExpr having;
     private final List<SqlOrderByItem> orderBy = new ArrayList<SqlOrderByItem>(2);
     private SqlLimit limit;
@@ -296,6 +298,22 @@ public final class SqlSelect extends SqlStatement {
      */
     public void setClusterBy(String clusterBy) {
         this.clusterBy = clusterBy;
+    }
+
+    /**
+     * @return Oracle {@code MODEL …} 原文，可空
+     * @since 2.0.1
+     */
+    public String modelClause() {
+        return modelClause;
+    }
+
+    /**
+     * @param modelClause MODEL 子句原文
+     * @since 2.0.1
+     */
+    public void setModelClause(String modelClause) {
+        this.modelClause = modelClause;
     }
 
     /**

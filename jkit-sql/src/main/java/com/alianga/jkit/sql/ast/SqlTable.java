@@ -16,6 +16,10 @@ public final class SqlTable extends SqlTableSource {
     private String indexHint;
     private String optimizerHint;
     private String sampleClause;
+    /** Oracle {@code AS OF TIMESTAMP|SCN …} / SQL Server {@code FOR SYSTEM_TIME …} 原文。 */
+    private String temporalClause;
+    /** Oracle {@code MATCH_RECOGNIZE (...)} 括号内原文（不含关键字与外层括号）。 */
+    private String matchRecognize;
     private final List<SqlIdentifier> partitions = new ArrayList<SqlIdentifier>(2);
 
     /**
@@ -86,6 +90,38 @@ public final class SqlTable extends SqlTableSource {
      */
     public void setSampleClause(String sampleClause) {
         this.sampleClause = sampleClause;
+    }
+
+    /**
+     * @return 闪回 / 时态表查询子句原文，可空
+     * @since 2.0.1
+     */
+    public String temporalClause() {
+        return temporalClause;
+    }
+
+    /**
+     * @param temporalClause {@code AS OF …} / {@code FOR SYSTEM_TIME …}
+     * @since 2.0.1
+     */
+    public void setTemporalClause(String temporalClause) {
+        this.temporalClause = temporalClause;
+    }
+
+    /**
+     * @return {@code MATCH_RECOGNIZE} 括号内原文，可空
+     * @since 2.0.1
+     */
+    public String matchRecognize() {
+        return matchRecognize;
+    }
+
+    /**
+     * @param matchRecognize 括号内原文
+     * @since 2.0.1
+     */
+    public void setMatchRecognize(String matchRecognize) {
+        this.matchRecognize = matchRecognize;
     }
 
     /**

@@ -40,6 +40,8 @@
 
 ### 修复
 
+- `jkit-sql`：ClickHouse 参数化函数 `fn(params)(args)`（如 `windowFunnel(n)(...)`）；Oracle `MODEL` / `MATCH_RECOGNIZE` / `AS OF TIMESTAMP|SCN`；SQL Server `FOR SYSTEM_TIME AS OF`（表级时态子句，轻量原文进 AST）。
+
 - `jkit-sql`：点号后单引号名可作引用标识符（`T.'Group'`）；`INTERVAL` 仅吸收时间单位（不吞 `OR`/`AND`）；聚合内 `ORDER BY`（`ARRAY_AGG(x ORDER BY y)`）；`PIVOT`/`UNPIVOT`；Hive `LATERAL VIEW` / `DISTRIBUTE BY` / `SORT BY` / `CLUSTER BY`；`GROUP BY GROUPING SETS|CUBE|ROLLUP(...)`；Oracle `ORDER SIBLINGS BY`。
 
 - `jkit-sql`：修复词法 `peek()` 污染当前记号（`next()` 消费预读后应拷贝到 `tokA`），使 `date()`/`datetime()`/`DATE()`/`MIN(Date)`/`IIF(timestamp=…)` 等可解析；允许词形式 `PERCENT` 作标识符（与 `%` 运算符共用 token）；支持 SQLite `trim(X, Y)` 逗号多参。

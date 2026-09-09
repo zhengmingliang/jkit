@@ -239,6 +239,10 @@ public final class SqlFormatter {
             sp();
             writeFrom(select.from());
         }
+        if (select.modelClause() != null && select.modelClause().length() > 0) {
+            nl();
+            out.append(select.modelClause());
+        }
         if (select.where() != null) {
             nl();
             kw("WHERE");
@@ -988,6 +992,10 @@ public final class SqlFormatter {
                 sp();
                 out.append(table.indexHint());
             }
+            if (table.temporalClause() != null) {
+                sp();
+                out.append(table.temporalClause());
+            }
             if (table.sampleClause() != null) {
                 sp();
                 out.append(table.sampleClause());
@@ -1102,6 +1110,17 @@ public final class SqlFormatter {
             if (!source.columnAliases().isEmpty()) {
                 out.append('(');
                 commaIdents(source.columnAliases());
+                out.append(')');
+            }
+        }
+        if (source instanceof SqlTable) {
+            SqlTable t = (SqlTable) source;
+            if (t.matchRecognize() != null) {
+                sp();
+                out.append("MATCH_RECOGNIZE");
+                sp();
+                out.append('(');
+                out.append(t.matchRecognize());
                 out.append(')');
             }
         }
@@ -1468,6 +1487,11 @@ public final class SqlFormatter {
             return;
         }
         writeExpr(fn.name());
+        if (fn.hasParameters()) {
+            out.append('(');
+            commaFunctionArgs(fn.parameters());
+            out.append(')');
+        }
         out.append('(');
         if (fn.distinct()) {
             kw("DISTINCT");
@@ -1588,7 +1612,7 @@ public final class SqlFormatter {
     private static boolean canWriteTypedLiteral(SqlFunctionExpr fn) {
         if (fn.distinct() || fn.over() != null || fn.filter() != null || fn.against() != null
                 || fn.separator() != null || fn.usingCharset() || fn.withinGroup()
-                || fn.keepClause() != null
+                || fn.keepClause() != null || fn.hasParameters()
                 || (fn.orderBy() != null && !fn.orderBy().isEmpty()) || fn.aggOption() != null) {
             return false;
         }

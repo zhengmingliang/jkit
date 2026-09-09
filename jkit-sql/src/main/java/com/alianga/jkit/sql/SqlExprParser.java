@@ -384,6 +384,25 @@ final class SqlExprParser {
             p.selectParser.parseOrderBy(fn.orderBy());
         }
         p.expect(SqlTokenType.RPAREN);
+        // ClickHouse 参数化聚合：windowFunnel(n)(ts, cond…) / quantile(0.9)(x)
+        if (p.is(SqlTokenType.LPAREN)) {
+            java.util.ArrayList<SqlExpr> params = new java.util.ArrayList<SqlExpr>(fn.arguments());
+            fn.setParameters(params);
+            fn.arguments().clear();
+            p.next();
+            if (!p.is(SqlTokenType.RPAREN)) {
+                do {
+                    if (p.is(SqlTokenType.STAR)) {
+                        fn.addArgument(parsePrimary());
+                    } else if (p.isQueryStart()) {
+                        fn.addArgument(SqlQueryExpr.of(p.parseStatement()));
+                    } else {
+                        fn.addArgument(parseExpr());
+                    }
+                } while (p.match(SqlTokenType.COMMA));
+            }
+            p.expect(SqlTokenType.RPAREN);
+        }
         if (SqlParser.equalsIgnoreCase(fnName, "MATCH")) {
             parseMatchAgainst(fn);
         }
