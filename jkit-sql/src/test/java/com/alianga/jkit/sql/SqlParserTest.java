@@ -2357,6 +2357,24 @@ public class SqlParserTest {
                 SQL.parse("SELECT TOP 10 PERCENT id FROM t", SqlDialect.SQLSERVER).type());
     }
 
+
+    /**
+     * 词形式 MINUS 不作二元减号；Oracle KEEP (DENSE_RANK ...) 挂在聚合后。
+     */
+    @Test
+    public void oracleMinusSetOpAndKeepDenseRank() {
+        assertEquals(SqlStatementType.SELECT,
+                SQL.parse("SELECT a FROM t WHERE x != 'y' MINUS SELECT b FROM t2", SqlDialect.ORACLE).type());
+        assertEquals(SqlStatementType.SELECT,
+                SQL.parse("SELECT 1 FROM t MINUS SELECT 2 FROM t", SqlDialect.ORACLE).type());
+        assertEquals(SqlStatementType.SELECT,
+                SQL.parse("SELECT MAX(LANGUAGE) KEEP (DENSE_RANK LAST ORDER BY PERCENTAGE) FROM t",
+                        SqlDialect.ORACLE).type());
+        // 符号减号仍可用
+        assertEquals(SqlStatementType.SELECT,
+                SQL.parse("SELECT 1 - 2 FROM t").type());
+    }
+
     @Test
     public void setPassword() {
         SqlSimpleStatement forUser = (SqlSimpleStatement) SQL.parse(

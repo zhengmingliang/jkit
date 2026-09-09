@@ -1453,6 +1453,12 @@ public final class SqlFormatter {
     }
 
     private void writeFunctionSuffix(SqlFunctionExpr fn) {
+        if (fn.keepClause() != null && fn.keepClause().length() > 0) {
+            sp();
+            out.append("KEEP");
+            sp();
+            out.append(fn.keepClause());
+        }
         if (fn.withinGroup() && fn.orderBy() != null && !fn.orderBy().isEmpty()) {
             sp();
             kw("WITHIN");
@@ -1497,6 +1503,7 @@ public final class SqlFormatter {
     private static boolean canWriteTypedLiteral(SqlFunctionExpr fn) {
         if (fn.distinct() || fn.over() != null || fn.filter() != null || fn.against() != null
                 || fn.separator() != null || fn.usingCharset() || fn.withinGroup()
+                || fn.keepClause() != null
                 || (fn.orderBy() != null && !fn.orderBy().isEmpty()) || fn.aggOption() != null) {
             return false;
         }

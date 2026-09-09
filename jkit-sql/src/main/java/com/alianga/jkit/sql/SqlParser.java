@@ -900,6 +900,14 @@ public final class SqlParser {
         return t != null && t.length() > 1;
     }
 
+    /**
+     * 运算符记号（{@code -} / {@code %} / {@code +}）与同名关键字（{@code MINUS} / {@code PERCENT}）共用 type；
+     * 算术上下文只认符号形式（原文长度 1）。
+     */
+    boolean isSymbolOp(SqlTokenType type) {
+        return is(type) && token.length() <= 1;
+    }
+
     boolean isIdent(String word) {
         return is(SqlTokenType.IDENT) && token.textEqualsIgnoreCase(word);
     }

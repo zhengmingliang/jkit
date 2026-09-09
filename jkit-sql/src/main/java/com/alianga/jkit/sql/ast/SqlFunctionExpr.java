@@ -20,6 +20,9 @@ public final class SqlFunctionExpr extends SqlExpr {
     private String aggOption;
     private List<SqlOrderByItem> orderBy;
     private boolean withinGroup;
+
+    /** Oracle KEEP (...) 子句原文（含括号）。 */
+    private String keepClause;
     private SqlExpr separator;
     private boolean usingCharset;
     private SqlExpr against;
@@ -218,5 +221,21 @@ public final class SqlFunctionExpr extends SqlExpr {
         child(visitor, against);
         child(visitor, filter);
         child(visitor, over);
+    }
+
+    /**
+     * @return Oracle {@code KEEP (...)} 原文，无则 null
+     * @since 2.0.1
+     */
+    public String keepClause() {
+        return keepClause;
+    }
+
+    /**
+     * @param keepClause KEEP 子句（建议含括号）
+     * @since 2.0.1
+     */
+    public void setKeepClause(String keepClause) {
+        this.keepClause = keepClause;
     }
 }

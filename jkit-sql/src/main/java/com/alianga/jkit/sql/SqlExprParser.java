@@ -86,8 +86,8 @@ final class SqlExprParser {
 
     private SqlExpr parseAdd() {
         SqlExpr left = parseMul();
-        while (p.is(SqlTokenType.PLUS) || p.is(SqlTokenType.MINUS)) {
-            SqlBinaryOp op = p.is(SqlTokenType.PLUS) ? SqlBinaryOp.PLUS : SqlBinaryOp.MINUS;
+        while (p.isSymbolOp(SqlTokenType.PLUS) || p.isSymbolOp(SqlTokenType.MINUS)) {
+            SqlBinaryOp op = p.isSymbolOp(SqlTokenType.PLUS) ? SqlBinaryOp.PLUS : SqlBinaryOp.MINUS;
             p.next();
             left = SqlBinaryExpr.of(left, op, parseMul());
         }
@@ -399,6 +399,14 @@ final class SqlExprParser {
             fn.setFilter(parseExpr());
             p.expect(SqlTokenType.RPAREN);
         }
+        // Oracle：MAX(x) KEEP (DENSE_RANK LAST ORDER BY y)
+        if (p.isIdent("KEEP")) {
+            p.next();
+            p.expect(SqlTokenType.LPAREN);
+            // skipBalancedParensContent 已消费配对右括号
+            String keep = p.skipBalancedParensContent();
+            fn.setKeepClause("(" + keep + ")");
+        }
         if (p.match(SqlTokenType.OVER)) {
             fn.setOver(parseOver());
         }
@@ -492,7 +500,7 @@ final class SqlExprParser {
         SqlExpr left = parseUnary();
         // 自定义 DELIMITER（如 //）与除法同形：语句终止处不再当二元运算符
         while (!p.atStmtBreak() && (p.is(SqlTokenType.STAR) || p.is(SqlTokenType.SLASH)
-                || p.is(SqlTokenType.PERCENT) || p.is(SqlTokenType.DIV) || p.is(SqlTokenType.MOD))) {
+                || p.isSymbolOp(SqlTokenType.PERCENT) || p.is(SqlTokenType.DIV) || p.is(SqlTokenType.MOD))) {
             SqlBinaryOp op;
             if (p.is(SqlTokenType.STAR)) {
                 op = SqlBinaryOp.MUL;
@@ -760,11 +768,11 @@ final class SqlExprParser {
     }
 
     private SqlExpr parseUnary() {
-        if (p.is(SqlTokenType.MINUS)) {
+        if (p.isSymbolOp(SqlTokenType.MINUS)) {
             p.next();
             return SqlUnaryExpr.of(SqlUnaryExpr.Op.MINUS, parseUnary());
         }
-        if (p.is(SqlTokenType.PLUS)) {
+        if (p.isSymbolOp(SqlTokenType.PLUS)) {
             p.next();
             return SqlUnaryExpr.of(SqlUnaryExpr.Op.PLUS, parseUnary());
         }
