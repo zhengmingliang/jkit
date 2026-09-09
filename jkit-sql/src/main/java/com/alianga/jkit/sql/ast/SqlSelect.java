@@ -28,6 +28,9 @@ public final class SqlSelect extends SqlStatement {
     private boolean forUpdate;
     private boolean lockInShare;
     private String forUpdateTail;
+
+    /** SQL Server OPTION (...) 查询提示原文（含括号）。 */
+    private String queryOption;
     private final List<SqlIdentifier> forUpdateOf = new ArrayList<SqlIdentifier>(2);
     private String forUpdateWait;
     private SqlSelect union;
@@ -284,6 +287,22 @@ public final class SqlSelect extends SqlStatement {
      */
     public void setForUpdateTail(String forUpdateTail) {
         this.forUpdateTail = forUpdateTail;
+    }
+
+    /**
+     * @return SQL Server {@code OPTION (...)} 原文，无则 null
+     * @since 2.0.1
+     */
+    public String queryOption() {
+        return queryOption;
+    }
+
+    /**
+     * @param queryOption OPTION 子句（建议含括号）
+     * @since 2.0.1
+     */
+    public void setQueryOption(String queryOption) {
+        this.queryOption = queryOption;
     }
 
     /**

@@ -335,6 +335,12 @@ public final class SqlFormatter {
             sp();
             kw("MODE");
         }
+        if (select.queryOption() != null && select.queryOption().length() > 0) {
+            sp();
+            out.append("OPTION");
+            sp();
+            out.append(select.queryOption());
+        }
         if (select.union() != null) {
             nl();
             kw(select.unionOp() == null ? "UNION" : select.unionOp());

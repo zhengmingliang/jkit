@@ -2388,6 +2388,24 @@ public class SqlParserTest {
                 SQL.parse("SELECT a AS b.c FROM t").type());
     }
 
+
+    /**
+     * PG {@code ::} 紧绑定、INTERVAL 字面量；SQL Server WITHIN GROUP+OVER、OPTION。
+     */
+    @Test
+    public void pgCastIntervalAndSsPercentileOption() {
+        assertEquals(SqlStatementType.SELECT,
+                SQL.parse("SELECT COUNT(*)::numeric / 2 FROM t", SqlDialect.POSTGRES).type());
+        assertEquals(SqlStatementType.SELECT,
+                SQL.parse("SELECT CASE WHEN a - b > INTERVAL '30 minutes' THEN 1 ELSE 0 END FROM t",
+                        SqlDialect.POSTGRES).type());
+        assertEquals(SqlStatementType.SELECT,
+                SQL.parse("SELECT DISTINCT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY amount) OVER () FROM orders",
+                        SqlDialect.SQLSERVER).type());
+        assertEquals(SqlStatementType.SELECT,
+                SQL.parse("SELECT 1 FROM t OPTION (MAXRECURSION 100)", SqlDialect.SQLSERVER).type());
+    }
+
     @Test
     public void setPassword() {
         SqlSimpleStatement forUser = (SqlSimpleStatement) SQL.parse(

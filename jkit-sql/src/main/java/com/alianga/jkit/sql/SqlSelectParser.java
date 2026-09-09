@@ -307,6 +307,14 @@ final class SqlSelectParser {
             p.expect(SqlTokenType.MODE);
             select.setLockInShare(true);
         }
+        // SQL Server：OPTION (MAXRECURSION 100) 等查询提示
+        if (p.token.textEqualsIgnoreCase("OPTION")
+                && (p.is(SqlTokenType.IDENT) || (p.token.type() != null && p.token.type().keyword()))) {
+            p.next();
+            p.expect(SqlTokenType.LPAREN);
+            String opt = p.skipBalancedParensContent();
+            select.setQueryOption("(" + opt + ")");
+        }
         parseSelectTail(select);
         return select;
     }

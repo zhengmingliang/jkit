@@ -118,35 +118,27 @@ final class SqlExprParser {
         SqlExpr left = parseAdd();
         while (p.is(SqlTokenType.BIT_AND) || p.is(SqlTokenType.BIT_OR) || p.is(SqlTokenType.BIT_XOR)
                 || p.is(SqlTokenType.SHIFT_LEFT) || p.is(SqlTokenType.SHIFT_RIGHT)
-                || p.is(SqlTokenType.CONCAT) || p.is(SqlTokenType.JSON_OP) || p.is(SqlTokenType.CAST_OP)) {
+                || p.is(SqlTokenType.CONCAT) || p.is(SqlTokenType.JSON_OP)) {
             SqlTokenType t = p.token.type();
             String opText = p.token.text();
             p.next();
-            if (t == SqlTokenType.CAST_OP) {
-                SqlCastExpr cast = new SqlCastExpr();
-                cast.setExpr(left);
-                cast.setPostgresStyle(true);
-                cast.setDataType(parseDataType());
-                left = cast;
+            SqlBinaryOp op;
+            if (t == SqlTokenType.CONCAT) {
+                op = SqlBinaryOp.CONCAT;
+            } else if (t == SqlTokenType.JSON_OP) {
+                op = jsonOp(opText);
+            } else if (t == SqlTokenType.BIT_AND) {
+                op = SqlBinaryOp.BIT_AND;
+            } else if (t == SqlTokenType.BIT_OR) {
+                op = SqlBinaryOp.BIT_OR;
+            } else if (t == SqlTokenType.BIT_XOR) {
+                op = SqlBinaryOp.BIT_XOR;
+            } else if (t == SqlTokenType.SHIFT_LEFT) {
+                op = SqlBinaryOp.SHIFT_LEFT;
             } else {
-                SqlBinaryOp op;
-                if (t == SqlTokenType.CONCAT) {
-                    op = SqlBinaryOp.CONCAT;
-                } else if (t == SqlTokenType.JSON_OP) {
-                    op = jsonOp(opText);
-                } else if (t == SqlTokenType.BIT_AND) {
-                    op = SqlBinaryOp.BIT_AND;
-                } else if (t == SqlTokenType.BIT_OR) {
-                    op = SqlBinaryOp.BIT_OR;
-                } else if (t == SqlTokenType.BIT_XOR) {
-                    op = SqlBinaryOp.BIT_XOR;
-                } else if (t == SqlTokenType.SHIFT_LEFT) {
-                    op = SqlBinaryOp.SHIFT_LEFT;
-                } else {
-                    op = SqlBinaryOp.SHIFT_RIGHT;
-                }
-                left = SqlBinaryExpr.of(left, op, parseAdd());
+                op = SqlBinaryOp.SHIFT_RIGHT;
             }
+            left = SqlBinaryExpr.of(left, op, parseAdd());
         }
         return left;
     }
@@ -407,9 +399,7 @@ final class SqlExprParser {
             String keep = p.skipBalancedParensContent();
             fn.setKeepClause("(" + keep + ")");
         }
-        if (p.match(SqlTokenType.OVER)) {
-            fn.setOver(parseOver());
-        }
+        // SQL Server / PG：PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY x) [OVER (...)]
         if (p.isIdent("WITHIN")) {
             p.next();
             p.expect(SqlTokenType.GROUP);
@@ -419,6 +409,9 @@ final class SqlExprParser {
             p.selectParser.parseOrderBy(fn.orderBy());
             p.expect(SqlTokenType.RPAREN);
             fn.setWithinGroup(true);
+        }
+        if (p.match(SqlTokenType.OVER)) {
+            fn.setOver(parseOver());
         }
     }
 
@@ -616,7 +609,8 @@ final class SqlExprParser {
             return SqlUnaryExpr.of(SqlUnaryExpr.Op.ORACLE_OUTER_JOIN, expr);
         }
         if (p.is(SqlTokenType.LPAREN) && expr instanceof SqlIdentifier) {
-            return parseFunction((SqlIdentifier) expr);
+            // 不直接 return：后面还要挂 ::type / [下标] / COLLATE 等后缀
+            expr = parseFunction((SqlIdentifier) expr);
         }
         while (p.match(SqlTokenType.LBRACKET)) {
             SqlExpr index = parseExpr();
@@ -625,6 +619,14 @@ final class SqlExprParser {
         }
         if (p.match(SqlTokenType.COLLATE)) {
             expr = SqlBinaryExpr.of(expr, SqlBinaryOp.COLLATE, p.parseName());
+        }
+        // PG ::type 绑定紧于算术（COUNT(*)::numeric / 2）
+        while (p.match(SqlTokenType.CAST_OP)) {
+            SqlCastExpr cast = new SqlCastExpr();
+            cast.setExpr(expr);
+            cast.setPostgresStyle(true);
+            cast.setDataType(parseDataType());
+            expr = cast;
         }
         return expr;
     }
@@ -690,8 +692,16 @@ final class SqlExprParser {
             p.next();
             SqlFunctionExpr fn = new SqlFunctionExpr();
             fn.setName(SqlIdentifier.of("INTERVAL"));
-            fn.addArgument(parsePrimary());
-            if (p.identLike()) {
+            // INTERVAL '30 minutes' / INTERVAL 30 DAY / INTERVAL '1' HOUR
+            if (p.is(SqlTokenType.STRING) || p.is(SqlTokenType.NUMBER)) {
+                fn.addArgument(parsePrimaryInner());
+            } else {
+                fn.addArgument(parsePrimary());
+            }
+            // 仅吸收 DAY/HOUR/MINUTE 等单位；勿吞 THEN/ELSE（CASE 内 INTERVAL '30 minutes'）
+            if (p.identLike() && !p.is(SqlTokenType.THEN) && !p.is(SqlTokenType.ELSE)
+                    && !p.is(SqlTokenType.END) && !p.is(SqlTokenType.WHEN)
+                    && !p.is(SqlTokenType.FROM) && !p.is(SqlTokenType.WHERE)) {
                 fn.addArgument(SqlIdentifier.of(p.consumeIdentRaw()));
             }
             return fn;
