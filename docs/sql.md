@@ -244,7 +244,13 @@ SQL.format(stmt, SqlDialect.MYSQL, true);
 SqlFormatOptions opts = SqlFormatOptions.defaults().quoteIdentifiers(true);
 SQL.format(stmt, SqlDialect.MYSQL, opts);
 SQL.toSqlString(stmt, SqlDialect.POSTGRES, opts);
+
+// 关键字大小写策略（默认 AS_IS = formatter 原生输出，子句/运算符关键字大写）
+SQL.format(stmt, SqlDialect.MYSQL, false,
+        SqlFormatOptions.defaults().keywordCase(SqlKeywordCase.LOWER)); // select ... from ... where ...
 ```
+
+`keywordCase` 覆盖子句、DDL、事务控制与表达式运算符关键字（AND / OR / NOT / LIKE / IN / BETWEEN…）；不影响标识符、字符串字面量与 raw 直通原文（过程体等保真回写）。可与 `quoteIdentifiers` 叠加。
 
 原文已带引号的标识符按方言回写：MySQL 反引号、PostgreSQL/Oracle/ANSI/H2 双引号、SQL Server `[]`。
 开启 `quoteIdentifiers` 后，**未引号**的表/列名也会强制加同套引号。

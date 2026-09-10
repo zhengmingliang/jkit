@@ -64,6 +64,7 @@ import com.alianga.jkit.sql.ast.SqlWindowDefinition;
 import com.alianga.jkit.sql.ast.SqlWithItem;
 
 import java.util.List;
+import java.util.Locale;
 
 /**
  * 把 AST 打回 SQL。pretty 模式换行缩进；compact 模式只保留必要空格。
@@ -80,6 +81,7 @@ public final class SqlFormatter {
     private final boolean pretty;
     private final SqlDialectSpec dialect;
     private final SqlFormatOptions options;
+    private final SqlKeywordCase keywordCase;
     private int indent;
 
     /**
@@ -100,6 +102,7 @@ public final class SqlFormatter {
         this.pretty = pretty;
         this.dialect = dialect == null ? SqlDialect.MYSQL : dialect;
         this.options = options == null ? SqlFormatOptions.defaults() : options;
+        this.keywordCase = this.options.keywordCase();
     }
 
     /**
@@ -394,7 +397,7 @@ public final class SqlFormatter {
         }
         if (select.distributeBy() != null) {
             nl();
-            out.append("DISTRIBUTE");
+            kw("DISTRIBUTE");
             sp();
             kw("BY");
             sp();
@@ -402,7 +405,7 @@ public final class SqlFormatter {
         }
         if (select.clusterBy() != null) {
             nl();
-            out.append("CLUSTER");
+            kw("CLUSTER");
             sp();
             kw("BY");
             sp();
@@ -410,7 +413,7 @@ public final class SqlFormatter {
         }
         if (select.sortBy() != null) {
             nl();
-            out.append("SORT");
+            kw("SORT");
             sp();
             kw("BY");
             sp();
@@ -452,7 +455,7 @@ public final class SqlFormatter {
         }
         if (select.queryOption() != null && select.queryOption().length() > 0) {
             sp();
-            out.append("OPTION");
+            kw("OPTION");
             sp();
             out.append(select.queryOption());
         }
@@ -961,7 +964,7 @@ public final class SqlFormatter {
             sp();
             kw("ON");
             sp();
-            out.append("SCHEDULE");
+            kw("SCHEDULE");
             sp();
             out.append(ddl.eventScheduleKind());
             if (ddl.eventScheduleRaw() != null && ddl.eventScheduleRaw().length() > 0) {
@@ -970,38 +973,38 @@ public final class SqlFormatter {
             }
             if (ddl.eventStarts() != null && ddl.eventStarts().length() > 0) {
                 sp();
-                out.append("STARTS");
+                kw("STARTS");
                 sp();
                 out.append(ddl.eventStarts());
             }
             if (ddl.eventEnds() != null && ddl.eventEnds().length() > 0) {
                 sp();
-                out.append("ENDS");
+                kw("ENDS");
                 sp();
                 out.append(ddl.eventEnds());
             }
             if (ddl.eventOnCompletion() != null && ddl.eventOnCompletion().length() > 0) {
                 sp();
-                out.append("ON");
+                kw("ON");
                 sp();
-                out.append("COMPLETION");
+                kw("COMPLETION");
                 sp();
                 out.append(ddl.eventOnCompletion());
             }
             if (ddl.eventDisableOnSlave()) {
                 sp();
-                out.append("DISABLE");
+                kw("DISABLE");
                 sp();
-                out.append("ON");
+                kw("ON");
                 sp();
-                out.append("SLAVE");
+                kw("SLAVE");
             } else if (ddl.eventEnabled() != null) {
                 sp();
                 out.append(ddl.eventEnabled().booleanValue() ? "ENABLE" : "DISABLE");
             }
             if (ddl.eventComment() != null && ddl.eventComment().length() > 0) {
                 sp();
-                out.append("COMMENT");
+                kw("COMMENT");
                 sp();
                 out.append(ddl.eventComment());
             }
@@ -1037,7 +1040,7 @@ public final class SqlFormatter {
             sp();
             kw("FOR");
             sp();
-            out.append("EACH");
+            kw("EACH");
             sp();
             out.append(ddl.triggerForEach());
         }
@@ -1100,7 +1103,7 @@ public final class SqlFormatter {
         }
         if (ddl.returnsType() != null && ddl.returnsType().length() > 0) {
             sp();
-            out.append("RETURNS");
+            kw("RETURNS");
             sp();
             out.append(ddl.returnsType());
         }
@@ -1251,7 +1254,7 @@ public final class SqlFormatter {
             return;
         }
         if (ex.describe()) {
-            out.append("DESCRIBE");
+            kw("DESCRIBE");
             if (ex.name() != null) {
                 sp();
                 writeExpr(ex.name());
@@ -1262,13 +1265,13 @@ public final class SqlFormatter {
             }
             return;
         }
-        out.append("EXPLAIN");
+        kw("EXPLAIN");
         if (!ex.options().isEmpty()) {
             sp();
             out.append('(');
             boolean needComma = false;
             if (ex.analyze()) {
-                out.append("ANALYZE");
+                kw("ANALYZE");
                 needComma = true;
             }
             for (int i = 0; i < ex.options().size(); i++) {
@@ -1282,7 +1285,7 @@ public final class SqlFormatter {
                 if (needComma) {
                     out.append(", ");
                 }
-                out.append("FORMAT");
+                kw("FORMAT");
                 sp();
                 out.append(ex.format());
             }
@@ -1290,11 +1293,11 @@ public final class SqlFormatter {
         } else {
             if (ex.analyze()) {
                 sp();
-                out.append("ANALYZE");
+                kw("ANALYZE");
             }
             if (ex.format() != null && ex.format().length() > 0) {
                 sp();
-                out.append("FORMAT");
+                kw("FORMAT");
                 out.append('=');
                 out.append(ex.format());
             }
@@ -1316,14 +1319,14 @@ public final class SqlFormatter {
         if (set == null) {
             return;
         }
-        out.append("SET");
+        kw("SET");
         if (set.scope() != null && set.scope().length() > 0) {
             sp();
             out.append(set.scope());
         }
         if ("PASSWORD".equalsIgnoreCase(set.setKind())) {
             sp();
-            out.append("PASSWORD");
+            kw("PASSWORD");
             if (set.raw() != null && set.raw().length() > 0) {
                 sp();
                 out.append(set.raw());
@@ -1377,9 +1380,9 @@ public final class SqlFormatter {
         if (c == null) {
             return;
         }
-        out.append("COMMENT");
+        kw("COMMENT");
         sp();
-        out.append("ON");
+        kw("ON");
         if (c.objectKind() != null && c.objectKind().length() > 0) {
             sp();
             out.append(c.objectKind());
@@ -1390,7 +1393,7 @@ public final class SqlFormatter {
         }
         if (c.comment() != null) {
             sp();
-            out.append("IS");
+            kw("IS");
             sp();
             writeExpr(c.comment());
         }
@@ -1404,7 +1407,7 @@ public final class SqlFormatter {
         if (show == null) {
             return;
         }
-        out.append("SHOW");
+        kw("SHOW");
         if (show.showKind() != null && show.showKind().length() > 0) {
             sp();
             out.append(show.showKind());
@@ -1661,7 +1664,7 @@ public final class SqlFormatter {
             }
             if (t.matchRecognize() != null) {
                 sp();
-                out.append("MATCH_RECOGNIZE");
+                kw("MATCH_RECOGNIZE");
                 sp();
                 out.append('(');
                 writeMatchRecognizeBody(t.matchRecognize());
@@ -1686,7 +1689,7 @@ public final class SqlFormatter {
             }
             return;
         }
-        out.append("MODEL");
+        kw("MODEL");
         if (model.options() != null && model.options().length() > 0) {
             sp();
             out.append(model.options());
@@ -1709,7 +1712,7 @@ public final class SqlFormatter {
         }
         if (!model.dimensionBy().isEmpty()) {
             sp();
-            out.append("DIMENSION");
+            kw("DIMENSION");
             sp();
             kw("BY");
             sp();
@@ -1725,7 +1728,7 @@ public final class SqlFormatter {
         }
         if (!model.measures().isEmpty()) {
             sp();
-            out.append("MEASURES");
+            kw("MEASURES");
             sp();
             out.append('(');
             for (int i = 0; i < model.measures().size(); i++) {
@@ -1739,7 +1742,7 @@ public final class SqlFormatter {
         }
         if (model.rules() != null || !model.ruleEntries().isEmpty()) {
             sp();
-            out.append("RULES");
+            kw("RULES");
             if (model.rulesModifiers() != null && model.rulesModifiers().length() > 0) {
                 sp();
                 out.append(model.rulesModifiers());
@@ -1813,7 +1816,7 @@ public final class SqlFormatter {
             if (needSp) {
                 sp();
             }
-            out.append("MEASURES");
+            kw("MEASURES");
             sp();
             for (int i = 0; i < mr.measures().size(); i++) {
                 if (i > 0) {
@@ -1842,7 +1845,7 @@ public final class SqlFormatter {
             if (needSp) {
                 sp();
             }
-            out.append("PATTERN");
+            kw("PATTERN");
             sp();
             out.append('(');
             out.append(mr.pattern());
@@ -1860,7 +1863,7 @@ public final class SqlFormatter {
             if (needSp) {
                 sp();
             }
-            out.append("DEFINE");
+            kw("DEFINE");
             sp();
             for (int i = 0; i < mr.define().size(); i++) {
                 if (i > 0) {
@@ -1875,7 +1878,7 @@ public final class SqlFormatter {
             if (needSp) {
                 sp();
             }
-            out.append("SUBSET");
+            kw("SUBSET");
             sp();
             for (int i = 0; i < mr.subsets().size(); i++) {
                 if (i > 0) {
@@ -1911,7 +1914,7 @@ public final class SqlFormatter {
         }
         if (decl.kind() == SqlDeclareStatement.Kind.CURSOR) {
             sp();
-            out.append("CURSOR");
+            kw("CURSOR");
             sp();
             kw("FOR");
             if (decl.cursorQuery() != null) {
@@ -1920,7 +1923,7 @@ public final class SqlFormatter {
             }
         } else if (decl.kind() == SqlDeclareStatement.Kind.CONDITION) {
             sp();
-            out.append("CONDITION");
+            kw("CONDITION");
             sp();
             kw("FOR");
             if (decl.conditionFor() != null && decl.conditionFor().length() > 0) {
@@ -1953,7 +1956,7 @@ public final class SqlFormatter {
             out.append(h.action());
         }
         sp();
-        out.append("HANDLER");
+        kw("HANDLER");
         sp();
         kw("FOR");
         for (int i = 0; i < h.conditions().size(); i++) {
@@ -2022,7 +2025,7 @@ public final class SqlFormatter {
             out.append(h.raw());
             return;
         }
-        out.append("HANDLER");
+        kw("HANDLER");
         if (h.table() != null) {
             sp();
             writeExpr(h.table());
@@ -2070,7 +2073,7 @@ public final class SqlFormatter {
             out.append(copy.raw());
             return;
         }
-        out.append("COPY");
+        kw("COPY");
         if (copy.query() != null && copy.query().length() > 0) {
             sp();
             out.append(copy.query());
@@ -2098,7 +2101,7 @@ public final class SqlFormatter {
                     writeExpr(copy.source());
                 }
             } else if ("PROGRAM".equalsIgnoreCase(copy.sourceKind())) {
-                out.append("PROGRAM");
+                kw("PROGRAM");
                 if (copy.source() != null) {
                     sp();
                     writeExpr(copy.source());
@@ -2130,10 +2133,10 @@ public final class SqlFormatter {
             out.append(flush.raw());
             return;
         }
-        out.append("FLUSH");
+        kw("FLUSH");
         if (flush.noWriteToBinlog()) {
             sp();
-            out.append("NO_WRITE_TO_BINLOG");
+            kw("NO_WRITE_TO_BINLOG");
         }
         for (int i = 0; i < flush.options().size(); i++) {
             if (i > 0) {
@@ -2141,7 +2144,7 @@ public final class SqlFormatter {
             }
             sp();
             String opt = flush.options().get(i);
-            out.append(opt);
+            kw(opt);
             if ("TABLES".equalsIgnoreCase(opt)) {
                 for (int j = 0; j < flush.tables().size(); j++) {
                     if (j > 0) {
@@ -2202,10 +2205,10 @@ public final class SqlFormatter {
             return;
         }
         String kind = tx.kind().toUpperCase();
-        out.append(kind);
+        kw(kind);
         if ("RELEASE".equals(kind)) {
             sp();
-            out.append("SAVEPOINT");
+            kw("SAVEPOINT");
             if (tx.savepoint() != null) {
                 sp();
                 writeExpr(tx.savepoint());
@@ -2217,9 +2220,9 @@ public final class SqlFormatter {
             }
         } else if ("ROLLBACK".equals(kind) && tx.toSavepoint()) {
             sp();
-            out.append("TO");
+            kw("TO");
             sp();
-            out.append("SAVEPOINT");
+            kw("SAVEPOINT");
             if (tx.savepoint() != null) {
                 sp();
                 writeExpr(tx.savepoint());
@@ -2242,22 +2245,22 @@ public final class SqlFormatter {
             return;
         }
         if (tx.beginForm()) {
-            out.append("BEGIN");
+            kw("BEGIN");
             if (tx.work()) {
                 sp();
-                out.append("WORK");
+                kw("WORK");
             }
         } else {
-            out.append("START");
+            kw("START");
             sp();
-            out.append("TRANSACTION");
+            kw("TRANSACTION");
         }
         boolean needComma = false;
         if (tx.isolationLevel() != null && tx.isolationLevel().length() > 0) {
             sp();
-            out.append("ISOLATION");
+            kw("ISOLATION");
             sp();
-            out.append("LEVEL");
+            kw("LEVEL");
             sp();
             out.append(tx.isolationLevel());
             needComma = true;
@@ -2275,11 +2278,11 @@ public final class SqlFormatter {
                 out.append(',');
             }
             sp();
-            out.append("WITH");
+            kw("WITH");
             sp();
-            out.append("CONSISTENT");
+            kw("CONSISTENT");
             sp();
-            out.append("SNAPSHOT");
+            kw("SNAPSHOT");
             needComma = true;
         }
         if (tx.deferrable() != null) {
@@ -2288,10 +2291,10 @@ public final class SqlFormatter {
             }
             sp();
             if (!tx.deferrable().booleanValue()) {
-                out.append("NOT");
+                kw("NOT");
                 sp();
             }
-            out.append("DEFERRABLE");
+            kw("DEFERRABLE");
         }
         if (tx.raw() != null && tx.raw().length() > 0) {
             sp();
@@ -2307,19 +2310,19 @@ public final class SqlFormatter {
             out.append(load.raw());
             return;
         }
-        out.append("LOAD");
+        kw("LOAD");
         sp();
-        out.append("DATA");
+        kw("DATA");
         if (load.priority() != null) {
             sp();
             out.append(load.priority());
         }
         if (load.local()) {
             sp();
-            out.append("LOCAL");
+            kw("LOCAL");
         }
         sp();
-        out.append("INFILE");
+        kw("INFILE");
         if (load.fileName() != null) {
             sp();
             writeExpr(load.fileName());
@@ -2338,7 +2341,7 @@ public final class SqlFormatter {
         }
         if (load.characterSet() != null) {
             sp();
-            out.append("CHARACTER");
+            kw("CHARACTER");
             sp();
             kw("SET");
             sp();
@@ -2383,14 +2386,14 @@ public final class SqlFormatter {
             return;
         }
         if (lock.unlock()) {
-            out.append("UNLOCK");
+            kw("UNLOCK");
             sp();
-            out.append("TABLES");
+            kw("TABLES");
             return;
         }
-        out.append("LOCK");
+        kw("LOCK");
         sp();
-        out.append("TABLES");
+        kw("TABLES");
         for (int i = 0; i < lock.items().size(); i++) {
             if (i > 0) {
                 out.append(',');
@@ -2420,7 +2423,7 @@ public final class SqlFormatter {
             return;
         }
         if (p.kind() == SqlPrepareStatement.Kind.DEALLOCATE) {
-            out.append("DEALLOCATE");
+            kw("DEALLOCATE");
             sp();
             kw("PREPARE");
             if (p.name() != null) {
@@ -2430,9 +2433,9 @@ public final class SqlFormatter {
             return;
         }
         if (p.kind() == SqlPrepareStatement.Kind.EXECUTE_IMMEDIATE) {
-            out.append("EXECUTE");
+            kw("EXECUTE");
             sp();
-            out.append("IMMEDIATE");
+            kw("IMMEDIATE");
             if (p.source() != null) {
                 sp();
                 writeExpr(p.source());
@@ -2441,7 +2444,7 @@ public final class SqlFormatter {
             return;
         }
         if (p.kind() == SqlPrepareStatement.Kind.EXECUTE) {
-            out.append("EXECUTE");
+            kw("EXECUTE");
             if (p.name() != null) {
                 sp();
                 writeExpr(p.name());
@@ -2449,7 +2452,7 @@ public final class SqlFormatter {
             writePrepareUsing(p);
             return;
         }
-        out.append("PREPARE");
+        kw("PREPARE");
         if (p.name() != null) {
             sp();
             writeExpr(p.name());
@@ -2508,7 +2511,7 @@ public final class SqlFormatter {
             for (int i = 0; i < ctrl.elseIfs().size(); i++) {
                 SqlControlStatement br = ctrl.elseIfs().get(i);
                 sp();
-                out.append("ELSEIF");
+                kw("ELSEIF");
                 sp();
                 writeExpr(br.condition());
                 sp();
@@ -2525,7 +2528,7 @@ public final class SqlFormatter {
             sp();
             kw("IF");
         } else if (ctrl.kind() == SqlControlStatement.Kind.WHILE) {
-            out.append("WHILE");
+            kw("WHILE");
             sp();
             writeExpr(ctrl.condition());
             sp();
@@ -2534,25 +2537,25 @@ public final class SqlFormatter {
             sp();
             kw("END");
             sp();
-            out.append("WHILE");
+            kw("WHILE");
         } else if (ctrl.kind() == SqlControlStatement.Kind.LOOP) {
-            out.append("LOOP");
+            kw("LOOP");
             writeStmtListInline(ctrl.bodyStatements());
             sp();
             kw("END");
             sp();
-            out.append("LOOP");
+            kw("LOOP");
         } else if (ctrl.kind() == SqlControlStatement.Kind.REPEAT) {
-            out.append("REPEAT");
+            kw("REPEAT");
             writeStmtListInline(ctrl.bodyStatements());
             sp();
-            out.append("UNTIL");
+            kw("UNTIL");
             sp();
             writeExpr(ctrl.condition());
             sp();
             kw("END");
             sp();
-            out.append("REPEAT");
+            kw("REPEAT");
         } else if (ctrl.kind() == SqlControlStatement.Kind.CASE) {
             kw("CASE");
             if (ctrl.condition() != null) {
@@ -2579,19 +2582,19 @@ public final class SqlFormatter {
             sp();
             kw("CASE");
         } else if (ctrl.kind() == SqlControlStatement.Kind.LEAVE) {
-            out.append("LEAVE");
+            kw("LEAVE");
             if (ctrl.label() != null) {
                 sp();
                 out.append(ctrl.label());
             }
         } else if (ctrl.kind() == SqlControlStatement.Kind.ITERATE) {
-            out.append("ITERATE");
+            kw("ITERATE");
             if (ctrl.label() != null) {
                 sp();
                 out.append(ctrl.label());
             }
         } else if (ctrl.kind() == SqlControlStatement.Kind.RETURN) {
-            out.append("RETURN");
+            kw("RETURN");
             if (ctrl.condition() != null) {
                 sp();
                 writeExpr(ctrl.condition());
@@ -2916,7 +2919,7 @@ public final class SqlFormatter {
                 writeExpr(bin.left());
                 sp();
                 // CONCAT 一律回写 ||；MySQL 默认把 || 解析为 OR，故 AST 里的 OR 回写为 OR
-                out.append(bin.operator().symbol());
+                kw(bin.operator().symbol());
                 sp();
                 writeExpr(bin.right());
             }
@@ -3150,7 +3153,7 @@ public final class SqlFormatter {
     private void writeFunctionSuffix(SqlFunctionExpr fn) {
         if (fn.keepClause() != null && fn.keepClause().length() > 0) {
             sp();
-            out.append("KEEP");
+            kw("KEEP");
             sp();
             out.append(fn.keepClause());
         }
@@ -3409,7 +3412,13 @@ public final class SqlFormatter {
     }
 
     private void kw(String word) {
-        out.append(word);
+        if (keywordCase == SqlKeywordCase.UPPER) {
+            out.append(word.toUpperCase(Locale.ROOT));
+        } else if (keywordCase == SqlKeywordCase.LOWER) {
+            out.append(word.toLowerCase(Locale.ROOT));
+        } else {
+            out.append(word);
+        }
     }
 
     private void sp() {

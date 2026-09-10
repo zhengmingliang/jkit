@@ -8,6 +8,7 @@ package com.alianga.jkit.sql;
  */
 public final class SqlFormatOptions {
     private boolean quoteIdentifiers;
+    private SqlKeywordCase keywordCase = SqlKeywordCase.AS_IS;
 
     /**
      * @return 默认选项（不强制给标识符加方言引号；仅 {@link com.alianga.jkit.sql.ast.SqlIdentifier#quoted()} 为 true 时加引号）
@@ -33,6 +34,27 @@ public final class SqlFormatOptions {
      */
     public SqlFormatOptions quoteIdentifiers(boolean quoteIdentifiers) {
         this.quoteIdentifiers = quoteIdentifiers;
+        return this;
+    }
+
+    /**
+     * @return 关键字大小写策略（默认 {@link SqlKeywordCase#AS_IS}）
+     * @since 2.0.1
+     */
+    public SqlKeywordCase keywordCase() {
+        return keywordCase == null ? SqlKeywordCase.AS_IS : keywordCase;
+    }
+
+    /**
+     * 关键字大小写策略：SELECT / FROM / WHERE 等经 {@code kw(...)} 输出的关键字统一转大写或小写；
+     * 不影响标识符、字符串字面量与函数名。
+     *
+     * @param keywordCase 策略，null 视为 {@link SqlKeywordCase#AS_IS}
+     * @return this
+     * @since 2.0.1
+     */
+    public SqlFormatOptions keywordCase(SqlKeywordCase keywordCase) {
+        this.keywordCase = keywordCase == null ? SqlKeywordCase.AS_IS : keywordCase;
         return this;
     }
 }

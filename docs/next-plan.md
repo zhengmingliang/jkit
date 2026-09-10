@@ -355,7 +355,7 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 1. **方言能力可覆盖** ✅ `e3ca817` — `SqlDialectSpec` 接口 + `SqlDialectWrapper` 包装层；4 处散落 `dialect == SqlDialect.X`（Lexer 方括号标识符 / Lexer 反斜杠转义 / ExprParser `~` 正则 / Rewriter 逗号分页）改回能力方法；全部方言参数放宽为 `SqlDialectSpec`（枚举调用点源码兼容）。
 2. **SqlWall 规则 SPI** ✅（见本轮提交）— `checkStatement` 的 if-else 拆成内置 5 条 `SqlWallRule` 规则链，`SqlWallConfig.rules(...)` 追加自定义规则；违规码收集走 `SqlWallViolations`（去重）。行为与违规码完全不变，`SqlWallTest` 全部原样通过。
 3. **语句解析注册表** ✅ — `SqlStatementParsers`（`SqlParseOptions.statementParsers()`，默认关闭）按前导关键字注册 `SqlStatementParser`，只兜内建 switch 未覆盖的 default 分支；`SqlParseContext` 暴露游标子集（token / is / match / isIdent / matchIdent / name / consumeRest（原文切片）/ error / atStmtBreak）；返回 null 或留未消费记号 → 带位置错误；内建语句不受影响（注册 SELECT 也不会覆盖）。
-4. **SqlFormatOptions 扩展**（未做）— 关键字大小写策略、pretty-print 细项。
+4. **SqlFormatOptions 扩展** ✅ — 关键字大小写策略 `keywordCase(SqlKeywordCase.UPPER/LOWER/AS_IS)`；`SqlFormatter` 内 87 处关键字输出（含 84 处 `out.append("KEYWORD")` 直写、二元运算符 symbol、FLUSH 选项、事务 kind）统一收敛到 `kw()`，AS_IS 输出逐字节不变。pretty 缩进宽度**有意未做**：`SqlFormatter.indent` 字段是死代码（从未自增，pretty 输出本就无缩进），接 `indentSize` 前需先实现真实缩进（subquery/CTE/UNION 臂），等有真实需求再做，勿硬接死代码。
 5. **改写规则链**（未做，低）— `SqlRewriter` 前后 hook。
 
 明确不做：`SqlKeywords`/`SqlTokenType` 动态注册化（零分配哈希是性能关键路径）；visitor 重设计（双轨制够用）。
