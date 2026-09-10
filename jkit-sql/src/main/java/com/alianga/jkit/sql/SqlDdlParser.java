@@ -444,32 +444,39 @@ final class SqlDdlParser {
         }
         if (p.is(SqlTokenType.BEGIN)) {
             p.next(); // BEGIN
-            while (!p.is(SqlTokenType.EOF)) {
-                while (p.isStmtSeparator()) {
-                    p.next();
-                }
-                if (p.is(SqlTokenType.END)) {
-                    SqlToken peek = p.lexer.peek();
-                    if (peek != null && isCompoundEndSuffix(peek)) {
-                        ddl.bodyStatements().add(consumeCompoundRemainderAsOther());
-                        continue;
+            // 客户端 DELIMITER 可能是 ;;，但 BEGIN 体内语句仍以 ; 结束
+            String savedDelim = p.stmtDelimiter;
+            p.stmtDelimiter = ";";
+            try {
+                while (!p.is(SqlTokenType.EOF)) {
+                    while (p.is(SqlTokenType.SEMICOLON)) {
+                        p.next();
                     }
-                    p.next(); // END
-                    break;
-                }
-                if (p.is(SqlTokenType.IF) || p.is(SqlTokenType.CASE) || p.isIdent("WHILE")
-                        || p.isIdent("LOOP") || p.isIdent("REPEAT")) {
-                    ddl.bodyStatements().add(consumeCompoundStatementAsOther());
-                } else {
-                    try {
-                        ddl.bodyStatements().add(p.parseStatement());
-                    } catch (SqlParseException ex) {
-                        ddl.bodyStatements().add(consumeUntilSemiAsOther());
+                    if (p.is(SqlTokenType.END)) {
+                        SqlToken peek = p.lexer.peek();
+                        if (peek != null && isCompoundEndSuffix(peek)) {
+                            ddl.bodyStatements().add(consumeCompoundRemainderAsOther());
+                            continue;
+                        }
+                        p.next(); // END
+                        break;
+                    }
+                    if (p.is(SqlTokenType.IF) || p.is(SqlTokenType.CASE) || p.isIdent("WHILE")
+                            || p.isIdent("LOOP") || p.isIdent("REPEAT")) {
+                        ddl.bodyStatements().add(consumeCompoundStatementAsOther());
+                    } else {
+                        try {
+                            ddl.bodyStatements().add(p.parseStatement());
+                        } catch (SqlParseException ex) {
+                            ddl.bodyStatements().add(consumeUntilSemiAsOther());
+                        }
+                    }
+                    if (p.is(SqlTokenType.SEMICOLON)) {
+                        p.next();
                     }
                 }
-                if (p.isStmtSeparator()) {
-                    p.next();
-                }
+            } finally {
+                p.stmtDelimiter = savedDelim;
             }
         } else if (!p.atStmtBreak()) {
             try {
