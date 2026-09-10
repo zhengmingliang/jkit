@@ -24,6 +24,7 @@ public final class SqlSelect extends SqlStatement {
     private SqlExpr where;
     private final List<SqlExpr> groupBy = new ArrayList<SqlExpr>(2);
     private boolean groupByRollup;
+    private boolean groupByCube;
     /** GROUP BY 扩展：GROUPING SETS/CUBE/ROLLUP(...) 原文（含关键字） */
     private String groupByExtension;
     private boolean orderSiblings;
@@ -38,6 +39,10 @@ public final class SqlSelect extends SqlStatement {
     private boolean forUpdate;
     private boolean lockInShare;
     private String forUpdateTail;
+    /** Teradata / Snowflake：{@code CONNECT BY NOCYCLE}。 */
+    private boolean connectByNocycle;
+    /** Teradata / Snowflake / ClickHouse：{@code QUALIFY} 窗口过滤条件。 */
+    private SqlExpr qualify;
 
     /** SQL Server OPTION (...) 查询提示原文（含括号）。 */
     private String queryOption;
@@ -65,6 +70,38 @@ public final class SqlSelect extends SqlStatement {
     @Override
     public SqlStatementType type() {
         return SqlStatementType.SELECT;
+    }
+
+    /**
+     * @return {@code CONNECT BY NOCYCLE}
+     * @since 2.0.1
+     */
+    public boolean connectByNocycle() {
+        return connectByNocycle;
+    }
+
+    /**
+     * @param connectByNocycle {@code NOCYCLE}
+     * @since 2.0.1
+     */
+    public void setConnectByNocycle(boolean connectByNocycle) {
+        this.connectByNocycle = connectByNocycle;
+    }
+
+    /**
+     * @return {@code QUALIFY} 窗口过滤条件，无则 null
+     * @since 2.0.1
+     */
+    public SqlExpr qualify() {
+        return qualify;
+    }
+
+    /**
+     * @param qualify {@code QUALIFY} 条件
+     * @since 2.0.1
+     */
+    public void setQualify(SqlExpr qualify) {
+        this.qualify = qualify;
     }
 
     /**
@@ -252,6 +289,22 @@ public final class SqlSelect extends SqlStatement {
      */
     public void setGroupByRollup(boolean groupByRollup) {
         this.groupByRollup = groupByRollup;
+    }
+
+    /**
+     * @return GROUP BY … WITH CUBE
+     * @since 2.0.1
+     */
+    public boolean groupByCube() {
+        return groupByCube;
+    }
+
+    /**
+     * @param groupByCube WITH CUBE
+     * @since 2.0.1
+     */
+    public void setGroupByCube(boolean groupByCube) {
+        this.groupByCube = groupByCube;
     }
 
     /**

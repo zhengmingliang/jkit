@@ -89,7 +89,12 @@ final class SqlDmlParser {
     SqlInsert parseInsert(boolean replace) {
         p.next();
         SqlInsert insert = new SqlInsert();
-        if (!replace && p.match(SqlTokenType.DELAYED)) {
+        if (!replace && p.isIdent("OVERWRITE")) {
+            // Hive：INSERT OVERWRITE [TABLE] t [PARTITION (...)] SELECT …
+            p.next();
+            insert.setOverwrite(true);
+        }
+        if (!replace && !insert.overwrite() && p.match(SqlTokenType.DELAYED)) {
             insert.setDelayed(true);
         } else if (p.match(SqlTokenType.LOW_PRIORITY)) {
             insert.setLowPriority(true);
@@ -104,9 +109,17 @@ final class SqlDmlParser {
         }
         p.match(SqlTokenType.INTO);
         // Hive / 部分引擎：INSERT INTO TABLE t
-        p.match(SqlTokenType.TABLE);
+        if (p.match(SqlTokenType.TABLE)) {
+            insert.setTableKeyword(true);
+        }
         insert.setReplace(replace);
         insert.setTable(SqlTable.of(p.parseName()));
+        if (insert.overwrite() && p.is(SqlTokenType.PARTITION)) {
+            p.next();
+            if (p.match(SqlTokenType.LPAREN)) {
+                insert.setPartitionRaw("(" + p.skipBalancedParensContent() + ")");
+            }
+        }
         p.selectParser.parseTableHints(insert.table());
         if (p.match(SqlTokenType.LPAREN) && !p.isQueryStart()) {
             if (!p.is(SqlTokenType.RPAREN)) {

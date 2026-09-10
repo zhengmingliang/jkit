@@ -17,6 +17,12 @@ public final class SqlInsert extends SqlStatement {
     private boolean ignore;
     private boolean lowPriority;
     private boolean highPriority;
+    /** Hive：{@code INSERT OVERWRITE}。 */
+    private boolean overwrite;
+    /** Hive：{@code INSERT OVERWRITE TABLE t} 带 TABLE 关键字。 */
+    private boolean tableKeyword;
+    /** Hive：{@code PARTITION (dt='2024')} 子句原文（含外层括号）。 */
+    private String partitionRaw;
     private SqlTable table;
     private final List<SqlIdentifier> columns = new ArrayList<SqlIdentifier>(4);
     private final List<List<SqlExpr>> valuesList = new ArrayList<List<SqlExpr>>(2);
@@ -126,6 +132,54 @@ public final class SqlInsert extends SqlStatement {
      */
     public void setHighPriority(boolean highPriority) {
         this.highPriority = highPriority;
+    }
+
+    /**
+     * @return Hive {@code INSERT OVERWRITE}
+     * @since 2.0.1
+     */
+    public boolean overwrite() {
+        return overwrite;
+    }
+
+    /**
+     * @param overwrite {@code OVERWRITE}
+     * @since 2.0.1
+     */
+    public void setOverwrite(boolean overwrite) {
+        this.overwrite = overwrite;
+    }
+
+    /**
+     * @return 带 {@code TABLE} 关键字（Hive {@code INSERT OVERWRITE TABLE t}）
+     * @since 2.0.1
+     */
+    public boolean tableKeyword() {
+        return tableKeyword;
+    }
+
+    /**
+     * @param tableKeyword {@code TABLE} 关键字
+     * @since 2.0.1
+     */
+    public void setTableKeyword(boolean tableKeyword) {
+        this.tableKeyword = tableKeyword;
+    }
+
+    /**
+     * @return Hive {@code PARTITION (...)} 子句原文（含外层括号），无则 null
+     * @since 2.0.1
+     */
+    public String partitionRaw() {
+        return partitionRaw;
+    }
+
+    /**
+     * @param partitionRaw {@code PARTITION (...)} 原文
+     * @since 2.0.1
+     */
+    public void setPartitionRaw(String partitionRaw) {
+        this.partitionRaw = partitionRaw;
     }
 
     /**

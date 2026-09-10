@@ -94,9 +94,40 @@ final class SqlExprParser {
         return left;
     }
 
+    /** 位置游离的 optimizer hint（如 WHERE 中的 {@code /*+TDDL:MASTER*&#47;}），暂存后由语句层统一挂出。 */
+    private final java.util.List<String> floatingHints = new java.util.ArrayList<String>(0);
+
+    /**
+     * 跳过当前位置连续的 hint 注释（语义等同注释，不影响条件结构）。
+     */
+    void skipFloatingHints() {
+        while (p.is(SqlTokenType.HINT)) {
+            floatingHints.add(p.token.text());
+            p.next();
+        }
+    }
+
+    /**
+     * 取出暂存的游离 hint 并清空（语句层挂到 SELECT）。
+     *
+     * @return hint 原文列表，可能为空
+     */
+    java.util.List<String> drainFloatingHints() {
+        if (floatingHints.isEmpty()) {
+            return floatingHints;
+        }
+        java.util.List<String> copy = new java.util.ArrayList<String>(floatingHints);
+        floatingHints.clear();
+        return copy;
+    }
+
     private SqlExpr parseAnd() {
         SqlExpr left = parseNot();
-        while (p.is(SqlTokenType.AND) || p.is(SqlTokenType.AND_OP)) {
+        while (true) {
+            skipFloatingHints();
+            if (!p.is(SqlTokenType.AND) && !p.is(SqlTokenType.AND_OP)) {
+                break;
+            }
             p.next();
             left = SqlBinaryExpr.of(left, SqlBinaryOp.AND, parseNot());
         }
@@ -175,6 +206,7 @@ final class SqlExprParser {
     private SqlExpr parseComparison() {
         SqlExpr left = parseBit();
         while (true) {
+            skipFloatingHints();
             if (p.is(SqlTokenType.EQ)) {
                 p.next();
                 left = SqlBinaryExpr.of(left, SqlBinaryOp.EQ, parseBit());
@@ -374,7 +406,14 @@ final class SqlExprParser {
                 || SqlParser.equalsIgnoreCase(fnName, "JSON_ARRAY")
                 || SqlParser.equalsIgnoreCase(fnName, "JSON_OBJECTAGG")
                 || SqlParser.equalsIgnoreCase(fnName, "JSON_ARRAYAGG")
-                || SqlParser.equalsIgnoreCase(fnName, "JSON_TABLE")) {
+                || SqlParser.equalsIgnoreCase(fnName, "JSON_TABLE")
+                || SqlParser.equalsIgnoreCase(fnName, "XMLSERIALIZE")
+                || SqlParser.equalsIgnoreCase(fnName, "XMLPARSE")
+                || SqlParser.equalsIgnoreCase(fnName, "XMLROOT")
+                || SqlParser.equalsIgnoreCase(fnName, "XMLAGG")
+                || SqlParser.equalsIgnoreCase(fnName, "XMLELEMENT")
+                || SqlParser.equalsIgnoreCase(fnName, "XMLFOREST")
+                || SqlParser.equalsIgnoreCase(fnName, "EXTRACTVALUE")) {
             return parseRawArgsFunction(name);
         }
         p.expect(SqlTokenType.LPAREN);
@@ -385,6 +424,7 @@ final class SqlExprParser {
         }
         if (!p.is(SqlTokenType.RPAREN) && !p.is(SqlTokenType.ORDER)) {
             do {
+                skipFloatingHints();
                 if (p.is(SqlTokenType.ORDER)) {
                     break;
                 }
@@ -566,7 +606,11 @@ final class SqlExprParser {
 
     private SqlExpr parseOr() {
         SqlExpr left = parseXor();
-        while (p.is(SqlTokenType.OR) || p.is(SqlTokenType.OR_OP)) {
+        while (true) {
+            skipFloatingHints();
+            if (!p.is(SqlTokenType.OR) && !p.is(SqlTokenType.OR_OP)) {
+                break;
+            }
             p.next();
             left = SqlBinaryExpr.of(left, SqlBinaryOp.OR, parseXor());
         }
@@ -586,7 +630,9 @@ final class SqlExprParser {
                 && !p.is(SqlTokenType.ORDER)
                 && !p.is(SqlTokenType.ROWS)
                 && !p.isIdent("RANGE")
-                && !p.isIdent("GROUPS")) {
+                && !p.isIdent("GROUPS")
+                && !p.isIdent("DISTRIBUTE")
+                && !p.isIdent("SORT")) {
             over.setExistingWindowName(p.parseName());
         }
         if (p.match(SqlTokenType.PARTITION)) {
@@ -594,9 +640,22 @@ final class SqlExprParser {
             do {
                 over.partitionBy().add(parseExpr());
             } while (p.match(SqlTokenType.COMMA));
+        } else if (p.isIdent("DISTRIBUTE")) {
+            // Spark / Databricks：OVER (DISTRIBUTE BY … SORT BY …)，语义对应 PARTITION/ORDER
+            p.next();
+            p.expect(SqlTokenType.BY);
+            over.setSparkStyle(true);
+            do {
+                over.partitionBy().add(parseExpr());
+            } while (p.match(SqlTokenType.COMMA));
         }
         if (p.match(SqlTokenType.ORDER)) {
             p.expect(SqlTokenType.BY);
+            p.selectParser.parseOrderBy(over.orderBy());
+        } else if (p.isIdent("SORT")) {
+            p.next();
+            p.expect(SqlTokenType.BY);
+            over.setSparkStyle(true);
             p.selectParser.parseOrderBy(over.orderBy());
         }
         if (p.is(SqlTokenType.ROWS) || p.isIdent("RANGE")) {
@@ -1008,7 +1067,11 @@ final class SqlExprParser {
 
     private SqlExpr parseXor() {
         SqlExpr left = parseAnd();
-        while (p.is(SqlTokenType.XOR)) {
+        while (true) {
+            skipFloatingHints();
+            if (!p.is(SqlTokenType.XOR)) {
+                break;
+            }
             p.next();
             left = SqlBinaryExpr.of(left, SqlBinaryOp.XOR, parseAnd());
         }

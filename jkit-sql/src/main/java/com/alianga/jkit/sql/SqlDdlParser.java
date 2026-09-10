@@ -260,7 +260,13 @@ final class SqlDdlParser {
         }
         if ("ADD".equals(action) && p.match(SqlTokenType.LPAREN)) {
             do {
-                ddl.indexColumns().add(p.parseName());
+                if (p.is(SqlTokenType.LPAREN)) {
+                    // MySQL 8 函数索引：ADD KEY idx ((expr))，表达式列原文保留
+                    p.next();
+                    ddl.indexColumns().add(SqlIdentifier.of("(" + p.skipBalancedParensContent() + ")"));
+                } else {
+                    ddl.indexColumns().add(p.parseName());
+                }
                 // 跳过长度 / ASC / DESC 等列修饰
                 while (!p.is(SqlTokenType.COMMA) && !p.is(SqlTokenType.RPAREN)
                         && !p.is(SqlTokenType.SEMICOLON) && !p.is(SqlTokenType.EOF)) {

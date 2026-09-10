@@ -17,9 +17,27 @@ public final class SqlOverExpr extends SqlExpr {
     private SqlIdentifier existingWindowName;
     private final List<SqlExpr> partitionBy = new ArrayList<SqlExpr>(2);
     private final List<SqlOrderByItem> orderBy = new ArrayList<SqlOrderByItem>(2);
+    /** Spark / Databricks：{@code DISTRIBUTE BY}/{@code SORT BY} 替代 PARTITION/ORDER 关键字。 */
+    private boolean sparkStyle;
     private String frameUnit;
     private String frameStart;
     private String frameEnd;
+
+    /**
+     * @return Spark 风格关键字（DISTRIBUTE BY / SORT BY）
+     * @since 2.0.1
+     */
+    public boolean sparkStyle() {
+        return sparkStyle;
+    }
+
+    /**
+     * @param sparkStyle Spark 风格
+     * @since 2.0.1
+     */
+    public void setSparkStyle(boolean sparkStyle) {
+        this.sparkStyle = sparkStyle;
+    }
 
     /**
      * @return 命名窗口，与括号定义互斥

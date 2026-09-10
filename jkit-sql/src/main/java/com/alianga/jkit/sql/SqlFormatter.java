@@ -340,6 +340,10 @@ public final class SqlFormatter {
             kw("CONNECT");
             sp();
             kw("BY");
+            if (select.connectByNocycle()) {
+                sp();
+                kw("NOCYCLE");
+            }
             sp();
             writeExpr(select.connectBy());
         }
@@ -363,12 +367,24 @@ public final class SqlFormatter {
                 sp();
                 kw("ROLLUP");
             }
+            if (select.groupByCube()) {
+                sp();
+                kw("WITH");
+                sp();
+                kw("CUBE");
+            }
         }
         if (select.having() != null) {
             nl();
             kw("HAVING");
             sp();
             writeExpr(select.having());
+        }
+        if (select.qualify() != null) {
+            nl();
+            kw("QUALIFY");
+            sp();
+            writeExpr(select.qualify());
         }
         if (!select.windows().isEmpty()) {
             nl();
@@ -529,11 +545,25 @@ public final class SqlFormatter {
             }
             return;
         }
+        if (insert.overwrite()) {
+            sp();
+            kw("OVERWRITE");
+        }
         if (insert.table() != null) {
             sp();
-            kw("INTO");
+            if (!insert.overwrite()) {
+                kw("INTO");
+            } else if (insert.tableKeyword()) {
+                kw("TABLE");
+            }
             sp();
             writeFrom(insert.table());
+        }
+        if (insert.partitionRaw() != null) {
+            sp();
+            kw("PARTITION");
+            sp();
+            out.append(insert.partitionRaw());
         }
         if (!insert.columns().isEmpty()) {
             out.append('(');
@@ -3273,7 +3303,7 @@ public final class SqlFormatter {
             if (need) {
                 sp();
             }
-            kw("PARTITION");
+            kw(over.sparkStyle() ? "DISTRIBUTE" : "PARTITION");
             sp();
             kw("BY");
             sp();
@@ -3284,7 +3314,7 @@ public final class SqlFormatter {
             if (need) {
                 sp();
             }
-            kw("ORDER");
+            kw(over.sparkStyle() ? "SORT" : "ORDER");
             sp();
             kw("BY");
             sp();

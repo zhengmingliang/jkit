@@ -170,6 +170,17 @@ public class SqlRoundTripFidelityTest {
 
                 // Trino 风格 JOIN ON 后 hint
                 {"mysql", "SELECT count(*) FROM orders JOIN lineitem ON o_orderkey = l_orderkey/*+joinMethod=hash*/ LIMIT 1"},
+
+                // 游离 hint / INSERT OVERWRITE / NOCYCLE / WITH CUBE / QUALIFY / 函数索引 / XML 原文 / Spark 窗口
+                {"mysql", "select * from t where 1 = 1 /*+TDDL:MASTER*/ and a = 3"},
+                {"hive", "INSERT OVERWRITE TABLE t SELECT * FROM s"},
+                {"hive", "INSERT OVERWRITE t PARTITION (dt='2024') SELECT * FROM s"},
+                {"oracle", "select * from ge_rms start with a = '00' connect by nocycle prior a = b"},
+                {"sqlserver", "SELECT year, SUM(p) FROM sales GROUP BY year WITH CUBE"},
+                {"ansi", "SELECT * FROM t1 QUALIFY ROW_NUMBER() OVER (PARTITION BY id ORDER BY ts DESC) = 1"},
+                {"mysql", "alter TABLE t ADD KEY idx ((cast(site_id_list as char(10) array)))"},
+                {"oracle", "SELECT XMLSERIALIZE(CONTENT x AS VARCHAR(100)) FROM t"},
+                {"hive", "select row_number() over(distribute by num_id sort by id) from t"},
         });
     }
 
@@ -190,6 +201,7 @@ public class SqlRoundTripFidelityTest {
         r = r.replaceAll("(?i)\\bINNER\\b", " ").replaceAll("(?i)\\bOUTER\\b", " ");
         r = r.replaceAll("(?i)\\bASC\\b", " ");
         r = r.replaceAll("(?i)\\bTRUNCATE\\s+TABLE\\b", "TRUNCATE");
+        r = r.replaceAll("(?i)\\bPRIOR\\s*\\(\\s*([^()]+?)\\s*\\)", "PRIOR $1");
         r = r.replaceAll("\\s+", "");
         return r.toUpperCase(Locale.ROOT);
     }

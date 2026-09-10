@@ -285,6 +285,10 @@ final class SqlSelectParser {
         if (p.match(SqlTokenType.CONNECT)) {
             p.expect(SqlTokenType.BY);
             p.match(SqlTokenType.NOWAIT);
+            if (p.isIdent("NOCYCLE")) {
+                p.next();
+                select.setConnectByNocycle(true);
+            }
             select.setConnectBy(p.exprParser.parseExpr());
         }
         if (p.match(SqlTokenType.GROUP)) {
@@ -304,13 +308,22 @@ final class SqlSelectParser {
                 do {
                     select.groupBy().add(p.exprParser.parseExpr());
                 } while (p.match(SqlTokenType.COMMA));
-                if (p.match(SqlTokenType.WITH) && p.match(SqlTokenType.ROLLUP)) {
-                    select.setGroupByRollup(true);
+                if (p.match(SqlTokenType.WITH)) {
+                    if (p.match(SqlTokenType.ROLLUP)) {
+                        select.setGroupByRollup(true);
+                    } else if (p.match(SqlTokenType.CUBE)) {
+                        select.setGroupByCube(true);
+                    }
                 }
             }
         }
         if (p.match(SqlTokenType.HAVING)) {
             select.setHaving(p.exprParser.parseExpr());
+        }
+        // Teradata / Snowflake / ClickHouse：QUALIFY 窗口过滤（HAVING 之后、ORDER BY 之前）
+        if (p.isIdent("QUALIFY")) {
+            p.next();
+            select.setQualify(p.exprParser.parseExpr());
         }
         if (p.match(SqlTokenType.WINDOW)) {
             do {
@@ -373,6 +386,10 @@ final class SqlSelectParser {
             select.setQueryOption("(" + opt + ")");
         }
         parseSelectTail(select);
+        // 表达式层收集的游离 hint（如 WHERE 中的 TDDL hint）统一挂到 SELECT
+        for (String h : p.exprParser.drainFloatingHints()) {
+            select.addHint(h);
+        }
         return select;
     }
 

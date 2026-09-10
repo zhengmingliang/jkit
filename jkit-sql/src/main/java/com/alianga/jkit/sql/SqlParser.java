@@ -1853,6 +1853,7 @@ public final class SqlParser {
                 && !isIdent("TABLESAMPLE") && !isIdent("SAMPLE")
                 && !isIdent("OPTION")
                 && !isIdent("MODEL") && !isIdent("MATCH_RECOGNIZE")
+                && !isIdent("QUALIFY")
                 && !is(SqlTokenType.FORCE) && !is(SqlTokenType.USE)
                 && !is(SqlTokenType.IGNORE) && !is(SqlTokenType.PARTITION)) {
             // 无 AS 时也允许多段限定别名
