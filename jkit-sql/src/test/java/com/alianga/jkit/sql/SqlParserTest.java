@@ -1388,6 +1388,47 @@ public class SqlParserTest {
     }
 
     /**
+     * SET 多赋值 / NAMES / CHARACTER SET / SESSION → SqlSetStatement。
+     */
+    @Test
+    public void parseSetStructured() {
+        com.alianga.jkit.sql.ast.SqlSetStatement multi =
+                (com.alianga.jkit.sql.ast.SqlSetStatement) SQL.parse("SET @a = 1, @b = 2");
+        assertEquals(SqlStatementType.SET, multi.type());
+        assertEquals(2, multi.assignments().size());
+        assertEquals("@a", multi.assignments().get(0).name().simpleName());
+        assertEquals("@b", multi.assignments().get(1).name().simpleName());
+        String mFmt = SQL.toSqlString(multi).toUpperCase();
+        assertTrue(mFmt, mFmt.contains("SET") && mFmt.contains("@A") && mFmt.contains("@B"));
+        SQL.parse(SQL.toSqlString(multi));
+
+        com.alianga.jkit.sql.ast.SqlSetStatement names =
+                (com.alianga.jkit.sql.ast.SqlSetStatement) SQL.parse("SET NAMES utf8mb4");
+        assertEquals("NAMES", names.setKind());
+        assertEquals(1, names.assignments().size());
+        assertFalse(names.assignments().get(0).equalsSign());
+        String nFmt = SQL.toSqlString(names).toUpperCase();
+        assertTrue(nFmt, nFmt.contains("NAMES") && nFmt.contains("UTF8MB4"));
+        assertFalse(nFmt.contains("="));
+
+        com.alianga.jkit.sql.ast.SqlSetStatement charset =
+                (com.alianga.jkit.sql.ast.SqlSetStatement) SQL.parse("SET CHARACTER SET utf8");
+        assertEquals("CHARACTER SET", charset.setKind());
+        assertNotNull(charset.assignments().get(0).value());
+
+        com.alianga.jkit.sql.ast.SqlSetStatement session =
+                (com.alianga.jkit.sql.ast.SqlSetStatement) SQL.parse("SET SESSION sql_mode = 'STRICT'");
+        assertEquals("SESSION", session.scope());
+        assertEquals(1, session.assignments().size());
+        assertEquals("sql_mode", session.assignments().get(0).name().simpleName());
+
+        com.alianga.jkit.sql.ast.SqlSetStatement pwd =
+                (com.alianga.jkit.sql.ast.SqlSetStatement) SQL.parse("SET PASSWORD = PASSWORD('x')");
+        assertEquals("PASSWORD", pwd.setKind());
+        assertNotNull(pwd.raw());
+    }
+
+    /**
      * P1.5：GO 作为 SQL Server 批分隔（同分号）。
      */
     @Test
@@ -2646,20 +2687,22 @@ public class SqlParserTest {
 
     @Test
     public void setPassword() {
-        SqlSimpleStatement forUser = (SqlSimpleStatement) SQL.parse(
+        com.alianga.jkit.sql.ast.SqlSetStatement forUser =
+                (com.alianga.jkit.sql.ast.SqlSetStatement) SQL.parse(
                 "SET PASSWORD FOR myuser = 'mypass'");
         assertEquals(SqlStatementType.SET, forUser.type());
-        assertNotNull(forUser.text());
-        assertTrue(forUser.text().toUpperCase().contains("PASSWORD"));
-        assertTrue(forUser.text().toUpperCase().contains("FOR"));
+        assertEquals("PASSWORD", forUser.setKind());
+        assertNotNull(forUser.raw());
+        assertTrue(forUser.raw().toUpperCase().contains("FOR"));
         String out = SQL.toSqlString(forUser);
         assertTrue(out.toUpperCase().startsWith("SET"));
         assertTrue(out.toUpperCase().contains("PASSWORD"));
 
-        SqlSimpleStatement plain = (SqlSimpleStatement) SQL.parse(
+        com.alianga.jkit.sql.ast.SqlSetStatement plain =
+                (com.alianga.jkit.sql.ast.SqlSetStatement) SQL.parse(
                 "SET PASSWORD = 'secret'");
         assertEquals(SqlStatementType.SET, plain.type());
-        assertTrue(plain.text().toUpperCase().contains("PASSWORD"));
+        assertEquals("PASSWORD", plain.setKind());
         assertTrue(SQL.toSqlString(plain).toUpperCase().contains("PASSWORD"));
     }
 

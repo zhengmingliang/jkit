@@ -44,6 +44,7 @@ import com.alianga.jkit.sql.ast.SqlQueryExpr;
 import com.alianga.jkit.sql.ast.SqlRoutineParam;
 import com.alianga.jkit.sql.ast.SqlSelect;
 import com.alianga.jkit.sql.ast.SqlSelectItem;
+import com.alianga.jkit.sql.ast.SqlSetStatement;
 import com.alianga.jkit.sql.ast.SqlShowStatement;
 import com.alianga.jkit.sql.ast.SqlSimpleStatement;
 import com.alianga.jkit.sql.ast.SqlStartTransactionStatement;
@@ -158,6 +159,8 @@ public final class SqlFormatter {
             writeLoadData((SqlLoadDataStatement) node);
         } else if (node instanceof SqlCommentOnStatement) {
             writeCommentOn((SqlCommentOnStatement) node);
+        } else if (node instanceof SqlSetStatement) {
+            writeSet((SqlSetStatement) node);
         } else if (node instanceof SqlShowStatement) {
             writeShow((SqlShowStatement) node);
         } else if (node instanceof SqlSimpleStatement) {
@@ -1178,6 +1181,67 @@ public final class SqlFormatter {
     private static boolean isIndexDdl(SqlDdlStatement ddl) {
         String objectType = ddl.objectType();
         return objectType != null && "INDEX".equalsIgnoreCase(objectType);
+    }
+
+    private void writeSet(SqlSetStatement set) {
+        if (set == null) {
+            return;
+        }
+        out.append("SET");
+        if (set.scope() != null && set.scope().length() > 0) {
+            sp();
+            out.append(set.scope());
+        }
+        if ("PASSWORD".equalsIgnoreCase(set.setKind())) {
+            sp();
+            out.append("PASSWORD");
+            if (set.raw() != null && set.raw().length() > 0) {
+                sp();
+                out.append(set.raw());
+            }
+            return;
+        }
+        if ("NAMES".equalsIgnoreCase(set.setKind()) || "CHARACTER SET".equalsIgnoreCase(set.setKind())) {
+            sp();
+            out.append(set.setKind());
+            if (!set.assignments().isEmpty()) {
+                SqlSetStatement.Assignment a = set.assignments().get(0);
+                if (a != null && a.value() != null) {
+                    sp();
+                    writeExpr(a.value());
+                }
+            }
+            if (set.raw() != null && set.raw().length() > 0) {
+                sp();
+                out.append(set.raw());
+            }
+            return;
+        }
+        for (int i = 0; i < set.assignments().size(); i++) {
+            if (i > 0) {
+                out.append(',');
+            }
+            SqlSetStatement.Assignment a = set.assignments().get(i);
+            if (a == null) {
+                continue;
+            }
+            sp();
+            if (a.name() != null) {
+                writeExpr(a.name());
+            }
+            if (a.value() != null) {
+                if (a.equalsSign()) {
+                    out.append(" = ");
+                } else {
+                    sp();
+                }
+                writeExpr(a.value());
+            }
+        }
+        if (set.raw() != null && set.raw().length() > 0) {
+            sp();
+            out.append(set.raw());
+        }
     }
 
     private void writeCommentOn(SqlCommentOnStatement c) {

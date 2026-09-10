@@ -6,8 +6,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * EXPLAIN / SET / USE / SHOW / CALL / TRUNCATE / GRANT / REVOKE / BEGIN / DECLARE /
- * ANALYZE 等相对扁平的语句；{@link SqlStatementType#OTHER} 用于过程块与维护语句。
+ * USE / CALL / TRUNCATE / GRANT / REVOKE 等相对扁平的语句；{@link SqlStatementType#OTHER} 用于过程块与维护语句。
+ * （SET → {@link SqlSetStatement}；EXPLAIN → 见对应结构化节点；SHOW → {@link SqlShowStatement}。）
  *
  * @author 郑明亮
  * @since 2.0.1

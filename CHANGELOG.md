@@ -48,6 +48,7 @@
 - `jkit-sql`：过程体 `IF`/`WHILE`/`LOOP`/`REPEAT` → `SqlControlStatement`（条件+bodyStatements；ELSEIF/ELSE）；`FUNCTION RETURNS` → `returnsType`；`TRIGGER` 抽 `triggerTiming`/`triggerEvent`/`triggerTable` 与 `bodyStatements`；`EVENT` DO 体进 bodyStatements。
 - `jkit-sql`：过程 `CASE … END CASE` / `LEAVE` / `ITERATE` / `RETURN [expr]` / 循环标签 `lab: LOOP`；`TRIGGER` 补 `FOR EACH` / `FOLLOWS|PRECEDES`；`EVENT ON SCHEDULE AT|EVERY`；`MATCH_RECOGNIZE` 抽 `WITHIN`（`ROWS PER MATCH`/`AFTER MATCH` 保持字段）；`MODEL` 多维 cell 拆 `cellDims`。
 - `jkit-sql`：过程体 `DECLARE`/`CURSOR FOR`/`CONTINUE|EXIT|UNDO HANDLER` → `SqlDeclareStatement`/`SqlHandlerStatement`；`TRIGGER UPDATE OF` → `triggerUpdateColumns`；`EVENT` 抽 `eventStarts`/`eventEnds`/`eventEnabled`/`eventComment`；`MODEL` 简单维 `cellDimExprs`；`MATCH_RECOGNIZE.PATTERN` 保持字符串。
+- `jkit-sql`：`SET` 多赋值 / `SET NAMES` / `SET CHARACTER SET` / SESSION|GLOBAL → `SqlSetStatement`（scope / setKind / assignments + raw）；Formatter / Visitor 同步。
 - `jkit-sql`：PG/Oracle `COMMENT ON TABLE|COLUMN|INDEX|… IS …` → `SqlCommentOnStatement`（objectKind / name / comment + raw）；Formatter / Visitor / SchemaStat 同步。
 - `jkit-sql`：`SHOW CREATE TABLE|VIEW|DATABASE|…` / `SHOW COLUMNS|INDEX|TABLES` → `SqlShowStatement`（showKind / objectType / name / fromOrIn + raw）；Formatter / Visitor / SchemaStat 同步。
 - `jkit-sql`：`ANALYZE` / `VACUUM` / `OPTIMIZE|REPAIR|CHECK TABLE` → `SqlMaintenanceStatement`（kind / tables / optionsRaw + raw）；Formatter / Visitor / SchemaStat 同步。

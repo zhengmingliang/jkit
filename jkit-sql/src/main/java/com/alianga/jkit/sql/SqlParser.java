@@ -8,6 +8,7 @@ import com.alianga.jkit.sql.ast.SqlLoadDataStatement;
 import com.alianga.jkit.sql.ast.SqlLockTablesStatement;
 import com.alianga.jkit.sql.ast.SqlMaintenanceStatement;
 import com.alianga.jkit.sql.ast.SqlPrepareStatement;
+import com.alianga.jkit.sql.ast.SqlSetStatement;
 import com.alianga.jkit.sql.ast.SqlShowStatement;
 import com.alianga.jkit.sql.ast.SqlSimpleStatement;
 import com.alianga.jkit.sql.ast.SqlStartTransactionStatement;
@@ -321,39 +322,99 @@ public final class SqlParser {
         return stmt;
     }
 
+    /**
+     * {@code SET} / {@code SET NAMES} / {@code SET CHARACTER SET} / 多赋值 → {@link SqlSetStatement}。
+     */
     private SqlStatement parseSet() {
         expect(SqlTokenType.SET);
-        SqlSimpleStatement stmt = new SqlSimpleStatement();
-        stmt.setStatementType(SqlStatementType.SET);
-        match(SqlTokenType.SESSION);
-        match(SqlTokenType.GLOBAL);
-        match(SqlTokenType.LOCAL);
+        SqlSetStatement stmt = new SqlSetStatement();
+        if (is(SqlTokenType.SESSION) || is(SqlTokenType.GLOBAL) || is(SqlTokenType.LOCAL)
+                || isIdent("SESSION") || isIdent("GLOBAL") || isIdent("LOCAL")) {
+            stmt.setScope(token.text().toUpperCase());
+            next();
+        }
         // SET PASSWORD [FOR user] = '…'：吞尾，避免 FOR 残留成下一条语句
         if (isIdent("PASSWORD")) {
-            StringBuilder text = new StringBuilder("PASSWORD");
+            stmt.setSetKind("PASSWORD");
             next();
             if (!atStmtBreak()) {
                 String rest = consumeRawUntilSemi();
-                if (!rest.isEmpty()) {
-                    text.append(' ').append(rest);
+                if (rest != null && !rest.isEmpty()) {
+                    stmt.setRaw(rest);
                 }
             }
-            stmt.setText(text.toString());
             return stmt;
         }
+        // SET NAMES charset [COLLATE …]
         if (match(SqlTokenType.NAMES)) {
-            stmt.setName(SqlIdentifier.of("NAMES"));
-            stmt.setValue(exprParser.parsePrimary());
+            stmt.setSetKind("NAMES");
+            SqlSetStatement.Assignment a = new SqlSetStatement.Assignment();
+            a.setName(SqlIdentifier.of("NAMES"));
+            a.setEqualsSign(false);
+            if (!atStmtBreak()) {
+                a.setValue(exprParser.parsePrimary());
+            }
+            stmt.assignments().add(a);
+            if (!atStmtBreak()) {
+                String rest = consumeRawUntilSemi();
+                if (rest != null && !rest.isEmpty()) {
+                    stmt.setRaw(rest);
+                }
+            }
             return stmt;
         }
-        if (is(SqlTokenType.VARIABLE)) {
-            stmt.setName(SqlIdentifier.of(token.text()));
-            next();
-        } else {
-            stmt.setName(parseName());
+        // SET CHARACTER SET charset / SET CHARSET charset
+        if (is(SqlTokenType.CHARACTER) || isIdent("CHARACTER") || isIdent("CHARSET")) {
+            if (isIdent("CHARSET") || (identLike() && "CHARSET".equalsIgnoreCase(token.text()))) {
+                next();
+                stmt.setSetKind("CHARACTER SET");
+            } else {
+                next();
+                if (is(SqlTokenType.SET) || isIdent("SET")
+                        || (identLike() && "SET".equalsIgnoreCase(token.text()))) {
+                    next();
+                }
+                stmt.setSetKind("CHARACTER SET");
+            }
+            SqlSetStatement.Assignment a = new SqlSetStatement.Assignment();
+            a.setName(SqlIdentifier.of("CHARACTER SET"));
+            a.setEqualsSign(false);
+            if (!atStmtBreak()) {
+                a.setValue(exprParser.parsePrimary());
+            }
+            stmt.assignments().add(a);
+            if (!atStmtBreak()) {
+                String rest = consumeRawUntilSemi();
+                if (rest != null && !rest.isEmpty()) {
+                    stmt.setRaw(rest);
+                }
+            }
+            return stmt;
         }
-        if (match(SqlTokenType.EQ) || match(SqlTokenType.ASSIGN)) {
-            stmt.setValue(exprParser.parseExpr());
+        // SET a = 1 [, b = 2] …
+        do {
+            SqlSetStatement.Assignment a = new SqlSetStatement.Assignment();
+            if (is(SqlTokenType.VARIABLE)) {
+                a.setName(SqlIdentifier.of(token.text()));
+                next();
+            } else if (identLike() || (token.type() != null && token.type().keyword())) {
+                a.setName(parseName());
+            } else {
+                break;
+            }
+            if (match(SqlTokenType.EQ) || match(SqlTokenType.ASSIGN)) {
+                a.setEqualsSign(true);
+                a.setValue(exprParser.parseExpr());
+            } else {
+                a.setEqualsSign(false);
+            }
+            stmt.assignments().add(a);
+        } while (match(SqlTokenType.COMMA));
+        if (!atStmtBreak() && stmt.raw() == null) {
+            String rest = consumeRawUntilSemi();
+            if (rest != null && !rest.isEmpty()) {
+                stmt.setRaw(rest);
+            }
         }
         return stmt;
     }
