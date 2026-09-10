@@ -471,7 +471,7 @@ String body = HttpUtils.curlString(curl);
 或把 `parsed.toHttpRequest()` / `parsed` 交给 `HttpUtils.sse` / `sseMerge` / `sseReconnect`。
 
 需要把 curl 转成 OkHttp / fetch / requests 等其它语言源码时，请用独立模块
-`com.alianga:jkit-curl-codegen`（见 [jkit-curl-codegen/README.md](../jkit-curl-codegen/README.md)）。
+`com.alianga:jkit-curl-codegen`（见 [jkit-curl-codegen/README.md](https://github.com/zhengmingliang/jkit/blob/develop/jkit-curl-codegen/README.md)）。
 jkit 本身只做解析和执行：`parseModel` 给出的 `ParsedCurlRequest` 就是生成器的输入。
 
 除语言 SDK 外，本模块也提供与 curlconverter 对齐的互操作格式：`http`（原始 HTTP 报文）、

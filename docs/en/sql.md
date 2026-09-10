@@ -1,0 +1,269 @@
+# SQL Parsing Module
+
+For outstanding items and the kickoff order for follow-up agents, see [next-plan.md](https://github.com/zhengmingliang/jkit/blob/develop/docs/next-plan.md) (Section 2 is the main battleground for SQL).
+
+`com.alianga:jkit-sql` is a zero-dependency SQL parser: a hand-written lexer (`char[]` + open-addressing keyword hashing) and recursive descent producing an AST, with support for formatting, table/column statistics, and rewriting.
+
+Design references:
+
+- **Druid SQL Parser**: hand-written parsing, thread-local Parser reuse, `SchemaStatVisitor`-style table/column extraction, production-grade throughput
+- **JSqlParser**: AST + Visitor, `TablesNamesFinder`, pretty/compact write-back
+
+It does not execute SQL and does not pull in any JDBC driver.
+
+## Getting Started
+
+```xml
+<dependency>
+    <groupId>com.alianga</groupId>
+    <artifactId>jkit-sql</artifactId>
+    <version>2.0.1</version>
+</dependency>
+```
+
+Depends on `com.alianga:jkit` (logging, etc.); no other third-party libraries. JDK 8+.
+
+## Parsing
+
+```java
+import com.alianga.jkit.sql.SQL;
+import com.alianga.jkit.sql.SqlDialect;
+import com.alianga.jkit.sql.ast.SqlStatement;
+
+SqlStatement stmt = SQL.parse(
+        "SELECT u.id, b.name FROM users u "
+      + "LEFT JOIN order_t b ON u.id = b.uid "
+      + "WHERE u.age > 18");
+
+stmt.type();            // SELECT
+stmt.isReadOnly();      // true
+SQL.tables(stmt);       // [users, order_t]
+
+List<SqlStatement> batch = SQL.parseAll("SELECT 1; DELETE FROM t WHERE id=1");
+
+// Fault-tolerant multi-statement parsing (audit): failed entries become SqlSimpleStatement with parseError() set; parsing continues with the next statement
+List<SqlStatement> audit = SQL.parseAll(sql, SqlDialect.MYSQL, true);
+
+// Bare expression (must consume the entire input; trailing garbage throws SqlParseException)
+SqlExpr pred = SQL.parseExpr("tenant_id = ?");
+SqlExpr fn = SQL.parseExpr("REPLACE(email, '@', '^-^')");
+SqlExpr withOpt = SQL.parseExpr("age > @age@", SqlDialect.MYSQL,
+        SqlParseOptions.defaults().placeholders(SqlPlaceholders.create().atWrapped()));
+```
+
+The default dialect is **MySQL** (GBase / MariaDB / TiDB share the same set). Other dialects:
+
+```java
+SQL.parse(sql, SqlDialect.POSTGRES);
+SQL.parse(sql, SqlDialect.ORACLE);    // pre-12c: pagination rewrite uses ROWNUM
+SQL.parse(sql, SqlDialect.ORACLE12);  // 12c+: OFFSET/FETCH available
+SQL.parse(sql, SqlDialect.SQLSERVER);
+SQL.parse(sql, SqlDialect.ANSI);
+
+SqlDialect.fromName("gbase");     // MYSQL
+SqlDialect.fromName("gaussdb");   // POSTGRES
+SqlDialect.fromName("dm");        // ORACLE (ROWNUM)
+SqlDialect.fromName("oracle12");  // ORACLE12
+SqlDialect.fromName("19c");       // ORACLE12
+SqlDialect.fromName("tidb");      // MYSQL
+SqlDialect.fromName("sqlite");    // ANSI
+
+// Capability queries (single source of truth for rewriting/formatting)
+SqlDialect.MYSQL.supportsLimitOffset();   // true
+SqlDialect.SQLSERVER.supportsTop();       // true
+SqlDialect.ORACLE.supportsFetchFirst();   // false (pre-12c)
+SqlDialect.ORACLE12.supportsFetchFirst(); // true
+SqlDialect.ORACLE.supportsRownum();       // true
+SqlDialect.POSTGRES.pipesAreConcat();     // true
+SqlDialect.MYSQL.quoteIdent("user");      // `user`
+```
+
+Invalid SQL throws `SqlParseException` with line number, column number, and nearby source text; it never returns a half-built tree.
+
+## Template Placeholders (Optional)
+
+**Template SQL** such as common-model uses placeholder slots like `@age@`, `%s`, `<sheet>`, `<-sheet->`. Placeholder parsing is **off** by default (staying strict); enable it explicitly via `SqlParseOptions.placeholders()` when needed:
+
+```java
+SqlParseOptions opt = SqlParseOptions.defaults()
+        .placeholders(SqlPlaceholders.create()
+                .atWrapped()    // @name@
+                .printf()       // %s / %d / %f …
+                .angle()        // <sheet>
+                .arrowAngle()   // <-sheet->
+                .add("{{*}}")); // custom: exactly one * marks the body
+
+SqlStatement stmt = SQL.parse(
+        "select * from <20241230.1> where age > @age@ and name in (%s)",
+        SqlDialect.MYSQL, opt);
+```
+
+You can also use `SqlPlaceholders.create().commonModelTemplates()` to enable all four built-in presets above at once.
+
+Rule summary:
+
+| Pattern | Meaning | Lexer result |
+|------|------|----------|
+| `@*@` | identifier body wrapped in `@` on both sides | `IDENT` (usable as a column/value atom) |
+| printf | `%` + one letter | `IDENT` |
+| `<*>` / `<-*->` | table-name placeholder (allows `.` and `-`) | `IDENT` (usable as a table name) |
+| custom <code v-pre>{{*}}</code> etc. | non-empty prefix/suffix + body | `IDENT` |
+
+When not configured, `@age@` / `%s` / `<sheet>` still fail as before or get split into operators. Deliberately incomplete statements (e.g. `select * from`) fail even with placeholders enabled.
+
+## Statistics and Rewriting
+
+
+```java
+SqlSchemaStat stat = SQL.stat(sql);
+stat.tableNames();
+stat.getColumns();
+stat.getConditions();       // compact fragments from WHERE / JOIN ON / HAVING
+stat.getOrderByColumns();
+stat.getGroupByColumns();
+stat.getTables();           // Map<String, SqlTableAccess>; the same table can be INSERT+SELECT
+
+SqlStatement limited = SQL.addLimit(stmt, 100); // clones first, then appends LIMIT; the original tree is untouched
+SQL.getLimit(stmt);                              // Long, from LIMIT/TOP
+SQL.getOffset(stmt);
+SqlStatement page = SQL.setPage(stmt, 2, 20, SqlDialect.MYSQL); // clone; offset=20
+SQL.setLimit(stmt, 50, SqlDialect.POSTGRES);
+SQL.setOffset(stmt, 10, SqlDialect.POSTGRES);
+SqlStatement w = SQL.andWhere(stmt, "tenant_id = ?"); // internally parseExpr + clone, then AND WHERE
+SqlStatement t2 = SQL.replaceTable(w, "users", "users_archive"); // clone
+SqlStatement c2 = SQL.replaceColumn(t2, "name", "user_name");   // clone; skips table names/aliases
+SqlStatement copy = SQL.clone(stmt);
+```
+
+`addLimit`: does not overwrite an existing LIMIT/TOP; writes `TOP` for SQL Server, `LIMIT` for everything else.
+`andWhere` / `replaceTable` / `replaceColumn`: like `addLimit`/`setPage`, they now **clone before modifying** (breaking change: old code relying on in-place mutation must switch to using the return value).
+`setLimit` / `setOffset` / `setPage`: **replace** pagination; in `setPage(pageNo, pageSize)`, pageNo starts at 1.
+Dialects: MySQL/PG/H2/ANSI → `LIMIT`/`OFFSET`; SQL Server uses `TOP` on page 1 and `OFFSET FETCH` afterwards; bare Oracle SELECT → `FETCH FIRST` (optionally with `OFFSET`). For pre-existing Oracle `ROWNUM` double-nesting / `WHERE ROWNUM<=n` and SQL Server `row_number` wrappers: `getLimit` returns the page size, and `setPage`/`setLimit` only adjust the numeric bounds (without stacking OFFSET/FETCH). A UNION's LIMIT hangs at the end of the set-operation chain.
+
+## Parameterization / Wall / Evaluation (P2)
+
+```java
+String finger = SQL.parameterize("SELECT * FROM t WHERE name = 'a' AND age = 1");
+// SELECT * FROM t WHERE name = ? AND age = ?
+
+List<Object> litValues = SQL.exportParameterValues(sql); // "a", 1 — not ?/:name
+List<String> binds = SQL.parameters(sql);                 // "?", ":name"
+
+SqlWallResult wall = SQL.wall(sql); // parsing is not intercepted by default; call explicitly
+wall.passed();
+wall.violations(); // multi-statement / comment-bypass / always-true-condition / sleep-function / delete-without-where / update-without-where
+
+Object v = SQL.eval(expr); // literal arithmetic and comparison only; null when a column is read
+
+stmt.accept(new SqlAstVisitor() {
+    @Override protected boolean visitSelect(SqlSelect node) { return true; }
+});
+```
+
+## Formatting
+
+`format` / `toSqlString` write the AST back out (whitespace and comments are not preserved). **Semantic round-trip** (`parse → format → parse`) guarantees that `type()`, `tables()` (case-insensitive), and `isReadOnly()` match the original; the golden corpus `SqlGoldenCorpusTest` covers this fully.
+
+```java
+SQL.format(stmt);                           // newlines and indentation
+SQL.toSqlString(stmt);                      // compact single line
+SQL.format(stmt, SqlDialect.MYSQL, true);
+```
+
+Quoted identifiers are written back per dialect: backticks for MySQL, double quotes for PostgreSQL/Oracle/ANSI/H2, `[]` for SQL Server.
+`||` is written back from the AST (`CONCAT`→`||`; `OR` parsed by MySQL by default →`OR`).
+
+The write-back is pretty-printing; **comment and whitespace round-trip is not guaranteed**.
+
+## Dialect Differences
+
+| Aspect | MYSQL | POSTGRES / ANSI / ORACLE |
+| --- | --- | --- |
+| Identifier quoting | backticks `` ` `` | double quotes |
+| Double quotes | treated as string by default | treated as identifier |
+| `\|\|` | logical OR (`SqlParseOptions.pipesAsConcat(true)` switches to concatenation) | string concatenation |
+| `#` line comment | yes | no |
+| Pagination | `LIMIT` / `LIMIT off,n` (`supportsLimitOffset`) | PG/ANSI/H2: LIMIT+FETCH; Oracle: FETCH/ROWNUM; SQL Server: TOP + OFFSET FETCH |
+| `\|\|` capability | `pipesAsOr()` | `pipesAreConcat()` |
+
+## Quick Building (SqlBuilder)
+
+```java
+String sql = SqlBuilder.select("id", "name")
+        .distinct()
+        .from("users", "u")
+        .where("u.status = 1")
+        .and("u.age > 18")
+        .leftJoin("orders", "u.id = orders.uid")
+        .rightJoin("depts", "u.dept = depts.id")
+        .with("c", "SELECT id FROM t WHERE active = 1")
+        .groupBy("u.id")
+        .having("count(1) > 1")
+        .orderBy("u.id")
+        .limit(10)
+        .unionAll(SqlBuilder.select("id", "name").from("archive"))
+        .toSql();
+
+SqlBuilder.insertInto("t").columns("id", "name").values(1, "a").toSql();
+SqlBuilder.update("t").set("name", "b").where("id = 1").toSql();
+SqlBuilder.deleteFrom("t").where("id = 1").toSql();
+
+// AST-level composition (no string hacking)
+SQL.and(SqlBuilder.parsePredicate("a=1"), SqlBuilder.parsePredicate("b=2"));
+SQL.concat(Arrays.asList(SQL.parse("SELECT 1"), SQL.parse("SELECT 2")));
+SQL.builder().from("t").where("id = ?").limit(5).toSql();
+```
+
+The build result is an AST, which is then written back via `SQL.format` / `toSqlString`.
+
+## Parameter Extraction
+
+```java
+List<String> params = SQL.parameters("SELECT * FROM t WHERE id = ? AND name = :name");
+// ["?", ":name"]  — bind placeholders
+
+List<Object> literals = SQL.exportParameterValues("SELECT * FROM t WHERE name = 'a' AND age = 1");
+// ["a", 1]  — literal values (kept separate from parameters)
+```
+
+## v1 Coverage
+
+- SELECT: columns, `*`, `t.*`, DISTINCT / DISTINCT ON, TOP, `INTO` table / `@var` / `OUTFILE` (target table extracted into `tables`/`INSERT`), FROM (including MySQL `PARTITION (p0,p1)` table partition restriction), JOIN (INNER/LEFT/RIGHT/FULL/CROSS/NATURAL/STRAIGHT/comma), `CROSS APPLY` / `OUTER APPLY`, `LATERAL` subquery/table function, `UNNEST(...)` / `TABLE(fn(...))` / `OPENJSON(...) WITH (...)` table functions, `(VALUES …) AS v(cols)`, ON/USING, WHERE, GROUP BY [WITH ROLLUP], HAVING, `WINDOW … AS (…)` (can inherit another window name), ORDER BY, LIMIT/OFFSET/`FETCH FIRST n ROWS ONLY`, FOR UPDATE [OF cols] [NOWAIT|SKIP LOCKED], LOCK IN SHARE MODE, UNION/UNION ALL/INTERSECT/EXCEPT/MINUS, CONNECT BY / START WITH / PRIOR, WITH CTE
+- Window functions: `OVER (PARTITION BY ... ORDER BY ... ROWS/RANGE BETWEEN ...)`, named window reference `OVER w`, SELECT-level `WINDOW w AS (...)` (multiple allowed; `w2 AS (w)` / `w2 AS (w ORDER BY …)` inheritance), `FILTER (WHERE ...)`
+- Special functions: `EXTRACT(field FROM expr)`, `TRIM(BOTH/LEADING/TRAILING ... FROM expr)`, `SUBSTRING(expr FROM n FOR m)`, `POSITION(a IN b)`, `IF(a,b,c)` (MySQL), `CONVERT(expr USING charset)` / `CONVERT(type, expr)` (SQL Server), `GROUP_CONCAT(... ORDER BY ... SEPARATOR ...)`, `STRING_AGG(... ORDER BY ...)` / `WITHIN GROUP (ORDER BY ...)`, `MATCH (cols) AGAINST (...)`
+- INSERT / REPLACE: column list, multi-row VALUES, INSERT SELECT, INSERT SET, ON DUPLICATE KEY UPDATE, PG `ON CONFLICT` (`DO NOTHING` / `DO UPDATE` / `ON CONSTRAINT`), `RETURNING` (`*` or multi-column list), SQL Server `OUTPUT` / `OUTPUT … INTO`, Oracle `INSERT ALL` / `INSERT FIRST`
+- UPDATE / DELETE: JOIN, WHERE, ORDER BY, LIMIT, PG `UPDATE … FROM`, PG/MySQL `DELETE … USING`, `RETURNING` (multi-column), SQL Server `OUTPUT` / `OUTPUT … INTO` (table / `@var` / `#tmp`, included in `tables()`)
+- MERGE: INTO / USING / ON, multiple `WHEN MATCHED [AND pred]`, `WHEN NOT MATCHED [BY TARGET|SOURCE]`, `OUTPUT` / `OUTPUT … INTO`
+- DDL: CREATE/DROP/ALTER TABLE|VIEW|INDEX|DATABASE|PROCEDURE|FUNCTION|TRIGGER|EVENT (object name extracted; `CREATE OR REPLACE`; AS query for VIEW/CTAS; procedure parameters and BEGIN…END body go into tail; CREATE TABLE column definitions verbatim (`columnDefinitions`) + ENGINE/CHARSET/COLLATE/COMMENT + table-level FOREIGN KEY referenced tables; ALTER ADD/DROP INDEX, RENAME TO, CHANGE/MODIFY column definitions, ADD CONSTRAINT)
+- `EXPLAIN`/`DESCRIBE` → `SqlExplainStatement` (options such as ANALYZE/FORMAT/BUFFERS + nested statement), `SET` → `SqlSetStatement` (multiple assignments / NAMES / CHARACTER SET / SESSION|GLOBAL), USE, SHOW, CALL (arguments into AST), TRUNCATE, GRANT / REVOKE (privileges + ON object name; recipient `user@host` written back compactly; REVOKE uses FROM)
+- Procedural blocks / maintenance / transactions: `BEGIN … END` / top-level anonymous `DECLARE … BEGIN … END` → `SqlBlockStatement`; session-style `DECLARE x INT` (OTHER); bare `BEGIN` / `BEGIN WORK` / `START TRANSACTION` → `SqlStartTransactionStatement` (isolation level / READ WRITE|ONLY / WITH CONSISTENT SNAPSHOT); `COMMIT` / `ROLLBACK [TO SAVEPOINT]` / `SAVEPOINT` / `RELEASE SAVEPOINT` → `SqlTransactionControlStatement`; `FLUSH …` → `SqlFlushStatement` (option list / TABLES table names); `LOCK TABLES`/`UNLOCK TABLES` → `SqlLockTablesStatement`; `ANALYZE` / `VACUUM` / `OPTIMIZE|REPAIR|CHECK TABLE` → `SqlMaintenanceStatement` (tables + optionsRaw); `SHOW CREATE TABLE|VIEW|DATABASE` / `SHOW COLUMNS|INDEX|TABLES` → `SqlShowStatement`; `COMMENT ON TABLE|COLUMN|…` → `SqlCommentOnStatement` (objectKind/name/comment); SQL Server `GO` batch separator; PG `COPY … FROM|TO` → `SqlCopyStatement` (table/columns/STDIN·PROGRAM·file + WITH verbatim); MySQL `LOAD DATA [LOCAL] INFILE … INTO TABLE` → `SqlLoadDataStatement` (file/table/columns + FIELDS·LINES·IGNORE verbatim); MySQL table `HANDLER t OPEN|READ|CLOSE` → `SqlTableHandlerStatement`; `PREPARE` / `EXECUTE` / `DEALLOCATE PREPARE` / `EXECUTE IMMEDIATE` → `SqlPrepareStatement` (name / FROM·source / USING)
+- Expressions: literals, binds `?` / `:name` / `@var`, arithmetic and comparison, AND/OR/XOR/NOT, IN (including parenthesis-free bind lists `IN :name` / `IN ?`)/BETWEEN/LIKE/ILIKE/REGEXP, IS NULL, `IS DISTINCT FROM` / `IS NOT DISTINCT FROM`, CASE, CAST / `::`, functions, EXISTS, subqueries, `INTERVAL '1 day'` / `INTERVAL 1 DAY`, `X'FF'` / `0xFF`, row constructors `(a,b)`, JSON `->` `->>` `#>` `#>>`, array subscript `arr[1]`, `= ANY/SOME/ALL (...)`; plus PG `@>`/`<@`/`~`/`~*`, MySQL `FORCE INDEX FOR …`/`<=>`/`INSERT DELAYED`/`BINARY`, SQL Server `TOP WITH TIES`, `TABLESAMPLE`/`SAMPLE`, Oracle `(+)` outer-join suffix
+- Comments: `--`, `/* */`, MySQL `#`; input containing only comments/whitespace parses as an `OTHER` empty statement (no empty SQL error); MySQL executable comments `/*!40101 … */` are expanded into inner SQL (not discarded wholesale); optimizer hints `/*+ … */` attach to the SELECT / table and can be written back by format
+- Identifiers: bare MySQL identifiers may start with digits (e.g. `32强国` / `1019使用`), as long as the whole token is not purely numeric; `32` / `32.5` / `32e1` / `0xFF` remain literals; the backquoted form worked all along
+- Parse options: with `SqlParseOptions.keepComments(true)` (default false), regular comments go into `SqlStatement.comments()`; the hot path still discards them by default; `SqlParseOptions.pipesAsConcat(true)` makes `||` parse as concatenation under the MySQL dialect (equivalent to `PIPES_AS_CONCAT`); `SqlParseOptions.placeholders()` configures template placeholders (off by default, see "Template Placeholders"); `SQL.parseAll(sql, dialect, true)` enables fault-tolerant multi-statement parsing (failure placeholder + `parseError`, for auditing)
+
+Explicitly not done: structured execution of procedure bodies, an execution engine, a complete Wall rule set (only the `SQL.wall` subset is provided). CREATE TABLE column types/constraints are captured in `columnDefinitions` and can round-trip through format. Unknown functions parse as ordinary function calls and do not fail.
+
+## Performance
+
+Hand-written lexer + `ThreadLocal` Parser reuse. Comparison tests against Druid / JSqlParser live in **`tools-test`** in the parent directory (kept out of this module to avoid pulling in third-party dependencies):
+
+```text
+cd ../tools-test
+mvn -Dtest=SqlParserCompareTest test
+```
+
+On the `tools-test` file corpus `sql-corpus.txt` (about **379** statements), **jkit scores 379/379 (100%)**; the embedded CORPUS (about 64 statements) is also fully green. Competitor gaps vary with the samples (Druid commonly fails on `DISTINCT ON` / WINDOW inheritance / UNNEST; JSqlParser commonly fails on `LOCK IN SHARE MODE` / `[dbo].[user]` / WINDOW inheritance).
+
+For throughput, trust **JMH** (`SqlParseBenchmark` in `tools-test`, fork≥2); wall-clock for loops are only an order-of-magnitude reference: jkit and Druid are both in the hand-written tier, clearly faster than the JavaCC-based JSqlParser.
+
+| | Parse success rate (file corpus) | Notes |
+| --- | --- | --- |
+| **jkit-sql** | **379/379 (100%)** | in-module golden corpus ~216 statements (including round-trip); `mvn -pl jkit-sql test` runs about **647** tests |
+| Druid 1.2.23 | below jkit (gaps in `target/sql-compare-fail.txt`) | comparison is not part of this library's dependencies |
+| JSqlParser 4.9 | below jkit | same as above |
+
+## Corpus and Comparison
+
+- In-module: `SqlGoldenCorpusTest` (about **216** statements, including round-trip), `CommonModelSqlCorpusTest` (harvested from `icell/common-model`, 87 parseable statements).
+- Comparison against Druid / JSqlParser lives only in the parent project's `tools-test` module as `SqlParserCompareTest` (success rate + table-name set diff + JMH; not part of this library's dependencies).

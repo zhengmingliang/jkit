@@ -273,7 +273,7 @@ if (JDKVersion.VERSION >= 9) { /* 走 VarHandle 实现 */ }
 
 ## CSV / 身份证
 
-- `com.alianga.jkit.csv.CSVUtils`：UTF-8 读写字符串行，表头、引号内逗号/换行，含流式 `readStream` / `writer`。同包的 `CSV`/`CSVTable` 提供表格模型与 POJO 映射，两者共用同一个解析器。见 [csv.md](csv.md)。
+- `com.alianga.jkit.csv.CSVUtils`：UTF-8 读写字符串行，表头、引号内逗号/换行，含流式 `readStream` / `writer`。同包的 `CSV`/`CSVTable` 提供表格模型与 POJO 映射，两者共用同一个解析器。见 [csv.md](https://github.com/zhengmingliang/jkit/blob/develop/docs/csv.md)。
 - `IdCardUtils` / `IdCardGenerator`：18 位校验、解析、生成；区划数据在 `idcard-areas.txt`。
 
 ## 杂项工具

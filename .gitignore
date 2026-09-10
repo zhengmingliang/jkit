@@ -19,3 +19,8 @@ jkit-notify/src/test/resources/application-local.yml
 **/application-secrets.yml
 jkit-notify-extra/src/test/resources/jkit-application.yml
 jkit-notify-extra/src/test/resources/application-local.yml
+
+# Docs site (VitePress)
+node_modules/
+docs/.vitepress/dist/
+docs/.vitepress/cache/
