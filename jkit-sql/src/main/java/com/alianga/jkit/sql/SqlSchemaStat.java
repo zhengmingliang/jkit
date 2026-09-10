@@ -6,6 +6,7 @@ import com.alianga.jkit.sql.ast.SqlExpr;
 import com.alianga.jkit.sql.ast.SqlFunctionExpr;
 import com.alianga.jkit.sql.ast.SqlIdentifier;
 import com.alianga.jkit.sql.ast.SqlJoin;
+import com.alianga.jkit.sql.ast.SqlLoadDataStatement;
 import com.alianga.jkit.sql.ast.SqlLockTablesStatement;
 import com.alianga.jkit.sql.ast.SqlNode;
 import com.alianga.jkit.sql.ast.SqlOrderByItem;
@@ -192,6 +193,10 @@ public final class SqlSchemaStat {
                         addTable(item.table(), accessStack.peek());
                     }
                 }
+                return true;
+            }
+            if (node instanceof SqlLoadDataStatement) {
+                addTable(((SqlLoadDataStatement) node).table(), accessStack.peek());
                 return true;
             }
             if (node instanceof SqlFunctionExpr) {

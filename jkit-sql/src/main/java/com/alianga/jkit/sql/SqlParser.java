@@ -2,6 +2,7 @@ package com.alianga.jkit.sql;
 
 import com.alianga.jkit.sql.ast.SqlExpr;
 import com.alianga.jkit.sql.ast.SqlIdentifier;
+import com.alianga.jkit.sql.ast.SqlLoadDataStatement;
 import com.alianga.jkit.sql.ast.SqlLockTablesStatement;
 import com.alianga.jkit.sql.ast.SqlPrepareStatement;
 import com.alianga.jkit.sql.ast.SqlSimpleStatement;
@@ -904,50 +905,156 @@ public final class SqlParser {
     }
 
     /**
-     * MySQL {@code LOAD DATA [LOCAL] INFILE … INTO TABLE …}：OTHER + 全文，抽目标表名。
+     * MySQL {@code LOAD DATA [LOCAL] INFILE … INTO TABLE …} → {@link SqlLoadDataStatement}。
      */
     private SqlStatement parseLoad() {
+        int start = token.start();
         expect(SqlTokenType.LOAD);
-        SqlSimpleStatement stmt = new SqlSimpleStatement();
-        stmt.setStatementType(SqlStatementType.OTHER);
-        StringBuilder text = new StringBuilder("LOAD");
-        // LOAD DATA [LOCAL] INFILE 'path' INTO TABLE t …
-        if (isIdent("DATA")) {
-            text.append(' ').append(token.text().toUpperCase());
+        SqlLoadDataStatement stmt = new SqlLoadDataStatement();
+        if (!isIdent("DATA") && !(identLike() && "DATA".equalsIgnoreCase(token.text()))) {
+            // 非 LOAD DATA：回退全文
+            String rest = consumeRawUntilSemi();
+            stmt.setRaw(("LOAD " + (rest == null ? "" : rest)).trim());
+            return stmt;
+        }
+        next(); // DATA
+        if (is(SqlTokenType.LOW_PRIORITY)
+                || (identLike() && ("LOW_PRIORITY".equalsIgnoreCase(token.text())
+                || "CONCURRENT".equalsIgnoreCase(token.text())))) {
+            stmt.setPriority(token.text().toUpperCase());
             next();
         }
-        if (is(SqlTokenType.LOCAL) || isIdent("LOCAL")) {
-            text.append(' ').append(token.text().toUpperCase());
+        if (is(SqlTokenType.LOCAL) || isIdent("LOCAL")
+                || (identLike() && "LOCAL".equalsIgnoreCase(token.text()))) {
+            stmt.setLocal(true);
             next();
         }
-        if (isIdent("INFILE")) {
-            text.append(' ').append(token.text().toUpperCase());
+        if (isIdent("INFILE") || (identLike() && "INFILE".equalsIgnoreCase(token.text()))) {
             next();
         }
-        if (is(SqlTokenType.STRING)) {
-            text.append(' ').append(token.text());
+        if (!atStmtBreak() && !is(SqlTokenType.INTO) && !is(SqlTokenType.REPLACE)
+                && !is(SqlTokenType.IGNORE)) {
+            stmt.setFileName(exprParser.parsePrimary());
+        }
+        if (is(SqlTokenType.REPLACE) || is(SqlTokenType.IGNORE)
+                || (identLike() && ("REPLACE".equalsIgnoreCase(token.text())
+                || "IGNORE".equalsIgnoreCase(token.text())))) {
+            stmt.setDuplicateMode(token.text().toUpperCase());
             next();
         }
         if (is(SqlTokenType.INTO)) {
-            text.append(' ').append(token.text().toUpperCase());
             next();
             if (is(SqlTokenType.TABLE)) {
-                text.append(' ').append(token.text().toUpperCase());
                 next();
             }
             if (identLike()) {
-                stmt.setName(parseName());
-                text.append(' ').append(stmt.name().qualifiedName());
+                stmt.setTable(parseName());
             }
         }
-        if (!atStmtBreak()) {
+        if (is(SqlTokenType.PARTITION) || isIdent("PARTITION")) {
+            int pStart = token.start();
+            next();
+            if (is(SqlTokenType.LPAREN)) {
+                next();
+                skipBalancedParensContent();
+            }
+            // 并入 tail 前缀
+            String part = lexer.rawSlice(pStart, token.start()).trim();
+            stmt.setTail(part);
+        }
+        if (is(SqlTokenType.CHARACTER) || is(SqlTokenType.CHARSET)
+                || isIdent("CHARACTER") || isIdent("CHARSET")) {
+            if (is(SqlTokenType.CHARACTER) || isIdent("CHARACTER")) {
+                next();
+                if (is(SqlTokenType.SET) || isIdent("SET")) {
+                    next();
+                }
+            } else {
+                next(); // CHARSET
+            }
+            if (identLike() || (token.type() != null && token.type().keyword())
+                    || is(SqlTokenType.STRING)) {
+                if (is(SqlTokenType.STRING)) {
+                    stmt.setCharacterSet(unquote(consumeStringRaw()));
+                } else {
+                    stmt.setCharacterSet(consumeIdentRaw());
+                }
+            }
+        }
+        if (is(SqlTokenType.COLUMNS) || isIdent("FIELDS") || isIdent("COLUMNS")
+                || (identLike() && ("FIELDS".equalsIgnoreCase(token.text())
+                || "COLUMNS".equalsIgnoreCase(token.text())))) {
+            int fStart = token.start();
+            next();
+            while (!atStmtBreak() && !isLoadLinesStart() && !isLoadIgnoreRowsStart()
+                    && !is(SqlTokenType.SET) && !is(SqlTokenType.LPAREN)) {
+                next();
+            }
+            stmt.setFieldsClause(lexer.rawSlice(fStart, token.start()).trim());
+        }
+        if (isLoadLinesStart()) {
+            int lStart = token.start();
+            next();
+            while (!atStmtBreak() && !isLoadIgnoreRowsStart()
+                    && !is(SqlTokenType.SET) && !is(SqlTokenType.LPAREN)) {
+                next();
+            }
+            stmt.setLinesClause(lexer.rawSlice(lStart, token.start()).trim());
+        }
+        if (isLoadIgnoreRowsStart()) {
+            int iStart = token.start();
+            next(); // IGNORE
+            if (is(SqlTokenType.NUMBER)) {
+                next();
+            }
+            if (isIdent("LINES") || isIdent("ROWS")
+                    || (identLike() && ("LINES".equalsIgnoreCase(token.text())
+                    || "ROWS".equalsIgnoreCase(token.text())))) {
+                next();
+            }
+            stmt.setIgnoreClause(lexer.rawSlice(iStart, token.start()).trim());
+        }
+        if (is(SqlTokenType.LPAREN)) {
+            next();
+            if (!is(SqlTokenType.RPAREN)) {
+                do {
+                    if (is(SqlTokenType.VARIABLE)) {
+                        stmt.columns().add(SqlIdentifier.of(token.text()));
+                        next();
+                    } else if (identLike() || (token.type() != null && token.type().keyword())) {
+                        stmt.columns().add(parseName());
+                    } else {
+                        break;
+                    }
+                } while (match(SqlTokenType.COMMA));
+            }
+            if (is(SqlTokenType.RPAREN)) {
+                next();
+            }
+        }
+        if (is(SqlTokenType.SET) || !atStmtBreak()) {
             String rest = consumeRawUntilSemi();
-            if (!rest.isEmpty()) {
-                text.append(' ').append(rest);
+            if (rest != null && !rest.isEmpty()) {
+                if (stmt.tail() != null && !stmt.tail().isEmpty()) {
+                    stmt.setTail(stmt.tail() + " " + rest);
+                } else {
+                    stmt.setTail(rest);
+                }
             }
         }
-        stmt.setText(text.toString());
+        if (stmt.table() == null && stmt.fileName() == null) {
+            stmt.setRaw(lexer.rawSlice(start, token.start()).trim());
+        }
         return stmt;
+    }
+
+    private boolean isLoadLinesStart() {
+        return isIdent("LINES") || (identLike() && "LINES".equalsIgnoreCase(token.text()));
+    }
+
+    private boolean isLoadIgnoreRowsStart() {
+        return is(SqlTokenType.IGNORE) || isIdent("IGNORE")
+                || (identLike() && "IGNORE".equalsIgnoreCase(token.text()));
     }
 
     private SqlStatement parseHandler() {

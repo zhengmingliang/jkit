@@ -22,6 +22,7 @@ import com.alianga.jkit.sql.ast.SqlInsert;
 import com.alianga.jkit.sql.ast.SqlJoin;
 import com.alianga.jkit.sql.ast.SqlListExpr;
 import com.alianga.jkit.sql.ast.SqlLiteral;
+import com.alianga.jkit.sql.ast.SqlLoadDataStatement;
 import com.alianga.jkit.sql.ast.SqlLockTablesStatement;
 import com.alianga.jkit.sql.ast.SqlMerge;
 import com.alianga.jkit.sql.ast.SqlMergeWhen;
@@ -2165,23 +2166,48 @@ public class SqlParserTest {
     }
 
     /**
-     * MySQL LOAD DATA [LOCAL] INFILE … INTO TABLE … → OTHER，抽表名。
+     * MySQL LOAD DATA [LOCAL] INFILE … INTO TABLE … → SqlLoadDataStatement。
      */
     @Test
     public void loadDataInfile() {
-        SqlSimpleStatement load = (SqlSimpleStatement) SQL.parse(
+        SqlLoadDataStatement load = (SqlLoadDataStatement) SQL.parse(
                 "LOAD DATA INFILE '/tmp/a.csv' INTO TABLE stg.foo "
                         + "FIELDS TERMINATED BY ','");
         assertEquals(SqlStatementType.OTHER, load.type());
-        assertNotNull(load.name());
-        assertEquals("stg.foo", load.name().qualifiedName());
-        assertTrue(load.text().toUpperCase().startsWith("LOAD"));
-        assertTrue(load.text().toUpperCase().contains("INFILE"));
+        assertFalse(load.local());
+        assertNotNull(load.fileName());
+        assertEquals("stg.foo", load.table().qualifiedName());
+        assertNotNull(load.fieldsClause());
+        assertTrue(load.fieldsClause().toUpperCase().contains("FIELDS"));
+        assertTrue(SQL.tables(load).contains("stg.foo"));
+        String fmt = SQL.toSqlString(load);
+        assertTrue(fmt.toUpperCase().contains("LOAD"));
+        assertTrue(fmt.toUpperCase().contains("INFILE"));
+        assertTrue(fmt.toUpperCase().contains("FIELDS"));
 
-        SqlSimpleStatement local = (SqlSimpleStatement) SQL.parse(
+        SqlLoadDataStatement local = (SqlLoadDataStatement) SQL.parse(
                 "LOAD DATA LOCAL INFILE 'x.dat' INTO TABLE t");
-        assertEquals(SqlStatementType.OTHER, local.type());
-        assertEquals("t", local.name().simpleName());
+        assertTrue(local.local());
+        assertEquals("t", local.table().simpleName());
+
+        SqlLoadDataStatement rich = (SqlLoadDataStatement) SQL.parse(
+                "LOAD DATA LOW_PRIORITY LOCAL INFILE 'a.csv' REPLACE INTO TABLE t "
+                        + "CHARACTER SET utf8 "
+                        + "FIELDS TERMINATED BY ',' "
+                        + "LINES TERMINATED BY '\n' "
+                        + "IGNORE 1 LINES "
+                        + "(id, name, @skip) "
+                        + "SET name = NULLIF(@skip, '')");
+        assertEquals("LOW_PRIORITY", rich.priority());
+        assertTrue(rich.local());
+        assertEquals("REPLACE", rich.duplicateMode());
+        assertEquals("utf8", rich.characterSet());
+        assertNotNull(rich.fieldsClause());
+        assertNotNull(rich.linesClause());
+        assertNotNull(rich.ignoreClause());
+        assertEquals(3, rich.columns().size());
+        assertNotNull(rich.tail());
+        assertTrue(rich.tail().toUpperCase().contains("SET"));
     }
 
     /**

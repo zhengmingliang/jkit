@@ -21,6 +21,7 @@ import com.alianga.jkit.sql.ast.SqlJoin;
 import com.alianga.jkit.sql.ast.SqlLimit;
 import com.alianga.jkit.sql.ast.SqlListExpr;
 import com.alianga.jkit.sql.ast.SqlLiteral;
+import com.alianga.jkit.sql.ast.SqlLoadDataStatement;
 import com.alianga.jkit.sql.ast.SqlLockTablesStatement;
 import com.alianga.jkit.sql.ast.SqlMatchRecognize;
 import com.alianga.jkit.sql.ast.SqlMerge;
@@ -101,6 +102,9 @@ public class SqlAstVisitor implements SqlVisitor {
         }
         if (node instanceof SqlLockTablesStatement) {
             return visitLockTables((SqlLockTablesStatement) node);
+        }
+        if (node instanceof SqlLoadDataStatement) {
+            return visitLoadData((SqlLoadDataStatement) node);
         }
         if (node instanceof SqlSimpleStatement) {
             return visitSimple((SqlSimpleStatement) node);
@@ -286,6 +290,11 @@ public class SqlAstVisitor implements SqlVisitor {
 
     /** @param node LOCK/UNLOCK TABLES @return 是否继续子节点 */
     protected boolean visitLockTables(SqlLockTablesStatement node) {
+        return true;
+    }
+
+    /** @param node LOAD DATA INFILE @return 是否继续子节点 */
+    protected boolean visitLoadData(SqlLoadDataStatement node) {
         return true;
     }
 

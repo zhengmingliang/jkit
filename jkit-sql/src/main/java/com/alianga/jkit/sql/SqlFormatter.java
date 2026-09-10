@@ -23,6 +23,7 @@ import com.alianga.jkit.sql.ast.SqlJoin;
 import com.alianga.jkit.sql.ast.SqlLimit;
 import com.alianga.jkit.sql.ast.SqlListExpr;
 import com.alianga.jkit.sql.ast.SqlLiteral;
+import com.alianga.jkit.sql.ast.SqlLoadDataStatement;
 import com.alianga.jkit.sql.ast.SqlLockTablesStatement;
 import com.alianga.jkit.sql.ast.SqlMatchRecognize;
 import com.alianga.jkit.sql.ast.SqlMerge;
@@ -136,6 +137,8 @@ public final class SqlFormatter {
             writePrepare((SqlPrepareStatement) node);
         } else if (node instanceof SqlLockTablesStatement) {
             writeLockTables((SqlLockTablesStatement) node);
+        } else if (node instanceof SqlLoadDataStatement) {
+            writeLoadData((SqlLoadDataStatement) node);
         } else if (node instanceof SqlSimpleStatement) {
             writeSimple((SqlSimpleStatement) node);
         } else if (node instanceof SqlExpr) {
@@ -1777,6 +1780,81 @@ public final class SqlFormatter {
                 sp();
                 writeLimit(h.limit());
             }
+        }
+    }
+
+    private void writeLoadData(SqlLoadDataStatement load) {
+        if (load == null) {
+            return;
+        }
+        if (load.raw() != null && load.table() == null && load.fileName() == null) {
+            out.append(load.raw());
+            return;
+        }
+        out.append("LOAD");
+        sp();
+        out.append("DATA");
+        if (load.priority() != null) {
+            sp();
+            out.append(load.priority());
+        }
+        if (load.local()) {
+            sp();
+            out.append("LOCAL");
+        }
+        sp();
+        out.append("INFILE");
+        if (load.fileName() != null) {
+            sp();
+            writeExpr(load.fileName());
+        }
+        if (load.duplicateMode() != null) {
+            sp();
+            out.append(load.duplicateMode());
+        }
+        sp();
+        kw("INTO");
+        sp();
+        kw("TABLE");
+        if (load.table() != null) {
+            sp();
+            writeExpr(load.table());
+        }
+        if (load.characterSet() != null) {
+            sp();
+            out.append("CHARACTER");
+            sp();
+            kw("SET");
+            sp();
+            out.append(load.characterSet());
+        }
+        if (load.fieldsClause() != null && load.fieldsClause().length() > 0) {
+            sp();
+            out.append(load.fieldsClause());
+        }
+        if (load.linesClause() != null && load.linesClause().length() > 0) {
+            sp();
+            out.append(load.linesClause());
+        }
+        if (load.ignoreClause() != null && load.ignoreClause().length() > 0) {
+            sp();
+            out.append(load.ignoreClause());
+        }
+        if (!load.columns().isEmpty()) {
+            sp();
+            out.append('(');
+            for (int i = 0; i < load.columns().size(); i++) {
+                if (i > 0) {
+                    out.append(',');
+                    sp();
+                }
+                writeExpr(load.columns().get(i));
+            }
+            out.append(')');
+        }
+        if (load.tail() != null && load.tail().length() > 0) {
+            sp();
+            out.append(load.tail());
         }
     }
 
