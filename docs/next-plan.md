@@ -345,3 +345,17 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 **已知遗留（低价值，勿自动展开）**：`FROM dual` 计表、`SHOW TABLES FROM db` 把库名计表、`WITH (INDEX(ix))` 内部空格按原文保留。
 
 后续若继续：优先把 `SqlRoundTripFidelityTest` 扩到 `tools-test` 的 379 条语料批量跑（本地探针已验证可行），再考虑新语法。
+
+---
+
+## 9. 扩展性改造（2026-09-10，agent）
+
+按 ROI 排序的五项扩展性改造，本轮完成前两项 ✅（`mvn -pl jkit-sql test` 817 全绿）：
+
+1. **方言能力可覆盖** ✅ `e3ca817` — `SqlDialectSpec` 接口 + `SqlDialectWrapper` 包装层；4 处散落 `dialect == SqlDialect.X`（Lexer 方括号标识符 / Lexer 反斜杠转义 / ExprParser `~` 正则 / Rewriter 逗号分页）改回能力方法；全部方言参数放宽为 `SqlDialectSpec`（枚举调用点源码兼容）。
+2. **SqlWall 规则 SPI** ✅（见本轮提交）— `checkStatement` 的 if-else 拆成内置 5 条 `SqlWallRule` 规则链，`SqlWallConfig.rules(...)` 追加自定义规则；违规码收集走 `SqlWallViolations`（去重）。行为与违规码完全不变，`SqlWallTest` 全部原样通过。
+3. **语句解析注册表**（未做）— `SqlParser` 语句级 switch 后加 `Map<SqlTokenType, ParseFn>` fallback，新语句类型免改 switch。
+4. **SqlFormatOptions 扩展**（未做）— 关键字大小写策略、pretty-print 细项。
+5. **改写规则链**（未做，低）— `SqlRewriter` 前后 hook。
+
+明确不做：`SqlKeywords`/`SqlTokenType` 动态注册化（零分配哈希是性能关键路径）；visitor 重设计（双轨制够用）。

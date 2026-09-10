@@ -302,11 +302,25 @@ mvn -Dtest=SqlParserCompareTest test
 
 On the `tools-test` file corpus `sql-corpus.txt` (about **379** statements), **jkit scores 379/379 (100%)**; the embedded CORPUS (about 64 statements) is also fully green. Competitor gaps vary with the samples (Druid commonly fails on `DISTINCT ON` / WINDOW inheritance / UNNEST; JSqlParser commonly fails on `LOCK IN SHARE MODE` / `[dbo].[user]` / WINDOW inheritance).
 
-For throughput, trust **JMH** (`SqlParseBenchmark` in `tools-test`, fork≥2); wall-clock for loops are only an order-of-magnitude reference: jkit and Druid are both in the hand-written tier, clearly faster than the JavaCC-based JSqlParser.
+Throughput is measured with **JMH** (`SqlParseBenchmark` in `tools-test`). Formal run (fork=2, warmup=5, iterations=5, Cnt=10, avgt, ns/op — lower is better; measured 2026-09-10 on i9-13900HX / OpenJDK 17.0.11):
+
+| Engine | SIMPLE (single table) | JOIN (two tables) | WINDOW (window function) |
+| --- | ---: | ---: | ---: |
+| **jkit-sql** | **508** | **1,073** | **657** |
+| Druid 1.2.23 | 1,274 (2.5×) | 3,667 (3.4×) | 3,023 (4.6×) |
+| JSqlParser 4.9 | 220,445 (434×) | 252,464 (235×) | 301,220 (459×) |
+
+jkit and Druid are both hand-written parsers, and jkit is consistently **2.5–4.6× faster**; the JavaCC-generated JSqlParser is over two orders of magnitude slower. Reproduce (about 30 minutes):
+
+```text
+cd ../tools-test
+mvn -DskipTests package
+java -jar target/benchmarks.jar com.alianga.test.sql.jmh.SqlParseBenchmark -f 2 -wi 5 -i 5
+```
 
 | | Parse success rate (file corpus) | Notes |
 | --- | --- | --- |
-| **jkit-sql** | **379/379 (100%)** | in-module golden corpus ~216 statements (including round-trip; `SqlGoldenCorpusTest` ~432 assertions); `mvn -pl jkit-sql test` runs about **790** tests |
+| **jkit-sql** | **379/379 (100%)** | in-module golden corpus ~216 statements (including round-trip; `SqlGoldenCorpusTest` ~432 assertions) + 73 round-trip fidelity statements (`SqlRoundTripFidelityTest`) + 379 batch fidelity lines (`SqlRoundTripFidelityCorpusTest` in tools-test); `mvn -pl jkit-sql test` runs **810** tests |
 | Druid 1.2.23 | below jkit (gaps in `target/sql-compare-fail.txt`) | comparison is not part of this library's dependencies |
 | JSqlParser 4.9 | below jkit | same as above |
 

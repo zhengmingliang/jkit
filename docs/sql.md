@@ -191,6 +191,14 @@ SqlWallConfig cfg = SqlWallConfig.defaults()
         .selectOnly(false);
 SqlWallResult w2 = SQL.wall(sql, SqlDialect.MYSQL, cfg);
 
+// 自定义规则（SqlWallRule SPI）：在全部内置检查之后、按注册顺序执行，违规码自动去重
+cfg.rules((statement, config, violations) -> {
+    if (statement.type() != SqlStatementType.SELECT) {
+        violations.add("non-select");
+    }
+});
+SqlWallResult w3 = SQL.wall(sql, SqlDialect.MYSQL, cfg); // violations 可同时含内置码与 non-select
+
 Object v = SQL.eval(expr); // 仅字面量算术与比较；读列则 null
 
 stmt.accept(new SqlAstVisitor() {
@@ -318,11 +326,25 @@ mvn -Dtest=SqlParserCompareTest test
 
 `tools-test` 文件语料 `sql-corpus.txt`（约 **379** 条）上 **jkit 379/379（100%）**；内嵌 CORPUS（约 64 条）亦全绿。竞品缺口随样例变化（Druid 常见挂 `DISTINCT ON` / WINDOW 继承 / UNNEST；JSqlParser 常见挂 `LOCK IN SHARE MODE` / `[dbo].[user]` / WINDOW 继承）。
 
-吞吐请以 **JMH** 为准（`tools-test` 的 `SqlParseBenchmark`，fork≥2）；墙钟 for 循环仅作数量级参考：jkit 与 Druid 同属手写档，明显快于 JavaCC 的 JSqlParser。
+吞吐以 **JMH** 为准（`tools-test` 的 `SqlParseBenchmark`）。正式轮实测（fork=2、warmup=5、iteration=5、Cnt=10，avgt，ns/op，越小越好；2026-09-10，i9-13900HX / OpenJDK 17.0.11）：
+
+| 引擎 | SIMPLE（单表查询） | JOIN（双表连接） | WINDOW（窗口函数） |
+| --- | ---: | ---: | ---: |
+| **jkit-sql** | **508** | **1,073** | **657** |
+| Druid 1.2.23 | 1,274（2.5×） | 3,667（3.4×） | 3,023（4.6×） |
+| JSqlParser 4.9 | 220,445（434×） | 252,464（235×） | 301,220（459×） |
+
+jkit 与 Druid 同属手写解析档，且稳定快 **2.5~4.6 倍**；JavaCC 生成的 JSqlParser 慢两个数量级以上。复现（约 30 分钟）：
+
+```text
+cd ../tools-test
+mvn -DskipTests package
+java -jar target/benchmarks.jar com.alianga.test.sql.jmh.SqlParseBenchmark -f 2 -wi 5 -i 5
+```
 
 | | 解析成功率（文件语料） | 备注 |
 | --- | --- | --- |
-| **jkit-sql** | **379/379 (100%)** | 模块内黄金集约 216 条（含往返，`SqlGoldenCorpusTest` 约 432 断言）+ 回写保真 66 条（`SqlRoundTripFidelityTest`）；`mvn -pl jkit-sql test` 约 **800** 条 |
+| **jkit-sql** | **379/379 (100%)** | 模块内黄金集约 216 条（含往返，`SqlGoldenCorpusTest` 约 432 断言）+ 回写保真 73 条（`SqlRoundTripFidelityTest`）+ tools-test 批量保真 379 条（`SqlRoundTripFidelityCorpusTest`）；`mvn -pl jkit-sql test` **810** 条 |
 | Druid 1.2.23 | 低于 jkit（缺口见 `target/sql-compare-fail.txt`） | 对比不进本库依赖 |
 | JSqlParser 4.9 | 低于 jkit | 同上 |
 

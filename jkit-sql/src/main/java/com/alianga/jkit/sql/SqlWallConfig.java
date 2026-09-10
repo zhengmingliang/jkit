@@ -1,10 +1,17 @@
 package com.alianga.jkit.sql;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+
 /**
  * {@link SqlWall} 可配置规则（对标 Druid WallFilter 子集）。
  *
  * <p>{@link #defaults()} 打开安全关键检查；{@code denyUnion} / {@code denyInformationSchema}
  * 默认关闭，以免误伤合法业务 SQL。{@code selectOnly} 默认关闭。</p>
+ *
+ * <p>内置开关之外可用 {@link #rules(SqlWallRule...)} 追加自定义检查（在全部内置检查之后执行）。</p>
  *
  * @author 郑明亮
  * @since 2.0.1
@@ -20,6 +27,7 @@ public final class SqlWallConfig {
     private boolean denyUnion;
     private boolean denyInformationSchema;
     private boolean selectOnly;
+    private List<SqlWallRule> rules = Collections.emptyList();
 
     /**
      * @return 默认安全配置
@@ -177,6 +185,28 @@ public final class SqlWallConfig {
     /** @param selectOnly 仅 SELECT @return this */
     public SqlWallConfig selectOnly(boolean selectOnly) {
         this.selectOnly = selectOnly;
+        return this;
+    }
+
+    /**
+     * @return 自定义规则（默认空列表，只读）
+     */
+    public List<SqlWallRule> rules() {
+        return rules;
+    }
+
+    /**
+     * 注册自定义规则：在全部内置检查之后、按注册顺序执行。
+     *
+     * @param rules 规则；null 或空数组清空
+     * @return this
+     */
+    public SqlWallConfig rules(SqlWallRule... rules) {
+        if (rules == null || rules.length == 0) {
+            this.rules = Collections.emptyList();
+        } else {
+            this.rules = Collections.unmodifiableList(new ArrayList<SqlWallRule>(Arrays.asList(rules)));
+        }
         return this;
     }
 }
