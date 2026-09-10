@@ -15,7 +15,7 @@ public final class SqlLexer {
     private int pos;
     private int line;
     private int lineStart;
-    private SqlDialect dialect;
+    private SqlDialectSpec dialect;
     private boolean keepComments;
     private boolean pipesAsConcat;
     private SqlPlaceholderPattern[] placeholderPatterns;
@@ -36,9 +36,9 @@ public final class SqlLexer {
      * 绑定一段 SQL 文本。
      *
      * @param sql SQL
-     * @param dialect 方言
+     * @param dialect 方言（枚举或 {@link SqlDialectWrapper} 自定义能力）
      */
-    public void reset(String sql, SqlDialect dialect) {
+    public void reset(String sql, SqlDialectSpec dialect) {
         if (sql == null) {
             sql = "";
         }
@@ -52,9 +52,9 @@ public final class SqlLexer {
      * @param src 源
      * @param offset 起始
      * @param length 长度
-     * @param dialect 方言
+     * @param dialect 方言（枚举或 {@link SqlDialectWrapper} 自定义能力）
      */
-    public void reset(char[] src, int offset, int length, SqlDialect dialect) {
+    public void reset(char[] src, int offset, int length, SqlDialectSpec dialect) {
         this.src = src;
         this.start = offset;
         this.limit = offset + length;
@@ -125,7 +125,7 @@ public final class SqlLexer {
     /**
      * @return 当前方言
      */
-    public SqlDialect dialect() {
+    public SqlDialectSpec dialect() {
         return dialect;
     }
 
@@ -245,7 +245,7 @@ public final class SqlLexer {
             return;
         }
         if (c == '`' || (c == '"' && !dialect.doubleQuoteIsString())
-                || (c == '[' && dialect == SqlDialect.SQLSERVER)) {
+                || (c == '[' && dialect.bracketIdentifiers())) {
             scanQuotedIdent(token, tLine, tCol, tStart, c);
             return;
         }
@@ -366,7 +366,7 @@ public final class SqlLexer {
                 pos++;
                 break;
             }
-            if (c == '\\' && dialect == SqlDialect.MYSQL && pos + 1 < limit) {
+            if (c == '\\' && dialect.backslashEscapes() && pos + 1 < limit) {
                 pos += 2;
                 continue;
             }

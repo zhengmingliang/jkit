@@ -201,8 +201,7 @@ final class SqlExprParser {
                 p.next();
                 left = SqlBinaryExpr.of(left, atOp(opText), parseBit());
             } else if (p.is(SqlTokenType.REGEX_OP)
-                    || ((p.dialect == SqlDialect.POSTGRES || p.dialect == SqlDialect.H2)
-                    && p.is(SqlTokenType.TILDE))) {
+                    || (p.dialect.supportsTildeRegex() && p.is(SqlTokenType.TILDE))) {
                 String opText = p.token.text();
                 p.next();
                 left = SqlBinaryExpr.of(left, regexOp(opText), parseBit());

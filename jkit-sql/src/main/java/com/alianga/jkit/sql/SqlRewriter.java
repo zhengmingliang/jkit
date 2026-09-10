@@ -36,7 +36,7 @@ public final class SqlRewriter {
      * @param dialect 方言
      * @return 原对象（就地修改）
      */
-    public static SqlStatement addLimit(SqlStatement statement, long rowCount, SqlDialect dialect) {
+    public static SqlStatement addLimit(SqlStatement statement, long rowCount, SqlDialectSpec dialect) {
         SqlSelect select = asSelect(statement);
         if (select == null) {
             return statement;
@@ -44,7 +44,7 @@ public final class SqlRewriter {
         if (getLimit(statement) != null) {
             return statement;
         }
-        SqlDialect d = dialect == null ? SqlDialect.MYSQL : dialect;
+        SqlDialectSpec d = dialect == null ? SqlDialect.MYSQL : dialect;
         applyPagination(select, 0L, rowCount, d, false);
         return statement;
     }
@@ -104,12 +104,12 @@ public final class SqlRewriter {
      * @param dialect 方言
      * @return 原对象
      */
-    public static SqlStatement setLimit(SqlStatement statement, long rowCount, SqlDialect dialect) {
+    public static SqlStatement setLimit(SqlStatement statement, long rowCount, SqlDialectSpec dialect) {
         SqlSelect select = asSelect(statement);
         if (select == null) {
             return statement;
         }
-        SqlDialect d = dialect == null ? SqlDialect.MYSQL : dialect;
+        SqlDialectSpec d = dialect == null ? SqlDialect.MYSQL : dialect;
         if (rowCount < 0) {
             RowNumPage page = detectRowNumPage(select);
             if (page == null) {
@@ -131,12 +131,12 @@ public final class SqlRewriter {
      * @param dialect 方言
      * @return 原对象
      */
-    public static SqlStatement setOffset(SqlStatement statement, long offset, SqlDialect dialect) {
+    public static SqlStatement setOffset(SqlStatement statement, long offset, SqlDialectSpec dialect) {
         SqlSelect select = asSelect(statement);
         if (select == null) {
             return statement;
         }
-        SqlDialect d = dialect == null ? SqlDialect.MYSQL : dialect;
+        SqlDialectSpec d = dialect == null ? SqlDialect.MYSQL : dialect;
         long off = offset < 0 ? 0L : offset;
         RowNumPage page = detectRowNumPage(select);
         if (page != null) {
@@ -176,12 +176,12 @@ public final class SqlRewriter {
      * @return 原对象
      */
     public static SqlStatement setPage(SqlStatement statement, long pageNo, long pageSize,
-            SqlDialect dialect) {
+            SqlDialectSpec dialect) {
         SqlSelect select = asSelect(statement);
         if (select == null) {
             return statement;
         }
-        SqlDialect d = dialect == null ? SqlDialect.MYSQL : dialect;
+        SqlDialectSpec d = dialect == null ? SqlDialect.MYSQL : dialect;
         long pn = pageNo < 1 ? 1L : pageNo;
         long ps = pageSize < 1 ? 1L : pageSize;
         long offset = (pn - 1L) * ps;
@@ -191,7 +191,7 @@ public final class SqlRewriter {
 
     /** 按方言就地挂/改分页（包内供 {@link SqlBuilder} 复用）。 */
     static void applyPagination(SqlSelect root, long offset, long rowCount,
-            SqlDialect dialect, boolean withOffset) {
+            SqlDialectSpec dialect, boolean withOffset) {
         RowNumPage page = detectRowNumPage(root);
         if (page != null) {
             if (page.kind == RowNumPage.Kind.ORACLE_SIMPLE && offset > 0L) {
@@ -222,7 +222,7 @@ public final class SqlRewriter {
                 || (dialect.supportsFetchFirst() && !dialect.supportsLimitOffset())) {
             // SQL Server（有偏移）或 Oracle 12c+：OFFSET/FETCH
             limit.setFetchStyle(true);
-        } else if (dialect.supportsLimitOffset() && offset > 0L && dialect == SqlDialect.MYSQL) {
+        } else if (dialect.supportsLimitOffset() && dialect.supportsCommaLimitOffset() && offset > 0L) {
             limit.setMysqlCommaStyle(true);
         }
         select.setLimit(limit);
@@ -331,7 +331,7 @@ public final class SqlRewriter {
         return core;
     }
 
-    private static void ensureLimitNode(SqlSelect select, SqlDialect dialect, boolean fetchIfNeeded) {
+    private static void ensureLimitNode(SqlSelect select, SqlDialectSpec dialect, boolean fetchIfNeeded) {
         if (select.limit() == null) {
             SqlLimit limit = new SqlLimit();
             if (fetchIfNeeded && (dialect.supportsTop()

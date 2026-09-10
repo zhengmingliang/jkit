@@ -36,7 +36,7 @@ public final class SqlWall {
      * @param dialect 方言
      * @return 检测结果（默认配置）
      */
-    public static SqlWallResult check(String sql, SqlDialect dialect) {
+    public static SqlWallResult check(String sql, SqlDialectSpec dialect) {
         return check(sql, dialect, SqlWallConfig.defaults());
     }
 
@@ -46,7 +46,7 @@ public final class SqlWall {
      * @param config 规则；null 视为 {@link SqlWallConfig#defaults()}
      * @return 检测结果
      */
-    public static SqlWallResult check(String sql, SqlDialect dialect, SqlWallConfig config) {
+    public static SqlWallResult check(String sql, SqlDialectSpec dialect, SqlWallConfig config) {
         SqlWallConfig cfg = config == null ? SqlWallConfig.defaults() : config;
         List<String> violations = new ArrayList<String>(4);
         if (sql == null || sql.trim().isEmpty()) {
@@ -55,7 +55,7 @@ public final class SqlWall {
         if (cfg.denyCommentBypass()) {
             checkCommentBypass(sql, violations);
         }
-        SqlDialect d = dialect == null ? SqlDialect.MYSQL : dialect;
+        SqlDialectSpec d = dialect == null ? SqlDialect.MYSQL : dialect;
         List<SqlStatement> all;
         try {
             all = SQL.parseAll(sql, d);

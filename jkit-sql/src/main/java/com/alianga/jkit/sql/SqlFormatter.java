@@ -78,7 +78,7 @@ import java.util.List;
 public final class SqlFormatter {
     private final StringBuilder out = new StringBuilder(128);
     private final boolean pretty;
-    private final SqlDialect dialect;
+    private final SqlDialectSpec dialect;
     private final SqlFormatOptions options;
     private int indent;
 
@@ -86,7 +86,7 @@ public final class SqlFormatter {
      * @param pretty 是否换行缩进
      * @param dialect 方言（影响 LIMIT / 引号）
      */
-    public SqlFormatter(boolean pretty, SqlDialect dialect) {
+    public SqlFormatter(boolean pretty, SqlDialectSpec dialect) {
         this(pretty, dialect, null);
     }
 
@@ -96,7 +96,7 @@ public final class SqlFormatter {
      * @param options 格式化选项；null 视为 {@link SqlFormatOptions#defaults()}
      * @since 2.0.1
      */
-    public SqlFormatter(boolean pretty, SqlDialect dialect, SqlFormatOptions options) {
+    public SqlFormatter(boolean pretty, SqlDialectSpec dialect, SqlFormatOptions options) {
         this.pretty = pretty;
         this.dialect = dialect == null ? SqlDialect.MYSQL : dialect;
         this.options = options == null ? SqlFormatOptions.defaults() : options;

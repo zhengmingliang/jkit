@@ -27,11 +27,11 @@ public final class SqlParameterizer {
      * @param dialect 方言
      * @return 参数化后的紧凑 SQL
      */
-    public static String parameterize(SqlStatement statement, SqlDialect dialect) {
+    public static String parameterize(SqlStatement statement, SqlDialectSpec dialect) {
         if (statement == null) {
             return "";
         }
-        SqlDialect d = dialect == null ? SqlDialect.MYSQL : dialect;
+        SqlDialectSpec d = dialect == null ? SqlDialect.MYSQL : dialect;
         SqlStatement copy = SQL.clone(statement, d);
         replaceLiteralsWithBind(copy);
         return SQL.toSqlString(copy, d);

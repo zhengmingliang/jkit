@@ -40,6 +40,7 @@
 
 ### 修复
 
+- `jkit-sql`：**DML 修饰符回写保真**（tools-test 新增 `SqlRoundTripFidelityCorpusTest`：379 条全量语料批量归一化逐字比对，5 条有据白名单）——`STRAIGHT_JOIN` 在分支条件里被 `match` 提前消费、类型判断永远落空，回写成普通 `JOIN`（连接顺序约束静默丢失）；`INSERT/UPDATE/DELETE` 的 `IGNORE`、INSERT/UPDATE 的 `LOW_PRIORITY`、INSERT 的 `HIGH_PRIORITY`、SELECT 的 `HIGH_PRIORITY` / `SQL_CALC_FOUND_ROWS` 由「吞掉不存」改为入 AST 并回写（新 API：`SqlInsert.ignore/lowPriority/highPriority`、`SqlUpdate.ignore/lowPriority`、`SqlDelete.ignore/lowPriority/quick`、`SqlSelect.highPriority/calcFoundRows`）；非裸标识符别名（如 `'-- a'`）回写强制加引号，此前回写成 `AS -- a`，二次解析把别名当注释丢掉。
 - `jkit-sql`：**回写保真收口**（新增 `SqlRoundTripFidelityTest`，66 条坑位语料，回写文本与原文**归一化后逐字比对**，只容忍纯排版差异）——修 `NATURAL LEFT/RIGHT/FULL/INNER JOIN` 回写丢修饰符（`LEFT` 静默丢失致外连接变内连接、`FULL` 被误当表名）；`RENAME TABLE a TO b[, c TO d]` 升为独立语句类型（此前回写成非法 `ALTER TABLE a TO b`，后续组静默丢失）；`ALTER TABLE … ADD UNIQUE KEY|INDEX` 回写丢 `UNIQUE`（唯一索引变普通索引）。
 - `jkit-sql`：解析失败补齐 — MySQL `DROP INDEX idx ON t`；SQL Server 表提示 `WITH (NOLOCK)` / `WITH (INDEX(ix))`（别名前后均可，原文保留）；PG 数组构造 `ARRAY[1,2,3]`（含 `ANY(ARRAY[...])`）；`CREATE/DROP USER 'u'@'%'`（账号原文 `userSpec`，引号不再被改写）。
 - `jkit-sql`：`tables()` 精度 — 补漏：`CREATE TRIGGER … ON t` 漏真实表、`CREATE TABLE t2 LIKE t1` 漏源表、`ALTER TABLE t RENAME TO t2` 漏目标表、`OPTIMIZE/ANALYZE/CHECK/REPAIR TABLE t, s` 只取首表；清误：库名（`USE db`）、例程/索引/事件对象名、`CALL sp` / `DECLARE` / `GRANT` 目标、CTE 名（`WITH w AS (…) SELECT FROM w`）不再计入。
@@ -101,6 +102,7 @@
 
 
 ### 新增
+- `jkit-sql`：方言能力可覆写 — 新增 `SqlDialectSpec` 接口（全部方言能力方法的单一规约，未覆写处默认 ANSI 基线）与 `SqlDialectWrapper` 包装层（委托基方言、按需覆写单个能力：如 MySQL+ANSI_QUOTES、NO_BACKSLASH_ESCAPES、关闭逗号分页）；`SQL.parse*/parseExpr/format/toSqlString/setPage/setLimit/setOffset/addLimit/wall/concat/clone/parameterize`、`SqlParser.reset`、`SqlLexer.reset`、`SqlFormatter`、`SqlBuilder`、`SqlRewriter`、`SqlParameterizer` 的方言参数统一放宽为 `SqlDialectSpec`（传枚举的调用点源码兼容）；新增能力方法 `backslashEscapes()` / `bracketIdentifiers()` / `supportsTildeRegex()` / `supportsCommaLimitOffset()`，替换词法（方括号标识符、反斜杠转义）、表达式（`~` 正则）、改写（逗号分页）中 4 处散落的 `dialect == SqlDialect.X` 判断。
 - `jkit-sql`：回写保真新增公开 API（均 `@since 2.0.1`）— `SqlJoin.natural()`（`NATURAL` 与连接类型正交的独立标志）；`SqlTable.withHint()`（SQL Server `WITH (…)` 表提示原文）；`SqlFunctionExpr.arrayConstructor()`（PG 数组构造，方括号回写）；`SqlDdlStatement.likeTable()`（`CREATE TABLE … LIKE` 源表）/ `userSpec()`（`CREATE/DROP USER` 账号原文）；语句类型 `SqlStatementType.RENAME`。
 - `jkit-sql`：拼接/回写可开关标识符引号 — `SqlFormatOptions.quoteIdentifiers`（默认 false）；`SqlFormatter`/`SQL.toSqlString`/`SQL.format` 重载；`SqlBuilder.quoteIdentifiers(boolean)` 可开可关；开启后按方言强制引用（MySQL `` ` ``、PG/Oracle `"`、SQL Server `[]`），不影响字面量/关键字/`*`。
 - `jkit-sql`：新增 `SQL.parseExpr` / `SQL.parseExpr(expr, dialect)` / `SQL.parseExpr(expr, dialect, options)`，经 `SqlParser.parseExpression()` 解析裸表达式为 `SqlExpr`（须 EOF；支持方言与占位符选项）；`andWhere` / `SqlBuilder.parsePredicate` 改为走 `parseExpr`。

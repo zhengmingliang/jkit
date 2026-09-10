@@ -17,10 +17,13 @@ package com.alianga.jkit.sql;
  *
  * <p>名称别名见 {@link #fromName(String)}：无法识别时默认 {@link #MYSQL}。</p>
  *
+ * <p>本枚举实现 {@link SqlDialectSpec}；需要微调个别能力时用 {@link SqlDialectWrapper}
+ * 包装，不要往枚举里加一次性变体。</p>
+ *
  * @author 郑明亮
  * @since 2.0.1
  */
-public enum SqlDialect {
+public enum SqlDialect implements SqlDialectSpec {
     /**
      * SQL-92 / ANSI：双引号是标识符，{@code ||} 是拼接。
      */
@@ -169,6 +172,27 @@ public enum SqlDialect {
     }
 
     /**
+     * @return 字符串字面量内 {@code \} 是否为转义前缀（MySQL；NO_BACKSLASH_ESCAPES 时应为 false）
+     */
+    public boolean backslashEscapes() {
+        return this == MYSQL;
+    }
+
+    /**
+     * @return 方括号 {@code [name]} 是否为标识符引号（SQL Server）
+     */
+    public boolean bracketIdentifiers() {
+        return this == SQLSERVER;
+    }
+
+    /**
+     * @return 裸 {@code ~} 是否为正则匹配操作符（PostgreSQL / H2）
+     */
+    public boolean supportsTildeRegex() {
+        return this == POSTGRES || this == H2;
+    }
+
+    /**
      * @return 是否识别 {@code #} 行注释
      */
     public boolean hashLineComment() {
@@ -211,6 +235,15 @@ public enum SqlDialect {
      */
     public boolean supportsRownum() {
         return this == ORACLE || this == ORACLE12;
+    }
+
+    /**
+     * 带 offset 的分页是否写 {@code LIMIT offset, count} 逗号风格（MySQL）。
+     *
+     * @return true 时改写优先逗号风格
+     */
+    public boolean supportsCommaLimitOffset() {
+        return this == MYSQL;
     }
 
     /**

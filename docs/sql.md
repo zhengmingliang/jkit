@@ -80,6 +80,21 @@ SqlDialect.POSTGRES.pipesAreConcat();     // true
 SqlDialect.MYSQL.quoteIdent("user");      // `user`
 ```
 
+内置方言不够用时，用 `SqlDialectWrapper` 基于某个方言微调个别能力（`SQL.parse*` / `format` / `setPage` / `wall` 等所有方言参数都接受 `SqlDialectSpec`）：
+
+```java
+// MySQL + ANSI_QUOTES：双引号是标识符不是字符串
+SqlDialectSpec ansiQuotes = new SqlDialectWrapper(SqlDialect.MYSQL) {
+    @Override
+    public boolean doubleQuoteIsString() {
+        return false;
+    }
+};
+SQL.parse("SELECT \"id\" FROM t", ansiQuotes);  // "id" 按标识符解析
+```
+
+可覆写的能力覆盖解析到改写全链路：引号（`identQuoteOpen/Close`）、`||` 语义（`pipesAsOr`）、反斜杠转义（`backslashEscapes`）、方括号标识符（`bracketIdentifiers`）、`~` 正则（`supportsTildeRegex`）、`#` 注释（`hashLineComment`）、分页形态（`supportsLimitOffset/Top/FetchFirst/Rownum/CommaLimitOffset`）。直接实现 `SqlDialectSpec` 时未覆写的方法按 ANSI 基线取默认值。
+
 非法 SQL 抛 `SqlParseException`，带行号、列号和附近原文，不返回半棵树。
 
 ## 模板占位符（可选）

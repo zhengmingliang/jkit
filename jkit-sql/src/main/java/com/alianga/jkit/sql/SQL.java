@@ -92,7 +92,7 @@ public final class SQL {
      * @return 紧凑 SQL
      * @since 2.0.1
      */
-    public static String concat(List<SqlStatement> statements, SqlDialect dialect) {
+    public static String concat(List<SqlStatement> statements, SqlDialectSpec dialect) {
         return SqlBuilder.concatStatements(statements, dialect);
     }
 
@@ -113,7 +113,7 @@ public final class SQL {
      * @param dialect 方言
      * @return 第一条语句
      */
-    public static SqlStatement parse(String sql, SqlDialect dialect) {
+    public static SqlStatement parse(String sql, SqlDialectSpec dialect) {
         return parse(sql, dialect, SqlParseOptions.defaults());
     }
 
@@ -126,7 +126,7 @@ public final class SQL {
      * @return 第一条语句
      * @since 2.0.1
      */
-    public static SqlStatement parse(String sql, SqlDialect dialect, SqlParseOptions options) {
+    public static SqlStatement parse(String sql, SqlDialectSpec dialect, SqlParseOptions options) {
         List<SqlStatement> all = parseAll(sql, dialect, options);
         if (all.isEmpty()) {
             // 仅注释 / 空白：不硬失败，返回 OTHER 空语句（语料 comment-only 边）
@@ -155,7 +155,7 @@ public final class SQL {
      * @param dialect 方言
      * @return 语句列表，无语句时为空列表
      */
-    public static List<SqlStatement> parseAll(String sql, SqlDialect dialect) {
+    public static List<SqlStatement> parseAll(String sql, SqlDialectSpec dialect) {
         return parseAll(sql, dialect, SqlParseOptions.defaults());
     }
 
@@ -168,7 +168,7 @@ public final class SQL {
      * @return 语句列表，无语句时为空列表
      * @since 2.0.1
      */
-    public static List<SqlStatement> parseAll(String sql, SqlDialect dialect, SqlParseOptions options) {
+    public static List<SqlStatement> parseAll(String sql, SqlDialectSpec dialect, SqlParseOptions options) {
         return parseAll(sql, dialect, options, false);
     }
 
@@ -185,7 +185,7 @@ public final class SQL {
      * @return 语句列表，无语句时为空列表
      * @since 2.0.1
      */
-    public static List<SqlStatement> parseAll(String sql, SqlDialect dialect, boolean tolerant) {
+    public static List<SqlStatement> parseAll(String sql, SqlDialectSpec dialect, boolean tolerant) {
         return parseAll(sql, dialect, SqlParseOptions.defaults(), tolerant);
     }
 
@@ -199,7 +199,7 @@ public final class SQL {
      * @return 语句列表，无语句时为空列表
      * @since 2.0.1
      */
-    public static List<SqlStatement> parseAll(String sql, SqlDialect dialect,
+    public static List<SqlStatement> parseAll(String sql, SqlDialectSpec dialect,
             SqlParseOptions options, boolean tolerant) {
         if (sql == null || sql.trim().isEmpty()) {
             return Collections.emptyList();
@@ -230,7 +230,7 @@ public final class SQL {
      * @return 表达式 AST
      * @since 2.0.1
      */
-    public static SqlExpr parseExpr(String expr, SqlDialect dialect) {
+    public static SqlExpr parseExpr(String expr, SqlDialectSpec dialect) {
         return parseExpr(expr, dialect, SqlParseOptions.defaults());
     }
 
@@ -243,7 +243,7 @@ public final class SQL {
      * @return 表达式 AST
      * @since 2.0.1
      */
-    public static SqlExpr parseExpr(String expr, SqlDialect dialect, SqlParseOptions options) {
+    public static SqlExpr parseExpr(String expr, SqlDialectSpec dialect, SqlParseOptions options) {
         if (expr == null || expr.trim().isEmpty()) {
             throw new SqlParseException("empty expression", 1, 1, "");
         }
@@ -279,7 +279,7 @@ public final class SQL {
      * @param dialect 方言
      * @return 格式化文本
      */
-    public static String format(SqlStatement statement, SqlDialect dialect) {
+    public static String format(SqlStatement statement, SqlDialectSpec dialect) {
         return format(statement, dialect, true);
     }
 
@@ -291,7 +291,7 @@ public final class SQL {
      * @param pretty 是否换行缩进
      * @return SQL 文本
      */
-    public static String format(SqlStatement statement, SqlDialect dialect, boolean pretty) {
+    public static String format(SqlStatement statement, SqlDialectSpec dialect, boolean pretty) {
         return format(statement, dialect, pretty, null);
     }
 
@@ -305,7 +305,7 @@ public final class SQL {
      * @return SQL 文本
      * @since 2.0.1
      */
-    public static String format(SqlStatement statement, SqlDialect dialect, boolean pretty,
+    public static String format(SqlStatement statement, SqlDialectSpec dialect, boolean pretty,
                                 SqlFormatOptions options) {
         return new SqlFormatter(pretty, dialect, options).format(statement);
     }
@@ -319,7 +319,7 @@ public final class SQL {
      * @return SQL 文本
      * @since 2.0.1
      */
-    public static String format(SqlStatement statement, SqlDialect dialect, SqlFormatOptions options) {
+    public static String format(SqlStatement statement, SqlDialectSpec dialect, SqlFormatOptions options) {
         return format(statement, dialect, true, options);
     }
 
@@ -340,7 +340,7 @@ public final class SQL {
      * @param dialect 方言
      * @return SQL 文本
      */
-    public static String toSqlString(SqlStatement statement, SqlDialect dialect) {
+    public static String toSqlString(SqlStatement statement, SqlDialectSpec dialect) {
         return format(statement, dialect, false);
     }
 
@@ -353,7 +353,7 @@ public final class SQL {
      * @return SQL 文本
      * @since 2.0.1
      */
-    public static String toSqlString(SqlStatement statement, SqlDialect dialect, SqlFormatOptions options) {
+    public static String toSqlString(SqlStatement statement, SqlDialectSpec dialect, SqlFormatOptions options) {
         return format(statement, dialect, false, options);
     }
 
@@ -426,7 +426,7 @@ public final class SQL {
      * @param dialect 方言
      * @return 带 LIMIT 的新语句
      */
-    public static SqlStatement addLimit(SqlStatement statement, long rowCount, SqlDialect dialect) {
+    public static SqlStatement addLimit(SqlStatement statement, long rowCount, SqlDialectSpec dialect) {
         SqlStatement copy = clone(statement, dialect);
         return SqlRewriter.addLimit(copy, rowCount, dialect);
     }
@@ -474,8 +474,8 @@ public final class SQL {
      * @return 新语句
      * @since 2.0.1
      */
-    public static SqlStatement setLimit(SqlStatement statement, long rowCount, SqlDialect dialect) {
-        SqlDialect d = dialect == null ? SqlDialect.MYSQL : dialect;
+    public static SqlStatement setLimit(SqlStatement statement, long rowCount, SqlDialectSpec dialect) {
+        SqlDialectSpec d = dialect == null ? SqlDialect.MYSQL : dialect;
         SqlStatement copy = clone(statement, d);
         return SqlRewriter.setLimit(copy, rowCount, d);
     }
@@ -501,8 +501,8 @@ public final class SQL {
      * @return 新语句
      * @since 2.0.1
      */
-    public static SqlStatement setOffset(SqlStatement statement, long offset, SqlDialect dialect) {
-        SqlDialect d = dialect == null ? SqlDialect.MYSQL : dialect;
+    public static SqlStatement setOffset(SqlStatement statement, long offset, SqlDialectSpec dialect) {
+        SqlDialectSpec d = dialect == null ? SqlDialect.MYSQL : dialect;
         SqlStatement copy = clone(statement, d);
         return SqlRewriter.setOffset(copy, offset, d);
     }
@@ -532,8 +532,8 @@ public final class SQL {
      * @since 2.0.1
      */
     public static SqlStatement setPage(SqlStatement statement, long pageNo, long pageSize,
-            SqlDialect dialect) {
-        SqlDialect d = dialect == null ? SqlDialect.MYSQL : dialect;
+            SqlDialectSpec dialect) {
+        SqlDialectSpec d = dialect == null ? SqlDialect.MYSQL : dialect;
         SqlStatement copy = clone(statement, d);
         return SqlRewriter.setPage(copy, pageNo, pageSize, d);
     }
@@ -649,11 +649,11 @@ public final class SQL {
      * @return 新 AST，null 入参返回 null
      * @since 2.0.1
      */
-    public static SqlStatement clone(SqlStatement statement, SqlDialect dialect) {
+    public static SqlStatement clone(SqlStatement statement, SqlDialectSpec dialect) {
         if (statement == null) {
             return null;
         }
-        SqlDialect d = dialect == null ? SqlDialect.MYSQL : dialect;
+        SqlDialectSpec d = dialect == null ? SqlDialect.MYSQL : dialect;
         return parse(toSqlString(statement, d), d);
     }
 
@@ -676,7 +676,7 @@ public final class SQL {
      * @return 参数化后的紧凑 SQL
      * @since 2.0.1
      */
-    public static String parameterize(String sql, SqlDialect dialect) {
+    public static String parameterize(String sql, SqlDialectSpec dialect) {
         return SqlParameterizer.parameterize(parse(sql, dialect), dialect);
     }
 
@@ -732,7 +732,7 @@ public final class SQL {
      * @return 检测结果
      * @since 2.0.1
      */
-    public static SqlWallResult wall(String sql, SqlDialect dialect) {
+    public static SqlWallResult wall(String sql, SqlDialectSpec dialect) {
         return SqlWall.check(sql, dialect, SqlWallConfig.defaults());
     }
 
@@ -745,7 +745,7 @@ public final class SQL {
      * @return 检测结果
      * @since 2.0.1
      */
-    public static SqlWallResult wall(String sql, SqlDialect dialect, SqlWallConfig config) {
+    public static SqlWallResult wall(String sql, SqlDialectSpec dialect, SqlWallConfig config) {
         return SqlWall.check(sql, dialect, config);
     }
 

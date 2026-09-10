@@ -34,7 +34,7 @@ public final class SqlParser {
     /** 当前记号。 */
     SqlToken token;
     /** 当前方言。 */
-    SqlDialect dialect;
+    SqlDialectSpec dialect;
     /** 是否保留普通注释。 */
     boolean keepComments;
     /** 待挂到下一条语句的注释。 */
@@ -64,9 +64,9 @@ public final class SqlParser {
      * 绑定输入。
      *
      * @param sql SQL
-     * @param dialect 方言
+     * @param dialect 方言（枚举或 {@link SqlDialectWrapper} 自定义能力）
      */
-    public void reset(String sql, SqlDialect dialect) {
+    public void reset(String sql, SqlDialectSpec dialect) {
         reset(sql, dialect, SqlParseOptions.defaults());
     }
 
@@ -74,11 +74,11 @@ public final class SqlParser {
      * 绑定输入与解析选项。
      *
      * @param sql SQL
-     * @param dialect 方言
+     * @param dialect 方言（枚举或 {@link SqlDialectWrapper} 自定义能力）
      * @param options 选项，null 视为默认
      * @since 2.0.1
      */
-    public void reset(String sql, SqlDialect dialect, SqlParseOptions options) {
+    public void reset(String sql, SqlDialectSpec dialect, SqlParseOptions options) {
         this.dialect = dialect == null ? SqlDialect.MYSQL : dialect;
         if (options == null) {
             options = SqlParseOptions.defaults();

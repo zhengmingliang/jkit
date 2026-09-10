@@ -52,7 +52,7 @@ public final class SqlBuilder {
     }
 
     private final Kind kind;
-    private SqlDialect dialect = SqlDialect.MYSQL;
+    private SqlDialectSpec dialect = SqlDialect.MYSQL;
     private boolean quoteIdentifiers;
 
     private final List<SqlSelectItem> selectItems = new ArrayList<SqlSelectItem>(4);
@@ -153,7 +153,7 @@ public final class SqlBuilder {
      * @param dialect 方言（影响 {@link #toSql()} / {@link #build()} 分页形态）
      * @return this
      */
-    public SqlBuilder dialect(SqlDialect dialect) {
+    public SqlBuilder dialect(SqlDialectSpec dialect) {
         this.dialect = dialect == null ? SqlDialect.MYSQL : dialect;
         return this;
     }
@@ -534,7 +534,7 @@ public final class SqlBuilder {
     }
 
     /**
-     * @return 构建好的语句 AST（分页按 {@link #dialect(SqlDialect)}）
+     * @return 构建好的语句 AST（分页按 {@link #dialect(SqlDialectSpec)}）
      */
     public SqlStatement build() {
         return build(this.dialect);
@@ -547,8 +547,8 @@ public final class SqlBuilder {
      * @return 语句 AST
      * @since 2.0.1
      */
-    public SqlStatement build(SqlDialect dialect) {
-        SqlDialect d = dialect == null ? this.dialect : dialect;
+    public SqlStatement build(SqlDialectSpec dialect) {
+        SqlDialectSpec d = dialect == null ? this.dialect : dialect;
         switch (kind) {
             case SELECT:
                 return buildSelect(d);
@@ -564,7 +564,7 @@ public final class SqlBuilder {
     }
 
     /**
-     * @return SELECT AST（分页按 {@link #dialect(SqlDialect)}）
+     * @return SELECT AST（分页按 {@link #dialect(SqlDialectSpec)}）
      */
     public SqlSelect buildSelect() {
         return buildSelect(this.dialect);
@@ -574,7 +574,7 @@ public final class SqlBuilder {
      * @param effectiveDialect 分页所用方言
      * @return SELECT AST
      */
-    private SqlSelect buildSelect(SqlDialect effectiveDialect) {
+    private SqlSelect buildSelect(SqlDialectSpec effectiveDialect) {
         if (kind != Kind.SELECT) {
             throw new IllegalStateException("not a SELECT builder");
         }
@@ -631,8 +631,8 @@ public final class SqlBuilder {
      * @param dialect 方言；null 时回落 builder 方言
      * @return 紧凑 SQL
      */
-    public String toSql(SqlDialect dialect) {
-        SqlDialect d = dialect == null ? this.dialect : dialect;
+    public String toSql(SqlDialectSpec dialect) {
+        SqlDialectSpec d = dialect == null ? this.dialect : dialect;
         SqlFormatOptions opts = quoteIdentifiers
                 ? SqlFormatOptions.defaults().quoteIdentifiers(true)
                 : null;
@@ -713,11 +713,11 @@ public final class SqlBuilder {
      * @param dialect 方言
      * @return 文本
      */
-    public static String concatStatements(List<SqlStatement> statements, SqlDialect dialect) {
+    public static String concatStatements(List<SqlStatement> statements, SqlDialectSpec dialect) {
         if (statements == null || statements.isEmpty()) {
             return "";
         }
-        SqlDialect d = dialect == null ? SqlDialect.MYSQL : dialect;
+        SqlDialectSpec d = dialect == null ? SqlDialect.MYSQL : dialect;
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < statements.size(); i++) {
             if (i > 0) {
@@ -780,11 +780,11 @@ public final class SqlBuilder {
      * {@link SqlRewriter#applyPagination} 路径（Oracle ROWNUM、Oracle12/SQL Server
      * OFFSET FETCH、MySQL LIMIT 等）。
      */
-    private void applyLimit(SqlSelect select, SqlDialect effectiveDialect) {
+    private void applyLimit(SqlSelect select, SqlDialectSpec effectiveDialect) {
         if (limitRows == null && offsetRows == null) {
             return;
         }
-        SqlDialect d = effectiveDialect == null ? this.dialect : effectiveDialect;
+        SqlDialectSpec d = effectiveDialect == null ? this.dialect : effectiveDialect;
         if (d == null) {
             d = SqlDialect.MYSQL;
         }
