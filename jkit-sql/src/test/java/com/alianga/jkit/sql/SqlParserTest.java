@@ -1357,19 +1357,34 @@ public class SqlParserTest {
     }
 
     /**
-     * P1.5：COMMENT ON TABLE/COLUMN。
+     * COMMENT ON TABLE/COLUMN → SqlCommentOnStatement（objectKind / name / comment）。
      */
     @Test
     public void p15CommentOn() {
-        SqlSimpleStatement table = (SqlSimpleStatement) SQL.parse(
+        com.alianga.jkit.sql.ast.SqlCommentOnStatement table =
+                (com.alianga.jkit.sql.ast.SqlCommentOnStatement) SQL.parse(
                 "COMMENT ON TABLE t IS 'users'", SqlDialect.POSTGRES);
         assertEquals(SqlStatementType.OTHER, table.type());
+        assertEquals("TABLE", table.objectKind());
         assertEquals("t", table.name().simpleName());
-        assertTrue(table.text(), table.text().contains("COMMENT ON TABLE"));
+        assertNotNull(table.comment());
+        String tFmt = SQL.toSqlString(table).toUpperCase();
+        assertTrue(tFmt, tFmt.contains("COMMENT") && tFmt.contains("TABLE") && tFmt.contains("USERS"));
+        assertEquals("t", SQL.tables(table).get(0));
 
-        SqlSimpleStatement col = (SqlSimpleStatement) SQL.parse(
+        com.alianga.jkit.sql.ast.SqlCommentOnStatement col =
+                (com.alianga.jkit.sql.ast.SqlCommentOnStatement) SQL.parse(
                 "COMMENT ON COLUMN t.id IS 'pk'", SqlDialect.POSTGRES);
+        assertEquals("COLUMN", col.objectKind());
         assertEquals("t.id", col.name().qualifiedName());
+        assertNotNull(col.comment());
+        SQL.parse(SQL.toSqlString(col), SqlDialect.POSTGRES);
+
+        com.alianga.jkit.sql.ast.SqlCommentOnStatement idx =
+                (com.alianga.jkit.sql.ast.SqlCommentOnStatement) SQL.parse(
+                "COMMENT ON INDEX idx_t_id IS 'index'", SqlDialect.POSTGRES);
+        assertEquals("INDEX", idx.objectKind());
+        assertEquals("idx_t_id", idx.name().simpleName());
     }
 
     /**

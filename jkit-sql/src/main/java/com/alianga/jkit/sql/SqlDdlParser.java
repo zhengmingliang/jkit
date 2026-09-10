@@ -248,31 +248,48 @@ final class SqlDdlParser {
         return true;
     }
 
+    /**
+     * {@code COMMENT ON TABLE|COLUMN|… name IS '…'} → {@link com.alianga.jkit.sql.ast.SqlCommentOnStatement}。
+     */
     SqlStatement parseCommentOn() {
         p.expect(SqlTokenType.COMMENT);
         p.expect(SqlTokenType.ON);
-        SqlSimpleStatement stmt = new SqlSimpleStatement();
-        stmt.setStatementType(SqlStatementType.OTHER);
-        StringBuilder text = new StringBuilder("COMMENT ON");
+        com.alianga.jkit.sql.ast.SqlCommentOnStatement stmt =
+                new com.alianga.jkit.sql.ast.SqlCommentOnStatement();
         if (p.is(SqlTokenType.TABLE) || p.is(SqlTokenType.INDEX) || p.is(SqlTokenType.VIEW)
-                || p.isIdent("COLUMN") || p.identLike()) {
-            text.append(' ').append(p.token.text().toUpperCase());
+                || p.is(SqlTokenType.DATABASE) || p.is(SqlTokenType.SCHEMA)
+                || p.isIdent("COLUMN") || p.isIdent("SCHEMA") || p.identLike()
+                || (p.token.type() != null && p.token.type().keyword())) {
+            stmt.setObjectKind(p.token.text().toUpperCase());
             p.next();
         }
         if (p.identLike()) {
             stmt.setName(p.parseName());
-            text.append(' ').append(stmt.name().qualifiedName());
         }
         if (p.match(SqlTokenType.IS)) {
-            text.append(" IS");
-        }
-        if (!p.atStmtBreak()) {
+            if (!p.atStmtBreak()) {
+                // 优先结构化字面量 / 表达式；失败则吞残余
+                try {
+                    stmt.setComment(p.exprParser.parseExpr());
+                } catch (SqlParseException ex) {
+                    String rest = p.consumeRawUntilSemi();
+                    if (rest != null && !rest.isEmpty()) {
+                        stmt.setRaw(rest);
+                    }
+                }
+            }
+        } else if (!p.atStmtBreak()) {
             String rest = p.consumeRawUntilSemi();
-            if (!rest.isEmpty()) {
-                text.append(' ').append(rest);
+            if (rest != null && !rest.isEmpty()) {
+                stmt.setRaw(rest);
             }
         }
-        stmt.setText(text.toString());
+        if (!p.atStmtBreak() && stmt.raw() == null) {
+            String rest = p.consumeRawUntilSemi();
+            if (rest != null && !rest.isEmpty()) {
+                stmt.setRaw(rest);
+            }
+        }
         return stmt;
     }
 

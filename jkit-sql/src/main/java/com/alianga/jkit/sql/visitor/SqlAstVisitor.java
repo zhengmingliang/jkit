@@ -6,6 +6,7 @@ import com.alianga.jkit.sql.ast.SqlBinaryExpr;
 import com.alianga.jkit.sql.ast.SqlBlockStatement;
 import com.alianga.jkit.sql.ast.SqlCaseExpr;
 import com.alianga.jkit.sql.ast.SqlCastExpr;
+import com.alianga.jkit.sql.ast.SqlCommentOnStatement;
 import com.alianga.jkit.sql.ast.SqlControlStatement;
 import com.alianga.jkit.sql.ast.SqlCopyStatement;
 import com.alianga.jkit.sql.ast.SqlDdlStatement;
@@ -126,6 +127,9 @@ public class SqlAstVisitor implements SqlVisitor {
         }
         if (node instanceof SqlLoadDataStatement) {
             return visitLoadData((SqlLoadDataStatement) node);
+        }
+        if (node instanceof SqlCommentOnStatement) {
+            return visitCommentOn((SqlCommentOnStatement) node);
         }
         if (node instanceof SqlShowStatement) {
             return visitShow((SqlShowStatement) node);
@@ -277,13 +281,18 @@ public class SqlAstVisitor implements SqlVisitor {
         return true;
     }
 
-    /** @param node 简单语句 @return 是否继续子节点 */
-        /** @param node SHOW @return 是否继续子节点 */
+    /** @param node COMMENT ON @return 是否继续子节点 */
+    protected boolean visitCommentOn(SqlCommentOnStatement node) {
+        return true;
+    }
+
+    /** @param node SHOW @return 是否继续子节点 */
     protected boolean visitShow(SqlShowStatement node) {
         return true;
     }
 
-protected boolean visitSimple(SqlSimpleStatement node) {
+    /** @param node 简单语句 @return 是否继续子节点 */
+    protected boolean visitSimple(SqlSimpleStatement node) {
         return true;
     }
 

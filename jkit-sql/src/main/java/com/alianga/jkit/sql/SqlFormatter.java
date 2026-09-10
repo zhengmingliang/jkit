@@ -7,6 +7,7 @@ import com.alianga.jkit.sql.ast.SqlBinaryOp;
 import com.alianga.jkit.sql.ast.SqlBlockStatement;
 import com.alianga.jkit.sql.ast.SqlCaseExpr;
 import com.alianga.jkit.sql.ast.SqlCastExpr;
+import com.alianga.jkit.sql.ast.SqlCommentOnStatement;
 import com.alianga.jkit.sql.ast.SqlControlStatement;
 import com.alianga.jkit.sql.ast.SqlCopyStatement;
 import com.alianga.jkit.sql.ast.SqlDdlStatement;
@@ -155,6 +156,8 @@ public final class SqlFormatter {
             writeStartTransaction((SqlStartTransactionStatement) node);
         } else if (node instanceof SqlLoadDataStatement) {
             writeLoadData((SqlLoadDataStatement) node);
+        } else if (node instanceof SqlCommentOnStatement) {
+            writeCommentOn((SqlCommentOnStatement) node);
         } else if (node instanceof SqlShowStatement) {
             writeShow((SqlShowStatement) node);
         } else if (node instanceof SqlSimpleStatement) {
@@ -1177,6 +1180,33 @@ public final class SqlFormatter {
         return objectType != null && "INDEX".equalsIgnoreCase(objectType);
     }
 
+    private void writeCommentOn(SqlCommentOnStatement c) {
+        if (c == null) {
+            return;
+        }
+        out.append("COMMENT");
+        sp();
+        out.append("ON");
+        if (c.objectKind() != null && c.objectKind().length() > 0) {
+            sp();
+            out.append(c.objectKind());
+        }
+        if (c.name() != null) {
+            sp();
+            writeExpr(c.name());
+        }
+        if (c.comment() != null) {
+            sp();
+            out.append("IS");
+            sp();
+            writeExpr(c.comment());
+        }
+        if (c.raw() != null && c.raw().length() > 0) {
+            sp();
+            out.append(c.raw());
+        }
+    }
+
     private void writeShow(SqlShowStatement show) {
         if (show == null) {
             return;
@@ -1206,7 +1236,7 @@ public final class SqlFormatter {
     }
 
     private void writeSimple(SqlSimpleStatement stmt) {
-        // OTHER（BEGIN/DECLARE/ANALYZE/COMMENT ON 等）：text 已是完整语句
+        // OTHER（BEGIN/DECLARE 等）：text 已是完整语句
         if (stmt.type() == SqlStatementType.OTHER) {
             if (stmt.text() != null) {
                 out.append(stmt.text());
