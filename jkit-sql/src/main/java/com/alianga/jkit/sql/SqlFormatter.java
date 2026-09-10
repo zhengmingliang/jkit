@@ -12,6 +12,7 @@ import com.alianga.jkit.sql.ast.SqlDdlStatement;
 import com.alianga.jkit.sql.ast.SqlDeclareStatement;
 import com.alianga.jkit.sql.ast.SqlDelete;
 import com.alianga.jkit.sql.ast.SqlExpr;
+import com.alianga.jkit.sql.ast.SqlFlushStatement;
 import com.alianga.jkit.sql.ast.SqlFunctionExpr;
 import com.alianga.jkit.sql.ast.SqlFunctionTable;
 import com.alianga.jkit.sql.ast.SqlHandlerStatement;
@@ -138,6 +139,8 @@ public final class SqlFormatter {
             writePrepare((SqlPrepareStatement) node);
         } else if (node instanceof SqlLockTablesStatement) {
             writeLockTables((SqlLockTablesStatement) node);
+        } else if (node instanceof SqlFlushStatement) {
+            writeFlush((SqlFlushStatement) node);
         } else if (node instanceof SqlStartTransactionStatement) {
             writeStartTransaction((SqlStartTransactionStatement) node);
         } else if (node instanceof SqlLoadDataStatement) {
@@ -1783,6 +1786,48 @@ public final class SqlFormatter {
                 sp();
                 writeLimit(h.limit());
             }
+        }
+    }
+
+    private void writeFlush(SqlFlushStatement flush) {
+        if (flush == null) {
+            return;
+        }
+        if (flush.raw() != null && flush.options().isEmpty() && flush.tables().isEmpty()
+                && flush.raw().toUpperCase().startsWith("FLUSH")) {
+            out.append(flush.raw());
+            return;
+        }
+        out.append("FLUSH");
+        if (flush.noWriteToBinlog()) {
+            sp();
+            out.append("NO_WRITE_TO_BINLOG");
+        }
+        for (int i = 0; i < flush.options().size(); i++) {
+            if (i > 0) {
+                out.append(',');
+            }
+            sp();
+            String opt = flush.options().get(i);
+            out.append(opt);
+            if ("TABLES".equalsIgnoreCase(opt)) {
+                for (int j = 0; j < flush.tables().size(); j++) {
+                    if (j > 0) {
+                        out.append(',');
+                    }
+                    sp();
+                    writeExpr(flush.tables().get(j));
+                }
+                if (flush.tablesModifier() != null && flush.tablesModifier().length() > 0) {
+                    sp();
+                    out.append(flush.tablesModifier());
+                }
+            }
+        }
+        if (flush.raw() != null && flush.raw().length() > 0
+                && !flush.raw().toUpperCase().startsWith("FLUSH")) {
+            sp();
+            out.append(flush.raw());
         }
     }
 

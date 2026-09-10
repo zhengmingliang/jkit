@@ -1,6 +1,7 @@
 package com.alianga.jkit.sql;
 
 import com.alianga.jkit.sql.ast.SqlExpr;
+import com.alianga.jkit.sql.ast.SqlFlushStatement;
 import com.alianga.jkit.sql.ast.SqlIdentifier;
 import com.alianga.jkit.sql.ast.SqlLoadDataStatement;
 import com.alianga.jkit.sql.ast.SqlLockTablesStatement;
@@ -654,19 +655,144 @@ public final class SqlParser {
         return stmt;
     }
 
+    /**
+     * MySQL {@code FLUSH [LOCAL|NO_WRITE_TO_BINLOG] option[, …]} → {@link SqlFlushStatement}。
+     */
     private SqlStatement parseFlush() {
         expect(SqlTokenType.FLUSH);
-        SqlSimpleStatement stmt = new SqlSimpleStatement();
-        stmt.setStatementType(SqlStatementType.OTHER);
-        StringBuilder text = new StringBuilder("FLUSH");
+        SqlFlushStatement stmt = new SqlFlushStatement();
+        if (is(SqlTokenType.LOCAL) || isIdent("LOCAL")
+                || (identLike() && ("LOCAL".equalsIgnoreCase(token.text())
+                || "NO_WRITE_TO_BINLOG".equalsIgnoreCase(token.text())))) {
+            stmt.setNoWriteToBinlog(true);
+            next();
+        }
+        if (atStmtBreak()) {
+            return stmt;
+        }
+        do {
+            if (is(SqlTokenType.COMMA)) {
+                next();
+                if (atStmtBreak()) {
+                    break;
+                }
+            }
+            if (!parseFlushOption(stmt)) {
+                String rest = consumeRawUntilSemi();
+                if (rest != null && !rest.isEmpty()) {
+                    stmt.setRaw(rest);
+                }
+                break;
+            }
+        } while (!atStmtBreak() && is(SqlTokenType.COMMA));
         if (!atStmtBreak()) {
             String rest = consumeRawUntilSemi();
-            if (!rest.isEmpty()) {
-                text.append(' ').append(rest);
+            if (rest != null && !rest.isEmpty()) {
+                if (stmt.raw() != null && !stmt.raw().isEmpty()) {
+                    stmt.setRaw(stmt.raw() + " " + rest);
+                } else {
+                    stmt.setRaw(rest);
+                }
             }
         }
-        stmt.setText(text.toString());
         return stmt;
+    }
+
+    /**
+     * @return 是否成功解析一个 flush option
+     */
+    private boolean parseFlushOption(SqlFlushStatement stmt) {
+        if (!(identLike() || (token.type() != null && token.type().keyword())
+                || is(SqlTokenType.TABLES) || is(SqlTokenType.TABLE)
+                || is(SqlTokenType.STATUS) || is(SqlTokenType.BINARY))) {
+            return false;
+        }
+        String first = token.text().toUpperCase();
+        // TABLES [tbl…] [WITH READ LOCK | FOR EXPORT]
+        if (is(SqlTokenType.TABLES) || is(SqlTokenType.TABLE) || "TABLES".equals(first)
+                || "TABLE".equals(first)) {
+            next();
+            stmt.options().add("TABLES");
+            while (!atStmtBreak() && !is(SqlTokenType.COMMA) && !is(SqlTokenType.WITH)
+                    && !isIdent("FOR") && !(identLike() && "FOR".equalsIgnoreCase(token.text()))
+                    && identLike()) {
+                // 表名（非修饰关键字）
+                String peek = token.text().toUpperCase();
+                if ("WITH".equals(peek) || "FOR".equals(peek) || "READ".equals(peek)
+                        || "EXPORT".equals(peek) || "LOCK".equals(peek)) {
+                    break;
+                }
+                stmt.tables().add(parseName());
+                if (!match(SqlTokenType.COMMA)) {
+                    break;
+                }
+            }
+            if (is(SqlTokenType.WITH) || isIdent("WITH")
+                    || (identLike() && "WITH".equalsIgnoreCase(token.text()))) {
+                int mStart = token.start();
+                next(); // WITH
+                if (isIdent("READ") || (identLike() && "READ".equalsIgnoreCase(token.text()))) {
+                    next();
+                    if (isIdent("LOCK") || (identLike() && "LOCK".equalsIgnoreCase(token.text()))
+                            || is(SqlTokenType.LOCK)) {
+                        next();
+                    }
+                    stmt.setTablesModifier(lexer.rawSlice(mStart, token.start()).trim().toUpperCase()
+                            .replaceAll("\\s+", " "));
+                } else {
+                    String rest = consumeRawUntilSemi();
+                    stmt.setRaw(((stmt.raw() == null ? "" : stmt.raw() + " ")
+                            + lexer.rawSlice(mStart, token.start()).trim()
+                            + (rest == null || rest.isEmpty() ? "" : " " + rest)).trim());
+                }
+            } else if (isIdent("FOR") || (identLike() && "FOR".equalsIgnoreCase(token.text()))
+                    || is(SqlTokenType.FOR)) {
+                int mStart = token.start();
+                next();
+                if (isIdent("EXPORT") || (identLike() && "EXPORT".equalsIgnoreCase(token.text()))) {
+                    next();
+                    stmt.setTablesModifier("FOR EXPORT");
+                } else {
+                    String rest = consumeRawUntilSemi();
+                    stmt.setRaw(((stmt.raw() == null ? "" : stmt.raw() + " ")
+                            + lexer.rawSlice(mStart, token.start()).trim()
+                            + (rest == null || rest.isEmpty() ? "" : " " + rest)).trim());
+                }
+            }
+            return true;
+        }
+        // 双词：BINARY LOGS / ENGINE LOGS / ERROR LOGS / GENERAL LOGS / RELAY LOGS / SLOW LOGS
+        next();
+        String opt = first;
+        if (!atStmtBreak() && !is(SqlTokenType.COMMA)
+                && (identLike() || (token.type() != null && token.type().keyword()))) {
+            String second = token.text().toUpperCase();
+            if ("LOGS".equals(second) || "LOG".equals(second)
+                    || ("LOGS".equals(second) || "COSTS".equals(second)
+                    || "RESOURCES".equals(second))) {
+                // BINARY LOGS / OPTIMIZER_COSTS already single / USER_RESOURCES
+                if ("LOGS".equals(second) || "LOG".equals(second)) {
+                    opt = first + " LOGS";
+                    next();
+                } else if ("COSTS".equals(second) || "RESOURCES".equals(second)) {
+                    opt = first + " " + second;
+                    next();
+                }
+            }
+        }
+        // RELAY LOGS FOR CHANNEL …
+        if (opt.endsWith("LOGS") && (is(SqlTokenType.FOR) || isIdent("FOR")
+                || (identLike() && "FOR".equalsIgnoreCase(token.text())))) {
+            int cStart = token.start();
+            next();
+            while (!atStmtBreak() && !is(SqlTokenType.COMMA)) {
+                next();
+            }
+            String channel = lexer.rawSlice(cStart, token.start()).trim();
+            opt = opt + " " + channel;
+        }
+        stmt.options().add(opt);
+        return true;
     }
 
     /**

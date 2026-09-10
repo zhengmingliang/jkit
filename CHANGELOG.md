@@ -48,6 +48,7 @@
 - `jkit-sql`：过程体 `IF`/`WHILE`/`LOOP`/`REPEAT` → `SqlControlStatement`（条件+bodyStatements；ELSEIF/ELSE）；`FUNCTION RETURNS` → `returnsType`；`TRIGGER` 抽 `triggerTiming`/`triggerEvent`/`triggerTable` 与 `bodyStatements`；`EVENT` DO 体进 bodyStatements。
 - `jkit-sql`：过程 `CASE … END CASE` / `LEAVE` / `ITERATE` / `RETURN [expr]` / 循环标签 `lab: LOOP`；`TRIGGER` 补 `FOR EACH` / `FOLLOWS|PRECEDES`；`EVENT ON SCHEDULE AT|EVERY`；`MATCH_RECOGNIZE` 抽 `WITHIN`（`ROWS PER MATCH`/`AFTER MATCH` 保持字段）；`MODEL` 多维 cell 拆 `cellDims`。
 - `jkit-sql`：过程体 `DECLARE`/`CURSOR FOR`/`CONTINUE|EXIT|UNDO HANDLER` → `SqlDeclareStatement`/`SqlHandlerStatement`；`TRIGGER UPDATE OF` → `triggerUpdateColumns`；`EVENT` 抽 `eventStarts`/`eventEnds`/`eventEnabled`/`eventComment`；`MODEL` 简单维 `cellDimExprs`；`MATCH_RECOGNIZE.PATTERN` 保持字符串。
+- `jkit-sql`：`FLUSH [LOCAL|NO_WRITE_TO_BINLOG] option[,…]` → `SqlFlushStatement`（PRIVILEGES/LOGS/STATUS/TABLES[tbl…] 等选项列表 + raw 残余）；Formatter / Visitor / SchemaStat 同步。
 - `jkit-sql`：`START TRANSACTION` / `BEGIN [WORK|TRANSACTION]` → `SqlStartTransactionStatement`（ISOLATION LEVEL / READ WRITE|ONLY / WITH CONSISTENT SNAPSHOT / [NOT] DEFERRABLE）；过程块 `BEGIN … END` 仍为 `SqlBlockStatement`；Formatter / Visitor 同步。
 - `jkit-sql`：`LOAD DATA [LOCAL] INFILE` → `SqlLoadDataStatement`（文件/表/列、可选 FIELDS·LINES·IGNORE 原文段）；Formatter / Visitor / SchemaStat 同步。
 - `jkit-sql`：`LOCK TABLES`/`UNLOCK TABLES` → `SqlLockTablesStatement`（表清单 + READ/WRITE/LOCAL 等锁模式）；Formatter / Visitor / SchemaStat 同步。

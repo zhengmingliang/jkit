@@ -14,6 +14,7 @@ import com.alianga.jkit.sql.ast.SqlCaseExpr;
 import com.alianga.jkit.sql.ast.SqlDdlStatement;
 import com.alianga.jkit.sql.ast.SqlDelete;
 import com.alianga.jkit.sql.ast.SqlExpr;
+import com.alianga.jkit.sql.ast.SqlFlushStatement;
 import com.alianga.jkit.sql.ast.SqlFunctionExpr;
 import com.alianga.jkit.sql.ast.SqlFunctionTable;
 import com.alianga.jkit.sql.ast.SqlIdentifier;
@@ -1965,22 +1966,46 @@ public class SqlParserTest {
     }
 
     /**
-     * FLUSH PRIVILEGES / TABLES 等 → OTHER + 完整 text。
+     * FLUSH PRIVILEGES / TABLES 等 → SqlFlushStatement。
      */
     @Test
     public void flushPrivilegesAndTables() {
-        SqlSimpleStatement flush = (SqlSimpleStatement) SQL.parse("FLUSH PRIVILEGES");
-        assertEquals(com.alianga.jkit.sql.ast.SqlStatementType.OTHER, flush.type());
-        assertTrue(flush.text(), flush.text().toUpperCase().startsWith("FLUSH"));
-        assertTrue(flush.text().toUpperCase().contains("PRIVILEGES"));
+        SqlFlushStatement flush = (SqlFlushStatement) SQL.parse("FLUSH PRIVILEGES");
+        assertEquals(SqlStatementType.OTHER, flush.type());
+        assertEquals(1, flush.options().size());
+        assertEquals("PRIVILEGES", flush.options().get(0));
         assertTrue(SQL.toSqlString(flush).toUpperCase().contains("FLUSH"));
+        assertTrue(SQL.toSqlString(flush).toUpperCase().contains("PRIVILEGES"));
 
-        SqlSimpleStatement tables = (SqlSimpleStatement) SQL.parse("FLUSH TABLES");
-        assertEquals(com.alianga.jkit.sql.ast.SqlStatementType.OTHER, tables.type());
-        assertTrue(tables.text().toUpperCase().contains("TABLES"));
+        SqlFlushStatement tables = (SqlFlushStatement) SQL.parse("FLUSH TABLES");
+        assertTrue(tables.options().contains("TABLES"));
+        assertTrue(tables.tables().isEmpty());
 
-        SqlSimpleStatement logs = (SqlSimpleStatement) SQL.parse("FLUSH LOGS");
-        assertTrue(logs.text().toUpperCase().contains("LOGS"));
+        SqlFlushStatement logs = (SqlFlushStatement) SQL.parse("FLUSH LOGS");
+        assertTrue(logs.options().contains("LOGS"));
+
+        SqlFlushStatement multi = (SqlFlushStatement) SQL.parse(
+                "FLUSH NO_WRITE_TO_BINLOG PRIVILEGES, STATUS, LOGS");
+        assertTrue(multi.noWriteToBinlog());
+        assertEquals(3, multi.options().size());
+        assertTrue(multi.options().contains("PRIVILEGES"));
+        assertTrue(multi.options().contains("STATUS"));
+        assertTrue(multi.options().contains("LOGS"));
+
+        SqlFlushStatement tbls = (SqlFlushStatement) SQL.parse(
+                "FLUSH TABLES t1, db.t2 WITH READ LOCK");
+        assertTrue(tbls.options().contains("TABLES"));
+        assertEquals(2, tbls.tables().size());
+        assertEquals("t1", tbls.tables().get(0).simpleName());
+        assertEquals("db.t2", tbls.tables().get(1).qualifiedName());
+        assertNotNull(tbls.tablesModifier());
+        assertTrue(tbls.tablesModifier().toUpperCase().contains("READ"));
+        assertTrue(SQL.tables(tbls).contains("t1"));
+        assertTrue(SQL.tables(tbls).contains("db.t2"));
+
+        SqlFlushStatement binary = (SqlFlushStatement) SQL.parse("FLUSH BINARY LOGS");
+        assertTrue(binary.options().get(0).toUpperCase().contains("BINARY"));
+        assertTrue(binary.options().get(0).toUpperCase().contains("LOGS"));
     }
 
     /**
@@ -2044,7 +2069,8 @@ public class SqlParserTest {
         assertEquals(2, batch.size());
         assertEquals(SqlStatementType.UPDATE, batch.get(0).type());
         assertEquals(SqlStatementType.OTHER, batch.get(1).type());
-        assertTrue(((SqlSimpleStatement) batch.get(1)).text().toUpperCase().contains("FLUSH"));
+        assertTrue(batch.get(1) instanceof SqlFlushStatement);
+        assertTrue(((SqlFlushStatement) batch.get(1)).options().contains("PRIVILEGES"));
 
         java.util.List<SqlStatement> txBatch = SQL.parseAll(
                 "START TRANSACTION; INSERT INTO t (id) VALUES (1); COMMIT");

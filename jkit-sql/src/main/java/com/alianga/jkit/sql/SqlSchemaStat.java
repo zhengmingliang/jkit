@@ -3,6 +3,7 @@ package com.alianga.jkit.sql;
 import com.alianga.jkit.sql.ast.SqlAllColumns;
 import com.alianga.jkit.sql.ast.SqlDdlStatement;
 import com.alianga.jkit.sql.ast.SqlExpr;
+import com.alianga.jkit.sql.ast.SqlFlushStatement;
 import com.alianga.jkit.sql.ast.SqlFunctionExpr;
 import com.alianga.jkit.sql.ast.SqlIdentifier;
 import com.alianga.jkit.sql.ast.SqlJoin;
@@ -197,6 +198,13 @@ public final class SqlSchemaStat {
             }
             if (node instanceof SqlLoadDataStatement) {
                 addTable(((SqlLoadDataStatement) node).table(), accessStack.peek());
+                return true;
+            }
+            if (node instanceof SqlFlushStatement) {
+                SqlFlushStatement flush = (SqlFlushStatement) node;
+                for (int i = 0; i < flush.tables().size(); i++) {
+                    addTable(flush.tables().get(i), accessStack.peek());
+                }
                 return true;
             }
             if (node instanceof SqlFunctionExpr) {

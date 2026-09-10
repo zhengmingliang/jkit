@@ -10,6 +10,7 @@ import com.alianga.jkit.sql.ast.SqlControlStatement;
 import com.alianga.jkit.sql.ast.SqlDdlStatement;
 import com.alianga.jkit.sql.ast.SqlDeclareStatement;
 import com.alianga.jkit.sql.ast.SqlDelete;
+import com.alianga.jkit.sql.ast.SqlFlushStatement;
 import com.alianga.jkit.sql.ast.SqlFunctionExpr;
 import com.alianga.jkit.sql.ast.SqlFunctionTable;
 import com.alianga.jkit.sql.ast.SqlHandlerStatement;
@@ -103,6 +104,9 @@ public class SqlAstVisitor implements SqlVisitor {
         }
         if (node instanceof SqlLockTablesStatement) {
             return visitLockTables((SqlLockTablesStatement) node);
+        }
+        if (node instanceof SqlFlushStatement) {
+            return visitFlush((SqlFlushStatement) node);
         }
         if (node instanceof SqlStartTransactionStatement) {
             return visitStartTransaction((SqlStartTransactionStatement) node);
@@ -294,6 +298,11 @@ public class SqlAstVisitor implements SqlVisitor {
 
     /** @param node LOCK/UNLOCK TABLES @return 是否继续子节点 */
     protected boolean visitLockTables(SqlLockTablesStatement node) {
+        return true;
+    }
+
+    /** @param node FLUSH @return 是否继续子节点 */
+    protected boolean visitFlush(SqlFlushStatement node) {
         return true;
     }
 
