@@ -38,6 +38,10 @@
 
 新模块 `jkit-sql` 随父 POM **2.0.1** 一并交付（同版本号下的新增 artifact；下方保留 2026-09-01 的历史 `2.0.1` 小节）。
 
+### 新增
+
+- `jkit-sql`：**方言扩展**——新增一等枚举 `DB2`（仅 FETCH FIRST 分页）、`SQLITE`（LIMIT 族无 FETCH）、`HIVE`（反引号/拼接/双引号字符串，别名 maxcompute/odps）、`CLICKHOUSE`（反引号、双引号也是标识符、逗号 LIMIT）、`PRESTO`（别名 trino）；`fromName` 增补国产与主流别名：GoldenDB/SelectDB/AnalyticDB(ads)/MatrixOne/StoneDB→MYSQL，HighGo/UXDB/MogDB/Vastbase/AntDB/IvorySQL→POSTGRES。能力全部经 `SqlDialectSpec` 方法驱动，无散落 `== SqlDialect.X` 判断。
+
 ### 修复
 
 - `jkit-sql`：**DML 修饰符回写保真**（tools-test 新增 `SqlRoundTripFidelityCorpusTest`：379 条全量语料批量归一化逐字比对，5 条有据白名单）——`STRAIGHT_JOIN` 在分支条件里被 `match` 提前消费、类型判断永远落空，回写成普通 `JOIN`（连接顺序约束静默丢失）；`INSERT/UPDATE/DELETE` 的 `IGNORE`、INSERT/UPDATE 的 `LOW_PRIORITY`、INSERT 的 `HIGH_PRIORITY`、SELECT 的 `HIGH_PRIORITY` / `SQL_CALC_FOUND_ROWS` 由「吞掉不存」改为入 AST 并回写（新 API：`SqlInsert.ignore/lowPriority/highPriority`、`SqlUpdate.ignore/lowPriority`、`SqlDelete.ignore/lowPriority/quick`、`SqlSelect.highPriority/calcFoundRows`）；非裸标识符别名（如 `'-- a'`）回写强制加引号，此前回写成 `AS -- a`，二次解析把别名当注释丢掉。

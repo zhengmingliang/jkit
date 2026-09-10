@@ -33,10 +33,28 @@ public class SqlDialectTest {
         assertEquals(SqlDialect.ORACLE12, SqlDialect.fromName("19c"));
         assertEquals(SqlDialect.SQLSERVER, SqlDialect.fromName("sybase"));
         assertEquals(SqlDialect.SQLSERVER, SqlDialect.fromName("azuresql"));
-        assertEquals(SqlDialect.ANSI, SqlDialect.fromName("sqlite"));
-        assertEquals(SqlDialect.ANSI, SqlDialect.fromName("db2"));
         assertEquals(SqlDialect.H2, SqlDialect.fromName("h2"));
         assertEquals(SqlDialect.MYSQL, SqlDialect.fromName("unknown-dialect-xyz"));
+
+        // 国产与主流新增：引擎兼容重命名走别名，能力不同的进一等枚举
+        assertEquals(SqlDialect.MYSQL, SqlDialect.fromName("goldendb"));
+        assertEquals(SqlDialect.MYSQL, SqlDialect.fromName("selectdb"));
+        assertEquals(SqlDialect.MYSQL, SqlDialect.fromName("analyticdb"));
+        assertEquals(SqlDialect.POSTGRES, SqlDialect.fromName("highgo"));
+        assertEquals(SqlDialect.POSTGRES, SqlDialect.fromName("uxdb"));
+        assertEquals(SqlDialect.POSTGRES, SqlDialect.fromName("mogdb"));
+        assertEquals(SqlDialect.POSTGRES, SqlDialect.fromName("ivorysql"));
+        assertEquals(SqlDialect.DB2, SqlDialect.fromName("db2"));
+        assertEquals(SqlDialect.DB2, SqlDialect.fromName("db2luw"));
+        assertEquals(SqlDialect.SQLITE, SqlDialect.fromName("sqlite"));
+        assertEquals(SqlDialect.SQLITE, SqlDialect.fromName("sqlite3"));
+        assertEquals(SqlDialect.HIVE, SqlDialect.fromName("hive"));
+        assertEquals(SqlDialect.HIVE, SqlDialect.fromName("odps"));
+        assertEquals(SqlDialect.HIVE, SqlDialect.fromName("maxcompute"));
+        assertEquals(SqlDialect.CLICKHOUSE, SqlDialect.fromName("clickhouse"));
+        assertEquals(SqlDialect.CLICKHOUSE, SqlDialect.fromName("ck"));
+        assertEquals(SqlDialect.PRESTO, SqlDialect.fromName("presto"));
+        assertEquals(SqlDialect.PRESTO, SqlDialect.fromName("trino"));
     }
 
     @Test
@@ -73,6 +91,34 @@ public class SqlDialectTest {
         assertTrue(SqlDialect.H2.hashLineComment());
         assertTrue(SqlDialect.ANSI.supportsLimitOffset());
         assertTrue(SqlDialect.ANSI.supportsFetchFirst());
+
+        // DB2：仅 FETCH FIRST，无 LIMIT/ROWNUM
+        assertFalse(SqlDialect.DB2.supportsLimitOffset());
+        assertTrue(SqlDialect.DB2.supportsFetchFirst());
+        assertFalse(SqlDialect.DB2.supportsRownum());
+        assertFalse(SqlDialect.DB2.supportsTop());
+        assertTrue(SqlDialect.DB2.pipesAreConcat());
+        assertEquals("LIMIT", SqlDialect.DB2.preferredLimitStyle());
+
+        // SQLite / Presto：LIMIT 族，无 FETCH FIRST
+        assertTrue(SqlDialect.SQLITE.supportsLimitOffset());
+        assertFalse(SqlDialect.SQLITE.supportsFetchFirst());
+        assertTrue(SqlDialect.PRESTO.supportsLimitOffset());
+        assertFalse(SqlDialect.PRESTO.supportsFetchFirst());
+        assertTrue(SqlDialect.PRESTO.pipesAreConcat());
+
+        // Hive：反引号、拼接、双引号字符串、仅 LIMIT
+        assertEquals('`', SqlDialect.HIVE.identQuoteOpen());
+        assertTrue(SqlDialect.HIVE.pipesAreConcat());
+        assertTrue(SqlDialect.HIVE.doubleQuoteIsString());
+        assertTrue(SqlDialect.HIVE.supportsLimitOffset());
+        assertFalse(SqlDialect.HIVE.supportsCommaLimitOffset());
+
+        // ClickHouse：反引号、双引号是标识符、逗号 LIMIT
+        assertEquals('`', SqlDialect.CLICKHOUSE.identQuoteOpen());
+        assertFalse(SqlDialect.CLICKHOUSE.doubleQuoteIsString());
+        assertTrue(SqlDialect.CLICKHOUSE.pipesAreConcat());
+        assertTrue(SqlDialect.CLICKHOUSE.supportsCommaLimitOffset());
     }
 
     @Test

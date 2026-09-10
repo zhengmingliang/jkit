@@ -13,6 +13,10 @@ package com.alianga.jkit.sql;
  *   <li>{@link #ORACLE12}：Oracle 12c+ — 同引号/拼接，裸 SELECT 可用 OFFSET/FETCH，仍识别 ROWNUM 包装</li>
  *   <li>{@link #SQLSERVER}：方括号、TOP 与 OFFSET FETCH；别名含 mssql/tsql</li>
  *   <li>{@link #ANSI} / {@link #H2}：双引号、拼接、LIMIT/OFFSET（H2 兼认 {@code #} 注释）</li>
+ *   <li>{@link #DB2}：双引号、拼接、仅 {@code FETCH FIRST} 分页（无 LIMIT/ROWNUM）</li>
+ *   <li>{@link #SQLITE}：双引号、拼接、LIMIT/OFFSET，无 FETCH FIRST；别名含 presto/trino</li>
+ *   <li>{@link #HIVE}：反引号、拼接、LIMIT（无 OFFSET）；别名含 maxcompute/odps</li>
+ *   <li>{@link #CLICKHOUSE}：反引号、双引号也是标识符、拼接、LIMIT 含逗号风格</li>
  * </ul>
  *
  * <p>名称别名见 {@link #fromName(String)}：无法识别时默认 {@link #MYSQL}。</p>
@@ -53,7 +57,32 @@ public enum SqlDialect implements SqlDialectSpec {
     /**
      * H2：接近 ANSI，兼有 MySQL 与 PG 的常见写法。
      */
-    H2;
+    H2,
+    /**
+     * DB2（LUW）：双引号标识符，{@code ||} 拼接；分页用 {@code FETCH FIRST n ROWS ONLY}，
+     * 不用 LIMIT，也不生成 ROWNUM 包装。
+     */
+    DB2,
+    /**
+     * SQLite：双引号标识符（亦接受反引号），{@code ||} 拼接，LIMIT/OFFSET；
+     * 不支持 {@code FETCH FIRST}。
+     */
+    SQLITE,
+    /**
+     * Hive / MaxCompute（ODPS）：反引号标识符，双引号是字符串，{@code ||} 拼接；
+     * 分页仅 {@code LIMIT n}（无 OFFSET）。
+     */
+    HIVE,
+    /**
+     * ClickHouse：反引号标识符（双引号同），{@code ||} 拼接；
+     * {@code LIMIT n} / {@code LIMIT offset, count} / {@code LIMIT n OFFSET m}。
+     */
+    CLICKHOUSE,
+    /**
+     * Presto / Trino：双引号标识符，{@code ||} 拼接，LIMIT；
+     * 不支持 {@code FETCH FIRST}（Trino 部分版本有 OFFSET）。
+     */
+    PRESTO;
 
     /**
      * 按名称解析方言，无法识别时返回 {@link #MYSQL}。
@@ -70,13 +99,18 @@ public enum SqlDialect implements SqlDialectSpec {
                 || "maria".equals(n) || "gbase".equals(n) || "tidb".equals(n)
                 || "oceanbase".equals(n) || "polardb".equals(n) || "starrocks".equals(n)
                 || "doris".equals(n) || "percona".equals(n) || "singlestore".equals(n)
-                || "memsql".equals(n) || "tdsql".equals(n) || "greatsql".equals(n)) {
+                || "memsql".equals(n) || "tdsql".equals(n) || "greatsql".equals(n)
+                || "goldendb".equals(n) || "adb".equals(n) || "analyticdb".equals(n)
+                || "ads".equals(n) || "selectdb".equals(n) || "matrixone".equals(n)
+                || "stonedb".equals(n)) {
             return MYSQL;
         }
         if ("postgres".equals(n) || "postgresql".equals(n) || "pgsql".equals(n)
                 || "gauss".equals(n) || "gaussdb".equals(n) || "greenplum".equals(n)
                 || "kingbase".equals(n) || "opengauss".equals(n) || "cockroach".equals(n)
-                || "cockroachdb".equals(n) || "redshift".equals(n)) {
+                || "cockroachdb".equals(n) || "redshift".equals(n)
+                || "highgo".equals(n) || "uxdb".equals(n) || "mogdb".equals(n)
+                || "vastbase".equals(n) || "antdb".equals(n) || "ivorysql".equals(n)) {
             return POSTGRES;
         }
         if ("oracle12".equals(n) || "oracle12c".equals(n) || "12c".equals(n)
@@ -94,8 +128,24 @@ public enum SqlDialect implements SqlDialectSpec {
                 || "azuresql".equals(n)) {
             return SQLSERVER;
         }
+        if ("db2".equals(n) || "db2luw".equals(n)) {
+            return DB2;
+        }
+        if ("sqlite".equals(n) || "sqlite3".equals(n)) {
+            return SQLITE;
+        }
+        if ("hive".equals(n) || "hive2".equals(n) || "hive3".equals(n)
+                || "maxcompute".equals(n) || "odps".equals(n)) {
+            return HIVE;
+        }
+        if ("clickhouse".equals(n) || "ck".equals(n) || "ch".equals(n)) {
+            return CLICKHOUSE;
+        }
+        if ("presto".equals(n) || "prestodb".equals(n) || "trino".equals(n)) {
+            return PRESTO;
+        }
         if ("ansi".equals(n) || "sql92".equals(n) || "standard".equals(n)
-                || "sqlite".equals(n) || "db2".equals(n) || "snowflake".equals(n)) {
+                || "snowflake".equals(n)) {
             return ANSI;
         }
         if ("h2".equals(n)) {
@@ -110,6 +160,8 @@ public enum SqlDialect implements SqlDialectSpec {
     public char identQuoteOpen() {
         switch (this) {
             case MYSQL:
+            case HIVE:
+            case CLICKHOUSE:
                 return '`';
             case SQLSERVER:
                 return '[';
@@ -118,6 +170,9 @@ public enum SqlDialect implements SqlDialectSpec {
             case ORACLE:
             case ORACLE12:
             case H2:
+            case DB2:
+            case SQLITE:
+            case PRESTO:
             default:
                 return '"';
         }
@@ -168,14 +223,14 @@ public enum SqlDialect implements SqlDialectSpec {
      * @return 双引号是否当作字符串（MySQL 默认开启；ANSI_QUOTES 关闭）
      */
     public boolean doubleQuoteIsString() {
-        return this == MYSQL;
+        return this == MYSQL || this == HIVE;
     }
 
     /**
      * @return 字符串字面量内 {@code \} 是否为转义前缀（MySQL；NO_BACKSLASH_ESCAPES 时应为 false）
      */
     public boolean backslashEscapes() {
-        return this == MYSQL;
+        return this == MYSQL || this == HIVE;
     }
 
     /**
@@ -205,7 +260,8 @@ public enum SqlDialect implements SqlDialectSpec {
      * @return true 表示改写宜写 LIMIT
      */
     public boolean supportsLimitOffset() {
-        return this == MYSQL || this == POSTGRES || this == H2 || this == ANSI;
+        return this == MYSQL || this == POSTGRES || this == H2 || this == ANSI
+                || this == SQLITE || this == HIVE || this == CLICKHOUSE || this == PRESTO;
     }
 
     /**
@@ -224,7 +280,7 @@ public enum SqlDialect implements SqlDialectSpec {
      */
     public boolean supportsFetchFirst() {
         return this == ORACLE12 || this == POSTGRES || this == SQLSERVER
-                || this == ANSI || this == H2;
+                || this == ANSI || this == H2 || this == DB2;
     }
 
     /**
@@ -243,7 +299,7 @@ public enum SqlDialect implements SqlDialectSpec {
      * @return true 时改写优先逗号风格
      */
     public boolean supportsCommaLimitOffset() {
-        return this == MYSQL;
+        return this == MYSQL || this == CLICKHOUSE;
     }
 
     /**
