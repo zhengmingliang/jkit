@@ -42,6 +42,7 @@
 
 - `jkit-sql`：ClickHouse 参数化函数 `fn(params)(args)`（如 `windowFunnel(n)(...)`）；Oracle `MODEL` / `MATCH_RECOGNIZE` / `AS OF TIMESTAMP|SCN`；SQL Server `FOR SYSTEM_TIME AS OF`（表级时态子句）。
 - `jkit-sql`：`MODEL` / `MATCH_RECOGNIZE` 升级为结构化 AST（`SqlModelClause` / `SqlMatchRecognize` / `SqlNamedExpr`），保留 `raw` 往返；Formatter / Visitor 同步；`Complex100GiantsTest` 断言结构化字段。
+- `jkit-sql`：`SqlWallConfig` 可配置增强（denyDdl / 危险函数 / INTO OUTFILE / 可选 denyUnion·information_schema / selectOnly）；`SQL.wall(sql, dialect, config)` 重载；默认保持安全关键检查。
 
 - `jkit-sql`：点号后单引号名可作引用标识符（`T.'Group'`）；`INTERVAL` 仅吸收时间单位（不吞 `OR`/`AND`）；聚合内 `ORDER BY`（`ARRAY_AGG(x ORDER BY y)`）；`PIVOT`/`UNPIVOT`；Hive `LATERAL VIEW` / `DISTRIBUTE BY` / `SORT BY` / `CLUSTER BY`；`GROUP BY GROUPING SETS|CUBE|ROLLUP(...)`；Oracle `ORDER SIBLINGS BY`。
 

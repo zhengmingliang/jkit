@@ -733,7 +733,20 @@ public final class SQL {
      * @since 2.0.1
      */
     public static SqlWallResult wall(String sql, SqlDialect dialect) {
-        return SqlWall.check(sql, dialect);
+        return SqlWall.check(sql, dialect, SqlWallConfig.defaults());
+    }
+
+    /**
+     * WallFilter 子集检测（可配置规则）。
+     *
+     * @param sql SQL
+     * @param dialect 方言
+     * @param config 规则；null 视为 {@link SqlWallConfig#defaults()}
+     * @return 检测结果
+     * @since 2.0.1
+     */
+    public static SqlWallResult wall(String sql, SqlDialect dialect, SqlWallConfig config) {
+        return SqlWall.check(sql, dialect, config);
     }
 
     /**
@@ -745,6 +758,18 @@ public final class SQL {
      */
     public static SqlWallResult wall(SqlStatement statement) {
         return SqlWall.check(statement);
+    }
+
+    /**
+     * 对已解析语句做 Wall AST 侧检查（可配置）。
+     *
+     * @param statement 语句
+     * @param config 规则；null 视为 defaults
+     * @return 检测结果
+     * @since 2.0.1
+     */
+    public static SqlWallResult wall(SqlStatement statement, SqlWallConfig config) {
+        return SqlWall.check(statement, config);
     }
 
     /**
