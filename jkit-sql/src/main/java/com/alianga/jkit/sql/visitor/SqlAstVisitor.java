@@ -7,9 +7,11 @@ import com.alianga.jkit.sql.ast.SqlCaseExpr;
 import com.alianga.jkit.sql.ast.SqlCastExpr;
 import com.alianga.jkit.sql.ast.SqlControlStatement;
 import com.alianga.jkit.sql.ast.SqlDdlStatement;
+import com.alianga.jkit.sql.ast.SqlDeclareStatement;
 import com.alianga.jkit.sql.ast.SqlDelete;
 import com.alianga.jkit.sql.ast.SqlFunctionExpr;
 import com.alianga.jkit.sql.ast.SqlFunctionTable;
+import com.alianga.jkit.sql.ast.SqlHandlerStatement;
 import com.alianga.jkit.sql.ast.SqlIdentifier;
 import com.alianga.jkit.sql.ast.SqlInExpr;
 import com.alianga.jkit.sql.ast.SqlInsert;
@@ -77,6 +79,12 @@ public class SqlAstVisitor implements SqlVisitor {
         }
         if (node instanceof SqlControlStatement) {
             return visitControl((SqlControlStatement) node);
+        }
+        if (node instanceof SqlDeclareStatement) {
+            return visitDeclare((SqlDeclareStatement) node);
+        }
+        if (node instanceof SqlHandlerStatement) {
+            return visitHandler((SqlHandlerStatement) node);
         }
         if (node instanceof SqlSimpleStatement) {
             return visitSimple((SqlSimpleStatement) node);
@@ -232,6 +240,16 @@ public class SqlAstVisitor implements SqlVisitor {
 
     /** @param node 控制流 @return 是否继续子节点 */
     protected boolean visitControl(SqlControlStatement node) {
+        return true;
+    }
+
+    /** @param node DECLARE @return 是否继续子节点 */
+    protected boolean visitDeclare(SqlDeclareStatement node) {
+        return true;
+    }
+
+    /** @param node HANDLER @return 是否继续子节点 */
+    protected boolean visitHandler(SqlHandlerStatement node) {
         return true;
     }
 

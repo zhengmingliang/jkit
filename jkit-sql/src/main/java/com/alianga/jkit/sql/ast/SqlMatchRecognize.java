@@ -8,8 +8,9 @@ import java.util.List;
 /**
  * Oracle / 标准 {@code MATCH_RECOGNIZE (...)} 结构化节点。
  *
- * <p>常见子句尽量结构化（含 {@code PATTERN} 原文、{@code DEFINE}、{@code SUBSET}、
- * {@code ROWS PER MATCH}/{@code AFTER MATCH}/{@code WITHIN}）；未识别片段进 {@link #optionsRaw()} / {@link #raw()}。</p>
+ * <p>常见子句尽量结构化（含 {@code PATTERN} <b>原文字符串</b>（完整 PATTERN DSL 不展开）、
+ * {@code DEFINE}、{@code SUBSET}、{@code ROWS PER MATCH}/{@code AFTER MATCH}/{@code WITHIN}）；
+ * 未识别片段进 {@link #optionsRaw()} / {@link #raw()}。</p>
  *
  * @author 郑明亮
  * @since 2.0.1
@@ -95,7 +96,7 @@ public final class SqlMatchRecognize extends SqlNode {
     }
 
     /**
-     * @return {@code PATTERN (...)} 括号内原文，可空
+     * @return {@code PATTERN (...)} 括号内原文，可空；保持字符串，不解析正则/量词 DSL
      */
     public String pattern() {
         return pattern;

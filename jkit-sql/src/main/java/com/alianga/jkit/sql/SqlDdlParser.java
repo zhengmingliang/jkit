@@ -2,6 +2,8 @@ package com.alianga.jkit.sql;
 
 import com.alianga.jkit.sql.ast.SqlControlStatement;
 import com.alianga.jkit.sql.ast.SqlDdlStatement;
+import com.alianga.jkit.sql.ast.SqlDeclareStatement;
+import com.alianga.jkit.sql.ast.SqlHandlerStatement;
 import com.alianga.jkit.sql.ast.SqlIdentifier;
 import com.alianga.jkit.sql.ast.SqlRoutineParam;
 import com.alianga.jkit.sql.ast.SqlSimpleStatement;
@@ -621,6 +623,9 @@ final class SqlDdlParser {
     }
 
     private SqlStatement parseBodyStatement() {
+        if (p.is(SqlTokenType.DECLARE)) {
+            return parseDeclareOrHandlerInBody();
+        }
         try {
             return p.parseStatement();
         } catch (SqlParseException ex) {
@@ -902,8 +907,22 @@ final class SqlDdlParser {
         }
         if (p.is(SqlTokenType.INSERT) || p.is(SqlTokenType.UPDATE) || p.is(SqlTokenType.DELETE)
                 || p.isIdent("INSERT") || p.isIdent("UPDATE") || p.isIdent("DELETE")) {
-            ddl.setTriggerEvent(p.token.text().toUpperCase());
+            String ev = p.token.text().toUpperCase();
+            ddl.setTriggerEvent(ev);
             p.next();
+            // UPDATE OF col1, col2
+            if ("UPDATE".equals(ev) && (p.is(SqlTokenType.OF) || p.isIdent("OF"))) {
+                p.next();
+                while (!p.is(SqlTokenType.EOF) && !p.atStmtBreak()) {
+                    if (!p.identLike() && !(p.token.type() != null && p.token.type().keyword())) {
+                        break;
+                    }
+                    ddl.triggerUpdateColumns().add(p.parseName());
+                    if (!p.match(SqlTokenType.COMMA)) {
+                        break;
+                    }
+                }
+            }
         }
         if (p.match(SqlTokenType.ON)) {
             ddl.setTriggerTable(p.parseName());
@@ -956,7 +975,7 @@ final class SqlDdlParser {
 
     private void parseEventBody(SqlDdlStatement ddl, String paramTail) {
         int start = p.token.start();
-        // ON SCHEDULE AT|EVERY … [STARTS …] [ENDS …] DO <body>
+        // ON SCHEDULE AT|EVERY … [STARTS …] [ENDS …] [ENABLE|DISABLE] [COMMENT …] DO <body>
         if (p.match(SqlTokenType.ON)
                 || (p.identLike() && p.token.textEqualsIgnoreCase("ON"))) {
             if (p.identLike() && p.token.textEqualsIgnoreCase("ON")) {
@@ -972,7 +991,8 @@ final class SqlDdlParser {
                 p.next();
                 int schedStart = p.token.start();
                 while (!p.is(SqlTokenType.EOF) && !p.atStmtBreak() && !p.is(SqlTokenType.BEGIN)
-                        && !p.is(SqlTokenType.DO) && !isRoutineExecutableStart()) {
+                        && !p.is(SqlTokenType.DO) && !isRoutineExecutableStart()
+                        && !isEventClauseKeyword()) {
                     if (p.is(SqlTokenType.LPAREN)) {
                         p.next();
                         p.skipBalancedParensContent();
@@ -986,10 +1006,49 @@ final class SqlDdlParser {
                 }
             }
         }
-        // 其它前缀（ENABLE/DISABLE/COMMENT…）仍跳过直至 DO/BEGIN
+        // STARTS / ENDS / ON COMPLETION / ENABLE|DISABLE / COMMENT
         while (!p.is(SqlTokenType.EOF) && !p.atStmtBreak() && !p.is(SqlTokenType.BEGIN)
                 && !p.is(SqlTokenType.DO) && !isRoutineExecutableStart()) {
-            if (p.is(SqlTokenType.LPAREN)) {
+            if (p.isIdent("STARTS") || (p.identLike() && p.token.textEqualsIgnoreCase("STARTS"))) {
+                p.next();
+                ddl.setEventStarts(consumeEventTimestampRaw());
+            } else if (p.isIdent("ENDS") || (p.identLike() && p.token.textEqualsIgnoreCase("ENDS"))) {
+                p.next();
+                ddl.setEventEnds(consumeEventTimestampRaw());
+            } else if (p.isIdent("ENABLE") || (p.identLike() && p.token.textEqualsIgnoreCase("ENABLE"))) {
+                p.next();
+                ddl.setEventEnabled(Boolean.TRUE);
+            } else if (p.isIdent("DISABLE") || (p.identLike() && p.token.textEqualsIgnoreCase("DISABLE"))) {
+                p.next();
+                ddl.setEventEnabled(Boolean.FALSE);
+                // DISABLE ON SLAVE
+                if ((p.is(SqlTokenType.ON) || (p.identLike() && p.token.textEqualsIgnoreCase("ON")))
+                        && isPeekIdent("SLAVE")) {
+                    p.next();
+                    p.next();
+                }
+            } else if (p.is(SqlTokenType.COMMENT) || p.isIdent("COMMENT")
+                    || (p.identLike() && p.token.textEqualsIgnoreCase("COMMENT"))) {
+                p.next();
+                if (p.is(SqlTokenType.STRING) || p.is(SqlTokenType.NUMBER) || p.identLike()) {
+                    ddl.setEventComment(p.token.text());
+                    p.next();
+                }
+            } else if (p.is(SqlTokenType.ON) || (p.identLike() && p.token.textEqualsIgnoreCase("ON"))) {
+                // ON COMPLETION [NOT] PRESERVE —— 仍进 bodyRaw，跳过关键词
+                p.next();
+                if (p.isIdent("COMPLETION") || (p.identLike() && p.token.textEqualsIgnoreCase("COMPLETION"))) {
+                    p.next();
+                    if (p.is(SqlTokenType.NOT) || p.isIdent("NOT")) {
+                        p.next();
+                    }
+                    if (p.isIdent("PRESERVE") || (p.identLike() && p.token.textEqualsIgnoreCase("PRESERVE"))) {
+                        p.next();
+                    }
+                } else {
+                    break;
+                }
+            } else if (p.is(SqlTokenType.LPAREN)) {
                 p.next();
                 p.skipBalancedParensContent();
             } else {
@@ -1007,6 +1066,41 @@ final class SqlDdlParser {
         } else {
             ddl.setTail(bodyRaw);
         }
+    }
+
+    private boolean isEventClauseKeyword() {
+        if (p.is(SqlTokenType.COMMENT) || p.is(SqlTokenType.ON) || p.is(SqlTokenType.NOT)) {
+            return true;
+        }
+        if (!p.identLike() && !(p.token.type() != null && p.token.type().keyword())) {
+            return false;
+        }
+        String t = p.token.text().toUpperCase();
+        return "STARTS".equals(t) || "ENDS".equals(t) || "ENABLE".equals(t) || "DISABLE".equals(t)
+                || "COMMENT".equals(t) || "ON".equals(t);
+    }
+
+    private boolean isPeekIdent(String word) {
+        SqlToken peek = p.lexer.peek();
+        return peek != null && peek.text() != null && word.equalsIgnoreCase(peek.text());
+    }
+
+    /** 读 STARTS/ENDS 后的时间戳/表达式原文，直至下一事件子句或 DO。 */
+    private String consumeEventTimestampRaw() {
+        int start = p.token.start();
+        while (!p.is(SqlTokenType.EOF) && !p.atStmtBreak() && !p.is(SqlTokenType.BEGIN)
+                && !p.is(SqlTokenType.DO) && !isRoutineExecutableStart() && !isEventClauseKeyword()) {
+            if (p.is(SqlTokenType.LPAREN)) {
+                p.next();
+                p.skipBalancedParensContent();
+            } else if (p.is(SqlTokenType.PLUS) || p.is(SqlTokenType.MINUS)) {
+                // timestamp + INTERVAL …
+                p.next();
+            } else {
+                p.next();
+            }
+        }
+        return p.lexer.rawSlice(start, p.token.start()).trim();
     }
 
     private boolean isRoutineExecutableStart() {
@@ -1050,6 +1144,198 @@ final class SqlDdlParser {
         stmt.setStatementType(SqlStatementType.OTHER);
         stmt.setText(text);
         return stmt;
+    }
+
+    private SqlStatement parseDeclareOrHandlerInBody() {
+        int start = p.token.start();
+        try {
+            return parseDeclareOrHandlerInBody0(start);
+        } catch (SqlParseException ex) {
+            // fall through
+        }
+        if (p.token.start() == start) {
+            return consumeUntilSemiAsOther();
+        }
+        while (!p.is(SqlTokenType.EOF) && !p.atStmtBreak() && !p.is(SqlTokenType.SEMICOLON)
+                && !p.is(SqlTokenType.END) && !p.is(SqlTokenType.ELSE) && !p.is(SqlTokenType.WHEN)
+                && !isElseIfStart()) {
+            if (p.is(SqlTokenType.LPAREN)) {
+                p.next();
+                p.skipBalancedParensContent();
+            } else if (p.is(SqlTokenType.BEGIN)) {
+                // 处理体含 BEGIN：吃到匹配 END
+                p.consumeRawAllowingBeginEnd();
+                break;
+            } else {
+                p.next();
+            }
+        }
+        SqlSimpleStatement stmt = new SqlSimpleStatement();
+        stmt.setStatementType(SqlStatementType.OTHER);
+        stmt.setText(p.lexer.rawSlice(start, p.token.start()).trim());
+        return stmt;
+    }
+
+    private SqlStatement parseDeclareOrHandlerInBody0(int start) {
+        p.expect(SqlTokenType.DECLARE);
+        // DECLARE CONTINUE|EXIT|UNDO HANDLER FOR …
+        if (isHandlerActionToken()) {
+            return parseHandlerStatement(start);
+        }
+        SqlDeclareStatement decl = new SqlDeclareStatement();
+        if (!p.identLike() && !(p.token.type() != null && p.token.type().keyword())) {
+            throw p.error("expected DECLARE name");
+        }
+        decl.names().add(p.parseName());
+        while (p.match(SqlTokenType.COMMA)) {
+            decl.names().add(p.parseName());
+        }
+        if (p.isIdent("CURSOR") || (p.identLike() && p.token.textEqualsIgnoreCase("CURSOR"))) {
+            decl.setKind(SqlDeclareStatement.Kind.CURSOR);
+            p.next();
+            if (!(p.is(SqlTokenType.FOR) || p.isIdent("FOR"))) {
+                throw p.error("expected FOR after CURSOR");
+            }
+            p.next();
+            decl.setCursorQuery(parseBodyStatement());
+        } else if (p.isIdent("CONDITION") || (p.identLike() && p.token.textEqualsIgnoreCase("CONDITION"))) {
+            decl.setKind(SqlDeclareStatement.Kind.CONDITION);
+            p.next();
+            if (!(p.is(SqlTokenType.FOR) || p.isIdent("FOR"))) {
+                throw p.error("expected FOR after CONDITION");
+            }
+            p.next();
+            int cStart = p.token.start();
+            while (!p.is(SqlTokenType.EOF) && !p.atStmtBreak() && !p.is(SqlTokenType.SEMICOLON)
+                    && !p.is(SqlTokenType.END) && !p.is(SqlTokenType.ELSE) && !p.is(SqlTokenType.WHEN)
+                    && !isElseIfStart()) {
+                if (p.is(SqlTokenType.LPAREN)) {
+                    p.next();
+                    p.skipBalancedParensContent();
+                } else {
+                    p.next();
+                }
+            }
+            decl.setConditionFor(p.lexer.rawSlice(cStart, p.token.start()).trim());
+        } else {
+            decl.setKind(SqlDeclareStatement.Kind.VARIABLE);
+            int typeStart = p.token.start();
+            while (!p.is(SqlTokenType.EOF) && !p.atStmtBreak() && !p.is(SqlTokenType.SEMICOLON)
+                    && !p.is(SqlTokenType.DEFAULT) && !p.is(SqlTokenType.END)
+                    && !p.is(SqlTokenType.ELSE) && !p.is(SqlTokenType.WHEN) && !isElseIfStart()) {
+                if (p.is(SqlTokenType.LPAREN)) {
+                    p.next();
+                    p.skipBalancedParensContent();
+                } else {
+                    p.next();
+                }
+            }
+            String typeRaw = p.lexer.rawSlice(typeStart, p.token.start()).trim();
+            if (!typeRaw.isEmpty()) {
+                decl.setTypeRaw(typeRaw);
+            }
+            if (p.is(SqlTokenType.DEFAULT)) {
+                p.next();
+                decl.setDefaultValue(p.exprParser.parseExpr());
+            }
+        }
+        decl.setRaw(p.lexer.rawSlice(start, p.token.start()).trim());
+        return decl;
+    }
+
+    private boolean isHandlerActionToken() {
+        if (!p.identLike() && !(p.token.type() != null && p.token.type().keyword())) {
+            return false;
+        }
+        String t = p.token.text().toUpperCase();
+        if (!("CONTINUE".equals(t) || "EXIT".equals(t) || "UNDO".equals(t))) {
+            return false;
+        }
+        return isPeekIdent("HANDLER");
+    }
+
+    private SqlHandlerStatement parseHandlerStatement(int start) {
+        SqlHandlerStatement h = new SqlHandlerStatement();
+        h.setAction(p.token.text().toUpperCase());
+        p.next(); // CONTINUE|EXIT|UNDO
+        if (!(p.is(SqlTokenType.HANDLER) || p.isIdent("HANDLER"))) {
+            throw p.error("expected HANDLER");
+        }
+        p.next();
+        if (!(p.is(SqlTokenType.FOR) || p.isIdent("FOR"))) {
+            throw p.error("expected FOR after HANDLER");
+        }
+        p.next();
+        // conditions
+        while (!p.is(SqlTokenType.EOF) && !p.atStmtBreak() && !p.is(SqlTokenType.SEMICOLON)
+                && !p.is(SqlTokenType.BEGIN) && !isRoutineExecutableStart() && !isControlStart()
+                && isHandlerConditionStart()) {
+            h.conditions().add(consumeHandlerCondition());
+            if (!p.match(SqlTokenType.COMMA)) {
+                break;
+            }
+        }
+        // body
+        if (p.is(SqlTokenType.BEGIN)) {
+            p.next();
+            String savedDelim = p.stmtDelimiter;
+            p.stmtDelimiter = ";";
+            try {
+                parseStatementListUntilEnd(h.bodyStatements(), null);
+            } finally {
+                p.stmtDelimiter = savedDelim;
+            }
+        } else if (isControlStart()) {
+            h.bodyStatements().add(parseControlStatement());
+        } else {
+            h.bodyStatements().add(parseBodyStatement());
+        }
+        h.setRaw(p.lexer.rawSlice(start, p.token.start()).trim());
+        return h;
+    }
+
+    private boolean isHandlerConditionStart() {
+        if (p.is(SqlTokenType.NUMBER) || p.is(SqlTokenType.STRING)) {
+            return true;
+        }
+        if (!p.identLike() && !(p.token.type() != null && p.token.type().keyword())) {
+            return false;
+        }
+        if (p.is(SqlTokenType.BEGIN) || isRoutineExecutableStart() || isControlStart()) {
+            return false;
+        }
+        String t = p.token.text().toUpperCase();
+        // 排除明显语句开头（已在上面拦），其余作条件名 / SQLSTATE / NOT FOUND 等
+        return !"DO".equals(t);
+    }
+
+    private String consumeHandlerCondition() {
+        int start = p.token.start();
+        if (p.isIdent("NOT") || (p.identLike() && p.token.textEqualsIgnoreCase("NOT"))
+                || p.is(SqlTokenType.NOT)) {
+            p.next();
+            if (p.isIdent("FOUND") || (p.identLike() && p.token.textEqualsIgnoreCase("FOUND"))) {
+                p.next();
+            }
+            return p.lexer.rawSlice(start, p.token.start()).trim();
+        }
+        if (p.isIdent("SQLSTATE") || (p.identLike() && p.token.textEqualsIgnoreCase("SQLSTATE"))) {
+            p.next();
+            if (p.isIdent("VALUE") || (p.identLike() && p.token.textEqualsIgnoreCase("VALUE"))) {
+                p.next();
+            }
+            if (p.is(SqlTokenType.STRING) || p.is(SqlTokenType.NUMBER) || p.identLike()) {
+                p.next();
+            }
+            return p.lexer.rawSlice(start, p.token.start()).trim();
+        }
+        if (p.is(SqlTokenType.NUMBER) || p.is(SqlTokenType.STRING)) {
+            p.next();
+            return p.lexer.rawSlice(start, p.token.start()).trim();
+        }
+        // SQLWARNING / SQLEXCEPTION / condition_name
+        p.next();
+        return p.lexer.rawSlice(start, p.token.start()).trim();
     }
 
     private SqlStatement consumeCompoundRemainderAsOther() {

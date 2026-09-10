@@ -1229,6 +1229,40 @@ final class SqlSelectParser {
         if (!last.isEmpty()) {
             rule.cellDims().add(last);
         }
+        fillSimpleCellDimExprs(rule);
+    }
+
+    /** 当各维均为简单标识符时填充 {@link SqlModelRule#cellDimExprs()}。 */
+    private void fillSimpleCellDimExprs(SqlModelRule rule) {
+        if (rule.cellDims().isEmpty()) {
+            return;
+        }
+        List<SqlExpr> exprs = new ArrayList<SqlExpr>(rule.cellDims().size());
+        for (int i = 0; i < rule.cellDims().size(); i++) {
+            String part = rule.cellDims().get(i);
+            if (!isSimpleIdentDim(part)) {
+                return;
+            }
+            exprs.add(SqlIdentifier.of(part));
+        }
+        rule.cellDimExprs().addAll(exprs);
+    }
+
+    private static boolean isSimpleIdentDim(String part) {
+        if (part == null || part.isEmpty()) {
+            return false;
+        }
+        // 允许 a / a.b / "a" / `a`；拒绝含运算符/空白的维
+        for (int i = 0; i < part.length(); i++) {
+            char c = part.charAt(i);
+            if (c == '=' || c == '(' || c == ')' || c == '[' || c == ']' || c == ','
+                    || c == '+' || c == '-' || c == '*' || c == '/' || c == '<' || c == '>'
+                    || Character.isWhitespace(c) || c == '\'') {
+                return false;
+            }
+        }
+        char first = part.charAt(0);
+        return Character.isLetter(first) || first == '_' || first == '"' || first == '`' || first == '[';
     }
 
     private String skipBalancedBracketsContent() {

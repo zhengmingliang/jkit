@@ -8,10 +8,12 @@ import com.alianga.jkit.sql.ast.SqlCaseExpr;
 import com.alianga.jkit.sql.ast.SqlCastExpr;
 import com.alianga.jkit.sql.ast.SqlControlStatement;
 import com.alianga.jkit.sql.ast.SqlDdlStatement;
+import com.alianga.jkit.sql.ast.SqlDeclareStatement;
 import com.alianga.jkit.sql.ast.SqlDelete;
 import com.alianga.jkit.sql.ast.SqlExpr;
 import com.alianga.jkit.sql.ast.SqlFunctionExpr;
 import com.alianga.jkit.sql.ast.SqlFunctionTable;
+import com.alianga.jkit.sql.ast.SqlHandlerStatement;
 import com.alianga.jkit.sql.ast.SqlIdentifier;
 import com.alianga.jkit.sql.ast.SqlInExpr;
 import com.alianga.jkit.sql.ast.SqlInsert;
@@ -118,6 +120,10 @@ public final class SqlFormatter {
             writeDdl((SqlDdlStatement) node);
         } else if (node instanceof SqlControlStatement) {
             writeControl((SqlControlStatement) node);
+        } else if (node instanceof SqlDeclareStatement) {
+            writeDeclare((SqlDeclareStatement) node);
+        } else if (node instanceof SqlHandlerStatement) {
+            writeHandler((SqlHandlerStatement) node);
         } else if (node instanceof SqlSimpleStatement) {
             writeSimple((SqlSimpleStatement) node);
         } else if (node instanceof SqlExpr) {
@@ -839,6 +845,9 @@ public final class SqlFormatter {
         } else if (ddl.triggerTiming() != null || ddl.triggerEvent() != null
                 || ddl.triggerTable() != null || ddl.eventScheduleKind() != null
                 || ddl.triggerForEach() != null || ddl.triggerOrder() != null
+                || !ddl.triggerUpdateColumns().isEmpty()
+                || ddl.eventStarts() != null || ddl.eventEnds() != null
+                || ddl.eventEnabled() != null || ddl.eventComment() != null
                 || (!ddl.bodyStatements().isEmpty() && "TRIGGER".equalsIgnoreCase(ddl.objectType()))
                 || (!ddl.bodyStatements().isEmpty() && "EVENT".equalsIgnoreCase(ddl.objectType()))) {
             writeTriggerOrEvent(ddl);
@@ -865,6 +874,28 @@ public final class SqlFormatter {
                 sp();
                 out.append(ddl.eventScheduleRaw());
             }
+            if (ddl.eventStarts() != null && ddl.eventStarts().length() > 0) {
+                sp();
+                out.append("STARTS");
+                sp();
+                out.append(ddl.eventStarts());
+            }
+            if (ddl.eventEnds() != null && ddl.eventEnds().length() > 0) {
+                sp();
+                out.append("ENDS");
+                sp();
+                out.append(ddl.eventEnds());
+            }
+            if (ddl.eventEnabled() != null) {
+                sp();
+                out.append(ddl.eventEnabled().booleanValue() ? "ENABLE" : "DISABLE");
+            }
+            if (ddl.eventComment() != null && ddl.eventComment().length() > 0) {
+                sp();
+                out.append("COMMENT");
+                sp();
+                out.append(ddl.eventComment());
+            }
             sp();
             kw("DO");
         }
@@ -875,6 +906,17 @@ public final class SqlFormatter {
         if (ddl.triggerEvent() != null) {
             sp();
             out.append(ddl.triggerEvent());
+            if (!ddl.triggerUpdateColumns().isEmpty()) {
+                sp();
+                kw("OF");
+                for (int i = 0; i < ddl.triggerUpdateColumns().size(); i++) {
+                    if (i > 0) {
+                        out.append(',');
+                        sp();
+                    }
+                    writeExpr(ddl.triggerUpdateColumns().get(i));
+                }
+            }
         }
         if (ddl.triggerTable() != null) {
             sp();
@@ -1540,6 +1582,99 @@ public final class SqlFormatter {
                 sp();
             }
             out.append(mr.optionsRaw());
+        }
+    }
+
+    private void writeDeclare(SqlDeclareStatement decl) {
+        if (decl.names().isEmpty() && decl.raw() != null && decl.raw().length() > 0) {
+            out.append(decl.raw());
+            return;
+        }
+        kw("DECLARE");
+        for (int i = 0; i < decl.names().size(); i++) {
+            if (i > 0) {
+                out.append(',');
+                sp();
+            } else {
+                sp();
+            }
+            writeExpr(decl.names().get(i));
+        }
+        if (decl.kind() == SqlDeclareStatement.Kind.CURSOR) {
+            sp();
+            out.append("CURSOR");
+            sp();
+            kw("FOR");
+            if (decl.cursorQuery() != null) {
+                sp();
+                writeNode(decl.cursorQuery());
+            }
+        } else if (decl.kind() == SqlDeclareStatement.Kind.CONDITION) {
+            sp();
+            out.append("CONDITION");
+            sp();
+            kw("FOR");
+            if (decl.conditionFor() != null && decl.conditionFor().length() > 0) {
+                sp();
+                out.append(decl.conditionFor());
+            }
+        } else {
+            if (decl.typeRaw() != null && decl.typeRaw().length() > 0) {
+                sp();
+                out.append(decl.typeRaw());
+            }
+            if (decl.defaultValue() != null) {
+                sp();
+                kw("DEFAULT");
+                sp();
+                writeExpr(decl.defaultValue());
+            }
+        }
+    }
+
+    private void writeHandler(SqlHandlerStatement h) {
+        if (h.raw() != null && h.raw().length() > 0
+                && (h.action() == null || h.conditions().isEmpty())) {
+            out.append(h.raw());
+            return;
+        }
+        kw("DECLARE");
+        if (h.action() != null) {
+            sp();
+            out.append(h.action());
+        }
+        sp();
+        out.append("HANDLER");
+        sp();
+        kw("FOR");
+        for (int i = 0; i < h.conditions().size(); i++) {
+            if (i > 0) {
+                out.append(',');
+            }
+            sp();
+            out.append(h.conditions().get(i));
+        }
+        if (!h.bodyStatements().isEmpty()) {
+            boolean needBegin = h.bodyStatements().size() > 1
+                    || (h.raw() != null && h.raw().toUpperCase().contains("BEGIN"));
+            if (needBegin) {
+                sp();
+                kw("BEGIN");
+            }
+            for (int i = 0; i < h.bodyStatements().size(); i++) {
+                sp();
+                writeNode(h.bodyStatements().get(i));
+                if (needBegin || i < h.bodyStatements().size() - 1) {
+                    out.append(';');
+                }
+            }
+            if (needBegin) {
+                sp();
+                kw("END");
+            }
+        } else if (h.raw() != null) {
+            sp();
+            out.append(h.raw());
         }
     }
 

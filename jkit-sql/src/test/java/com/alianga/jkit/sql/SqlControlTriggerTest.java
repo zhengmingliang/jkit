@@ -2,10 +2,13 @@ package com.alianga.jkit.sql;
 
 import com.alianga.jkit.sql.ast.SqlControlStatement;
 import com.alianga.jkit.sql.ast.SqlDdlStatement;
+import com.alianga.jkit.sql.ast.SqlDeclareStatement;
+import com.alianga.jkit.sql.ast.SqlHandlerStatement;
 import com.alianga.jkit.sql.ast.SqlStatementType;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
@@ -188,5 +191,99 @@ public class SqlControlTriggerTest {
         assertNotNull(ev.eventScheduleRaw());
         assertTrue(ev.eventScheduleRaw().contains("2026"));
         assertTrue(ev.bodyStatements().size() >= 1);
+    }
+
+
+    @Test
+    public void triggerUpdateOfColumns() {
+        String sql = "CREATE TRIGGER trg_bu BEFORE UPDATE OF a, b ON t FOR EACH ROW "
+                + "BEGIN SET NEW.a = 1; END";
+        SqlDdlStatement trg = (SqlDdlStatement) SQL.parse(sql, SqlDialect.MYSQL);
+        assertEquals("UPDATE", trg.triggerEvent());
+        assertEquals(2, trg.triggerUpdateColumns().size());
+        assertEquals("a", trg.triggerUpdateColumns().get(0).simpleName());
+        assertEquals("b", trg.triggerUpdateColumns().get(1).simpleName());
+        String formatted = SQL.toSqlString(trg, SqlDialect.MYSQL);
+        assertTrue(formatted.toUpperCase().contains("UPDATE"));
+        assertTrue(formatted.toUpperCase().contains("OF"));
+    }
+
+    @Test
+    public void eventStartsEndsEnableComment() {
+        String sql = "CREATE EVENT ev_full ON SCHEDULE EVERY 1 DAY "
+                + "STARTS '2026-01-01 00:00:00' ENDS '2026-12-31 23:59:59' "
+                + "DISABLE COMMENT 'daily cleanup' "
+                + "DO BEGIN DELETE FROM t WHERE id < 0; END";
+        SqlDdlStatement ev = (SqlDdlStatement) SQL.parse(sql, SqlDialect.MYSQL);
+        assertEquals("EVERY", ev.eventScheduleKind());
+        assertNotNull(ev.eventScheduleRaw());
+        assertTrue(ev.eventScheduleRaw().toUpperCase().contains("DAY"));
+        assertFalse("schedule should not swallow STARTS",
+                ev.eventScheduleRaw().toUpperCase().contains("STARTS"));
+        assertNotNull(ev.eventStarts());
+        assertTrue(ev.eventStarts().contains("2026-01-01"));
+        assertNotNull(ev.eventEnds());
+        assertTrue(ev.eventEnds().contains("2026-12-31"));
+        assertEquals(Boolean.FALSE, ev.eventEnabled());
+        assertNotNull(ev.eventComment());
+        assertTrue(ev.eventComment().contains("cleanup"));
+        String formatted = SQL.toSqlString(ev, SqlDialect.MYSQL);
+        assertTrue(formatted.toUpperCase().contains("STARTS"));
+        assertTrue(formatted.toUpperCase().contains("DISABLE"));
+        assertTrue(formatted.toUpperCase().contains("COMMENT"));
+    }
+
+    @Test
+    public void procedureDeclareHandlerCursor() {
+        String sql = "CREATE PROCEDURE sp_decl() BEGIN "
+                + "DECLARE x INT DEFAULT 0; "
+                + "DECLARE y, z VARCHAR(10); "
+                + "DECLARE done INT DEFAULT 0; "
+                + "DECLARE cur CURSOR FOR SELECT id FROM t; "
+                + "DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = 1; "
+                + "SET x = 1; "
+                + "END";
+        SqlDdlStatement ddl = (SqlDdlStatement) SQL.parse(sql, SqlDialect.MYSQL);
+        assertTrue(ddl.bodyStatements().size() >= 5);
+        boolean sawVar = false;
+        boolean sawMulti = false;
+        boolean sawCursor = false;
+        boolean sawHandler = false;
+        for (int i = 0; i < ddl.bodyStatements().size(); i++) {
+            Object s = ddl.bodyStatements().get(i);
+            if (s instanceof SqlDeclareStatement) {
+                SqlDeclareStatement d = (SqlDeclareStatement) s;
+                if (d.kind() == SqlDeclareStatement.Kind.VARIABLE && d.defaultValue() != null
+                        && "x".equals(d.names().get(0).simpleName())) {
+                    sawVar = true;
+                    assertNotNull(d.typeRaw());
+                    assertTrue(d.typeRaw().toUpperCase().contains("INT"));
+                }
+                if (d.kind() == SqlDeclareStatement.Kind.VARIABLE && d.names().size() >= 2) {
+                    sawMulti = true;
+                }
+                if (d.kind() == SqlDeclareStatement.Kind.CURSOR) {
+                    sawCursor = true;
+                    assertEquals("cur", d.names().get(0).simpleName());
+                    assertNotNull(d.cursorQuery());
+                }
+            }
+            if (s instanceof SqlHandlerStatement) {
+                SqlHandlerStatement h = (SqlHandlerStatement) s;
+                sawHandler = true;
+                assertEquals("CONTINUE", h.action());
+                assertTrue(h.conditions().size() >= 1);
+                assertTrue(h.conditions().get(0).toUpperCase().contains("NOT FOUND"));
+                assertTrue(h.bodyStatements().size() >= 1);
+            }
+        }
+        assertTrue("expected DECLARE var DEFAULT", sawVar);
+        assertTrue("expected multi-var DECLARE", sawMulti);
+        assertTrue("expected CURSOR", sawCursor);
+        assertTrue("expected HANDLER", sawHandler);
+        String formatted = SQL.toSqlString(ddl, SqlDialect.MYSQL);
+        assertTrue(formatted.toUpperCase().contains("DECLARE"));
+        assertTrue(formatted.toUpperCase().contains("HANDLER"));
+        assertTrue(formatted.toUpperCase().contains("CURSOR"));
     }
 }

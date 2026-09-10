@@ -10,7 +10,7 @@ import java.util.List;
  * CREATE TABLE 解析列定义原文、ENGINE/CHARSET/COMMENT 与表级 FOREIGN KEY 引用表；
  * ALTER 解析 ADD/DROP INDEX、RENAME TO、CHANGE/MODIFY 列定义、ADD CONSTRAINT；
  * 过程体等可留在 {@link #tail()}；FUNCTION {@code RETURNS}、TRIGGER 时机/事件/表/FOR EACH/FOLLOWS、
- * EVENT {@code ON SCHEDULE} 可结构化。
+ * EVENT {@code ON SCHEDULE}/STARTS/ENDS/ENABLE/COMMENT、TRIGGER {@code UPDATE OF} 可结构化。
  *
  * @author 郑明亮
  * @since 2.0.1
@@ -63,6 +63,16 @@ public final class SqlDdlStatement extends SqlStatement {
     private String eventScheduleKind;
     /** EVENT 调度表达式/原文（AT/EVERY 之后至 DO 之前），可空。 */
     private String eventScheduleRaw;
+    /** TRIGGER {@code UPDATE OF} 列名列表。 */
+    private final List<SqlIdentifier> triggerUpdateColumns = new ArrayList<SqlIdentifier>(2);
+    /** EVENT {@code STARTS} 原文，可空。 */
+    private String eventStarts;
+    /** EVENT {@code ENDS} 原文，可空。 */
+    private String eventEnds;
+    /** EVENT {@code ENABLE}/{@code DISABLE}；{@code true}=ENABLE，{@code false}=DISABLE，未写则为 {@code null}。 */
+    private Boolean eventEnabled;
+    /** EVENT {@code COMMENT} 原文（含引号），可空。 */
+    private String eventComment;
 
     /**
      * {@inheritDoc}
@@ -548,6 +558,78 @@ public final class SqlDdlStatement extends SqlStatement {
     }
 
     /**
+     * @return TRIGGER UPDATE OF 列名
+     * @since 2.0.1
+     */
+    public List<SqlIdentifier> triggerUpdateColumns() {
+        return triggerUpdateColumns;
+    }
+
+    /**
+     * @return EVENT STARTS 原文，可空
+     * @since 2.0.1
+     */
+    public String eventStarts() {
+        return eventStarts;
+    }
+
+    /**
+     * @param eventStarts STARTS 原文
+     * @since 2.0.1
+     */
+    public void setEventStarts(String eventStarts) {
+        this.eventStarts = eventStarts;
+    }
+
+    /**
+     * @return EVENT ENDS 原文，可空
+     * @since 2.0.1
+     */
+    public String eventEnds() {
+        return eventEnds;
+    }
+
+    /**
+     * @param eventEnds ENDS 原文
+     * @since 2.0.1
+     */
+    public void setEventEnds(String eventEnds) {
+        this.eventEnds = eventEnds;
+    }
+
+    /**
+     * @return {@code true}=ENABLE，{@code false}=DISABLE，未指定为 {@code null}
+     * @since 2.0.1
+     */
+    public Boolean eventEnabled() {
+        return eventEnabled;
+    }
+
+    /**
+     * @param eventEnabled ENABLE/DISABLE
+     * @since 2.0.1
+     */
+    public void setEventEnabled(Boolean eventEnabled) {
+        this.eventEnabled = eventEnabled;
+    }
+
+    /**
+     * @return EVENT COMMENT 原文，可空
+     * @since 2.0.1
+     */
+    public String eventComment() {
+        return eventComment;
+    }
+
+    /**
+     * @param eventComment COMMENT 原文
+     * @since 2.0.1
+     */
+    public void setEventComment(String eventComment) {
+        this.eventComment = eventComment;
+    }
+
+    /**
      * {@inheritDoc}
      */
     @Override
@@ -558,6 +640,7 @@ public final class SqlDdlStatement extends SqlStatement {
         children(visitor, parameters);
         children(visitor, bodyStatements);
         child(visitor, triggerTable);
+        children(visitor, triggerUpdateColumns);
         child(visitor, triggerOther);
         child(visitor, indexName);
         children(visitor, indexColumns);
