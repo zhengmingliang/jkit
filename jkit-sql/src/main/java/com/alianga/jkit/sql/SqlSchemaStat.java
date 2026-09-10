@@ -1,6 +1,7 @@
 package com.alianga.jkit.sql;
 
 import com.alianga.jkit.sql.ast.SqlAllColumns;
+import com.alianga.jkit.sql.ast.SqlCopyStatement;
 import com.alianga.jkit.sql.ast.SqlDdlStatement;
 import com.alianga.jkit.sql.ast.SqlExpr;
 import com.alianga.jkit.sql.ast.SqlFlushStatement;
@@ -198,6 +199,10 @@ public final class SqlSchemaStat {
             }
             if (node instanceof SqlLoadDataStatement) {
                 addTable(((SqlLoadDataStatement) node).table(), accessStack.peek());
+                return true;
+            }
+            if (node instanceof SqlCopyStatement) {
+                addTable(((SqlCopyStatement) node).table(), accessStack.peek());
                 return true;
             }
             if (node instanceof SqlFlushStatement) {

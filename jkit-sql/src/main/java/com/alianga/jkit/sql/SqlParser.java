@@ -1,5 +1,6 @@
 package com.alianga.jkit.sql;
 
+import com.alianga.jkit.sql.ast.SqlCopyStatement;
 import com.alianga.jkit.sql.ast.SqlExpr;
 import com.alianga.jkit.sql.ast.SqlFlushStatement;
 import com.alianga.jkit.sql.ast.SqlIdentifier;
@@ -1158,23 +1159,116 @@ public final class SqlParser {
         return stmt;
     }
 
+    /**
+     * PostgreSQL {@code COPY … FROM|TO …} → {@link SqlCopyStatement}。
+     */
     private SqlStatement parseCopy() {
+        int start = token.start();
         expect(SqlTokenType.COPY);
-        SqlSimpleStatement stmt = new SqlSimpleStatement();
-        stmt.setStatementType(SqlStatementType.OTHER);
-        StringBuilder text = new StringBuilder("COPY");
-        if (identLike()) {
-            stmt.setName(parseName());
-            text.append(' ').append(stmt.name().qualifiedName());
+        SqlCopyStatement stmt = new SqlCopyStatement();
+        // COPY (query) TO …
+        if (is(SqlTokenType.LPAREN)) {
+            int qStart = token.start();
+            next();
+            skipBalancedParensContent();
+            if (is(SqlTokenType.RPAREN)) {
+                next();
+            }
+            // slice includes outer parens content; store inner-ish raw
+            stmt.setQuery(lexer.rawSlice(qStart, token.start()).trim());
+        } else if (identLike()) {
+            stmt.setTable(parseName());
+            if (is(SqlTokenType.LPAREN)) {
+                next();
+                if (!is(SqlTokenType.RPAREN)) {
+                    do {
+                        if (identLike() || (token.type() != null && token.type().keyword())) {
+                            stmt.columns().add(parseName());
+                        } else {
+                            break;
+                        }
+                    } while (match(SqlTokenType.COMMA));
+                }
+                if (is(SqlTokenType.RPAREN)) {
+                    next();
+                }
+            }
+        }
+        if (is(SqlTokenType.FROM) || isIdent("FROM")
+                || (identLike() && "FROM".equalsIgnoreCase(token.text()))) {
+            next();
+            stmt.setTo(false);
+            parseCopySource(stmt);
+        } else if (is(SqlTokenType.TO) || isIdent("TO")
+                || (identLike() && "TO".equalsIgnoreCase(token.text()))) {
+            next();
+            stmt.setTo(true);
+            parseCopySource(stmt);
+        }
+        // WITH ( … ) 或旧式 WITH option …
+        if (is(SqlTokenType.WITH) || isIdent("WITH")
+                || (identLike() && "WITH".equalsIgnoreCase(token.text()))) {
+            int wStart = token.start();
+            next();
+            if (is(SqlTokenType.LPAREN)) {
+                next();
+                skipBalancedParensContent();
+                if (is(SqlTokenType.RPAREN)) {
+                    next();
+                }
+            } else {
+                while (!atStmtBreak()) {
+                    next();
+                }
+            }
+            stmt.setWithClause(lexer.rawSlice(wStart, token.start()).trim());
         }
         if (!atStmtBreak()) {
             String rest = consumeRawUntilSemi();
-            if (!rest.isEmpty()) {
-                text.append(' ').append(rest);
+            if (rest != null && !rest.isEmpty()) {
+                if (stmt.withClause() != null) {
+                    stmt.setWithClause(stmt.withClause() + " " + rest);
+                } else {
+                    stmt.setRaw(rest);
+                }
             }
         }
-        stmt.setText(text.toString());
+        if (stmt.table() == null && stmt.query() == null && stmt.source() == null
+                && stmt.sourceKind() == null) {
+            stmt.setRaw(lexer.rawSlice(start, token.start()).trim());
+        }
         return stmt;
+    }
+
+    private void parseCopySource(SqlCopyStatement stmt) {
+        if (isIdent("STDIN") || (identLike() && "STDIN".equalsIgnoreCase(token.text()))
+                || (token.type() != null && token.type().keyword()
+                && "STDIN".equalsIgnoreCase(token.text()))) {
+            stmt.setSourceKind("STDIN");
+            next();
+            return;
+        }
+        if (isIdent("STDOUT") || (identLike() && "STDOUT".equalsIgnoreCase(token.text()))
+                || (token.type() != null && token.type().keyword()
+                && "STDOUT".equalsIgnoreCase(token.text()))) {
+            stmt.setSourceKind("STDOUT");
+            next();
+            return;
+        }
+        if (isIdent("PROGRAM") || (identLike() && "PROGRAM".equalsIgnoreCase(token.text()))
+                || (token.type() != null && token.type().keyword()
+                && "PROGRAM".equalsIgnoreCase(token.text()))) {
+            stmt.setSourceKind("PROGRAM");
+            next();
+            if (!atStmtBreak() && !is(SqlTokenType.WITH)) {
+                stmt.setSource(exprParser.parsePrimary());
+            }
+            return;
+        }
+        if (!atStmtBreak() && !is(SqlTokenType.WITH)) {
+            stmt.setSourceKind("FILE");
+            stmt.setSource(exprParser.parsePrimary());
+        }
     }
 
     /**

@@ -8,6 +8,7 @@ import com.alianga.jkit.sql.ast.SqlBlockStatement;
 import com.alianga.jkit.sql.ast.SqlCaseExpr;
 import com.alianga.jkit.sql.ast.SqlCastExpr;
 import com.alianga.jkit.sql.ast.SqlControlStatement;
+import com.alianga.jkit.sql.ast.SqlCopyStatement;
 import com.alianga.jkit.sql.ast.SqlDdlStatement;
 import com.alianga.jkit.sql.ast.SqlDeclareStatement;
 import com.alianga.jkit.sql.ast.SqlDelete;
@@ -139,6 +140,8 @@ public final class SqlFormatter {
             writePrepare((SqlPrepareStatement) node);
         } else if (node instanceof SqlLockTablesStatement) {
             writeLockTables((SqlLockTablesStatement) node);
+        } else if (node instanceof SqlCopyStatement) {
+            writeCopy((SqlCopyStatement) node);
         } else if (node instanceof SqlFlushStatement) {
             writeFlush((SqlFlushStatement) node);
         } else if (node instanceof SqlStartTransactionStatement) {
@@ -1786,6 +1789,66 @@ public final class SqlFormatter {
                 sp();
                 writeLimit(h.limit());
             }
+        }
+    }
+
+    private void writeCopy(SqlCopyStatement copy) {
+        if (copy == null) {
+            return;
+        }
+        if (copy.raw() != null && copy.table() == null && copy.query() == null
+                && copy.source() == null && copy.sourceKind() == null) {
+            out.append(copy.raw());
+            return;
+        }
+        out.append("COPY");
+        if (copy.query() != null && copy.query().length() > 0) {
+            sp();
+            out.append(copy.query());
+        } else if (copy.table() != null) {
+            sp();
+            writeExpr(copy.table());
+            if (!copy.columns().isEmpty()) {
+                out.append('(');
+                for (int i = 0; i < copy.columns().size(); i++) {
+                    if (i > 0) {
+                        out.append(',');
+                        sp();
+                    }
+                    writeExpr(copy.columns().get(i));
+                }
+                out.append(')');
+            }
+        }
+        sp();
+        out.append(copy.to() ? "TO" : "FROM");
+        if (copy.sourceKind() != null) {
+            sp();
+            if ("FILE".equalsIgnoreCase(copy.sourceKind())) {
+                if (copy.source() != null) {
+                    writeExpr(copy.source());
+                }
+            } else if ("PROGRAM".equalsIgnoreCase(copy.sourceKind())) {
+                out.append("PROGRAM");
+                if (copy.source() != null) {
+                    sp();
+                    writeExpr(copy.source());
+                }
+            } else {
+                out.append(copy.sourceKind());
+            }
+        } else if (copy.source() != null) {
+            sp();
+            writeExpr(copy.source());
+        }
+        if (copy.withClause() != null && copy.withClause().length() > 0) {
+            sp();
+            out.append(copy.withClause());
+        }
+        if (copy.raw() != null && copy.raw().length() > 0
+                && !copy.raw().toUpperCase().startsWith("COPY")) {
+            sp();
+            out.append(copy.raw());
         }
     }
 

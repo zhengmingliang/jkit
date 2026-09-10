@@ -11,6 +11,7 @@ import com.alianga.jkit.sql.ast.SqlBinaryExpr;
 import com.alianga.jkit.sql.ast.SqlBinaryOp;
 import com.alianga.jkit.sql.ast.SqlBlockStatement;
 import com.alianga.jkit.sql.ast.SqlCaseExpr;
+import com.alianga.jkit.sql.ast.SqlCopyStatement;
 import com.alianga.jkit.sql.ast.SqlDdlStatement;
 import com.alianga.jkit.sql.ast.SqlDelete;
 import com.alianga.jkit.sql.ast.SqlExpr;
@@ -1739,16 +1740,44 @@ public class SqlParserTest {
     }
 
     /**
-     * PG COPY … STDIN：OTHER + 抽表名。
+     * PG COPY … FROM/TO → SqlCopyStatement。
      */
     @Test
     public void copyFromStdin() {
-        SqlSimpleStatement copy = (SqlSimpleStatement) SQL.parse(
+        SqlCopyStatement copy = (SqlCopyStatement) SQL.parse(
                 "COPY t FROM STDIN WITH (FORMAT csv)", SqlDialect.POSTGRES);
         assertEquals(SqlStatementType.OTHER, copy.type());
-        assertEquals("t", copy.name().simpleName());
-        assertTrue(copy.text().toUpperCase().contains("STDIN"));
+        assertEquals("t", copy.table().simpleName());
+        assertFalse(copy.to());
+        assertEquals("STDIN", copy.sourceKind());
+        assertNotNull(copy.withClause());
+        assertTrue(copy.withClause().toUpperCase().contains("WITH"));
         assertTrue(SQL.tables(copy).contains("t"));
+        String fmt = SQL.toSqlString(copy).toUpperCase();
+        assertTrue(fmt, fmt.contains("COPY"));
+        assertTrue(fmt.contains("STDIN"));
+        assertTrue(fmt.contains("WITH"));
+
+        SqlCopyStatement cols = (SqlCopyStatement) SQL.parse(
+                "COPY sch.t (a, b) FROM PROGRAM 'gunzip < /tmp/a.gz' WITH (FORMAT csv)",
+                SqlDialect.POSTGRES);
+        assertEquals("sch.t", cols.table().qualifiedName());
+        assertEquals(2, cols.columns().size());
+        assertEquals("PROGRAM", cols.sourceKind());
+        assertNotNull(cols.source());
+
+        SqlCopyStatement toFile = (SqlCopyStatement) SQL.parse(
+                "COPY t TO '/tmp/out.csv'", SqlDialect.POSTGRES);
+        assertTrue(toFile.to());
+        assertEquals("FILE", toFile.sourceKind());
+        assertNotNull(toFile.source());
+
+        SqlCopyStatement q = (SqlCopyStatement) SQL.parse(
+                "COPY (SELECT id FROM t) TO STDOUT", SqlDialect.POSTGRES);
+        assertTrue(q.to());
+        assertEquals("STDOUT", q.sourceKind());
+        assertNotNull(q.query());
+        assertTrue(q.query().toUpperCase().contains("SELECT"));
     }
 
     /**

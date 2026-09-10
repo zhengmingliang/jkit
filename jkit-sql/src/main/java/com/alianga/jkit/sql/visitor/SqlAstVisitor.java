@@ -7,6 +7,7 @@ import com.alianga.jkit.sql.ast.SqlBlockStatement;
 import com.alianga.jkit.sql.ast.SqlCaseExpr;
 import com.alianga.jkit.sql.ast.SqlCastExpr;
 import com.alianga.jkit.sql.ast.SqlControlStatement;
+import com.alianga.jkit.sql.ast.SqlCopyStatement;
 import com.alianga.jkit.sql.ast.SqlDdlStatement;
 import com.alianga.jkit.sql.ast.SqlDeclareStatement;
 import com.alianga.jkit.sql.ast.SqlDelete;
@@ -104,6 +105,9 @@ public class SqlAstVisitor implements SqlVisitor {
         }
         if (node instanceof SqlLockTablesStatement) {
             return visitLockTables((SqlLockTablesStatement) node);
+        }
+        if (node instanceof SqlCopyStatement) {
+            return visitCopy((SqlCopyStatement) node);
         }
         if (node instanceof SqlFlushStatement) {
             return visitFlush((SqlFlushStatement) node);
@@ -298,6 +302,11 @@ public class SqlAstVisitor implements SqlVisitor {
 
     /** @param node LOCK/UNLOCK TABLES @return 是否继续子节点 */
     protected boolean visitLockTables(SqlLockTablesStatement node) {
+        return true;
+    }
+
+    /** @param node PG COPY @return 是否继续子节点 */
+    protected boolean visitCopy(SqlCopyStatement node) {
         return true;
     }
 
