@@ -22,6 +22,7 @@ import com.alianga.jkit.sql.ast.SqlInsert;
 import com.alianga.jkit.sql.ast.SqlJoin;
 import com.alianga.jkit.sql.ast.SqlListExpr;
 import com.alianga.jkit.sql.ast.SqlLiteral;
+import com.alianga.jkit.sql.ast.SqlLockTablesStatement;
 import com.alianga.jkit.sql.ast.SqlMerge;
 import com.alianga.jkit.sql.ast.SqlMergeWhen;
 import com.alianga.jkit.sql.ast.SqlOverExpr;
@@ -2210,36 +2211,43 @@ public class SqlParserTest {
     }
 
     /**
-     * LOCK TABLES / UNLOCK TABLES → OTHER；抽第一张表名。
+     * LOCK TABLES / UNLOCK TABLES → SqlLockTablesStatement。
      */
     @Test
     public void lockUnlockTables() {
-        SqlSimpleStatement lock = (SqlSimpleStatement) SQL.parse(
+        SqlLockTablesStatement lock = (SqlLockTablesStatement) SQL.parse(
                 "LOCK TABLES t READ, u WRITE");
         assertEquals(SqlStatementType.OTHER, lock.type());
-        assertNotNull(lock.text());
-        assertTrue(lock.text().toUpperCase().startsWith("LOCK"));
-        assertTrue(lock.text().toUpperCase().contains("TABLES"));
-        assertEquals("t", lock.name().qualifiedName());
+        assertFalse(lock.unlock());
+        assertEquals(2, lock.items().size());
+        assertEquals("t", lock.items().get(0).table().qualifiedName());
+        assertEquals("READ", lock.items().get(0).lockMode());
+        assertEquals("u", lock.items().get(1).table().qualifiedName());
+        assertEquals("WRITE", lock.items().get(1).lockMode());
         assertTrue(SQL.tables(lock).toString(), SQL.tables(lock).contains("t"));
-        assertTrue(SQL.toSqlString(lock).toUpperCase().contains("LOCK"));
+        assertTrue(SQL.tables(lock).contains("u"));
+        String fmt = SQL.toSqlString(lock);
+        assertTrue(fmt.toUpperCase().contains("LOCK"));
+        assertTrue(fmt.toUpperCase().contains("READ"));
 
-        SqlSimpleStatement lockAs = (SqlSimpleStatement) SQL.parse(
+        SqlLockTablesStatement lockAs = (SqlLockTablesStatement) SQL.parse(
                 "LOCK TABLES db.t AS a READ LOCAL");
-        assertEquals("db.t", lockAs.name().qualifiedName());
-        assertTrue(lockAs.text().toUpperCase().contains("READ"));
+        assertEquals(1, lockAs.items().size());
+        assertEquals("db.t", lockAs.items().get(0).table().qualifiedName());
+        assertEquals("a", lockAs.items().get(0).alias());
+        assertEquals("READ LOCAL", lockAs.items().get(0).lockMode());
 
-        SqlSimpleStatement unlock = (SqlSimpleStatement) SQL.parse("UNLOCK TABLES");
-        assertEquals(SqlStatementType.OTHER, unlock.type());
-        assertTrue(unlock.text().toUpperCase().startsWith("UNLOCK"));
-        assertTrue(unlock.text().toUpperCase().contains("TABLES"));
+        SqlLockTablesStatement unlock = (SqlLockTablesStatement) SQL.parse("UNLOCK TABLES");
+        assertTrue(unlock.unlock());
+        assertTrue(unlock.items().isEmpty());
+        assertTrue(SQL.toSqlString(unlock).toUpperCase().contains("UNLOCK"));
 
         java.util.List<SqlStatement> batch = SQL.parseAll(
                 "LOCK TABLES t WRITE; UPDATE t SET a = 1; UNLOCK TABLES");
         assertEquals(3, batch.size());
-        assertEquals(SqlStatementType.OTHER, batch.get(0).type());
+        assertTrue(batch.get(0) instanceof SqlLockTablesStatement);
         assertEquals(SqlStatementType.UPDATE, batch.get(1).type());
-        assertEquals(SqlStatementType.OTHER, batch.get(2).type());
+        assertTrue(((SqlLockTablesStatement) batch.get(2)).unlock());
     }
 
     /**

@@ -23,6 +23,7 @@ import com.alianga.jkit.sql.ast.SqlJoin;
 import com.alianga.jkit.sql.ast.SqlLimit;
 import com.alianga.jkit.sql.ast.SqlListExpr;
 import com.alianga.jkit.sql.ast.SqlLiteral;
+import com.alianga.jkit.sql.ast.SqlLockTablesStatement;
 import com.alianga.jkit.sql.ast.SqlMatchRecognize;
 import com.alianga.jkit.sql.ast.SqlMerge;
 import com.alianga.jkit.sql.ast.SqlMergeWhen;
@@ -133,6 +134,8 @@ public final class SqlFormatter {
             writeTableHandler((SqlTableHandlerStatement) node);
         } else if (node instanceof SqlPrepareStatement) {
             writePrepare((SqlPrepareStatement) node);
+        } else if (node instanceof SqlLockTablesStatement) {
+            writeLockTables((SqlLockTablesStatement) node);
         } else if (node instanceof SqlSimpleStatement) {
             writeSimple((SqlSimpleStatement) node);
         } else if (node instanceof SqlExpr) {
@@ -1773,6 +1776,43 @@ public final class SqlFormatter {
             if (h.limit() != null) {
                 sp();
                 writeLimit(h.limit());
+            }
+        }
+    }
+
+    private void writeLockTables(SqlLockTablesStatement lock) {
+        if (lock == null) {
+            return;
+        }
+        if (lock.raw() != null && lock.items().isEmpty() && !lock.unlock()) {
+            out.append(lock.raw());
+            return;
+        }
+        if (lock.unlock()) {
+            out.append("UNLOCK");
+            sp();
+            out.append("TABLES");
+            return;
+        }
+        out.append("LOCK");
+        sp();
+        out.append("TABLES");
+        for (int i = 0; i < lock.items().size(); i++) {
+            if (i > 0) {
+                out.append(',');
+            }
+            SqlLockTablesStatement.LockItem item = lock.items().get(i);
+            if (item.table() != null) {
+                sp();
+                writeExpr(item.table());
+            }
+            if (item.alias() != null && item.alias().length() > 0) {
+                sp();
+                out.append(item.alias());
+            }
+            if (item.lockMode() != null && item.lockMode().length() > 0) {
+                sp();
+                out.append(item.lockMode());
             }
         }
     }

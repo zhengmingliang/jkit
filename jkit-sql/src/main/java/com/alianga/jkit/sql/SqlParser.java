@@ -2,6 +2,7 @@ package com.alianga.jkit.sql;
 
 import com.alianga.jkit.sql.ast.SqlExpr;
 import com.alianga.jkit.sql.ast.SqlIdentifier;
+import com.alianga.jkit.sql.ast.SqlLockTablesStatement;
 import com.alianga.jkit.sql.ast.SqlPrepareStatement;
 import com.alianga.jkit.sql.ast.SqlSimpleStatement;
 import com.alianga.jkit.sql.ast.SqlStatement;
@@ -521,51 +522,107 @@ public final class SqlParser {
     }
 
     /**
-     * MySQL {@code LOCK TABLES t READ, u WRITE, …}：OTHER + 全文，抽第一张表名。
+     * MySQL {@code LOCK TABLES t READ, u WRITE, …} → {@link SqlLockTablesStatement}。
      */
     private SqlStatement parseLockTables() {
+        int start = token.start();
         expect(SqlTokenType.LOCK);
-        SqlSimpleStatement stmt = new SqlSimpleStatement();
-        stmt.setStatementType(SqlStatementType.OTHER);
-        StringBuilder text = new StringBuilder("LOCK");
+        SqlLockTablesStatement stmt = new SqlLockTablesStatement();
         if (is(SqlTokenType.TABLES) || is(SqlTokenType.TABLE) || isIdent("TABLES") || isIdent("TABLE")) {
-            text.append(' ').append(token.text().toUpperCase());
             next();
         }
-        if (identLike()) {
-            stmt.setName(parseName());
-            text.append(' ').append(stmt.name().qualifiedName());
+        if (!atStmtBreak()) {
+            do {
+                SqlLockTablesStatement.LockItem item = new SqlLockTablesStatement.LockItem();
+                if (identLike()) {
+                    item.setTable(parseName());
+                }
+                if (is(SqlTokenType.AS)) {
+                    next();
+                    if (identLike() || (token.type() != null && token.type().keyword())) {
+                        item.setAlias(parseAliasBare());
+                    }
+                } else if (identLike() && !isLockModeStart()) {
+                    item.setAlias(parseAliasBare());
+                }
+                item.setLockMode(parseLockMode());
+                stmt.items().add(item);
+            } while (match(SqlTokenType.COMMA));
         }
         if (!atStmtBreak()) {
             String rest = consumeRawUntilSemi();
-            if (!rest.isEmpty()) {
-                text.append(' ').append(rest);
+            if (rest != null && !rest.isEmpty()) {
+                stmt.setRaw(lexer.rawSlice(start, token.start()).trim());
             }
         }
-        stmt.setText(text.toString());
         return stmt;
     }
 
     /**
-     * MySQL {@code UNLOCK TABLES}。
+     * MySQL {@code UNLOCK TABLES} → {@link SqlLockTablesStatement}（{@link SqlLockTablesStatement#unlock()}）。
      */
     private SqlStatement parseUnlockTables() {
         expect(SqlTokenType.UNLOCK);
-        SqlSimpleStatement stmt = new SqlSimpleStatement();
-        stmt.setStatementType(SqlStatementType.OTHER);
-        StringBuilder text = new StringBuilder("UNLOCK");
+        SqlLockTablesStatement stmt = new SqlLockTablesStatement();
+        stmt.setUnlock(true);
         if (is(SqlTokenType.TABLES) || is(SqlTokenType.TABLE) || isIdent("TABLES") || isIdent("TABLE")) {
-            text.append(' ').append(token.text().toUpperCase());
             next();
         }
         if (!atStmtBreak()) {
             String rest = consumeRawUntilSemi();
-            if (!rest.isEmpty()) {
-                text.append(' ').append(rest);
+            if (rest != null && !rest.isEmpty()) {
+                stmt.setRaw(("UNLOCK TABLES " + rest).trim());
             }
         }
-        stmt.setText(text.toString());
         return stmt;
+    }
+
+    private boolean isLockModeStart() {
+        if (is(SqlTokenType.LOW_PRIORITY)) {
+            return true;
+        }
+        if (!identLike() && !(token.type() != null && token.type().keyword())) {
+            return false;
+        }
+        String t = token.text();
+        return "READ".equalsIgnoreCase(t) || "WRITE".equalsIgnoreCase(t)
+                || "LOW_PRIORITY".equalsIgnoreCase(t);
+    }
+
+    private String parseLockMode() {
+        StringBuilder mode = new StringBuilder();
+        if (is(SqlTokenType.LOW_PRIORITY) || (identLike() && "LOW_PRIORITY".equalsIgnoreCase(token.text()))) {
+            mode.append("LOW_PRIORITY");
+            next();
+        }
+        if (identLike() || (token.type() != null && token.type().keyword())) {
+            String t = token.text();
+            if ("READ".equalsIgnoreCase(t) || "WRITE".equalsIgnoreCase(t)) {
+                if (mode.length() > 0) {
+                    mode.append(' ');
+                }
+                mode.append(t.toUpperCase());
+                next();
+                if (mode.toString().endsWith("READ")
+                        && (is(SqlTokenType.LOCAL) || isIdent("LOCAL")
+                        || (identLike() && "LOCAL".equalsIgnoreCase(token.text())))) {
+                    mode.append(" LOCAL");
+                    next();
+                }
+            }
+        }
+        return mode.length() == 0 ? null : mode.toString();
+    }
+
+    /** 锁表别名：不消费 AS（调用方已处理）。 */
+    private String parseAliasBare() {
+        if (is(SqlTokenType.STRING)) {
+            return unquote(consumeStringRaw());
+        }
+        if (identLike() || (token.type() != null && token.type().keyword())) {
+            return parseName().qualifiedName();
+        }
+        return unquote(consumeIdentRaw());
     }
 
     /**

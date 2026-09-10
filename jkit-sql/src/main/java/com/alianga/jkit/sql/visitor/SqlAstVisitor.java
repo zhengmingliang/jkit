@@ -21,6 +21,7 @@ import com.alianga.jkit.sql.ast.SqlJoin;
 import com.alianga.jkit.sql.ast.SqlLimit;
 import com.alianga.jkit.sql.ast.SqlListExpr;
 import com.alianga.jkit.sql.ast.SqlLiteral;
+import com.alianga.jkit.sql.ast.SqlLockTablesStatement;
 import com.alianga.jkit.sql.ast.SqlMatchRecognize;
 import com.alianga.jkit.sql.ast.SqlMerge;
 import com.alianga.jkit.sql.ast.SqlMergeWhen;
@@ -97,6 +98,9 @@ public class SqlAstVisitor implements SqlVisitor {
         }
         if (node instanceof SqlPrepareStatement) {
             return visitPrepare((SqlPrepareStatement) node);
+        }
+        if (node instanceof SqlLockTablesStatement) {
+            return visitLockTables((SqlLockTablesStatement) node);
         }
         if (node instanceof SqlSimpleStatement) {
             return visitSimple((SqlSimpleStatement) node);
@@ -277,6 +281,11 @@ public class SqlAstVisitor implements SqlVisitor {
 
     /** @param node PREPARE/EXECUTE/DEALLOCATE @return 是否继续子节点 */
     protected boolean visitPrepare(SqlPrepareStatement node) {
+        return true;
+    }
+
+    /** @param node LOCK/UNLOCK TABLES @return 是否继续子节点 */
+    protected boolean visitLockTables(SqlLockTablesStatement node) {
         return true;
     }
 
