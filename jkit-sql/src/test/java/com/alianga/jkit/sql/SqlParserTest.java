@@ -8,23 +8,24 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import com.alianga.jkit.sql.ast.SqlBinaryExpr;
-import com.alianga.jkit.sql.ast.SqlBlockStatement;
 import com.alianga.jkit.sql.ast.SqlBinaryOp;
+import com.alianga.jkit.sql.ast.SqlBlockStatement;
 import com.alianga.jkit.sql.ast.SqlCaseExpr;
 import com.alianga.jkit.sql.ast.SqlDdlStatement;
 import com.alianga.jkit.sql.ast.SqlDelete;
 import com.alianga.jkit.sql.ast.SqlExpr;
 import com.alianga.jkit.sql.ast.SqlFunctionExpr;
 import com.alianga.jkit.sql.ast.SqlFunctionTable;
-import com.alianga.jkit.sql.ast.SqlInExpr;
 import com.alianga.jkit.sql.ast.SqlIdentifier;
+import com.alianga.jkit.sql.ast.SqlInExpr;
 import com.alianga.jkit.sql.ast.SqlInsert;
 import com.alianga.jkit.sql.ast.SqlJoin;
-import com.alianga.jkit.sql.ast.SqlLiteral;
 import com.alianga.jkit.sql.ast.SqlListExpr;
+import com.alianga.jkit.sql.ast.SqlLiteral;
 import com.alianga.jkit.sql.ast.SqlMerge;
 import com.alianga.jkit.sql.ast.SqlMergeWhen;
 import com.alianga.jkit.sql.ast.SqlOverExpr;
+import com.alianga.jkit.sql.ast.SqlPrepareStatement;
 import com.alianga.jkit.sql.ast.SqlSelect;
 import com.alianga.jkit.sql.ast.SqlSelectItem;
 import com.alianga.jkit.sql.ast.SqlSimpleStatement;
@@ -1802,7 +1803,7 @@ public class SqlParserTest {
     }
 
     /**
-     * MySQL PREPARE / EXECUTE / DEALLOCATE。
+     * MySQL PREPARE / EXECUTE / DEALLOCATE → SqlPrepareStatement。
      */
     @Test
     public void prepareExecuteDeallocate() {
@@ -1810,11 +1811,31 @@ public class SqlParserTest {
                 "PREPARE stmt FROM 'SELECT * FROM t WHERE id = ?'; "
                         + "EXECUTE stmt USING @id; DEALLOCATE PREPARE stmt");
         assertEquals(3, all.size());
-        assertEquals(SqlStatementType.OTHER, all.get(0).type());
-        assertEquals("stmt", ((SqlSimpleStatement) all.get(0)).name().simpleName());
-        assertTrue(((SqlSimpleStatement) all.get(0)).text().toUpperCase().startsWith("PREPARE"));
-        assertTrue(((SqlSimpleStatement) all.get(1)).text().toUpperCase().startsWith("EXECUTE"));
-        assertTrue(((SqlSimpleStatement) all.get(2)).text().toUpperCase().contains("DEALLOCATE"));
+        assertTrue(all.get(0) instanceof SqlPrepareStatement);
+        SqlPrepareStatement prep = (SqlPrepareStatement) all.get(0);
+        assertEquals(SqlPrepareStatement.Kind.PREPARE, prep.kind());
+        assertEquals("stmt", prep.name().simpleName());
+        assertNotNull(prep.source());
+        assertTrue(SQL.toSqlString(prep).toUpperCase().contains("PREPARE"));
+        assertTrue(SQL.toSqlString(prep).toUpperCase().contains("FROM"));
+
+        SqlPrepareStatement exec = (SqlPrepareStatement) all.get(1);
+        assertEquals(SqlPrepareStatement.Kind.EXECUTE, exec.kind());
+        assertEquals("stmt", exec.name().simpleName());
+        assertEquals(1, exec.usingBinds().size());
+        assertTrue(SQL.toSqlString(exec).toUpperCase().contains("USING"));
+
+        SqlPrepareStatement dealloc = (SqlPrepareStatement) all.get(2);
+        assertEquals(SqlPrepareStatement.Kind.DEALLOCATE, dealloc.kind());
+        assertEquals("stmt", dealloc.name().simpleName());
+        assertTrue(SQL.toSqlString(dealloc).toUpperCase().contains("DEALLOCATE"));
+
+        SqlPrepareStatement imm = (SqlPrepareStatement) SQL.parse(
+                "EXECUTE IMMEDIATE 'DELETE FROM t WHERE id = ?' USING @id");
+        assertEquals(SqlPrepareStatement.Kind.EXECUTE_IMMEDIATE, imm.kind());
+        assertNotNull(imm.source());
+        assertEquals(1, imm.usingBinds().size());
+        assertTrue(SQL.toSqlString(imm).toUpperCase().contains("IMMEDIATE"));
     }
 
 

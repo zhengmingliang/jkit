@@ -33,6 +33,7 @@ import com.alianga.jkit.sql.ast.SqlNode;
 import com.alianga.jkit.sql.ast.SqlOrderByItem;
 import com.alianga.jkit.sql.ast.SqlOverExpr;
 import com.alianga.jkit.sql.ast.SqlPivotTable;
+import com.alianga.jkit.sql.ast.SqlPrepareStatement;
 import com.alianga.jkit.sql.ast.SqlQueryExpr;
 import com.alianga.jkit.sql.ast.SqlRoutineParam;
 import com.alianga.jkit.sql.ast.SqlSelect;
@@ -130,6 +131,8 @@ public final class SqlFormatter {
             writeBlock((SqlBlockStatement) node);
         } else if (node instanceof SqlTableHandlerStatement) {
             writeTableHandler((SqlTableHandlerStatement) node);
+        } else if (node instanceof SqlPrepareStatement) {
+            writePrepare((SqlPrepareStatement) node);
         } else if (node instanceof SqlSimpleStatement) {
             writeSimple((SqlSimpleStatement) node);
         } else if (node instanceof SqlExpr) {
@@ -1771,6 +1774,76 @@ public final class SqlFormatter {
                 sp();
                 writeLimit(h.limit());
             }
+        }
+    }
+
+    private void writePrepare(SqlPrepareStatement p) {
+        if (p == null) {
+            return;
+        }
+        if (p.raw() != null && p.name() == null && p.source() == null && p.usingBinds().isEmpty()) {
+            out.append(p.raw());
+            return;
+        }
+        if (p.kind() == SqlPrepareStatement.Kind.DEALLOCATE) {
+            out.append("DEALLOCATE");
+            sp();
+            kw("PREPARE");
+            if (p.name() != null) {
+                sp();
+                writeExpr(p.name());
+            }
+            return;
+        }
+        if (p.kind() == SqlPrepareStatement.Kind.EXECUTE_IMMEDIATE) {
+            out.append("EXECUTE");
+            sp();
+            out.append("IMMEDIATE");
+            if (p.source() != null) {
+                sp();
+                writeExpr(p.source());
+            }
+            writePrepareUsing(p);
+            return;
+        }
+        if (p.kind() == SqlPrepareStatement.Kind.EXECUTE) {
+            out.append("EXECUTE");
+            if (p.name() != null) {
+                sp();
+                writeExpr(p.name());
+            }
+            writePrepareUsing(p);
+            return;
+        }
+        out.append("PREPARE");
+        if (p.name() != null) {
+            sp();
+            writeExpr(p.name());
+        }
+        if (p.source() != null) {
+            sp();
+            kw("FROM");
+            sp();
+            writeExpr(p.source());
+        }
+        if (p.raw() != null && p.source() == null) {
+            sp();
+            out.append(p.raw());
+        }
+    }
+
+    private void writePrepareUsing(SqlPrepareStatement p) {
+        if (p.usingBinds().isEmpty()) {
+            return;
+        }
+        sp();
+        kw("USING");
+        for (int i = 0; i < p.usingBinds().size(); i++) {
+            if (i > 0) {
+                out.append(',');
+            }
+            sp();
+            writeExpr(p.usingBinds().get(i));
         }
     }
 

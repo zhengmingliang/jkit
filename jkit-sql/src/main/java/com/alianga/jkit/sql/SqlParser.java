@@ -2,6 +2,7 @@ package com.alianga.jkit.sql;
 
 import com.alianga.jkit.sql.ast.SqlExpr;
 import com.alianga.jkit.sql.ast.SqlIdentifier;
+import com.alianga.jkit.sql.ast.SqlPrepareStatement;
 import com.alianga.jkit.sql.ast.SqlSimpleStatement;
 import com.alianga.jkit.sql.ast.SqlStatement;
 import com.alianga.jkit.sql.ast.SqlStatementType;
@@ -983,27 +984,57 @@ public final class SqlParser {
     }
 
     private SqlStatement parsePrepareFamily() {
-        String kind = token.text().toUpperCase();
+        int start = token.start();
+        String lead = token.text().toUpperCase();
         next();
-        SqlSimpleStatement stmt = new SqlSimpleStatement();
-        stmt.setStatementType(SqlStatementType.OTHER);
-        StringBuilder text = new StringBuilder(kind);
-        // DEALLOCATE PREPARE stmt
-        if ("DEALLOCATE".equals(kind) && is(SqlTokenType.PREPARE)) {
-            text.append(' ').append(token.text().toUpperCase());
-            next();
-        }
-        if (identLike()) {
-            stmt.setName(parseName());
-            text.append(' ').append(stmt.name().qualifiedName());
+        SqlPrepareStatement stmt = new SqlPrepareStatement();
+        if ("DEALLOCATE".equals(lead)) {
+            stmt.setKind(SqlPrepareStatement.Kind.DEALLOCATE);
+            if (is(SqlTokenType.PREPARE)) {
+                next();
+            }
+            if (identLike()) {
+                stmt.setName(parseName());
+            }
+        } else if ("EXECUTE".equals(lead)) {
+            if (isIdent("IMMEDIATE")
+                    || (identLike() && "IMMEDIATE".equalsIgnoreCase(token.text()))) {
+                next();
+                stmt.setKind(SqlPrepareStatement.Kind.EXECUTE_IMMEDIATE);
+                if (!atStmtBreak() && !is(SqlTokenType.USING)) {
+                    stmt.setSource(exprParser.parsePrimary());
+                }
+            } else {
+                stmt.setKind(SqlPrepareStatement.Kind.EXECUTE);
+                if (identLike()) {
+                    stmt.setName(parseName());
+                }
+            }
+            if (is(SqlTokenType.USING)) {
+                next();
+                do {
+                    stmt.usingBinds().add(exprParser.parsePrimary());
+                } while (match(SqlTokenType.COMMA));
+            }
+        } else {
+            // PREPARE name FROM expr（偶见 AS）
+            stmt.setKind(SqlPrepareStatement.Kind.PREPARE);
+            if (identLike()) {
+                stmt.setName(parseName());
+            }
+            if (is(SqlTokenType.FROM) || is(SqlTokenType.AS)) {
+                next();
+                if (!atStmtBreak()) {
+                    stmt.setSource(exprParser.parsePrimary());
+                }
+            }
         }
         if (!atStmtBreak()) {
             String rest = consumeRawUntilSemi();
-            if (!rest.isEmpty()) {
-                text.append(' ').append(rest);
+            if (rest != null && !rest.isEmpty()) {
+                stmt.setRaw(lexer.rawSlice(start, token.start()).trim());
             }
         }
-        stmt.setText(text.toString());
         return stmt;
     }
 

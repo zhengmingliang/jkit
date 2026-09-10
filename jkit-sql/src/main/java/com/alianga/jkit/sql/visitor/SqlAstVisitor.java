@@ -31,6 +31,7 @@ import com.alianga.jkit.sql.ast.SqlNode;
 import com.alianga.jkit.sql.ast.SqlOrderByItem;
 import com.alianga.jkit.sql.ast.SqlOverExpr;
 import com.alianga.jkit.sql.ast.SqlPivotTable;
+import com.alianga.jkit.sql.ast.SqlPrepareStatement;
 import com.alianga.jkit.sql.ast.SqlQueryExpr;
 import com.alianga.jkit.sql.ast.SqlRoutineParam;
 import com.alianga.jkit.sql.ast.SqlSelect;
@@ -93,6 +94,9 @@ public class SqlAstVisitor implements SqlVisitor {
         }
         if (node instanceof SqlTableHandlerStatement) {
             return visitTableHandler((SqlTableHandlerStatement) node);
+        }
+        if (node instanceof SqlPrepareStatement) {
+            return visitPrepare((SqlPrepareStatement) node);
         }
         if (node instanceof SqlSimpleStatement) {
             return visitSimple((SqlSimpleStatement) node);
@@ -268,6 +272,11 @@ public class SqlAstVisitor implements SqlVisitor {
 
     /** @param node 表 HANDLER @return 是否继续子节点 */
     protected boolean visitTableHandler(SqlTableHandlerStatement node) {
+        return true;
+    }
+
+    /** @param node PREPARE/EXECUTE/DEALLOCATE @return 是否继续子节点 */
+    protected boolean visitPrepare(SqlPrepareStatement node) {
         return true;
     }
 

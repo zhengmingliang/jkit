@@ -48,6 +48,7 @@
 - `jkit-sql`：过程体 `IF`/`WHILE`/`LOOP`/`REPEAT` → `SqlControlStatement`（条件+bodyStatements；ELSEIF/ELSE）；`FUNCTION RETURNS` → `returnsType`；`TRIGGER` 抽 `triggerTiming`/`triggerEvent`/`triggerTable` 与 `bodyStatements`；`EVENT` DO 体进 bodyStatements。
 - `jkit-sql`：过程 `CASE … END CASE` / `LEAVE` / `ITERATE` / `RETURN [expr]` / 循环标签 `lab: LOOP`；`TRIGGER` 补 `FOR EACH` / `FOLLOWS|PRECEDES`；`EVENT ON SCHEDULE AT|EVERY`；`MATCH_RECOGNIZE` 抽 `WITHIN`（`ROWS PER MATCH`/`AFTER MATCH` 保持字段）；`MODEL` 多维 cell 拆 `cellDims`。
 - `jkit-sql`：过程体 `DECLARE`/`CURSOR FOR`/`CONTINUE|EXIT|UNDO HANDLER` → `SqlDeclareStatement`/`SqlHandlerStatement`；`TRIGGER UPDATE OF` → `triggerUpdateColumns`；`EVENT` 抽 `eventStarts`/`eventEnds`/`eventEnabled`/`eventComment`；`MODEL` 简单维 `cellDimExprs`；`MATCH_RECOGNIZE.PATTERN` 保持字符串。
+- `jkit-sql`：`PREPARE`/`EXECUTE`/`DEALLOCATE PREPARE`/`EXECUTE IMMEDIATE` → `SqlPrepareStatement`（名、FROM/源表达式、USING 绑定）；Formatter / Visitor 同步。
 - `jkit-sql`：顶层匿名 `DECLARE … BEGIN … END` / 裸 `BEGIN … END` → `SqlBlockStatement`（`declares`/`bodyStatements`）；会话式 `DECLARE x INT` 仍为 `SqlSimpleStatement`；MySQL 表 `HANDLER t OPEN|READ|CLOSE` → `SqlTableHandlerStatement`（表/操作/可选 WHERE·LIMIT）；`EVENT` 抽 `eventOnCompletion`（PRESERVE/NOT PRESERVE）与 `eventDisableOnSlave`；`MATCH_RECOGNIZE.PATTERN` 仍保持字符串（未建 DSL 树）。
 
 - `jkit-sql`：点号后单引号名可作引用标识符（`T.'Group'`）；`INTERVAL` 仅吸收时间单位（不吞 `OR`/`AND`）；聚合内 `ORDER BY`（`ARRAY_AGG(x ORDER BY y)`）；`PIVOT`/`UNPIVOT`；Hive `LATERAL VIEW` / `DISTRIBUTE BY` / `SORT BY` / `CLUSTER BY`；`GROUP BY GROUPING SETS|CUBE|ROLLUP(...)`；Oracle `ORDER SIBLINGS BY`。
