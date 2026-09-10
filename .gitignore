@@ -1,4 +1,8 @@
 target/
+target1/
+
+# WorkBuddy agent workspace (memory, tasks, scratch)
+.workbuddy/
 *.class
 *.jar
 !.mvn/wrapper/maven-wrapper.jar
