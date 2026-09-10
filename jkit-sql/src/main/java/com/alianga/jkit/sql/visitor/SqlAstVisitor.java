@@ -41,6 +41,7 @@ import com.alianga.jkit.sql.ast.SqlQueryExpr;
 import com.alianga.jkit.sql.ast.SqlRoutineParam;
 import com.alianga.jkit.sql.ast.SqlSelect;
 import com.alianga.jkit.sql.ast.SqlSelectItem;
+import com.alianga.jkit.sql.ast.SqlShowStatement;
 import com.alianga.jkit.sql.ast.SqlSimpleStatement;
 import com.alianga.jkit.sql.ast.SqlStartTransactionStatement;
 import com.alianga.jkit.sql.ast.SqlSubqueryTable;
@@ -125,6 +126,9 @@ public class SqlAstVisitor implements SqlVisitor {
         }
         if (node instanceof SqlLoadDataStatement) {
             return visitLoadData((SqlLoadDataStatement) node);
+        }
+        if (node instanceof SqlShowStatement) {
+            return visitShow((SqlShowStatement) node);
         }
         if (node instanceof SqlSimpleStatement) {
             return visitSimple((SqlSimpleStatement) node);
@@ -274,7 +278,12 @@ public class SqlAstVisitor implements SqlVisitor {
     }
 
     /** @param node 简单语句 @return 是否继续子节点 */
-    protected boolean visitSimple(SqlSimpleStatement node) {
+        /** @param node SHOW @return 是否继续子节点 */
+    protected boolean visitShow(SqlShowStatement node) {
+        return true;
+    }
+
+protected boolean visitSimple(SqlSimpleStatement node) {
         return true;
     }
 

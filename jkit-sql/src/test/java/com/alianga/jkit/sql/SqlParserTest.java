@@ -33,6 +33,7 @@ import com.alianga.jkit.sql.ast.SqlOverExpr;
 import com.alianga.jkit.sql.ast.SqlPrepareStatement;
 import com.alianga.jkit.sql.ast.SqlSelect;
 import com.alianga.jkit.sql.ast.SqlSelectItem;
+import com.alianga.jkit.sql.ast.SqlShowStatement;
 import com.alianga.jkit.sql.ast.SqlSimpleStatement;
 import com.alianga.jkit.sql.ast.SqlStartTransactionStatement;
 import com.alianga.jkit.sql.ast.SqlStatement;
@@ -459,12 +460,40 @@ public class SqlParserTest {
     }
 
     /**
-     * SHOW CREATE TABLE / SHOW COLUMNS FROM 抽表名。
+     * SHOW CREATE TABLE|VIEW|DATABASE / SHOW COLUMNS FROM → SqlShowStatement。
      */
     @Test
     public void parseShowCreateTable() {
-        assertEquals("abc", SQL.tables("SHOW CREATE TABLE abc").get(0));
-        assertEquals("t", SQL.tables("SHOW COLUMNS FROM t").get(0));
+        SqlShowStatement createTbl = (SqlShowStatement) SQL.parse("SHOW CREATE TABLE abc");
+        assertEquals(SqlStatementType.SHOW, createTbl.type());
+        assertEquals("CREATE", createTbl.showKind());
+        assertEquals("TABLE", createTbl.objectType());
+        assertEquals("abc", createTbl.name().simpleName());
+        assertEquals("abc", SQL.tables(createTbl).get(0));
+        String ctFmt = SQL.toSqlString(createTbl).toUpperCase();
+        assertTrue(ctFmt, ctFmt.contains("SHOW") && ctFmt.contains("CREATE") && ctFmt.contains("TABLE"));
+
+        SqlShowStatement createView = (SqlShowStatement) SQL.parse("SHOW CREATE VIEW v1");
+        assertEquals("CREATE", createView.showKind());
+        assertEquals("VIEW", createView.objectType());
+        assertEquals("v1", createView.name().simpleName());
+
+        SqlShowStatement createDb = (SqlShowStatement) SQL.parse("SHOW CREATE DATABASE d1");
+        assertEquals("DATABASE", createDb.objectType());
+        assertEquals("d1", createDb.name().simpleName());
+
+        SqlShowStatement cols = (SqlShowStatement) SQL.parse("SHOW COLUMNS FROM t");
+        assertEquals("COLUMNS", cols.showKind());
+        assertEquals("FROM", cols.fromOrIn());
+        assertEquals("t", cols.name().simpleName());
+        assertEquals("t", SQL.tables(cols).get(0));
+
+        SqlShowStatement tables = (SqlShowStatement) SQL.parse("SHOW TABLES LIKE 't%'");
+        assertEquals("TABLES", tables.showKind());
+        assertNotNull(tables.raw());
+        assertTrue(tables.raw().toUpperCase().contains("LIKE"));
+
+        assertTrue(createTbl.isReadOnly());
         SQL.parse("SELECT DATE '2020-01-01', TIMESTAMP '2020-01-01 00:00:00' FROM dual",
                 SqlDialect.POSTGRES);
     }

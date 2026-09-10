@@ -8,6 +8,7 @@ import com.alianga.jkit.sql.ast.SqlLoadDataStatement;
 import com.alianga.jkit.sql.ast.SqlLockTablesStatement;
 import com.alianga.jkit.sql.ast.SqlMaintenanceStatement;
 import com.alianga.jkit.sql.ast.SqlPrepareStatement;
+import com.alianga.jkit.sql.ast.SqlShowStatement;
 import com.alianga.jkit.sql.ast.SqlSimpleStatement;
 import com.alianga.jkit.sql.ast.SqlStartTransactionStatement;
 import com.alianga.jkit.sql.ast.SqlStatement;
@@ -365,46 +366,72 @@ public final class SqlParser {
         return stmt;
     }
 
+    /**
+     * {@code SHOW …} / {@code SHOW CREATE TABLE|VIEW|DATABASE|…} → {@link SqlShowStatement}。
+     */
     private SqlStatement parseShow() {
         expect(SqlTokenType.SHOW);
-        SqlSimpleStatement stmt = new SqlSimpleStatement();
-        stmt.setStatementType(SqlStatementType.SHOW);
-        StringBuilder clause = new StringBuilder();
+        SqlShowStatement stmt = new SqlShowStatement();
         if (match(SqlTokenType.CREATE)) {
-            clause.append("CREATE");
+            stmt.setShowKind("CREATE");
             if (is(SqlTokenType.TABLE) || is(SqlTokenType.VIEW) || is(SqlTokenType.DATABASE)
-                    || is(SqlTokenType.INDEX) || identLike()) {
-                clause.append(' ').append(token.text().toUpperCase());
+                    || is(SqlTokenType.INDEX) || is(SqlTokenType.PROCEDURE)
+                    || is(SqlTokenType.FUNCTION) || is(SqlTokenType.TRIGGER)
+                    || is(SqlTokenType.EVENT) || identLike()
+                    || (token.type() != null && token.type().keyword())) {
+                stmt.setObjectType(token.text().toUpperCase());
                 next();
             }
             if (identLike()) {
                 stmt.setName(parseName());
-                clause.append(' ').append(stmt.name().qualifiedName());
             }
         } else if (is(SqlTokenType.COLUMNS) || isIdent("FIELDS") || isIdent("INDEX")
-                || is(SqlTokenType.INDEX) || is(SqlTokenType.TABLES) || is(SqlTokenType.DATABASES)) {
-            clause.append(token.text().toUpperCase());
+                || is(SqlTokenType.INDEX) || is(SqlTokenType.TABLES) || is(SqlTokenType.DATABASES)
+                || (identLike() && ("FIELDS".equalsIgnoreCase(token.text())
+                || "STATUS".equalsIgnoreCase(token.text())
+                || "VARIABLES".equalsIgnoreCase(token.text())
+                || "PROCESSLIST".equalsIgnoreCase(token.text())
+                || "WARNINGS".equalsIgnoreCase(token.text())
+                || "ERRORS".equalsIgnoreCase(token.text())
+                || "ENGINES".equalsIgnoreCase(token.text())
+                || "COLLATION".equalsIgnoreCase(token.text())
+                || "CHARSET".equalsIgnoreCase(token.text())
+                || "CHARACTER".equalsIgnoreCase(token.text())
+                || "GRANTS".equalsIgnoreCase(token.text())))) {
+            stmt.setShowKind(token.text().toUpperCase());
             next();
+            // SHOW CHARACTER SET
+            if ("CHARACTER".equalsIgnoreCase(stmt.showKind())
+                    && (isIdent("SET") || (identLike() && "SET".equalsIgnoreCase(token.text()))
+                    || is(SqlTokenType.SET))) {
+                next();
+                stmt.setShowKind("CHARACTER SET");
+            }
             if (is(SqlTokenType.FROM) || is(SqlTokenType.IN)) {
-                clause.append(' ').append(token.text().toUpperCase());
+                stmt.setFromOrIn(token.text().toUpperCase());
                 next();
                 if (identLike()) {
                     stmt.setName(parseName());
-                    clause.append(' ').append(stmt.name().qualifiedName());
+                }
+            }
+        } else if (identLike() || (token.type() != null && token.type().keyword()
+                && !is(SqlTokenType.SEMICOLON) && !is(SqlTokenType.EOF))) {
+            // SHOW <other>
+            stmt.setShowKind(token.text().toUpperCase());
+            next();
+            if (is(SqlTokenType.FROM) || is(SqlTokenType.IN)) {
+                stmt.setFromOrIn(token.text().toUpperCase());
+                next();
+                if (identLike()) {
+                    stmt.setName(parseName());
                 }
             }
         }
-        if (!is(SqlTokenType.SEMICOLON) && !is(SqlTokenType.EOF)) {
+        if (!is(SqlTokenType.SEMICOLON) && !is(SqlTokenType.EOF) && !atStmtBreak()) {
             String rest = consumeRawUntilSemi();
-            if (!rest.isEmpty()) {
-                if (clause.length() > 0) {
-                    clause.append(' ');
-                }
-                clause.append(rest);
+            if (rest != null && !rest.isEmpty()) {
+                stmt.setRaw(rest);
             }
-        }
-        if (clause.length() > 0) {
-            stmt.setText(clause.toString());
         }
         return stmt;
     }

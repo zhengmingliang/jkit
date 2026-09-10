@@ -43,6 +43,7 @@ import com.alianga.jkit.sql.ast.SqlQueryExpr;
 import com.alianga.jkit.sql.ast.SqlRoutineParam;
 import com.alianga.jkit.sql.ast.SqlSelect;
 import com.alianga.jkit.sql.ast.SqlSelectItem;
+import com.alianga.jkit.sql.ast.SqlShowStatement;
 import com.alianga.jkit.sql.ast.SqlSimpleStatement;
 import com.alianga.jkit.sql.ast.SqlStartTransactionStatement;
 import com.alianga.jkit.sql.ast.SqlStatement;
@@ -154,6 +155,8 @@ public final class SqlFormatter {
             writeStartTransaction((SqlStartTransactionStatement) node);
         } else if (node instanceof SqlLoadDataStatement) {
             writeLoadData((SqlLoadDataStatement) node);
+        } else if (node instanceof SqlShowStatement) {
+            writeShow((SqlShowStatement) node);
         } else if (node instanceof SqlSimpleStatement) {
             writeSimple((SqlSimpleStatement) node);
         } else if (node instanceof SqlExpr) {
@@ -1172,6 +1175,34 @@ public final class SqlFormatter {
     private static boolean isIndexDdl(SqlDdlStatement ddl) {
         String objectType = ddl.objectType();
         return objectType != null && "INDEX".equalsIgnoreCase(objectType);
+    }
+
+    private void writeShow(SqlShowStatement show) {
+        if (show == null) {
+            return;
+        }
+        out.append("SHOW");
+        if (show.showKind() != null && show.showKind().length() > 0) {
+            sp();
+            out.append(show.showKind());
+        }
+        if ("CREATE".equalsIgnoreCase(show.showKind())
+                && show.objectType() != null && show.objectType().length() > 0) {
+            sp();
+            out.append(show.objectType());
+        }
+        if (show.fromOrIn() != null && show.fromOrIn().length() > 0) {
+            sp();
+            out.append(show.fromOrIn());
+        }
+        if (show.name() != null) {
+            sp();
+            writeExpr(show.name());
+        }
+        if (show.raw() != null && show.raw().length() > 0) {
+            sp();
+            out.append(show.raw());
+        }
     }
 
     private void writeSimple(SqlSimpleStatement stmt) {

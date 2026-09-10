@@ -36,7 +36,7 @@
 - DML：INSERT/REPLACE（VALUES 多行、INSERT SELECT、INSERT SET、ON DUPLICATE KEY、ON CONFLICT DO UPDATE/NOTHING/ON CONSTRAINT、RETURNING、OUTPUT、Oracle INSERT ALL/FIRST）、UPDATE/DELETE（JOIN、FROM、USING、LIMIT、RETURNING、OUTPUT）、MERGE（多 WHEN AND / BY SOURCE|TARGET、OUTPUT）
 - 表达式：CASE、CAST / `::`、IN/BETWEEN/LIKE/ILIKE/REGEXP、`IS [NOT] DISTINCT FROM`、`?` / `:name` / `@var`、EXTRACT/TRIM/SUBSTRING/POSITION/IF/CONVERT/GROUP_CONCAT/STRING_AGG/MATCH AGAINST、JSON `->`/`->>`/`#>`/`#>>`、数组下标、ANY/SOME/ALL、INTERVAL/HEX、行构造 `(a,b) IN ((?,?))`
 - DDL：CREATE/DROP/ALTER/TRUNCATE 抽对象名；ALTER ADD/DROP/MODIFY/CHANGE 抽列名；其余进 `SqlDdlStatement.tail`
-- SHOW CREATE TABLE / SHOW COLUMNS FROM / SHOW INDEX FROM 抽表名
+- SHOW CREATE TABLE|VIEW|DATABASE / SHOW COLUMNS|INDEX|TABLES → `SqlShowStatement`
 - 类型字面量：`DATE '2020-01-01'`
 - `SqlParseException` 带行号/列号/片段
 - 模块内测试：`SqlParserTest` + `SqlGoldenCorpusTest`（黄金集约 206 条 + 模块测试合计约 613）
@@ -109,7 +109,7 @@ HTTP（含 SSE merge、curl 执行、负载均衡、Nacos）、JSON、YAML、配
 | ALTER ADD/DROP INDEX、RENAME TO | ✅ 结构化并可 format；ADD UNIQUE INDEX 亦支持 |
 | FOR UPDATE OF … NOWAIT / SKIP LOCKED | ✅ `forUpdateOf` + `forUpdateWait`；未知残余仍可 `forUpdateTail` |
 | ALTER CHANGE 全列定义 / ADD CONSTRAINT | ✅ CHANGE/MODIFY → columns + columnDefinition；ADD CONSTRAINT/FK/PK/UNIQUE/CHECK |
-| GRANT / SHOW CREATE VIEW/DATABASE | ✅ GRANT 抽 privileges + 对象名（`user@host` 紧凑）；SHOW CREATE TABLE/COLUMNS/INDEX 已抽表；SHOW CREATE VIEW/DATABASE 仍未扩 |
+| GRANT / SHOW CREATE VIEW/DATABASE | ✅ GRANT 抽 privileges + 对象名（`user@host` 紧凑）；SHOW CREATE TABLE/VIEW/DATABASE/COLUMNS/INDEX → `SqlShowStatement`（objectType + name）✅ |
 | WITHIN GROUP order-by | ✅ `STRING_AGG`/`GROUP_CONCAT` 已结构化；余量仅其它聚合的 `aggOption` 字符串 |
 | CREATE TABLE 表级 FOREIGN KEY 引用表 | ✅ `referencedTables`；列定义原文 `columnDefinitions` 可 format 往返 |
 
@@ -298,7 +298,7 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 1. 跑绿：`mvn -pl jkit-sql test`；`cd ../tools-test && mvn -Dtest=SqlParserCompareTest test`（先 `install` jkit-sql）。
 2. ~~P0.1 拆 Parser~~ ✅；~~P0.2 往返~~ ✅；~~P0.3 SchemaStat~~ ✅；~~P0.4 验收最小集 + CHANGE/CONSTRAINT/FK/GRANT/列定义回写~~ ✅。
 3. ~~P1.1 WINDOW / P1.2 APPLY·LATERAL / P1–P3 主体~~ ✅；lexer 短 ident intern 仍延期。
-4. 余量（可选）：SHOW CREATE VIEW/DATABASE；其它聚合的 WITHIN GROUP/`aggOption`。~~OUTPUT INTO~~ ✅；~~SqlBuilder rightJoin/union/with/distinct~~ ✅。
+4. 余量（可选）：其它聚合的 WITHIN GROUP/`aggOption`。~~OUTPUT INTO~~ ✅；~~SqlBuilder rightJoin/union/with/distinct~~ ✅。
 5. 对比工程：语料成功率 ✅；~~表名集合差分~~ ✅；改解析器后记得 `install` 再跑 tools-test。
 
 **发版叙事已定（sql-only）**：`jkit-sql` 随父 POM **2.0.1** 收口（`CHANGELOG` 顶栏 `## 2.0.1 - 2026-09-09`，javadoc `@since 2.0.1`）。每完成一块：补 `@since 2.0.1`（仅 sql 模块）、更新 `docs/sql.md` 覆盖表、在 `CHANGELOG.md` 的 `2.0.1 - 2026-09-09` 追加条目。父 POM 保持 2.0.1，不要擅自升版。

@@ -14,6 +14,7 @@ import com.alianga.jkit.sql.ast.SqlMaintenanceStatement;
 import com.alianga.jkit.sql.ast.SqlNode;
 import com.alianga.jkit.sql.ast.SqlOrderByItem;
 import com.alianga.jkit.sql.ast.SqlSelect;
+import com.alianga.jkit.sql.ast.SqlShowStatement;
 import com.alianga.jkit.sql.ast.SqlSimpleStatement;
 import com.alianga.jkit.sql.ast.SqlStatement;
 import com.alianga.jkit.sql.ast.SqlStatementType;
@@ -178,6 +179,10 @@ public final class SqlSchemaStat {
                 for (int i = 0; i < ddl.referencedTables().size(); i++) {
                     addTable(ddl.referencedTables().get(i), SqlStatementType.SELECT);
                 }
+                return true;
+            }
+            if (node instanceof SqlShowStatement) {
+                addTable(((SqlShowStatement) node).name(), accessStack.peek());
                 return true;
             }
             if (node instanceof SqlSimpleStatement) {
