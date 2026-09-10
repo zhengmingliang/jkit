@@ -837,7 +837,8 @@ public final class SqlFormatter {
             sp();
             writeNode(ddl.query());
         } else if (ddl.triggerTiming() != null || ddl.triggerEvent() != null
-                || ddl.triggerTable() != null
+                || ddl.triggerTable() != null || ddl.eventScheduleKind() != null
+                || ddl.triggerForEach() != null || ddl.triggerOrder() != null
                 || (!ddl.bodyStatements().isEmpty() && "TRIGGER".equalsIgnoreCase(ddl.objectType()))
                 || (!ddl.bodyStatements().isEmpty() && "EVENT".equalsIgnoreCase(ddl.objectType()))) {
             writeTriggerOrEvent(ddl);
@@ -853,6 +854,20 @@ public final class SqlFormatter {
     }
 
     private void writeTriggerOrEvent(SqlDdlStatement ddl) {
+        if (ddl.eventScheduleKind() != null) {
+            sp();
+            kw("ON");
+            sp();
+            out.append("SCHEDULE");
+            sp();
+            out.append(ddl.eventScheduleKind());
+            if (ddl.eventScheduleRaw() != null && ddl.eventScheduleRaw().length() > 0) {
+                sp();
+                out.append(ddl.eventScheduleRaw());
+            }
+            sp();
+            kw("DO");
+        }
         if (ddl.triggerTiming() != null) {
             sp();
             out.append(ddl.triggerTiming());
@@ -866,6 +881,22 @@ public final class SqlFormatter {
             kw("ON");
             sp();
             writeExpr(ddl.triggerTable());
+        }
+        if (ddl.triggerForEach() != null) {
+            sp();
+            kw("FOR");
+            sp();
+            out.append("EACH");
+            sp();
+            out.append(ddl.triggerForEach());
+        }
+        if (ddl.triggerOrder() != null) {
+            sp();
+            out.append(ddl.triggerOrder());
+            if (ddl.triggerOther() != null) {
+                sp();
+                writeExpr(ddl.triggerOther());
+            }
         }
         if (!ddl.bodyStatements().isEmpty()) {
             boolean needBegin = ddl.bodyStatements().size() > 1
@@ -1391,7 +1422,8 @@ public final class SqlFormatter {
                 || !mr.measures().isEmpty() || (mr.pattern() != null && mr.pattern().length() > 0)
                 || !mr.define().isEmpty() || !mr.subsets().isEmpty()
                 || (mr.rowsPerMatch() != null && mr.rowsPerMatch().length() > 0)
-                || (mr.afterMatch() != null && mr.afterMatch().length() > 0);
+                || (mr.afterMatch() != null && mr.afterMatch().length() > 0)
+                || (mr.within() != null && mr.within().length() > 0);
         if (!structured) {
             if (mr.raw() != null) {
                 out.append(mr.raw());
@@ -1466,6 +1498,13 @@ public final class SqlFormatter {
             out.append(')');
             needSp = true;
         }
+        if (mr.within() != null && mr.within().length() > 0) {
+            if (needSp) {
+                sp();
+            }
+            out.append(mr.within());
+            needSp = true;
+        }
         if (!mr.define().isEmpty()) {
             if (needSp) {
                 sp();
@@ -1513,7 +1552,10 @@ public final class SqlFormatter {
             out.append(ctrl.raw());
             return;
         }
-        if (ctrl.label() != null) {
+        if (ctrl.label() != null
+                && (ctrl.kind() == SqlControlStatement.Kind.WHILE
+                || ctrl.kind() == SqlControlStatement.Kind.LOOP
+                || ctrl.kind() == SqlControlStatement.Kind.REPEAT)) {
             out.append(ctrl.label());
             out.append(':');
             sp();
@@ -1573,6 +1615,49 @@ public final class SqlFormatter {
             kw("END");
             sp();
             out.append("REPEAT");
+        } else if (ctrl.kind() == SqlControlStatement.Kind.CASE) {
+            kw("CASE");
+            if (ctrl.condition() != null) {
+                sp();
+                writeExpr(ctrl.condition());
+            }
+            for (int i = 0; i < ctrl.elseIfs().size(); i++) {
+                SqlControlStatement br = ctrl.elseIfs().get(i);
+                sp();
+                kw("WHEN");
+                sp();
+                writeExpr(br.condition());
+                sp();
+                kw("THEN");
+                writeStmtListInline(br.bodyStatements());
+            }
+            if (!ctrl.elseStatements().isEmpty()) {
+                sp();
+                kw("ELSE");
+                writeStmtListInline(ctrl.elseStatements());
+            }
+            sp();
+            kw("END");
+            sp();
+            kw("CASE");
+        } else if (ctrl.kind() == SqlControlStatement.Kind.LEAVE) {
+            out.append("LEAVE");
+            if (ctrl.label() != null) {
+                sp();
+                out.append(ctrl.label());
+            }
+        } else if (ctrl.kind() == SqlControlStatement.Kind.ITERATE) {
+            out.append("ITERATE");
+            if (ctrl.label() != null) {
+                sp();
+                out.append(ctrl.label());
+            }
+        } else if (ctrl.kind() == SqlControlStatement.Kind.RETURN) {
+            out.append("RETURN");
+            if (ctrl.condition() != null) {
+                sp();
+                writeExpr(ctrl.condition());
+            }
         } else if (ctrl.raw() != null) {
             out.append(ctrl.raw());
         }

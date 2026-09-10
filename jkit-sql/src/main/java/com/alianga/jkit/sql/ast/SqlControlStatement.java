@@ -6,9 +6,10 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 过程体内轻量控制流：{@code IF}/{@code WHILE}/{@code LOOP}/{@code REPEAT}。
+ * 过程体内轻量控制流：{@code IF}/{@code WHILE}/{@code LOOP}/{@code REPEAT}/{@code CASE}，
+ * 以及 {@code LEAVE}/{@code ITERATE}/{@code RETURN}。
  *
- * <p>条件尽量结构化；ELSEIF 以列表形式保留；无法拆分时整段进 {@link #raw()}。
+ * <p>条件尽量结构化；ELSEIF / CASE 的 WHEN 以列表形式保留；无法拆分时整段进 {@link #raw()}。
  * 语句种类仍为 {@link SqlStatementType#OTHER}。</p>
  *
  * @author 郑明亮
@@ -22,7 +23,13 @@ public final class SqlControlStatement extends SqlStatement {
         IF,
         WHILE,
         LOOP,
-        REPEAT
+        REPEAT,
+        /** {@code CASE … WHEN … END CASE}；WHEN 分支在 {@link #elseIfs()}，可选比较值在 {@link #condition()}。 */
+        CASE,
+        LEAVE,
+        ITERATE,
+        /** {@code RETURN [expr]}；表达式在 {@link #condition()}。 */
+        RETURN
     }
 
     private Kind kind = Kind.IF;
@@ -43,7 +50,7 @@ public final class SqlControlStatement extends SqlStatement {
     }
 
     /**
-     * @return IF / WHILE / LOOP / REPEAT
+     * @return IF / WHILE / LOOP / REPEAT / CASE / LEAVE / ITERATE / RETURN
      */
     public Kind kind() {
         return kind;
@@ -57,7 +64,7 @@ public final class SqlControlStatement extends SqlStatement {
     }
 
     /**
-     * @return 可选标签（{@code lab: LOOP}），可空
+     * @return 循环标签（{@code lab: LOOP}）或 LEAVE/ITERATE 目标标签，可空
      */
     public String label() {
         return label;
@@ -71,7 +78,7 @@ public final class SqlControlStatement extends SqlStatement {
     }
 
     /**
-     * @return IF/WHILE 条件，或 REPEAT 的 UNTIL 条件；可空
+     * @return IF/WHILE 条件、REPEAT 的 UNTIL、简单 CASE 比较值、或 RETURN 表达式；可空
      */
     public SqlExpr condition() {
         return condition;
@@ -92,14 +99,14 @@ public final class SqlControlStatement extends SqlStatement {
     }
 
     /**
-     * @return ELSEIF 分支（仅 IF；每个元素的 condition + bodyStatements）
+     * @return ELSEIF（IF）或 WHEN（CASE）分支；每个元素的 condition + bodyStatements
      */
     public List<SqlControlStatement> elseIfs() {
         return elseIfs;
     }
 
     /**
-     * @return ELSE 分支语句（仅 IF）
+     * @return ELSE 分支语句（IF / CASE）
      */
     public List<SqlStatement> elseStatements() {
         return elseStatements;

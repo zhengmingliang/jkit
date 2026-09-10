@@ -93,4 +93,100 @@ public class SqlControlTriggerTest {
         assertNotNull(trg.triggerTable());
         assertTrue(trg.bodyStatements().size() >= 1);
     }
+
+    @Test
+    public void caseLeaveIterateReturnAndLabel() {
+        String sql = "CREATE PROCEDURE sp_case(IN v INT) BEGIN "
+                + "lab: LOOP "
+                + "CASE v WHEN 1 THEN SET v = 2; WHEN 2 THEN LEAVE lab; ELSE ITERATE lab; END CASE; "
+                + "END LOOP lab; "
+                + "RETURN v; "
+                + "END";
+        SqlDdlStatement ddl = (SqlDdlStatement) SQL.parse(sql, SqlDialect.MYSQL);
+        assertTrue(ddl.bodyStatements().size() >= 2);
+        boolean sawLoop = false;
+        boolean sawCase = false;
+        boolean sawReturn = false;
+        for (int i = 0; i < ddl.bodyStatements().size(); i++) {
+            if (!(ddl.bodyStatements().get(i) instanceof SqlControlStatement)) {
+                continue;
+            }
+            SqlControlStatement c = (SqlControlStatement) ddl.bodyStatements().get(i);
+            if (c.kind() == SqlControlStatement.Kind.LOOP) {
+                sawLoop = true;
+                assertEquals("lab", c.label());
+                assertTrue(c.bodyStatements().size() >= 1);
+                SqlControlStatement cas = (SqlControlStatement) c.bodyStatements().get(0);
+                assertEquals(SqlControlStatement.Kind.CASE, cas.kind());
+                sawCase = true;
+                assertNotNull(cas.condition());
+                assertTrue(cas.elseIfs().size() >= 2);
+                assertTrue(cas.elseStatements().size() >= 1);
+                boolean sawLeave = false;
+                boolean sawIterate = false;
+                SqlControlStatement w1 = cas.elseIfs().get(1);
+                assertTrue(w1.bodyStatements().size() >= 1);
+                SqlControlStatement leave = (SqlControlStatement) w1.bodyStatements().get(0);
+                assertEquals(SqlControlStatement.Kind.LEAVE, leave.kind());
+                assertEquals("lab", leave.label());
+                sawLeave = true;
+                SqlControlStatement it = (SqlControlStatement) cas.elseStatements().get(0);
+                assertEquals(SqlControlStatement.Kind.ITERATE, it.kind());
+                assertEquals("lab", it.label());
+                sawIterate = true;
+                assertTrue(sawLeave && sawIterate);
+            }
+            if (c.kind() == SqlControlStatement.Kind.RETURN) {
+                sawReturn = true;
+                assertNotNull(c.condition());
+            }
+        }
+        assertTrue("expected labeled LOOP", sawLoop);
+        assertTrue("expected CASE", sawCase);
+        assertTrue("expected RETURN", sawReturn);
+        String formatted = SQL.toSqlString(ddl, SqlDialect.MYSQL);
+        assertTrue(formatted.toUpperCase().contains("CASE"));
+        assertTrue(formatted.toUpperCase().contains("LEAVE"));
+        assertTrue(formatted.toUpperCase().contains("RETURN"));
+    }
+
+    @Test
+    public void triggerForEachFollows() {
+        String sql = "CREATE TRIGGER trg_ai AFTER INSERT ON t FOR EACH ROW "
+                + "FOLLOWS trg_bi BEGIN SET NEW.id = 1; END";
+        SqlDdlStatement trg = (SqlDdlStatement) SQL.parse(sql, SqlDialect.MYSQL);
+        assertEquals("ROW", trg.triggerForEach());
+        assertEquals("FOLLOWS", trg.triggerOrder());
+        assertNotNull(trg.triggerOther());
+        assertEquals("trg_bi", trg.triggerOther().simpleName());
+        String formatted = SQL.toSqlString(trg, SqlDialect.MYSQL);
+        assertTrue(formatted.toUpperCase().contains("FOR EACH ROW"));
+        assertTrue(formatted.toUpperCase().contains("FOLLOWS"));
+    }
+
+    @Test
+    public void eventOnScheduleEvery() {
+        String sql = "CREATE EVENT ev_hourly ON SCHEDULE EVERY 1 HOUR "
+                + "DO BEGIN DELETE FROM t WHERE id < 0; END";
+        SqlDdlStatement ev = (SqlDdlStatement) SQL.parse(sql, SqlDialect.MYSQL);
+        assertEquals("EVENT", ev.objectType());
+        assertEquals("EVERY", ev.eventScheduleKind());
+        assertNotNull(ev.eventScheduleRaw());
+        assertTrue(ev.eventScheduleRaw().toUpperCase().contains("HOUR"));
+        assertTrue(ev.bodyStatements().size() >= 1);
+        String formatted = SQL.toSqlString(ev, SqlDialect.MYSQL);
+        assertTrue(formatted.toUpperCase().contains("SCHEDULE"));
+        assertTrue(formatted.toUpperCase().contains("EVERY"));
+    }
+
+    @Test
+    public void eventOnScheduleAt() {
+        SqlDdlStatement ev = (SqlDdlStatement) SQL.parse(
+                "CREATE EVENT ev_once ON SCHEDULE AT '2026-01-01 00:00:00' DO SET @a = 1",
+                SqlDialect.MYSQL);
+        assertEquals("AT", ev.eventScheduleKind());
+        assertNotNull(ev.eventScheduleRaw());
+        assertTrue(ev.eventScheduleRaw().contains("2026"));
+        assertTrue(ev.bodyStatements().size() >= 1);
+    }
 }

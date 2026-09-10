@@ -9,7 +9,8 @@ import java.util.List;
  * CREATE / DROP / ALTER 等 DDL。抽取对象名；支持 {@code OR REPLACE}、VIEW / PROCEDURE 等；
  * CREATE TABLE 解析列定义原文、ENGINE/CHARSET/COMMENT 与表级 FOREIGN KEY 引用表；
  * ALTER 解析 ADD/DROP INDEX、RENAME TO、CHANGE/MODIFY 列定义、ADD CONSTRAINT；
- * 过程体等可留在 {@link #tail()}；FUNCTION {@code RETURNS}、TRIGGER 时机/事件/表可结构化。
+ * 过程体等可留在 {@link #tail()}；FUNCTION {@code RETURNS}、TRIGGER 时机/事件/表/FOR EACH/FOLLOWS、
+ * EVENT {@code ON SCHEDULE} 可结构化。
  *
  * @author 郑明亮
  * @since 2.0.1
@@ -52,6 +53,16 @@ public final class SqlDdlStatement extends SqlStatement {
     private String triggerEvent;
     /** TRIGGER {@code ON} 表名，可空。 */
     private SqlIdentifier triggerTable;
+    /** TRIGGER {@code FOR EACH ROW|STATEMENT}，可空。 */
+    private String triggerForEach;
+    /** TRIGGER {@code FOLLOWS}/{@code PRECEDES}，可空。 */
+    private String triggerOrder;
+    /** TRIGGER FOLLOWS/PRECEDES 目标触发器名，可空。 */
+    private SqlIdentifier triggerOther;
+    /** EVENT {@code ON SCHEDULE} 种类 {@code AT}/{@code EVERY}，可空。 */
+    private String eventScheduleKind;
+    /** EVENT 调度表达式/原文（AT/EVERY 之后至 DO 之前），可空。 */
+    private String eventScheduleRaw;
 
     /**
      * {@inheritDoc}
@@ -457,6 +468,86 @@ public final class SqlDdlStatement extends SqlStatement {
     }
 
     /**
+     * @return FOR EACH ROW/STATEMENT，可空
+     * @since 2.0.1
+     */
+    public String triggerForEach() {
+        return triggerForEach;
+    }
+
+    /**
+     * @param triggerForEach ROW/STATEMENT
+     * @since 2.0.1
+     */
+    public void setTriggerForEach(String triggerForEach) {
+        this.triggerForEach = triggerForEach;
+    }
+
+    /**
+     * @return FOLLOWS/PRECEDES，可空
+     * @since 2.0.1
+     */
+    public String triggerOrder() {
+        return triggerOrder;
+    }
+
+    /**
+     * @param triggerOrder FOLLOWS/PRECEDES
+     * @since 2.0.1
+     */
+    public void setTriggerOrder(String triggerOrder) {
+        this.triggerOrder = triggerOrder;
+    }
+
+    /**
+     * @return FOLLOWS/PRECEDES 目标触发器，可空
+     * @since 2.0.1
+     */
+    public SqlIdentifier triggerOther() {
+        return triggerOther;
+    }
+
+    /**
+     * @param triggerOther 其它触发器名
+     * @since 2.0.1
+     */
+    public void setTriggerOther(SqlIdentifier triggerOther) {
+        this.triggerOther = triggerOther;
+    }
+
+    /**
+     * @return EVENT 调度种类 AT/EVERY，可空
+     * @since 2.0.1
+     */
+    public String eventScheduleKind() {
+        return eventScheduleKind;
+    }
+
+    /**
+     * @param eventScheduleKind AT/EVERY
+     * @since 2.0.1
+     */
+    public void setEventScheduleKind(String eventScheduleKind) {
+        this.eventScheduleKind = eventScheduleKind;
+    }
+
+    /**
+     * @return EVENT 调度原文（AT/EVERY 之后），可空
+     * @since 2.0.1
+     */
+    public String eventScheduleRaw() {
+        return eventScheduleRaw;
+    }
+
+    /**
+     * @param eventScheduleRaw 调度原文
+     * @since 2.0.1
+     */
+    public void setEventScheduleRaw(String eventScheduleRaw) {
+        this.eventScheduleRaw = eventScheduleRaw;
+    }
+
+    /**
      * {@inheritDoc}
      */
     @Override
@@ -467,6 +558,7 @@ public final class SqlDdlStatement extends SqlStatement {
         children(visitor, parameters);
         children(visitor, bodyStatements);
         child(visitor, triggerTable);
+        child(visitor, triggerOther);
         child(visitor, indexName);
         children(visitor, indexColumns);
         child(visitor, renameTo);
