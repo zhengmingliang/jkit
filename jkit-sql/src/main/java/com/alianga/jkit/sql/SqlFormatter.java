@@ -27,6 +27,7 @@ import com.alianga.jkit.sql.ast.SqlListExpr;
 import com.alianga.jkit.sql.ast.SqlLiteral;
 import com.alianga.jkit.sql.ast.SqlLoadDataStatement;
 import com.alianga.jkit.sql.ast.SqlLockTablesStatement;
+import com.alianga.jkit.sql.ast.SqlMaintenanceStatement;
 import com.alianga.jkit.sql.ast.SqlMatchRecognize;
 import com.alianga.jkit.sql.ast.SqlMerge;
 import com.alianga.jkit.sql.ast.SqlMergeWhen;
@@ -145,6 +146,8 @@ public final class SqlFormatter {
             writeCopy((SqlCopyStatement) node);
         } else if (node instanceof SqlFlushStatement) {
             writeFlush((SqlFlushStatement) node);
+        } else if (node instanceof SqlMaintenanceStatement) {
+            writeMaintenance((SqlMaintenanceStatement) node);
         } else if (node instanceof SqlTransactionControlStatement) {
             writeTransactionControl((SqlTransactionControlStatement) node);
         } else if (node instanceof SqlStartTransactionStatement) {
@@ -1894,6 +1897,34 @@ public final class SqlFormatter {
                 && !flush.raw().toUpperCase().startsWith("FLUSH")) {
             sp();
             out.append(flush.raw());
+        }
+    }
+
+    private void writeMaintenance(SqlMaintenanceStatement m) {
+        if (m == null) {
+            return;
+        }
+        if (m.kind() == null) {
+            if (m.raw() != null) {
+                out.append(m.raw());
+            }
+            return;
+        }
+        out.append(m.kind().toUpperCase());
+        if (m.optionsRaw() != null && m.optionsRaw().length() > 0) {
+            sp();
+            out.append(m.optionsRaw());
+        }
+        for (int i = 0; i < m.tables().size(); i++) {
+            if (i > 0) {
+                out.append(',');
+            }
+            sp();
+            writeExpr(m.tables().get(i));
+        }
+        if (m.raw() != null && m.raw().length() > 0) {
+            sp();
+            out.append(m.raw());
         }
     }
 

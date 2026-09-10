@@ -25,6 +25,7 @@ import com.alianga.jkit.sql.ast.SqlListExpr;
 import com.alianga.jkit.sql.ast.SqlLiteral;
 import com.alianga.jkit.sql.ast.SqlLoadDataStatement;
 import com.alianga.jkit.sql.ast.SqlLockTablesStatement;
+import com.alianga.jkit.sql.ast.SqlMaintenanceStatement;
 import com.alianga.jkit.sql.ast.SqlMatchRecognize;
 import com.alianga.jkit.sql.ast.SqlMerge;
 import com.alianga.jkit.sql.ast.SqlMergeWhen;
@@ -112,6 +113,9 @@ public class SqlAstVisitor implements SqlVisitor {
         }
         if (node instanceof SqlFlushStatement) {
             return visitFlush((SqlFlushStatement) node);
+        }
+        if (node instanceof SqlMaintenanceStatement) {
+            return visitMaintenance((SqlMaintenanceStatement) node);
         }
         if (node instanceof SqlTransactionControlStatement) {
             return visitTransactionControl((SqlTransactionControlStatement) node);
@@ -316,6 +320,11 @@ public class SqlAstVisitor implements SqlVisitor {
 
     /** @param node FLUSH @return 是否继续子节点 */
     protected boolean visitFlush(SqlFlushStatement node) {
+        return true;
+    }
+
+    /** @param node ANALYZE/VACUUM/OPTIMIZE/REPAIR/CHECK @return 是否继续子节点 */
+    protected boolean visitMaintenance(SqlMaintenanceStatement node) {
         return true;
     }
 

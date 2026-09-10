@@ -10,6 +10,7 @@ import com.alianga.jkit.sql.ast.SqlIdentifier;
 import com.alianga.jkit.sql.ast.SqlJoin;
 import com.alianga.jkit.sql.ast.SqlLoadDataStatement;
 import com.alianga.jkit.sql.ast.SqlLockTablesStatement;
+import com.alianga.jkit.sql.ast.SqlMaintenanceStatement;
 import com.alianga.jkit.sql.ast.SqlNode;
 import com.alianga.jkit.sql.ast.SqlOrderByItem;
 import com.alianga.jkit.sql.ast.SqlSelect;
@@ -209,6 +210,13 @@ public final class SqlSchemaStat {
                 SqlFlushStatement flush = (SqlFlushStatement) node;
                 for (int i = 0; i < flush.tables().size(); i++) {
                     addTable(flush.tables().get(i), accessStack.peek());
+                }
+                return true;
+            }
+            if (node instanceof SqlMaintenanceStatement) {
+                SqlMaintenanceStatement maint = (SqlMaintenanceStatement) node;
+                for (int i = 0; i < maint.tables().size(); i++) {
+                    addTable(maint.tables().get(i), accessStack.peek());
                 }
                 return true;
             }

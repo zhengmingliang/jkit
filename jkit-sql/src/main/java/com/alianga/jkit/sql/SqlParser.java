@@ -6,6 +6,7 @@ import com.alianga.jkit.sql.ast.SqlFlushStatement;
 import com.alianga.jkit.sql.ast.SqlIdentifier;
 import com.alianga.jkit.sql.ast.SqlLoadDataStatement;
 import com.alianga.jkit.sql.ast.SqlLockTablesStatement;
+import com.alianga.jkit.sql.ast.SqlMaintenanceStatement;
 import com.alianga.jkit.sql.ast.SqlPrepareStatement;
 import com.alianga.jkit.sql.ast.SqlSimpleStatement;
 import com.alianga.jkit.sql.ast.SqlStartTransactionStatement;
@@ -1169,35 +1170,48 @@ public final class SqlParser {
         }
     }
 
+    /**
+     * {@code ANALYZE}/{@code VACUUM}/{@code OPTIMIZE|REPAIR|CHECK TABLE}
+     * → {@link SqlMaintenanceStatement}。
+     */
     private SqlStatement parseMaintenance() {
         String kind = token.text().toUpperCase();
         next();
-        SqlSimpleStatement stmt = new SqlSimpleStatement();
-        stmt.setStatementType(SqlStatementType.OTHER);
-        StringBuilder text = new StringBuilder(kind);
+        SqlMaintenanceStatement stmt = new SqlMaintenanceStatement();
+        stmt.setKind(kind);
+        StringBuilder options = new StringBuilder();
         // VACUUM [FULL] [ANALYZE] / ANALYZE [TABLE] / OPTIMIZE|REPAIR|CHECK TABLE
         while (is(SqlTokenType.ANALYZE) || is(SqlTokenType.TABLE) || is(SqlTokenType.FULL)
                 || is(SqlTokenType.LOCAL) || isIdent("FREEZE") || isIdent("VERBOSE")
-                || isIdent("NO_WRITE_TO_BINLOG")) {
-            text.append(' ').append(token.text().toUpperCase());
+                || isIdent("NO_WRITE_TO_BINLOG")
+                || (identLike() && ("FREEZE".equalsIgnoreCase(token.text())
+                || "VERBOSE".equalsIgnoreCase(token.text())
+                || "NO_WRITE_TO_BINLOG".equalsIgnoreCase(token.text())))) {
+            if (options.length() > 0) {
+                options.append(' ');
+            }
+            options.append(token.text().toUpperCase());
             next();
         }
+        if (options.length() > 0) {
+            stmt.setOptionsRaw(options.toString());
+        }
         if (identLike()) {
-            stmt.setName(parseName());
-            text.append(' ').append(stmt.name().qualifiedName());
+            stmt.tables().add(parseName());
             while (match(SqlTokenType.COMMA)) {
-                text.append(',');
-                SqlIdentifier more = parseName();
-                text.append(' ').append(more.qualifiedName());
+                if (identLike()) {
+                    stmt.tables().add(parseName());
+                } else {
+                    break;
+                }
             }
         }
         if (!atStmtBreak()) {
             String rest = consumeRawUntilSemi();
-            if (!rest.isEmpty()) {
-                text.append(' ').append(rest);
+            if (rest != null && !rest.isEmpty()) {
+                stmt.setRaw(rest);
             }
         }
-        stmt.setText(text.toString());
         return stmt;
     }
 

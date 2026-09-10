@@ -26,6 +26,7 @@ import com.alianga.jkit.sql.ast.SqlListExpr;
 import com.alianga.jkit.sql.ast.SqlLiteral;
 import com.alianga.jkit.sql.ast.SqlLoadDataStatement;
 import com.alianga.jkit.sql.ast.SqlLockTablesStatement;
+import com.alianga.jkit.sql.ast.SqlMaintenanceStatement;
 import com.alianga.jkit.sql.ast.SqlMerge;
 import com.alianga.jkit.sql.ast.SqlMergeWhen;
 import com.alianga.jkit.sql.ast.SqlOverExpr;
@@ -1285,21 +1286,45 @@ public class SqlParserTest {
     }
 
     /**
-     * P1.5：ANALYZE / VACUUM / OPTIMIZE / REPAIR / CHECK TABLE。
+     * P1.5：ANALYZE / VACUUM / OPTIMIZE / REPAIR / CHECK TABLE → SqlMaintenanceStatement。
      */
     @Test
     public void p15MaintenanceStatements() {
-        SqlSimpleStatement analyze = (SqlSimpleStatement) SQL.parse("ANALYZE TABLE t");
+        SqlMaintenanceStatement analyze = (SqlMaintenanceStatement) SQL.parse("ANALYZE TABLE t");
         assertEquals(SqlStatementType.OTHER, analyze.type());
-        assertEquals("t", analyze.name().simpleName());
-        assertTrue(analyze.text().startsWith("ANALYZE"));
+        assertEquals("ANALYZE", analyze.kind());
+        assertNotNull(analyze.optionsRaw());
+        assertTrue(analyze.optionsRaw().toUpperCase().contains("TABLE"));
+        assertEquals(1, analyze.tables().size());
+        assertEquals("t", analyze.tables().get(0).simpleName());
+        assertTrue(SQL.tables(analyze).contains("t"));
+        String aFmt = SQL.toSqlString(analyze).toUpperCase();
+        assertTrue(aFmt, aFmt.contains("ANALYZE"));
+        assertTrue(aFmt.contains("TABLE"));
 
-        SqlSimpleStatement vacuum = (SqlSimpleStatement) SQL.parse("VACUUM ANALYZE t", SqlDialect.POSTGRES);
-        assertEquals("t", vacuum.name().simpleName());
+        SqlMaintenanceStatement vacuum = (SqlMaintenanceStatement) SQL.parse(
+                "VACUUM ANALYZE t", SqlDialect.POSTGRES);
+        assertEquals("VACUUM", vacuum.kind());
+        assertNotNull(vacuum.optionsRaw());
+        assertTrue(vacuum.optionsRaw().toUpperCase().contains("ANALYZE"));
+        assertEquals("t", vacuum.tables().get(0).simpleName());
 
-        assertEquals("t", ((SqlSimpleStatement) SQL.parse("OPTIMIZE TABLE t")).name().simpleName());
-        assertEquals("t", ((SqlSimpleStatement) SQL.parse("REPAIR TABLE t")).name().simpleName());
-        assertEquals("t", ((SqlSimpleStatement) SQL.parse("CHECK TABLE t")).name().simpleName());
+        SqlMaintenanceStatement opt = (SqlMaintenanceStatement) SQL.parse("OPTIMIZE TABLE t, s");
+        assertEquals("OPTIMIZE", opt.kind());
+        assertEquals(2, opt.tables().size());
+        assertEquals("t", opt.tables().get(0).simpleName());
+        assertEquals("s", opt.tables().get(1).simpleName());
+        assertTrue(SQL.tables(opt).contains("t"));
+        assertTrue(SQL.tables(opt).contains("s"));
+
+        assertEquals("t", ((SqlMaintenanceStatement) SQL.parse("REPAIR TABLE t")).tables().get(0).simpleName());
+        assertEquals("t", ((SqlMaintenanceStatement) SQL.parse("CHECK TABLE t")).tables().get(0).simpleName());
+
+        SqlMaintenanceStatement full = (SqlMaintenanceStatement) SQL.parse(
+                "VACUUM FULL VERBOSE t", SqlDialect.POSTGRES);
+        assertEquals("VACUUM", full.kind());
+        assertTrue(full.optionsRaw().toUpperCase().contains("FULL"));
+        assertTrue(full.optionsRaw().toUpperCase().contains("VERBOSE"));
     }
 
     /**
