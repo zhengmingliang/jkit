@@ -29,6 +29,7 @@ import com.alianga.jkit.sql.ast.SqlOrderByItem;
 import com.alianga.jkit.sql.ast.SqlOverExpr;
 import com.alianga.jkit.sql.ast.SqlPivotTable;
 import com.alianga.jkit.sql.ast.SqlQueryExpr;
+import com.alianga.jkit.sql.ast.SqlRoutineParam;
 import com.alianga.jkit.sql.ast.SqlSelect;
 import com.alianga.jkit.sql.ast.SqlSelectItem;
 import com.alianga.jkit.sql.ast.SqlSimpleStatement;
@@ -826,11 +827,96 @@ public final class SqlFormatter {
             kw("AS");
             sp();
             writeNode(ddl.query());
+        } else if (!ddl.parameters().isEmpty() || !ddl.bodyStatements().isEmpty()
+                || (ddl.bodyRaw() != null && ddl.bodyRaw().length() > 0)) {
+            writeRoutineParamsAndBody(ddl);
         } else if (ddl.tail() != null && ddl.type() != SqlStatementType.ALTER) {
             sp();
             out.append(ddl.tail());
         }
         // ALTER 的 tail 由 writeAlterClauses 输出，避免重复
+    }
+
+    private void writeRoutineParamsAndBody(SqlDdlStatement ddl) {
+        if (!ddl.parameters().isEmpty()) {
+            sp();
+            out.append('(');
+            for (int i = 0; i < ddl.parameters().size(); i++) {
+                if (i > 0) {
+                    out.append(',');
+                    sp();
+                }
+                writeRoutineParam(ddl.parameters().get(i));
+            }
+            out.append(')');
+        } else if (ddl.tail() != null && ddl.tail().startsWith("(")
+                && ddl.bodyRaw() == null && ddl.bodyStatements().isEmpty()) {
+            sp();
+            out.append(ddl.tail());
+            return;
+        }
+        if (!ddl.bodyStatements().isEmpty()) {
+            sp();
+            kw("BEGIN");
+            for (int i = 0; i < ddl.bodyStatements().size(); i++) {
+                sp();
+                writeNode(ddl.bodyStatements().get(i));
+                out.append(';');
+            }
+            sp();
+            kw("END");
+        } else if (ddl.bodyRaw() != null && ddl.bodyRaw().length() > 0) {
+            sp();
+            out.append(ddl.bodyRaw());
+        } else if (ddl.tail() != null) {
+            // parameters 已写出时 tail 含参数+体，避免重复参数
+            if (ddl.parameters().isEmpty()) {
+                sp();
+                out.append(ddl.tail());
+            } else {
+                String t = ddl.tail().trim();
+                if (t.startsWith("(")) {
+                    int depth = 0;
+                    int cut = -1;
+                    for (int i = 0; i < t.length(); i++) {
+                        char c = t.charAt(i);
+                        if (c == '(') {
+                            depth++;
+                        } else if (c == ')') {
+                            depth--;
+                            if (depth == 0) {
+                                cut = i + 1;
+                                break;
+                            }
+                        }
+                    }
+                    if (cut >= 0 && cut < t.length()) {
+                        String rest = t.substring(cut).trim();
+                        if (!rest.isEmpty()) {
+                            sp();
+                            out.append(rest);
+                        }
+                    }
+                } else {
+                    sp();
+                    out.append(t);
+                }
+            }
+        }
+    }
+
+    private void writeRoutineParam(SqlRoutineParam param) {
+        if (param.mode() != null) {
+            out.append(param.mode());
+            sp();
+        }
+        if (param.name() != null) {
+            writeExpr(param.name());
+        }
+        if (param.typeRaw() != null && param.typeRaw().length() > 0) {
+            sp();
+            out.append(param.typeRaw());
+        }
     }
 
     private void writeAlterClauses(SqlDdlStatement ddl) {

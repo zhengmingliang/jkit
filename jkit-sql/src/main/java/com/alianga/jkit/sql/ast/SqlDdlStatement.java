@@ -38,6 +38,12 @@ public final class SqlDdlStatement extends SqlStatement {
     private String constraintType;
     private final List<SqlIdentifier> referencedTables = new ArrayList<SqlIdentifier>(1);
     private String tail;
+    /** PROCEDURE/FUNCTION 参数列表。 */
+    private final List<SqlRoutineParam> parameters = new ArrayList<SqlRoutineParam>(4);
+    /** BEGIN…END 内语句列表（尽力解析）。 */
+    private final List<SqlStatement> bodyStatements = new ArrayList<SqlStatement>(4);
+    /** 过程体原文（含 BEGIN/END 或单语句），可空。 */
+    private String bodyRaw;
 
     /**
      * {@inheritDoc}
@@ -347,6 +353,38 @@ public final class SqlDdlStatement extends SqlStatement {
     }
 
     /**
+     * @return PROCEDURE/FUNCTION 参数列表
+     * @since 2.0.1
+     */
+    public List<SqlRoutineParam> parameters() {
+        return parameters;
+    }
+
+    /**
+     * @return BEGIN…END 内语句列表（可能为空；解析失败片段可不在此列）
+     * @since 2.0.1
+     */
+    public List<SqlStatement> bodyStatements() {
+        return bodyStatements;
+    }
+
+    /**
+     * @return 过程体原文，可空
+     * @since 2.0.1
+     */
+    public String bodyRaw() {
+        return bodyRaw;
+    }
+
+    /**
+     * @param bodyRaw 过程体原文
+     * @since 2.0.1
+     */
+    public void setBodyRaw(String bodyRaw) {
+        this.bodyRaw = bodyRaw;
+    }
+
+    /**
      * {@inheritDoc}
      */
     @Override
@@ -354,6 +392,8 @@ public final class SqlDdlStatement extends SqlStatement {
         super.acceptChildren(visitor);
         children(visitor, names);
         children(visitor, columns);
+        children(visitor, parameters);
+        children(visitor, bodyStatements);
         child(visitor, indexName);
         children(visitor, indexColumns);
         child(visitor, renameTo);

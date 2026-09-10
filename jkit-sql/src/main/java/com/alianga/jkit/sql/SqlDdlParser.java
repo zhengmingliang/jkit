@@ -2,6 +2,7 @@ package com.alianga.jkit.sql;
 
 import com.alianga.jkit.sql.ast.SqlDdlStatement;
 import com.alianga.jkit.sql.ast.SqlIdentifier;
+import com.alianga.jkit.sql.ast.SqlRoutineParam;
 import com.alianga.jkit.sql.ast.SqlSimpleStatement;
 import com.alianga.jkit.sql.ast.SqlStatement;
 import com.alianga.jkit.sql.ast.SqlStatementType;
@@ -340,7 +341,7 @@ final class SqlDdlParser {
         String paramTail = null;
         if (p.match(SqlTokenType.LPAREN)) {
             if (routine) {
-                paramTail = "(" + p.skipBalancedParensContent() + ")";
+                paramTail = parseRoutineParameters(ddl);
             } else {
                 parseCreateColumns(ddl);
                 p.expect(SqlTokenType.RPAREN);
@@ -352,6 +353,8 @@ final class SqlDdlParser {
         } else if (!p.atStmtBreak()) {
             if ("TABLE".equalsIgnoreCase(ddl.objectType())) {
                 parseCreateTableOptions(ddl);
+            } else if (routine && isProcedureOrFunction(ddl.objectType())) {
+                parseRoutineBody(ddl, paramTail);
             } else {
                 String body = p.consumeRawAllowingBeginEnd();
                 if (paramTail != null) {
@@ -364,6 +367,281 @@ final class SqlDdlParser {
             ddl.setTail(paramTail);
         }
         return ddl;
+    }
+
+    private static boolean isProcedureOrFunction(String objectType) {
+        return "PROCEDURE".equalsIgnoreCase(objectType) || "FUNCTION".equalsIgnoreCase(objectType);
+    }
+
+    /**
+     * 解析 {@code ( [IN|OUT|INOUT] name type… , … )}，返回含括号的原文。
+     */
+    private String parseRoutineParameters(SqlDdlStatement ddl) {
+        int start = p.token.start() - 1; // 已消费 LPAREN，尽量从 '(' 起
+        // token.start 已在括号内；用拼接保证 paramTail 形态
+        StringBuilder raw = new StringBuilder("(");
+        boolean first = true;
+        if (!p.is(SqlTokenType.RPAREN)) {
+            do {
+                if (!first) {
+                    raw.append(',');
+                }
+                first = false;
+                SqlRoutineParam param = new SqlRoutineParam();
+                int pStart = p.token.start();
+                if (p.is(SqlTokenType.IN) || p.isIdent("OUT") || p.isIdent("INOUT")
+                        || (p.identLike() && ("IN".equalsIgnoreCase(p.token.text())
+                        || "OUT".equalsIgnoreCase(p.token.text())
+                        || "INOUT".equalsIgnoreCase(p.token.text())))) {
+                    // IN 是关键字；OUT/INOUT 多为 IDENT
+                    if (p.is(SqlTokenType.IN) || p.token.textEqualsIgnoreCase("IN")
+                            || p.token.textEqualsIgnoreCase("OUT")
+                            || p.token.textEqualsIgnoreCase("INOUT")) {
+                        param.setMode(p.token.text().toUpperCase());
+                        p.next();
+                    }
+                }
+                if (p.identLike() || (p.token.type() != null && p.token.type().keyword())) {
+                    param.setName(p.parseName());
+                }
+                int typeStart = p.token.start();
+                int depth = 0;
+                while (!p.is(SqlTokenType.EOF) && !p.is(SqlTokenType.SEMICOLON)) {
+                    if (depth == 0 && (p.is(SqlTokenType.COMMA) || p.is(SqlTokenType.RPAREN))) {
+                        break;
+                    }
+                    if (p.is(SqlTokenType.LPAREN)) {
+                        depth++;
+                    } else if (p.is(SqlTokenType.RPAREN)) {
+                        depth--;
+                    }
+                    p.next();
+                }
+                String typeRaw = p.lexer.rawSlice(typeStart, p.token.start()).trim();
+                if (!typeRaw.isEmpty()) {
+                    param.setTypeRaw(typeRaw);
+                }
+                ddl.parameters().add(param);
+                raw.append(p.lexer.rawSlice(pStart, p.token.start()).trim());
+            } while (p.match(SqlTokenType.COMMA));
+        }
+        p.expect(SqlTokenType.RPAREN);
+        raw.append(')');
+        return raw.toString();
+    }
+
+    private void parseRoutineBody(SqlDdlStatement ddl, String paramTail) {
+        int start = p.token.start();
+        // 特性子句（RETURNS / DETERMINISTIC / COMMENT …）保留进 bodyRaw；碰到 BEGIN 再拆语句
+        while (!p.is(SqlTokenType.EOF) && !p.atStmtBreak() && !p.is(SqlTokenType.BEGIN)
+                && !isRoutineExecutableStart()) {
+            if (p.is(SqlTokenType.LPAREN)) {
+                p.next();
+                p.skipBalancedParensContent();
+            } else {
+                p.next();
+            }
+        }
+        if (p.is(SqlTokenType.BEGIN)) {
+            p.next(); // BEGIN
+            while (!p.is(SqlTokenType.EOF)) {
+                while (p.isStmtSeparator()) {
+                    p.next();
+                }
+                if (p.is(SqlTokenType.END)) {
+                    SqlToken peek = p.lexer.peek();
+                    if (peek != null && isCompoundEndSuffix(peek)) {
+                        ddl.bodyStatements().add(consumeCompoundRemainderAsOther());
+                        continue;
+                    }
+                    p.next(); // END
+                    break;
+                }
+                if (p.is(SqlTokenType.IF) || p.is(SqlTokenType.CASE) || p.isIdent("WHILE")
+                        || p.isIdent("LOOP") || p.isIdent("REPEAT")) {
+                    ddl.bodyStatements().add(consumeCompoundStatementAsOther());
+                } else {
+                    try {
+                        ddl.bodyStatements().add(p.parseStatement());
+                    } catch (SqlParseException ex) {
+                        ddl.bodyStatements().add(consumeUntilSemiAsOther());
+                    }
+                }
+                if (p.isStmtSeparator()) {
+                    p.next();
+                }
+            }
+        } else if (!p.atStmtBreak()) {
+            try {
+                ddl.bodyStatements().add(p.parseStatement());
+            } catch (SqlParseException ex) {
+                // 回落原文
+                p.consumeRawAllowingBeginEnd();
+            }
+        }
+        String bodyRaw = p.lexer.rawSlice(start, p.token.start()).trim();
+        ddl.setBodyRaw(bodyRaw);
+        if (paramTail != null) {
+            ddl.setTail(bodyRaw.isEmpty() ? paramTail : paramTail + " " + bodyRaw);
+        } else {
+            ddl.setTail(bodyRaw);
+        }
+    }
+
+    private boolean isRoutineExecutableStart() {
+        return p.is(SqlTokenType.SELECT) || p.is(SqlTokenType.WITH) || p.is(SqlTokenType.INSERT)
+                || p.is(SqlTokenType.UPDATE) || p.is(SqlTokenType.DELETE) || p.is(SqlTokenType.REPLACE)
+                || p.is(SqlTokenType.SET) || p.is(SqlTokenType.CALL) || p.is(SqlTokenType.DECLARE)
+                || p.is(SqlTokenType.IF) || p.is(SqlTokenType.CASE)
+                || p.isIdent("WHILE") || p.isIdent("LOOP") || p.isIdent("REPEAT")
+                || p.isIdent("LEAVE") || p.isIdent("ITERATE") || p.isIdent("RETURN");
+    }
+
+    private static boolean isCompoundEndSuffix(SqlToken peek) {
+        if (peek == null || peek.type() == null) {
+            return false;
+        }
+        if (peek.type() == SqlTokenType.IF || peek.type() == SqlTokenType.CASE) {
+            return true;
+        }
+        String t = peek.text();
+        return t != null && ("WHILE".equalsIgnoreCase(t) || "LOOP".equalsIgnoreCase(t)
+                || "REPEAT".equalsIgnoreCase(t));
+    }
+
+    private SqlStatement consumeCompoundStatementAsOther() {
+        int start = p.token.start();
+        String text = p.consumeRawAllowingBeginEnd();
+        // consumeRawAllowingBeginEnd 在 beginDepth=0 时遇分号会停，对 IF 不够；
+        // 若仍停在 END IF 之前，继续用配对消费
+        if (p.is(SqlTokenType.IF) || p.is(SqlTokenType.CASE) || p.isIdent("WHILE")
+                || p.isIdent("LOOP") || p.isIdent("REPEAT")
+                || (!p.is(SqlTokenType.END) && !p.atStmtBreak() && !p.is(SqlTokenType.EOF))) {
+            // 上面已消费了开头，若 text 只吃到首个分号，补全到匹配 END xxx
+            text = p.lexer.rawSlice(start, p.token.start()).trim();
+            if (!isAtCompoundClose()) {
+                text = consumeUntilCompoundClose(start);
+            }
+        } else {
+            text = p.lexer.rawSlice(start, p.token.start()).trim();
+        }
+        SqlSimpleStatement stmt = new SqlSimpleStatement();
+        stmt.setStatementType(SqlStatementType.OTHER);
+        stmt.setText(text);
+        return stmt;
+    }
+
+    private SqlStatement consumeCompoundRemainderAsOther() {
+        // 当前为 END，且后跟 IF/CASE/… —— 说明外层误判；整段当 OTHER 不该走到这里。
+        // 保险：把 END xxx 吃掉作为一个 OTHER。
+        int start = p.token.start();
+        p.next(); // END
+        if (!p.is(SqlTokenType.EOF) && !p.atStmtBreak()) {
+            p.next(); // IF/CASE/…
+        }
+        SqlSimpleStatement stmt = new SqlSimpleStatement();
+        stmt.setStatementType(SqlStatementType.OTHER);
+        stmt.setText(p.lexer.rawSlice(start, p.token.start()).trim());
+        return stmt;
+    }
+
+    private boolean isAtCompoundClose() {
+        return p.is(SqlTokenType.END) && isCompoundEndSuffix(p.lexer.peek());
+    }
+
+    private String consumeUntilCompoundClose(int start) {
+        int ifDepth = 0;
+        int whileDepth = 0;
+        int loopDepth = 0;
+        int repeatDepth = 0;
+        int caseDepth = 0;
+        // 起点已在复合语句内部某处；重新从 start 不方便，只能从当前向后配对
+        // 简化：提高 begin 风格，遇到 END IF/WHILE/… 递减，全 0 且刚消费完 END xxx 停止
+        // 因已部分消费，用「见到 END <suffix> 且各深度归零」困难；改为：
+        // 从当前起，统计未关闭的 IF/WHILE/LOOP/REPEAT/CASE。
+        while (!p.is(SqlTokenType.EOF)) {
+            if (p.is(SqlTokenType.IF)) {
+                ifDepth++;
+                p.next();
+            } else if (p.isIdent("WHILE")) {
+                whileDepth++;
+                p.next();
+            } else if (p.isIdent("LOOP")) {
+                loopDepth++;
+                p.next();
+            } else if (p.isIdent("REPEAT")) {
+                repeatDepth++;
+                p.next();
+            } else if (p.is(SqlTokenType.CASE)) {
+                caseDepth++;
+                p.next();
+            } else if (p.is(SqlTokenType.END)) {
+                p.next();
+                if (p.is(SqlTokenType.IF)) {
+                    if (ifDepth > 0) {
+                        ifDepth--;
+                    }
+                    p.next();
+                    if (ifDepth == 0 && whileDepth == 0 && loopDepth == 0 && repeatDepth == 0 && caseDepth == 0) {
+                        break;
+                    }
+                } else if (p.is(SqlTokenType.CASE)) {
+                    if (caseDepth > 0) {
+                        caseDepth--;
+                    }
+                    p.next();
+                    if (ifDepth == 0 && whileDepth == 0 && loopDepth == 0 && repeatDepth == 0 && caseDepth == 0) {
+                        break;
+                    }
+                } else if (p.isIdent("WHILE")) {
+                    if (whileDepth > 0) {
+                        whileDepth--;
+                    }
+                    p.next();
+                    if (ifDepth == 0 && whileDepth == 0 && loopDepth == 0 && repeatDepth == 0 && caseDepth == 0) {
+                        break;
+                    }
+                } else if (p.isIdent("LOOP")) {
+                    if (loopDepth > 0) {
+                        loopDepth--;
+                    }
+                    p.next();
+                    if (ifDepth == 0 && whileDepth == 0 && loopDepth == 0 && repeatDepth == 0 && caseDepth == 0) {
+                        break;
+                    }
+                } else if (p.isIdent("REPEAT")) {
+                    if (repeatDepth > 0) {
+                        repeatDepth--;
+                    }
+                    p.next();
+                    if (ifDepth == 0 && whileDepth == 0 && loopDepth == 0 && repeatDepth == 0 && caseDepth == 0) {
+                        break;
+                    }
+                } else {
+                    // 裸 END：可能是 BEGIN 块结束，交还调用方
+                    break;
+                }
+            } else if (p.is(SqlTokenType.LPAREN)) {
+                p.next();
+                p.skipBalancedParensContent();
+            } else {
+                p.next();
+            }
+        }
+        return p.lexer.rawSlice(start, p.token.start()).trim();
+    }
+
+    private SqlStatement consumeUntilSemiAsOther() {
+        int start = p.token.start();
+        String rest = p.consumeRawUntilSemi();
+        SqlSimpleStatement stmt = new SqlSimpleStatement();
+        stmt.setStatementType(SqlStatementType.OTHER);
+        String text = p.lexer.rawSlice(start, p.token.start()).trim();
+        if (text.isEmpty()) {
+            text = rest;
+        }
+        stmt.setText(text);
+        return stmt;
     }
 
     private void parseCreateColumns(SqlDdlStatement ddl) {

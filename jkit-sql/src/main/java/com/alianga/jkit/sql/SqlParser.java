@@ -956,7 +956,7 @@ public final class SqlParser {
         return raw;
     }
 
-    private boolean isStmtSeparator() {
+    boolean isStmtSeparator() {
         if (is(SqlTokenType.GO)) {
             return true;
         }
