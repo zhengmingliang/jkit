@@ -14,6 +14,8 @@ import java.util.List;
 public final class SqlTable extends SqlTableSource {
     private SqlIdentifier name;
     private String indexHint;
+    /** SQL Server {@code WITH (NOLOCK)} 表提示原文，位于别名之后。 */
+    private String withHint;
     private String optimizerHint;
     private String sampleClause;
     /** Oracle {@code AS OF TIMESTAMP|SCN …} / SQL Server {@code FOR SYSTEM_TIME …} 原文。 */
@@ -58,6 +60,22 @@ public final class SqlTable extends SqlTableSource {
      */
     public void setIndexHint(String indexHint) {
         this.indexHint = indexHint;
+    }
+
+    /**
+     * @return SQL Server {@code WITH (...)} 表提示原文，可空
+     * @since 2.0.1
+     */
+    public String withHint() {
+        return withHint;
+    }
+
+    /**
+     * @param withHint {@code WITH (...)} 表提示原文
+     * @since 2.0.1
+     */
+    public void setWithHint(String withHint) {
+        this.withHint = withHint;
     }
 
     /**

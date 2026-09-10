@@ -22,6 +22,7 @@ import com.alianga.jkit.sql.ast.SqlStatement;
 import com.alianga.jkit.sql.ast.SqlStatementType;
 import com.alianga.jkit.sql.ast.SqlTable;
 import com.alianga.jkit.sql.ast.SqlTableHandlerStatement;
+import com.alianga.jkit.sql.ast.SqlWithItem;
 import com.alianga.jkit.sql.visitor.SqlVisitorAdapter;
 
 import java.util.ArrayDeque;
@@ -30,6 +31,7 @@ import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -48,6 +50,8 @@ public final class SqlSchemaStat {
     private final List<String> conditions = new ArrayList<String>();
     private final List<String> orderByColumns = new ArrayList<String>();
     private final List<String> groupByColumns = new ArrayList<String>();
+    /** WITH 子句的 CTE 名：CTE 不是物理表，不进 tables()。 */
+    private final Set<String> cteNames = new LinkedHashSet<String>();
     private final SqlFormatter compact = new SqlFormatter(false, SqlDialect.MYSQL);
 
     /**
@@ -169,14 +173,47 @@ public final class SqlSchemaStat {
                 addCondition(((SqlJoin) node).condition());
                 return true;
             }
+            if (node instanceof SqlWithItem) {
+                // 登记 CTE 名，供 addTable 过滤；子查询继续走
+                SqlWithItem item = (SqlWithItem) node;
+                if (item.name() != null) {
+                    String n = item.name().qualifiedName();
+                    if (!n.isEmpty()) {
+                        cteNames.add(n.toLowerCase(Locale.ROOT));
+                    }
+                }
+                return true;
+            }
             if (node instanceof SqlTable) {
                 addTable(((SqlTable) node).name(), accessStack.peek());
                 return false;
             }
             if (node instanceof SqlDdlStatement) {
                 SqlDdlStatement ddl = (SqlDdlStatement) node;
-                for (int i = 0; i < ddl.names().size(); i++) {
-                    addTable(ddl.names().get(i), ddl.type());
+                String objectType = ddl.objectType();
+                if (objectType == null || "TABLE".equalsIgnoreCase(objectType)
+                        || "VIEW".equalsIgnoreCase(objectType)) {
+                    // 表/视图对象：names 即对象（视图按项目既定语义计入，见 SqlParserTest.p15）
+                    for (int i = 0; i < ddl.names().size(); i++) {
+                        addTable(ddl.names().get(i), ddl.type());
+                    }
+                } else if ("INDEX".equalsIgnoreCase(objectType)) {
+                    // 索引对象：names[0] 是索引名不是表；names[1..] 是 ON 的表
+                    for (int i = 1; i < ddl.names().size(); i++) {
+                        addTable(ddl.names().get(i), ddl.type());
+                    }
+                }
+                // 其余对象（VIEW/PROCEDURE/FUNCTION/TRIGGER/EVENT/USER/DATABASE/SEQUENCE）
+                // 的 names 是对象名，不当表；真实表走下面结构化字段
+                if (ddl.triggerTable() != null) {
+                    addTable(ddl.triggerTable(), ddl.type());
+                }
+                if (ddl.likeTable() != null) {
+                    addTable(ddl.likeTable(), SqlStatementType.SELECT);
+                }
+                if (ddl.renameTo() != null) {
+                    // ALTER TABLE t RENAME TO t2 / RENAME TABLE a TO b：目标也是表
+                    addTable(ddl.renameTo(), ddl.type());
                 }
                 for (int i = 0; i < ddl.referencedTables().size(); i++) {
                     addTable(ddl.referencedTables().get(i), SqlStatementType.SELECT);
@@ -196,7 +233,12 @@ public final class SqlSchemaStat {
                 return true;
             }
             if (node instanceof SqlSimpleStatement) {
-                addTable(((SqlSimpleStatement) node).name(), accessStack.peek());
+                SqlSimpleStatement simple = (SqlSimpleStatement) node;
+                // 只有 TRUNCATE 的 name 是表；USE db / CALL sp / DECLARE x / GRANT … ON db.*
+                // 的 name 分别是库名、例程名、变量名、授权对象，都不是表
+                if (simple.type() == SqlStatementType.TRUNCATE) {
+                    addTable(simple.name(), accessStack.peek());
+                }
                 return true;
             }
             if (node instanceof SqlTableHandlerStatement) {
@@ -278,7 +320,7 @@ public final class SqlSchemaStat {
             return;
         }
         String q = name.qualifiedName();
-        if (q.isEmpty()) {
+        if (q.isEmpty() || cteNames.contains(q.toLowerCase(Locale.ROOT))) {
             return;
         }
         SqlTableAccess access = tables.get(q);

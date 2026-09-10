@@ -810,6 +810,11 @@ public final class SqlFormatter {
             sp();
             kw("EXISTS");
         }
+        if (ddl.userSpec() != null) {
+            // CREATE USER 'u'@'%'：账号原文输出，保留引号与 @ 结构
+            sp();
+            out.append(ddl.userSpec());
+        }
         if (!ddl.names().isEmpty()) {
             sp();
             if (isIndexDdl(ddl) && ddl.names().size() >= 2) {
@@ -850,7 +855,14 @@ public final class SqlFormatter {
             }
             out.append(')');
         }
-        if (ddl.type() == SqlStatementType.ALTER) {
+        if (ddl.type() == SqlStatementType.CREATE && ddl.likeTable() != null) {
+            // CREATE TABLE t2 LIKE t1
+            sp();
+            kw("LIKE");
+            sp();
+            writeExpr(ddl.likeTable());
+        }
+        if (ddl.type() == SqlStatementType.ALTER || ddl.type() == SqlStatementType.RENAME) {
             writeAlterClauses(ddl);
         }
         if (ddl.engine() != null) {
@@ -898,7 +910,8 @@ public final class SqlFormatter {
                 || (ddl.bodyRaw() != null && ddl.bodyRaw().length() > 0)
                 || (ddl.returnsType() != null && ddl.returnsType().length() > 0)) {
             writeRoutineParamsAndBody(ddl);
-        } else if (ddl.tail() != null && ddl.type() != SqlStatementType.ALTER) {
+        } else if (ddl.tail() != null && ddl.type() != SqlStatementType.ALTER
+                && ddl.type() != SqlStatementType.RENAME) {
             sp();
             out.append(ddl.tail());
         }
@@ -1120,7 +1133,7 @@ public final class SqlFormatter {
     private void writeAlterClauses(SqlDdlStatement ddl) {
         if (ddl.alterAction() == null) {
             if (ddl.tail() != null) {
-                sp();
+                spBeforeComma(ddl.tail());
                 out.append(ddl.tail());
             }
             return;
@@ -1130,7 +1143,7 @@ public final class SqlFormatter {
         if (ddl.renameTo() != null) {
             sp();
             writeExpr(ddl.renameTo());
-            return;
+            // RENAME TABLE a TO b, c TO d：第二组以后在 tail，提前 return 会静默丢组
         }
         if (ddl.constraintName() != null) {
             sp();
@@ -1171,8 +1184,17 @@ public final class SqlFormatter {
             out.append(ddl.columnDefinition());
         }
         if (ddl.tail() != null) {
-            sp();
+            spBeforeComma(ddl.tail());
             out.append(ddl.tail());
+        }
+    }
+
+    /**
+     * tail 以逗号开头（RENAME TABLE a TO b , c TO d 的后续组）时不再补空格。
+     */
+    private void spBeforeComma(String tail) {
+        if (tail.isEmpty() || tail.charAt(0) != ',') {
+            sp();
         }
     }
 
@@ -1421,6 +1443,11 @@ public final class SqlFormatter {
             }
             return;
         }
+        if (stmt.type() == SqlStatementType.TRUNCATE) {
+            // TRUNCATE [TABLE] t：统一带 TABLE（MySQL 推荐写法，两种输入语义相同）
+            sp();
+            kw("TABLE");
+        }
         if (stmt.name() != null) {
             sp();
             writeExpr(stmt.name());
@@ -1508,7 +1535,7 @@ public final class SqlFormatter {
             } else {
                 writeFrom(join.left());
                 sp();
-                writeJoinType(join.joinType());
+                writeJoinType(join.joinType(), join.natural());
                 sp();
                 writeFrom(join.right());
                 if (join.condition() != null) {
@@ -1590,6 +1617,10 @@ public final class SqlFormatter {
         }
         if (source instanceof SqlTable) {
             SqlTable t = (SqlTable) source;
+            if (t.withHint() != null) {
+                sp();
+                out.append(t.withHint());
+            }
             if (t.matchRecognize() != null) {
                 sp();
                 out.append("MATCH_RECOGNIZE");
@@ -2615,8 +2646,12 @@ public final class SqlFormatter {
         out.append(')');
     }
 
-    private void writeJoinType(SqlJoin.Type type) {
-        if (type == null || type == SqlJoin.Type.INNER) {
+    private void writeJoinType(SqlJoin.Type type, boolean natural) {
+        if (natural) {
+            kw("NATURAL");
+            sp();
+        }
+        if (type == null || type == SqlJoin.Type.INNER || type == SqlJoin.Type.NATURAL) {
             kw("JOIN");
             return;
         }
@@ -2976,6 +3011,13 @@ public final class SqlFormatter {
             return;
         }
         writeExpr(fn.name());
+        if (fn.arrayConstructor()) {
+            out.append('[');
+            commaFunctionArgs(args);
+            out.append(']');
+            writeFunctionSuffix(fn);
+            return;
+        }
         if (fn.hasParameters()) {
             out.append('(');
             commaFunctionArgs(fn.parameters());

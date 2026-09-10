@@ -2112,13 +2112,17 @@ public final class SqlParser {
     }
 
     /**
-     * MySQL {@code 'u'@'%'} / {@code u@localhost} 收件人：{@code @} 两侧不加空格。
+     * MySQL {@code 'u'@'%'} / {@code u@localhost} 收件人：{@code @} 两侧不加空格；
+     * 逗号前不加空格（{@code (10 , 2)} → {@code (10, 2)}，与函数参数写法一致）。
      */
     private static boolean noSpaceBeforeRawToken(StringBuilder sb, String next) {
         if (next == null || next.isEmpty()) {
             return false;
         }
         if (next.charAt(0) == '@') {
+            return true;
+        }
+        if (next.charAt(0) == ',') {
             return true;
         }
         return sb.charAt(sb.length() - 1) == '@';

@@ -40,6 +40,10 @@
 
 ### 修复
 
+- `jkit-sql`：**回写保真收口**（新增 `SqlRoundTripFidelityTest`，66 条坑位语料，回写文本与原文**归一化后逐字比对**，只容忍纯排版差异）——修 `NATURAL LEFT/RIGHT/FULL/INNER JOIN` 回写丢修饰符（`LEFT` 静默丢失致外连接变内连接、`FULL` 被误当表名）；`RENAME TABLE a TO b[, c TO d]` 升为独立语句类型（此前回写成非法 `ALTER TABLE a TO b`，后续组静默丢失）；`ALTER TABLE … ADD UNIQUE KEY|INDEX` 回写丢 `UNIQUE`（唯一索引变普通索引）。
+- `jkit-sql`：解析失败补齐 — MySQL `DROP INDEX idx ON t`；SQL Server 表提示 `WITH (NOLOCK)` / `WITH (INDEX(ix))`（别名前后均可，原文保留）；PG 数组构造 `ARRAY[1,2,3]`（含 `ANY(ARRAY[...])`）；`CREATE/DROP USER 'u'@'%'`（账号原文 `userSpec`，引号不再被改写）。
+- `jkit-sql`：`tables()` 精度 — 补漏：`CREATE TRIGGER … ON t` 漏真实表、`CREATE TABLE t2 LIKE t1` 漏源表、`ALTER TABLE t RENAME TO t2` 漏目标表、`OPTIMIZE/ANALYZE/CHECK/REPAIR TABLE t, s` 只取首表；清误：库名（`USE db`）、例程/索引/事件对象名、`CALL sp` / `DECLARE` / `GRANT` 目标、CTE 名（`WITH w AS (…) SELECT FROM w`）不再计入。
+- `jkit-sql`：回写格式 — 类型参数紧凑逗号（`DECIMAL(10,2)`，不再 `DECIMAL(10 , 2)`）；`GRANT SELECT, INSERT`；`TRUNCATE TABLE` 统一补 `TABLE`；`'u'@'%'` 紧凑无空格。
 - `jkit-sql`：ClickHouse 参数化函数 `fn(params)(args)`（如 `windowFunnel(n)(...)`）；Oracle `MODEL` / `MATCH_RECOGNIZE` / `AS OF TIMESTAMP|SCN`；SQL Server `FOR SYSTEM_TIME AS OF`（表级时态子句）。
 - `jkit-sql`：`MODEL` / `MATCH_RECOGNIZE` 升级为结构化 AST（`SqlModelClause` / `SqlMatchRecognize` / `SqlNamedExpr`），保留 `raw` 往返；Formatter / Visitor 同步；`Complex100GiantsTest` 断言结构化字段。
 - `jkit-sql`：`MATCH_RECOGNIZE` 解析 `SUBSET name=(a,b,…)`（`SqlSubset`）；`MODEL RULES` 拆为 `SqlModelRule` 条目（`cell[…]=expr`，UPSERT 修饰；失败保留 raw）；`PATTERN`/`DEFINE` 保持既有字段。
@@ -97,6 +101,7 @@
 
 
 ### 新增
+- `jkit-sql`：回写保真新增公开 API（均 `@since 2.0.1`）— `SqlJoin.natural()`（`NATURAL` 与连接类型正交的独立标志）；`SqlTable.withHint()`（SQL Server `WITH (…)` 表提示原文）；`SqlFunctionExpr.arrayConstructor()`（PG 数组构造，方括号回写）；`SqlDdlStatement.likeTable()`（`CREATE TABLE … LIKE` 源表）/ `userSpec()`（`CREATE/DROP USER` 账号原文）；语句类型 `SqlStatementType.RENAME`。
 - `jkit-sql`：拼接/回写可开关标识符引号 — `SqlFormatOptions.quoteIdentifiers`（默认 false）；`SqlFormatter`/`SQL.toSqlString`/`SQL.format` 重载；`SqlBuilder.quoteIdentifiers(boolean)` 可开可关；开启后按方言强制引用（MySQL `` ` ``、PG/Oracle `"`、SQL Server `[]`），不影响字面量/关键字/`*`。
 - `jkit-sql`：新增 `SQL.parseExpr` / `SQL.parseExpr(expr, dialect)` / `SQL.parseExpr(expr, dialect, options)`，经 `SqlParser.parseExpression()` 解析裸表达式为 `SqlExpr`（须 EOF；支持方言与占位符选项）；`andWhere` / `SqlBuilder.parsePredicate` 改为走 `parseExpr`。
 - `jkit-sql`：补 Joplin 实语法缺口 — `LOCK TABLES` / `UNLOCK TABLES`（OTHER + 抽首表）、`SELECT … FROM … INTO @var|OUTFILE|DUMPFILE`（FROM 后置 INTO，镜像既有 SELECT INTO）、MySQL 客户端 `DELIMITER`（OTHER 占位）、`SET PASSWORD [FOR user] = …`（SET + text）；`CREATE DEFINER=user PROCEDURE|FUNCTION|…` 跳过 DEFINER 子句以便 DELIMITER 批可解析。

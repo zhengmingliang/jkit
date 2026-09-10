@@ -32,6 +32,8 @@ public final class SqlJoin extends SqlTableSource {
     }
 
     private Type joinType;
+    /** NATURAL 与连接类型正交：{@code NATURAL LEFT JOIN} 既是 NATURAL 也是 LEFT。 */
+    private boolean natural;
     private SqlTableSource left;
     private SqlTableSource right;
     private SqlExpr condition;
@@ -49,6 +51,23 @@ public final class SqlJoin extends SqlTableSource {
      */
     public void setJoinType(Type joinType) {
         this.joinType = joinType;
+    }
+
+    /**
+     * @return 是否 {@code NATURAL} 连接；与 {@link #joinType()} 正交，
+     *         {@code NATURAL LEFT JOIN} 返回 {@code true} 且类型为 {@code LEFT}
+     * @since 2.0.1
+     */
+    public boolean natural() {
+        return natural;
+    }
+
+    /**
+     * @param natural 是否 {@code NATURAL} 连接
+     * @since 2.0.1
+     */
+    public void setNatural(boolean natural) {
+        this.natural = natural;
     }
 
     /**

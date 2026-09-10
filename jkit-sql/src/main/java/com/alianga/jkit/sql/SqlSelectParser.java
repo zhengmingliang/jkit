@@ -71,8 +71,24 @@ final class SqlSelectParser {
                 continue;
             }
             SqlJoin.Type type = null;
+            boolean natural = false;
             if (p.match(SqlTokenType.COMMA)) {
                 type = SqlJoin.Type.COMMA;
+            } else if (p.match(SqlTokenType.NATURAL)) {
+                // NATURAL 与连接类型正交：NATURAL [LEFT|RIGHT|FULL|INNER] JOIN
+                natural = true;
+                if (p.match(SqlTokenType.LEFT)) {
+                    type = SqlJoin.Type.LEFT;
+                } else if (p.match(SqlTokenType.RIGHT)) {
+                    type = SqlJoin.Type.RIGHT;
+                } else if (p.match(SqlTokenType.FULL)) {
+                    type = SqlJoin.Type.FULL;
+                } else {
+                    p.match(SqlTokenType.INNER);
+                    type = SqlJoin.Type.INNER;
+                }
+                p.match(SqlTokenType.OUTER);
+                p.expect(SqlTokenType.JOIN);
             } else if (p.match(SqlTokenType.JOIN) || p.match(SqlTokenType.STRAIGHT_JOIN)
                     || p.match(SqlTokenType.INNER)) {
                 p.match(SqlTokenType.JOIN);
@@ -103,18 +119,12 @@ final class SqlSelectParser {
             } else if (p.match(SqlTokenType.OUTER)) {
                 p.expect(SqlTokenType.APPLY);
                 type = SqlJoin.Type.OUTER_APPLY;
-            } else if (p.match(SqlTokenType.NATURAL)) {
-                p.match(SqlTokenType.LEFT);
-                p.match(SqlTokenType.RIGHT);
-                p.match(SqlTokenType.INNER);
-                p.match(SqlTokenType.OUTER);
-                p.match(SqlTokenType.JOIN);
-                type = SqlJoin.Type.NATURAL;
             } else {
                 break;
             }
             SqlJoin join = new SqlJoin();
             join.setJoinType(type);
+            join.setNatural(natural);
             join.setLeft(left);
             join.setRight(parseTableSource());
             if (p.match(SqlTokenType.ON)) {
@@ -517,6 +527,21 @@ final class SqlSelectParser {
     }
 
     /**
+     * SQL Server 表提示 {@code WITH (NOLOCK)} / {@code WITH (INDEX(ix))}，
+     * 可出现在表名之后或别名之后。
+     */
+    private void parseWithTableHint(SqlTable table) {
+        if (!p.is(SqlTokenType.WITH) || p.lexer.peek().type() != SqlTokenType.LPAREN) {
+            return;
+        }
+        p.next();
+        p.expect(SqlTokenType.LPAREN);
+        String hint = "WITH (" + p.skipBalancedParensContent() + ")";
+        String prev = table.withHint();
+        table.setWithHint(prev == null || prev.isEmpty() ? hint : prev + " " + hint);
+    }
+
+    /**
      * MySQL {@code PARTITION (p0, p1)} 表分区限定（位于表名之后、别名之前）。
      */
     private void parseTablePartition(SqlTable table) {
@@ -640,6 +665,7 @@ final class SqlSelectParser {
             } else {
                 parseTableAlias(table);
             }
+            parseWithTableHint(table);
             parseTableSample(table);
             parseMatchRecognize(table);
             return table;

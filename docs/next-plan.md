@@ -304,3 +304,44 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 5. 对比工程：语料成功率 ✅；~~表名集合差分~~ ✅；改解析器后记得 `install` 再跑 tools-test。
 
 **发版叙事已定（sql-only）**：`jkit-sql` 随父 POM **2.0.1** 收口（`CHANGELOG` 顶栏 `## 2.0.1 - 2026-09-09`，javadoc `@since 2.0.1`）。每完成一块：补 `@since 2.0.1`（仅 sql 模块）、更新 `docs/sql.md` 覆盖表、在 `CHANGELOG.md` 的 `2.0.1 - 2026-09-09` 追加条目。父 POM 保持 2.0.1，不要擅自升版。
+
+---
+
+## 7. AST 深度收口评估（2026-09-10，agent）
+
+本轮已落地：`COMMENT ON` / `SET` 多赋值 / `EXPLAIN|DESCRIBE` 结构化。
+
+**余量多为低价值，建议问用户是否停止继续抠杂项：**
+
+| 项 | 建议 |
+| --- | --- |
+| GRANT/REVOKE 角色 / WITH GRANT OPTION / 多 TO 细拆 | 可选；现有 privileges+对象名已够多数墙/抽表 |
+| SHOW STATUS/VARIABLES/PROCESSLIST 细字段 | 跳过（raw 足够） |
+| VACUUM/ANALYZE 括号选项 DSL | 跳过 |
+| COMMENT ON FUNCTION 参数签名 | 跳过 |
+| lexer 短 ident intern | 延期（需 profiling） |
+
+主路径（DML/DDL 抽名、过程块、事务、维护、SHOW/SET/EXPLAIN/COMMENT）已较饱和。
+
+---
+
+## 8. 回写保真与表抽取精度收口（2026-09-10，agent）
+
+第 7 节只覆盖语法/AST 深度；本轮按用户指示转向**回写保真**与**表抽取精度**，全部完成 ✅（`mvn -pl jkit-sql test` 796 全绿）。
+
+**方法论（重要，后续 agent 直接复用）**：只断言「能否解析」测不出回写丢词——`NATURAL LEFT JOIN` 第一遍就把 `LEFT` 丢了，`format(format(x)) == format(x)` 依然成立。**必须做「原文归一化后 vs 回写」逐字比对**（归一化 = 去注释 / 去全部空白 / 去独立 `AS` / 统一大小写），已固化为 `SqlRoundTripFidelityTest`（66 条坑位语料）。
+
+本轮修复清单：
+
+- `SqlJoin.natural()`：`NATURAL` 与 joinType 正交（`NATURAL LEFT/RIGHT/FULL/INNER JOIN`）
+- `RENAME TABLE a TO b[, c TO d]`：独立语句类型 `RENAME`；多组不再静默丢
+- `ALTER … ADD UNIQUE KEY|INDEX` 保留 `UNIQUE`（根因：`isIdent("KEY")` 认不出关键字记号 → 改判 token 类型）
+- 解析失败补齐：`DROP INDEX … ON`、SS `WITH (NOLOCK)`/`WITH (INDEX(ix))`、PG `ARRAY[1,2,3]`、`CREATE/DROP USER`
+- `tables()`：补漏（TRIGGER 真实表 / LIKE 源表 / RENAME 目标表 / 维护语句全组）；清误（USE/CALL/DECLARE/对象名/GRANT/CTE 名）；VIEW 名计入 `tables()` 是 `SqlParserTest.p15` 锁定的既有语义，**保留勿动**
+- 格式：类型参数紧凑逗号（`appendRawToken` 不给逗号前加空格）、`GRANT` 列表、`TRUNCATE TABLE` 统一
+
+差分现状：only-druid 真缺口 3→1（剩 1 条是 druid 把 `TABLE(fn(...))` 函数当表，不是 jkit 的问题）；only-jkit 64→48（剩余抽查为 jkit 比 druid 抽得全：MERGE USING / HANDLER / REPAIR / FOR UPDATE 等）。
+
+**已知遗留（低价值，勿自动展开）**：`FROM dual` 计表、`SHOW TABLES FROM db` 把库名计表、`WITH (INDEX(ix))` 内部空格按原文保留。
+
+后续若继续：优先把 `SqlRoundTripFidelityTest` 扩到 `tools-test` 的 379 条语料批量跑（本地探针已验证可行），再考虑新语法。

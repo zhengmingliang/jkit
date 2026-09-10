@@ -51,6 +51,8 @@ SqlExpr withOpt = SQL.parseExpr("age > @age@", SqlDialect.MYSQL,
         SqlParseOptions.defaults().placeholders(SqlPlaceholders.create().atWrapped()));
 ```
 
+`tables()` 只收**真实被访问的表**：DML/SELECT 的 FROM/JOIN/INTO；DDL 按对象类型区分——`DROP/ALTER/TRUNCATE/RENAME TABLE` 的表、`CREATE TABLE t2 LIKE 源表`、`CREATE TRIGGER ... ON t`、维护语句（`OPTIMIZE/ANALYZE/CHECK/REPAIR TABLE t, s`）的全组表；VIEW 名按既有语义计入。**不**计入：库名（`USE db`）、例程/索引/事件等对象名（`CREATE INDEX idx`）、CTE 名（`WITH w AS (...) SELECT FROM w`）、`CALL sp` / `DECLARE` / `GRANT` 的目标。
+
 默认方言是 **MySQL**（GBase / MariaDB / TiDB 走同一套）。其它方言：
 
 ```java
@@ -183,7 +185,7 @@ stmt.accept(new SqlAstVisitor() {
 
 ## 格式化
 
-`format` / `toSqlString` 是 AST 回写（不保留空白与注释）。**语义往返**（`parse → format → parse`）保证 `type()`、`tables()`（忽略大小写）、`isReadOnly()` 与原文一致；黄金集 `SqlGoldenCorpusTest` 全覆盖。
+`format` / `toSqlString` 是 AST 回写（不保留空白与注释）。**语义往返**（`parse → format → parse`）保证 `type()`、`tables()`（忽略大小写）、`isReadOnly()` 与原文一致；黄金集 `SqlGoldenCorpusTest` 全覆盖。**词级保真**由 `SqlRoundTripFidelityTest` 额外保证：回写文本与原文**归一化后逐字等价**（去注释 / 去全部空白 / 去独立 `AS` / 统一大小写，只容忍纯排版差异），覆盖 JOIN 修饰符、DDL 关键字、`RENAME` 多组、引号形态等 66 条坑位语料——回写**丢词**（如 `NATURAL LEFT JOIN` 丢 `LEFT`）会直接抓出，不会静默通过。
 
 ```java
 SQL.format(stmt);                           // 换行缩进
@@ -272,17 +274,17 @@ SELECT 列表项与表源的别名用 **`alias()`** 读取：
 
 ## v1 覆盖
 
-- SELECT：列、`*`、`t.*`、DISTINCT / DISTINCT ON、TOP、`INTO` 表 / `@var` / `OUTFILE`（抽目标表进 `tables`/`INSERT`）、FROM（含 MySQL `PARTITION (p0,p1)` 表分区限定）、JOIN（INNER/LEFT/RIGHT/FULL/CROSS/NATURAL/STRAIGHT/逗号）、`CROSS APPLY` / `OUTER APPLY`、`LATERAL` 子查询/表函数、`UNNEST(...)` / `TABLE(fn(...))` / `OPENJSON(...) WITH (...)` 表函数、`(VALUES …) AS v(cols)`、ON/USING、WHERE、GROUP BY [WITH ROLLUP]、HAVING、`WINDOW … AS (…)`（可继承另一窗口名）、ORDER BY、LIMIT/OFFSET/`FETCH FIRST n ROWS ONLY`、FOR UPDATE [OF cols] [NOWAIT|SKIP LOCKED]、LOCK IN SHARE MODE、UNION/UNION ALL/INTERSECT/EXCEPT/MINUS、CONNECT BY / START WITH / PRIOR、WITH CTE
+- SELECT：列、`*`、`t.*`、DISTINCT / DISTINCT ON、TOP、`INTO` 表 / `@var` / `OUTFILE`（抽目标表进 `tables`/`INSERT`）、FROM（含 MySQL `PARTITION (p0,p1)` 表分区限定）、JOIN（INNER/LEFT/RIGHT/FULL/CROSS/STRAIGHT/逗号；`NATURAL` 与连接类型**正交**，`NATURAL LEFT/RIGHT/FULL/INNER JOIN` 均可解析与回写）、SQL Server 表提示 `WITH (NOLOCK)` / `WITH (INDEX(ix))`（别名前后均可，原文保留）、`CROSS APPLY` / `OUTER APPLY`、`LATERAL` 子查询/表函数、`UNNEST(...)` / `TABLE(fn(...))` / `OPENJSON(...) WITH (...)` 表函数、`(VALUES …) AS v(cols)`、ON/USING、WHERE、GROUP BY [WITH ROLLUP]、HAVING、`WINDOW … AS (…)`（可继承另一窗口名）、ORDER BY、LIMIT/OFFSET/`FETCH FIRST n ROWS ONLY`、FOR UPDATE [OF cols] [NOWAIT|SKIP LOCKED]、LOCK IN SHARE MODE、UNION/UNION ALL/INTERSECT/EXCEPT/MINUS、CONNECT BY / START WITH / PRIOR、WITH CTE
 - Oracle / 时态：`MODEL` → `SqlModelClause`（`RULES` → `SqlModelRule`，`cellDims`/`cellDimExprs`，失败保留 `raw`）；`MATCH_RECOGNIZE` → `SqlMatchRecognize`（`PARTITION BY`/`ORDER BY`/`MEASURES`/`PATTERN` 字符串/`DEFINE`/`SUBSET`/`WITHIN`，`ROWS PER MATCH`/`AFTER MATCH` 字段；`PATTERN` 未建 DSL 树）；表级 `AS OF TIMESTAMP|SCN`、SQL Server `FOR SYSTEM_TIME AS OF`；ClickHouse 参数化函数 `fn(params)(args)`
 - 窗口函数：`OVER (PARTITION BY ... ORDER BY ... ROWS/RANGE BETWEEN ...)`、命名窗口引用 `OVER w`、SELECT 级 `WINDOW w AS (...)`（可多个；`w2 AS (w)` / `w2 AS (w ORDER BY …)` 继承）、`FILTER (WHERE ...)`
 - 特殊函数：`EXTRACT(field FROM expr)`、`TRIM(BOTH/LEADING/TRAILING ... FROM expr)`、`SUBSTRING(expr FROM n FOR m)`、`POSITION(a IN b)`、`IF(a,b,c)`（MySQL）、`CONVERT(expr USING charset)` / `CONVERT(type, expr)`（SQL Server）、`GROUP_CONCAT(... ORDER BY ... SEPARATOR ...)`、`STRING_AGG(... ORDER BY ...)` / `WITHIN GROUP (ORDER BY ...)`、`MATCH (cols) AGAINST (...)`
 - INSERT / REPLACE：列清单、VALUES 多行、INSERT SELECT、INSERT SET、ON DUPLICATE KEY UPDATE、PG `ON CONFLICT`（`DO NOTHING` / `DO UPDATE` / `ON CONSTRAINT`）、`RETURNING`（`*` 或多列列表）、SQL Server `OUTPUT` / `OUTPUT … INTO`、Oracle `INSERT ALL` / `INSERT FIRST`
 - UPDATE / DELETE：JOIN、WHERE、ORDER BY、LIMIT、PG `UPDATE … FROM`、PG/MySQL `DELETE … USING`、`RETURNING`（多列）、SQL Server `OUTPUT` / `OUTPUT … INTO`（表 / `@var` / `#tmp`，进 `tables()`）
 - MERGE：INTO / USING / ON、多个 `WHEN MATCHED [AND pred]`、`WHEN NOT MATCHED [BY TARGET|SOURCE]`、`OUTPUT` / `OUTPUT … INTO`
-- DDL：CREATE/DROP/ALTER TABLE|VIEW|INDEX|DATABASE|PROCEDURE|FUNCTION|TRIGGER|EVENT（抽对象名；`CREATE OR REPLACE`；VIEW/CTAS 的 AS query；过程/函数参数 → `SqlRoutineParam`，`FUNCTION RETURNS` → `returnsType`，BEGIN 体 → `bodyStatements`（保留 `bodyRaw`/`tail` 往返）；CREATE TABLE 列定义原文（`columnDefinitions`）+ ENGINE/CHARSET/COLLATE/COMMENT + 表级 FOREIGN KEY 引用表；ALTER ADD/DROP INDEX、RENAME TO、CHANGE/MODIFY 列定义、ADD CONSTRAINT）
+- DDL：CREATE/DROP/ALTER TABLE|VIEW|INDEX|DATABASE|PROCEDURE|FUNCTION|TRIGGER|EVENT|USER（抽对象名；`CREATE OR REPLACE`；VIEW/CTAS 的 AS query；过程/函数参数 → `SqlRoutineParam`，`FUNCTION RETURNS` → `returnsType`，BEGIN 体 → `bodyStatements`（保留 `bodyRaw`/`tail` 往返）；CREATE TABLE 列定义原文（`columnDefinitions`）+ ENGINE/CHARSET/COLLATE/COMMENT + 表级 FOREIGN KEY 引用表；`CREATE TABLE t2 LIKE t1` 抽源表进 `tables()`；ALTER ADD/DROP INDEX（含 `ADD UNIQUE KEY|INDEX` 保留 `UNIQUE`）、`DROP INDEX idx ON t`、RENAME TO、CHANGE/MODIFY 列定义、ADD CONSTRAINT）；独立语句 `RENAME TABLE a TO b[, c TO d]`（多组完整回写）；`CREATE/DROP USER 'u'@'%'` 账号原文保留（`userSpec`）
 - `EXPLAIN`/`DESCRIBE` → `SqlExplainStatement`（ANALYZE/FORMAT/BUFFERS 等选项 + 嵌套 statement）、`SET` → `SqlSetStatement`（多赋值 / NAMES / CHARACTER SET / SESSION|GLOBAL）、USE、SHOW、CALL（实参进 AST）、TRUNCATE、GRANT / REVOKE（权限 + ON 对象名；收件人 `user@host` 紧凑回写；REVOKE 用 FROM）
 - 过程块 / 维护 / 事务：`BEGIN … END` / 顶层匿名 `DECLARE … BEGIN … END` → `SqlBlockStatement`；会话式 `DECLARE x INT`（OTHER）；过程体内 `DECLARE`/`CURSOR FOR` → `SqlDeclareStatement`，`CONTINUE|EXIT|UNDO HANDLER` → `SqlHandlerStatement`；`IF`/`WHILE`/`LOOP`/`REPEAT`/`CASE…END CASE`/`LEAVE`/`ITERATE`/`RETURN` → `SqlControlStatement`（可带循环标签）；`TRIGGER` 抽 `triggerTiming`/`triggerEvent`/`triggerTable`/`triggerUpdateColumns`/`FOR EACH`/`FOLLOWS|PRECEDES`；`EVENT` 抽 `ON SCHEDULE AT|EVERY`、`eventStarts`/`eventEnds`/`eventEnabled`/`eventComment`/`eventOnCompletion`/`eventDisableOnSlave`；裸 `BEGIN` / `BEGIN WORK` / `START TRANSACTION` → `SqlStartTransactionStatement`（隔离级别 / READ WRITE|ONLY / WITH CONSISTENT SNAPSHOT）；`COMMIT` / `ROLLBACK [TO SAVEPOINT]` / `SAVEPOINT` / `RELEASE SAVEPOINT` → `SqlTransactionControlStatement`；`FLUSH …` → `SqlFlushStatement`（选项列表 / TABLES 表名）；`LOCK TABLES`/`UNLOCK TABLES` → `SqlLockTablesStatement`；`ANALYZE` / `VACUUM` / `OPTIMIZE|REPAIR|CHECK TABLE` → `SqlMaintenanceStatement`（tables + optionsRaw）；`SHOW CREATE TABLE|VIEW|DATABASE` / `SHOW COLUMNS|INDEX|TABLES` → `SqlShowStatement`；`COMMENT ON TABLE|COLUMN|…` → `SqlCommentOnStatement`（objectKind/name/comment）；SQL Server `GO` 批分隔；PG `COPY … FROM|TO` → `SqlCopyStatement`（表/列/STDIN·PROGRAM·文件 + WITH 原文）；MySQL `LOAD DATA [LOCAL] INFILE … INTO TABLE` → `SqlLoadDataStatement`（文件/表/列 + FIELDS·LINES·IGNORE 原文）；MySQL 表 `HANDLER t OPEN|READ|CLOSE` → `SqlTableHandlerStatement`；`PREPARE` / `EXECUTE` / `DEALLOCATE PREPARE` / `EXECUTE IMMEDIATE` → `SqlPrepareStatement`（名 / FROM·源 / USING）
-- 表达式：字面量、绑定 `?` / `:name` / `@var`、算术比较、AND/OR/XOR/NOT、IN（含 `IN :name` / `IN ?` 无括号绑定列表）/BETWEEN/LIKE/ILIKE/REGEXP、IS NULL、`IS DISTINCT FROM` / `IS NOT DISTINCT FROM`、CASE、CAST / `::`、函数、EXISTS、子查询、`INTERVAL '1 day'` / `INTERVAL 1 DAY`、`X'FF'` / `0xFF`、行构造 `(a,b)`、JSON `->` `->>` `#>` `#>>`、数组下标 `arr[1]`、`= ANY/SOME/ALL (...)`；另含 PG `@>`/`<@`/`~`/`~*`、MySQL `FORCE INDEX FOR …`/`<=>`/`INSERT DELAYED`/`BINARY`、SQL Server `TOP WITH TIES`、`TABLESAMPLE`/`SAMPLE`、Oracle `(+)` 外连接后缀
+- 表达式：字面量、绑定 `?` / `:name` / `@var`、算术比较、AND/OR/XOR/NOT、IN（含 `IN :name` / `IN ?` 无括号绑定列表）/BETWEEN/LIKE/ILIKE/REGEXP、IS NULL、`IS DISTINCT FROM` / `IS NOT DISTINCT FROM`、CASE、CAST / `::`、函数、EXISTS、子查询、`INTERVAL '1 day'` / `INTERVAL 1 DAY`、`X'FF'` / `0xFF`、行构造 `(a,b)`、JSON `->` `->>` `#>` `#>>`、数组下标 `arr[1]`、PG 数组构造 `ARRAY[1,2,3]`（含 `ANY(ARRAY[...])`）、`= ANY/SOME/ALL (...)`；另含 PG `@>`/`<@`/`~`/`~*`、MySQL `FORCE INDEX FOR …`/`<=>`/`INSERT DELAYED`/`BINARY`、SQL Server `TOP WITH TIES`、`TABLESAMPLE`/`SAMPLE`、Oracle `(+)` 外连接后缀
 - 注释：`--`、`/* */`、MySQL `#`；仅注释/空白的输入解析为 `OTHER` 空语句（不抛 empty SQL）；MySQL 可执行注释 `/*!40101 … */` 展开为内部 SQL（不整段丢弃）；优化器 hint `/*+ … */` 挂到 SELECT / 表并可 format 回写
 - 标识符：MySQL 裸标识符允许数字开头（如 `32强国` / `1019使用`），整段不能只是数字；`32` / `32.5` / `32e1` / `0xFF` 仍为字面量；反引号形式原本即可；限定名中点号后的数字开头段可解析（`t.1_id` / `a.32强国`；前导小数 `.5` 仍为 NUMBER）；点号后单引号名作引用标识符（`T.'Group'`）；SELECT 列表别名支持点号限定（`AS a.b`）
 - 客户端 / 批处理：`DELIMITER xx` 切换 `parseAll` 终止符（见「DELIMITER」）；SQL Server `GO` 批分隔
@@ -305,13 +307,13 @@ mvn -Dtest=SqlParserCompareTest test
 
 | | 解析成功率（文件语料） | 备注 |
 | --- | --- | --- |
-| **jkit-sql** | **379/379 (100%)** | 模块内黄金集约 216 条（含往返，`SqlGoldenCorpusTest` 约 432 断言）；`mvn -pl jkit-sql test` 约 **790** 条 |
+| **jkit-sql** | **379/379 (100%)** | 模块内黄金集约 216 条（含往返，`SqlGoldenCorpusTest` 约 432 断言）+ 回写保真 66 条（`SqlRoundTripFidelityTest`）；`mvn -pl jkit-sql test` 约 **800** 条 |
 | Druid 1.2.23 | 低于 jkit（缺口见 `target/sql-compare-fail.txt`） | 对比不进本库依赖 |
 | JSqlParser 4.9 | 低于 jkit | 同上 |
 
 ## 语料与对比
 
-- 模块内：`SqlGoldenCorpusTest`（约 **216** 条，含往返）、`CommonModelSqlCorpusTest`（从 `icell/common-model` 收获，87 条可解析）、`Complex100GiantsTest` / `SqlModelMatchDeepenTest`（MODEL / MATCH_RECOGNIZE 结构化字段）。
+- 模块内：`SqlGoldenCorpusTest`（约 **216** 条，含往返）、`SqlRoundTripFidelityTest`（**66** 条，回写与原文归一化后逐字比对）、`CommonModelSqlCorpusTest`（从 `icell/common-model` 收获，87 条可解析）、`Complex100GiantsTest` / `SqlModelMatchDeepenTest`（MODEL / MATCH_RECOGNIZE 结构化字段）。
 - 与 Druid / JSqlParser 对比只在上级工程 `tools-test` 的 `SqlParserCompareTest`（成功率 + 表名集合差分 + JMH；不进本库依赖）。
 - 外部语料批量验收（同在 `tools-test`，不进本库依赖）：
   - `ExternalSqlCorpusTest` — bird / Spider / complex100 等 jkit 解析成功率（soft-assert）

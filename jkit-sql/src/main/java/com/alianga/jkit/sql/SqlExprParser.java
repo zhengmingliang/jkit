@@ -640,6 +640,9 @@ final class SqlExprParser {
             // 不直接 return：后面还要挂 ::type / [下标] / COLLATE 等后缀
             expr = parseFunction((SqlIdentifier) expr);
         }
+        if (isArrayConstructorHead(expr)) {
+            expr = parseArrayConstructor();
+        }
         while (p.match(SqlTokenType.LBRACKET)) {
             SqlExpr index = parseExpr();
             p.expect(SqlTokenType.RBRACKET);
@@ -657,6 +660,34 @@ final class SqlExprParser {
             expr = cast;
         }
         return expr;
+    }
+
+    /**
+     * 是否为数组构造起头：标识符 {@code ARRAY} 紧跟 {@code [}。
+     *
+     * <p>与 {@code col[1]} 下标区分：下标左边是普通列，ARRAY 在此是构造关键字。</p>
+     */
+    private boolean isArrayConstructorHead(SqlExpr expr) {
+        return expr instanceof SqlIdentifier
+                && "ARRAY".equalsIgnoreCase(((SqlIdentifier) expr).simpleName())
+                && p.is(SqlTokenType.LBRACKET);
+    }
+
+    /**
+     * PG / 标准数组构造 {@code ARRAY[1, 2, 3]}，元素可为任意表达式。
+     */
+    private SqlExpr parseArrayConstructor() {
+        p.expect(SqlTokenType.LBRACKET);
+        SqlFunctionExpr fn = new SqlFunctionExpr();
+        fn.setName(SqlIdentifier.of("ARRAY"));
+        fn.setArrayConstructor(true);
+        if (!p.is(SqlTokenType.RBRACKET)) {
+            do {
+                fn.arguments().add(parseExpr());
+            } while (p.match(SqlTokenType.COMMA));
+        }
+        p.expect(SqlTokenType.RBRACKET);
+        return fn;
     }
 
     private SqlExpr parsePrimaryInner() {

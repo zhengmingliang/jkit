@@ -77,7 +77,8 @@ final class SqlDdlParser {
 
     SqlStatement parseAlter() {
         SqlDdlStatement ddl = new SqlDdlStatement();
-        ddl.setStatementType(SqlStatementType.ALTER);
+        boolean renameStatement = p.is(SqlTokenType.RENAME);
+        ddl.setStatementType(renameStatement ? SqlStatementType.RENAME : SqlStatementType.ALTER);
         p.next();
         if (p.identLike() || p.token.type().keyword()) {
             ddl.setObjectType(p.token.text().toUpperCase());
@@ -85,6 +86,21 @@ final class SqlDdlParser {
         }
         if (p.identLike()) {
             ddl.names().add(p.parseName());
+        }
+        if (renameStatement) {
+            // RENAME TABLE a TO b [, c TO d]：首组结构化，其余进 tail
+            if (p.match(SqlTokenType.TO) || p.match(SqlTokenType.AS)) {
+                // 语句头已含 RENAME，动作只记 TO，避免回写成 RENAME TABLE a RENAME TO b
+                ddl.setAlterAction("TO");
+                ddl.setRenameTo(p.parseName());
+                String rest = p.consumeRawUntilSemi();
+                if (rest != null && !rest.isEmpty()) {
+                    ddl.setTail(rest);
+                }
+            } else if (!p.is(SqlTokenType.SEMICOLON) && !p.is(SqlTokenType.EOF)) {
+                ddl.setTail(p.consumeRawUntilSemi());
+            }
+            return ddl;
         }
         if (p.is(SqlTokenType.RENAME)) {
             p.next();
@@ -210,15 +226,29 @@ final class SqlDdlParser {
     }
 
     /**
+     * 下一个记号是否为 {@code INDEX} / {@code KEY}。
+     *
+     * <p>用于区分 {@code ADD UNIQUE …} 是索引动作还是约束动作：只有确认后面跟索引关键字
+     * 才消费 {@code UNIQUE}，否则会在回退时丢词（{@code KEY} 是关键字记号，{@code isIdent} 认不出来）。</p>
+     *
+     * @return 是否索引关键字
+     */
+    private boolean peekIsIndexKeyword() {
+        SqlToken next = p.lexer.peek();
+        return next != null && (next.type() == SqlTokenType.INDEX || next.type() == SqlTokenType.KEY
+                || (next.type() == SqlTokenType.IDENT && next.textEqualsIgnoreCase("KEY")));
+    }
+
+    /**
      * 解析 ADD/DROP INDEX|KEY；成功则填好 AST 并返回 true。
      */
     private boolean parseAlterIndexAction(SqlDdlStatement ddl, String action) {
         boolean unique = false;
-        if ("ADD".equals(action) && p.is(SqlTokenType.UNIQUE)) {
+        if ("ADD".equals(action) && p.is(SqlTokenType.UNIQUE) && peekIsIndexKeyword()) {
             p.next();
             unique = true;
         }
-        if (!(p.is(SqlTokenType.INDEX) || p.isIdent("KEY"))) {
+        if (!(p.is(SqlTokenType.INDEX) || p.is(SqlTokenType.KEY) || p.isIdent("KEY"))) {
             return false;
         }
         String indexKw = p.token.text().toUpperCase();
@@ -323,6 +353,30 @@ final class SqlDdlParser {
         }
     }
 
+    private static boolean isUserObject(String objectType) {
+        return objectType != null && "USER".equalsIgnoreCase(objectType);
+    }
+
+    /**
+     * 消费账号原文 {@code 'u'@'%'} / {@code `root`@`localhost`}，返回原始片段。
+     */
+    private String consumeUserSpec() {
+        int start = p.token.start();
+        if (p.identLike() || p.is(SqlTokenType.STRING) || p.is(SqlTokenType.VARIABLE)) {
+            p.next();
+        }
+        while (p.is(SqlTokenType.VARIABLE)) {
+            String v = p.token.text();
+            p.next();
+            if ("@".equals(v) && (p.identLike() || p.is(SqlTokenType.STRING))) {
+                p.next();
+            } else {
+                break;
+            }
+        }
+        return p.lexer.rawSlice(start, p.token.start()).trim();
+    }
+
     SqlStatement parseCreate() {
         p.expect(SqlTokenType.CREATE);
         boolean orReplace = false;
@@ -353,10 +407,22 @@ final class SqlDdlParser {
             p.expect(SqlTokenType.EXISTS);
             ddl.setIfNotExists(true);
         }
+        if (isUserObject(ddl.objectType())) {
+            // CREATE USER 'u'@'%' …：账号含引号与 @，整段保留原文，避免被改写成反引号标识符
+            ddl.setUserSpec(consumeUserSpec());
+            if (!p.atStmtBreak()) {
+                ddl.setTail(p.consumeRawAllowingBeginEnd());
+            }
+            return ddl;
+        }
         ddl.names().add(p.parseName());
         // CREATE INDEX name ON table；EVENT 的 ON SCHEDULE 不抽成对象名
         if (isIndexObject(ddl.objectType()) && p.match(SqlTokenType.ON)) {
             ddl.names().add(p.parseName());
+        }
+        // CREATE TABLE t2 LIKE t1：源表结构化，供回写与表统计
+        if ("TABLE".equalsIgnoreCase(ddl.objectType()) && p.match(SqlTokenType.LIKE)) {
+            ddl.setLikeTable(p.parseName());
         }
         boolean routine = isRoutineObject(ddl.objectType());
         String paramTail = null;
@@ -1574,9 +1640,21 @@ final class SqlDdlParser {
             p.expect(SqlTokenType.EXISTS);
             ddl.setIfExists(true);
         }
+        if (isUserObject(ddl.objectType())) {
+            // DROP USER 'u'@'%'：账号整段原文，与 CREATE USER 同一处理
+            ddl.setUserSpec(consumeUserSpec());
+            if (!p.atStmtBreak()) {
+                ddl.setTail(p.consumeRawAllowingBeginEnd());
+            }
+            return ddl;
+        }
         do {
             ddl.names().add(p.parseName());
         } while (p.match(SqlTokenType.COMMA));
+        // MySQL DROP INDEX name ON table；与 CREATE INDEX 一致，表名追加在 names 之后
+        if (isIndexObject(ddl.objectType()) && p.match(SqlTokenType.ON)) {
+            ddl.names().add(p.parseName());
+        }
         p.match(SqlTokenType.CASCADE);
         p.match(SqlTokenType.RESTRICT);
         return ddl;
@@ -1603,7 +1681,8 @@ final class SqlDdlParser {
             priv.append(p.token.text());
             p.next();
         }
-        stmt.setPrivileges(priv.toString().trim());
+        // 逐 token 拼接会在逗号两侧留空格（SELECT , INSERT），压回紧凑写法
+        stmt.setPrivileges(priv.toString().trim().replace(" ,", ","));
         if (p.match(SqlTokenType.ON)) {
             stmt.setName(parseGrantObject());
         }

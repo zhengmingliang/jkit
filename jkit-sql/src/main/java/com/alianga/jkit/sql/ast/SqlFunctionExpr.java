@@ -17,6 +17,8 @@ public final class SqlFunctionExpr extends SqlExpr {
     private List<SqlExpr> parameters;
     private List<SqlExpr> arguments;
     private boolean distinct;
+    /** PG / 标准数组构造 {@code ARRAY[1, 2, 3]}：元素放在 arguments，回写用方括号。 */
+    private boolean arrayConstructor;
     private SqlExpr over;
     private SqlExpr filter;
     private String aggOption;
@@ -107,6 +109,22 @@ public final class SqlFunctionExpr extends SqlExpr {
      */
     public void setDistinct(boolean distinct) {
         this.distinct = distinct;
+    }
+
+    /**
+     * @return 是否数组构造 {@code ARRAY[1, 2, 3]}，回写用方括号而非圆括号
+     * @since 2.0.1
+     */
+    public boolean arrayConstructor() {
+        return arrayConstructor;
+    }
+
+    /**
+     * @param arrayConstructor 是否数组构造
+     * @since 2.0.1
+     */
+    public void setArrayConstructor(boolean arrayConstructor) {
+        this.arrayConstructor = arrayConstructor;
     }
 
     /**

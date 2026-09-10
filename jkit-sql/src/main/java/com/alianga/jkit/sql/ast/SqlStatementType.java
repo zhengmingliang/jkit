@@ -16,6 +16,8 @@ public enum SqlStatementType {
     CREATE,
     DROP,
     ALTER,
+    /** MySQL {@code RENAME TABLE a TO b}：独立语句，不是 ALTER 的一种。 */
+    RENAME,
     TRUNCATE,
     EXPLAIN,
     SET,

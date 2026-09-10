@@ -38,7 +38,11 @@ public final class SqlDdlStatement extends SqlStatement {
     private SqlIdentifier constraintName;
     private String constraintType;
     private final List<SqlIdentifier> referencedTables = new ArrayList<SqlIdentifier>(1);
+    /** {@code CREATE TABLE t2 LIKE t1} 的源表 t1。 */
+    private SqlIdentifier likeTable;
     private String tail;
+    /** {@code CREATE USER} 账号原文，如 {@code 'u'@'%'}，保留引号避免改写。 */
+    private String userSpec;
     /** PROCEDURE/FUNCTION 参数列表。 */
     private final List<SqlRoutineParam> parameters = new ArrayList<SqlRoutineParam>(4);
     /** BEGIN…END 内语句列表（尽力解析）。 */
@@ -379,10 +383,40 @@ public final class SqlDdlStatement extends SqlStatement {
     }
 
     /**
+     * @return {@code CREATE TABLE t2 LIKE t1} 的源表，可空
+     * @since 2.0.1
+     */
+    public SqlIdentifier likeTable() {
+        return likeTable;
+    }
+
+    /**
+     * @param likeTable LIKE 源表
+     */
+    public void setLikeTable(SqlIdentifier likeTable) {
+        this.likeTable = likeTable;
+    }
+
+    /**
      * @param tail 尾部原文
      */
     public void setTail(String tail) {
         this.tail = tail;
+    }
+
+    /**
+     * @return {@code CREATE USER} 账号原文（如 {@code 'u'@'%'}，含引号），可空
+     * @since 2.0.1
+     */
+    public String userSpec() {
+        return userSpec;
+    }
+
+    /**
+     * @param userSpec 账号原文
+     */
+    public void setUserSpec(String userSpec) {
+        this.userSpec = userSpec;
     }
 
     /**
