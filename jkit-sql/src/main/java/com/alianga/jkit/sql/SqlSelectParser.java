@@ -127,6 +127,15 @@ final class SqlSelectParser {
             join.setRight(parseTableSource());
             if (p.match(SqlTokenType.ON)) {
                 join.setCondition(p.exprParser.parseExpr());
+                // Trino/Presto 风格：JOIN ON 后的 /*+joinMethod=…*/ hint 挂到右表
+                while (p.is(SqlTokenType.HINT)) {
+                    String h = p.token.text();
+                    p.next();
+                    if (join.right() instanceof SqlTable) {
+                        SqlTable t = (SqlTable) join.right();
+                        t.setOptimizerHint(t.optimizerHint() == null ? h : t.optimizerHint() + " " + h);
+                    }
+                }
             } else if (p.match(SqlTokenType.USING)) {
                 p.expect(SqlTokenType.LPAREN);
                 List<SqlIdentifier> using = new ArrayList<SqlIdentifier>(2);

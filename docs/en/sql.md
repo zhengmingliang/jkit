@@ -51,7 +51,7 @@ SqlExpr withOpt = SQL.parseExpr("age > @age@", SqlDialect.MYSQL,
         SqlParseOptions.defaults().placeholders(SqlPlaceholders.create().atWrapped()));
 ```
 
-The default dialect is **MySQL** (GBase / MariaDB / TiDB share the same set). Other dialects:
+The default dialect is **MySQL** (GBase / MariaDB / TiDB share the same set). First-class dialect enums:
 
 ```java
 SQL.parse(sql, SqlDialect.POSTGRES);
@@ -59,6 +59,12 @@ SQL.parse(sql, SqlDialect.ORACLE);    // pre-12c: pagination rewrite uses ROWNUM
 SQL.parse(sql, SqlDialect.ORACLE12);  // 12c+: OFFSET/FETCH available
 SQL.parse(sql, SqlDialect.SQLSERVER);
 SQL.parse(sql, SqlDialect.ANSI);
+SQL.parse(sql, SqlDialect.H2);
+SQL.parse(sql, SqlDialect.DB2);         // FETCH FIRST only
+SQL.parse(sql, SqlDialect.SQLITE);      // LIMIT family, no FETCH FIRST
+SQL.parse(sql, SqlDialect.HIVE);        // backticks, || is concat; aliases maxcompute/odps
+SQL.parse(sql, SqlDialect.CLICKHOUSE);  // backticks, double quotes are identifiers, comma-style LIMIT
+SQL.parse(sql, SqlDialect.PRESTO);      // double quotes, || is concat; alias trino
 
 SqlDialect.fromName("gbase");     // MYSQL
 SqlDialect.fromName("gaussdb");   // POSTGRES
@@ -66,7 +72,13 @@ SqlDialect.fromName("dm");        // ORACLE (ROWNUM)
 SqlDialect.fromName("oracle12");  // ORACLE12
 SqlDialect.fromName("19c");       // ORACLE12
 SqlDialect.fromName("tidb");      // MYSQL
-SqlDialect.fromName("sqlite");    // ANSI
+SqlDialect.fromName("sqlite");    // SQLITE
+SqlDialect.fromName("db2");       // DB2
+SqlDialect.fromName("hive");      // HIVE
+SqlDialect.fromName("clickhouse");// CLICKHOUSE
+SqlDialect.fromName("trino");     // PRESTO
+// Domestic & mainstream aliases: goldendb/selectdb/analyticdb/matrixone/stonedb/oceanbase/polardb/tdsql/starrocks/doris → MYSQL;
+// highgo/uxdb/mogdb/vastbase/antdb/ivorysql/kingbase/opengauss/greenplum → POSTGRES; dm/oscar → ORACLE
 
 // Capability queries (single source of truth for rewriting/formatting)
 SqlDialect.MYSQL.supportsLimitOffset();   // true

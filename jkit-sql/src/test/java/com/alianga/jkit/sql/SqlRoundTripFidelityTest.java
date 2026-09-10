@@ -167,6 +167,9 @@ public class SqlRoundTripFidelityTest {
                 {"mysql", "SELECT CAST('test' AS CHAR CHARACTER SET utf8) COLLATE utf8_bin"},
                 {"mysql", "SELECT CAST(x AS CHAR(10) ARRAY) FROM t"},
                 {"oracle", "SELECT TRANSLATE(SUBSTR(TRIM(T.BZ), 1, 35) USING CHAR_CS) FROM T"},
+
+                // Trino 风格 JOIN ON 后 hint
+                {"mysql", "SELECT count(*) FROM orders JOIN lineitem ON o_orderkey = l_orderkey/*+joinMethod=hash*/ LIMIT 1"},
         });
     }
 

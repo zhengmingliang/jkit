@@ -53,7 +53,7 @@ SqlExpr withOpt = SQL.parseExpr("age > @age@", SqlDialect.MYSQL,
 
 `tables()` 只收**真实被访问的表**：DML/SELECT 的 FROM/JOIN/INTO；DDL 按对象类型区分——`DROP/ALTER/TRUNCATE/RENAME TABLE` 的表、`CREATE TABLE t2 LIKE 源表`、`CREATE TRIGGER ... ON t`、维护语句（`OPTIMIZE/ANALYZE/CHECK/REPAIR TABLE t, s`）的全组表；VIEW 名按既有语义计入。**不**计入：库名（`USE db`）、例程/索引/事件等对象名（`CREATE INDEX idx`）、CTE 名（`WITH w AS (...) SELECT FROM w`）、`CALL sp` / `DECLARE` / `GRANT` 的目标。
 
-默认方言是 **MySQL**（GBase / MariaDB / TiDB 走同一套）。其它方言：
+默认方言是 **MySQL**（GBase / MariaDB / TiDB 走同一套）。一等方言枚举：
 
 ```java
 SQL.parse(sql, SqlDialect.POSTGRES);
@@ -61,6 +61,12 @@ SQL.parse(sql, SqlDialect.ORACLE);    // 12c 以下：分页改写用 ROWNUM
 SQL.parse(sql, SqlDialect.ORACLE12);  // 12c+：可用 OFFSET/FETCH
 SQL.parse(sql, SqlDialect.SQLSERVER);
 SQL.parse(sql, SqlDialect.ANSI);
+SQL.parse(sql, SqlDialect.H2);
+SQL.parse(sql, SqlDialect.DB2);         // 仅 FETCH FIRST 分页
+SQL.parse(sql, SqlDialect.SQLITE);      // LIMIT 族，无 FETCH FIRST
+SQL.parse(sql, SqlDialect.HIVE);        // 反引号、|| 拼接；别名 maxcompute/odps
+SQL.parse(sql, SqlDialect.CLICKHOUSE);  // 反引号、双引号也是标识符、逗号 LIMIT
+SQL.parse(sql, SqlDialect.PRESTO);      // 双引号、|| 拼接；别名 trino
 
 SqlDialect.fromName("gbase");     // MYSQL
 SqlDialect.fromName("gaussdb");   // POSTGRES
@@ -68,7 +74,13 @@ SqlDialect.fromName("dm");        // ORACLE（ROWNUM）
 SqlDialect.fromName("oracle12");  // ORACLE12
 SqlDialect.fromName("19c");       // ORACLE12
 SqlDialect.fromName("tidb");      // MYSQL
-SqlDialect.fromName("sqlite");    // ANSI
+SqlDialect.fromName("sqlite");    // SQLITE
+SqlDialect.fromName("db2");       // DB2
+SqlDialect.fromName("hive");      // HIVE
+SqlDialect.fromName("clickhouse");// CLICKHOUSE
+SqlDialect.fromName("trino");     // PRESTO
+// 国产与主流别名：goldendb/selectdb/analyticdb/matrixone/stonedb/oceanbase/polardb/tdsql/starrocks/doris → MYSQL；
+// highgo/uxdb/mogdb/vastbase/antdb/ivorysql/kingbase/opengauss/greenplum → POSTGRES；dm/oscar → ORACLE
 
 // 能力查询（改写/格式化单一事实来源）
 SqlDialect.MYSQL.supportsLimitOffset();   // true
