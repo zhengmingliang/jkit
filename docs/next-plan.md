@@ -167,6 +167,7 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 - `ANALYZE` / `VACUUM` / `OPTIMIZE TABLE` / `REPAIR` / `CHECK TABLE` ✅（OTHER + 抽表名）
 - `COMMENT ON TABLE/COLUMN` ✅（`SqlCommentOnStatement`：objectKind / name / comment）
 - `SET` 多赋值 / NAMES / CHARACTER SET ✅（`SqlSetStatement`：scope / setKind / assignments）
+- `EXPLAIN` / `DESCRIBE` ✅（`SqlExplainStatement`：analyze / format / options + statement）
 - `GO` ✅（SQL Server 批分隔，同分号；`isAliasStop` 避免当别名）
 
 #### P1.6 注释与提示 ✅ 完成（2026-09-09）

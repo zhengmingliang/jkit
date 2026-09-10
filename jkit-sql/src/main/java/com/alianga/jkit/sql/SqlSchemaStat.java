@@ -4,6 +4,7 @@ import com.alianga.jkit.sql.ast.SqlAllColumns;
 import com.alianga.jkit.sql.ast.SqlCommentOnStatement;
 import com.alianga.jkit.sql.ast.SqlCopyStatement;
 import com.alianga.jkit.sql.ast.SqlDdlStatement;
+import com.alianga.jkit.sql.ast.SqlExplainStatement;
 import com.alianga.jkit.sql.ast.SqlExpr;
 import com.alianga.jkit.sql.ast.SqlFlushStatement;
 import com.alianga.jkit.sql.ast.SqlFunctionExpr;
@@ -180,6 +181,10 @@ public final class SqlSchemaStat {
                 for (int i = 0; i < ddl.referencedTables().size(); i++) {
                     addTable(ddl.referencedTables().get(i), SqlStatementType.SELECT);
                 }
+                return true;
+            }
+            if (node instanceof SqlExplainStatement) {
+                addTable(((SqlExplainStatement) node).name(), accessStack.peek());
                 return true;
             }
             if (node instanceof SqlCommentOnStatement) {

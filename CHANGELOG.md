@@ -48,6 +48,7 @@
 - `jkit-sql`：过程体 `IF`/`WHILE`/`LOOP`/`REPEAT` → `SqlControlStatement`（条件+bodyStatements；ELSEIF/ELSE）；`FUNCTION RETURNS` → `returnsType`；`TRIGGER` 抽 `triggerTiming`/`triggerEvent`/`triggerTable` 与 `bodyStatements`；`EVENT` DO 体进 bodyStatements。
 - `jkit-sql`：过程 `CASE … END CASE` / `LEAVE` / `ITERATE` / `RETURN [expr]` / 循环标签 `lab: LOOP`；`TRIGGER` 补 `FOR EACH` / `FOLLOWS|PRECEDES`；`EVENT ON SCHEDULE AT|EVERY`；`MATCH_RECOGNIZE` 抽 `WITHIN`（`ROWS PER MATCH`/`AFTER MATCH` 保持字段）；`MODEL` 多维 cell 拆 `cellDims`。
 - `jkit-sql`：过程体 `DECLARE`/`CURSOR FOR`/`CONTINUE|EXIT|UNDO HANDLER` → `SqlDeclareStatement`/`SqlHandlerStatement`；`TRIGGER UPDATE OF` → `triggerUpdateColumns`；`EVENT` 抽 `eventStarts`/`eventEnds`/`eventEnabled`/`eventComment`；`MODEL` 简单维 `cellDimExprs`；`MATCH_RECOGNIZE.PATTERN` 保持字符串。
+- `jkit-sql`：`EXPLAIN` / `DESCRIBE` → `SqlExplainStatement`（analyze / format / options + 嵌套 statement / name）；Formatter / Visitor / SchemaStat 同步。
 - `jkit-sql`：`SET` 多赋值 / `SET NAMES` / `SET CHARACTER SET` / SESSION|GLOBAL → `SqlSetStatement`（scope / setKind / assignments + raw）；Formatter / Visitor 同步。
 - `jkit-sql`：PG/Oracle `COMMENT ON TABLE|COLUMN|INDEX|… IS …` → `SqlCommentOnStatement`（objectKind / name / comment + raw）；Formatter / Visitor / SchemaStat 同步。
 - `jkit-sql`：`SHOW CREATE TABLE|VIEW|DATABASE|…` / `SHOW COLUMNS|INDEX|TABLES` → `SqlShowStatement`（showKind / objectType / name / fromOrIn + raw）；Formatter / Visitor / SchemaStat 同步。
@@ -191,4 +192,4 @@
 
 jkit 首个对外版本，由 [ZmlTools](https://github.com/wuyongshi/ZmlTools) 迁移而来：零第三方依赖、包名改为 `com.alianga.jkit`，坐标 `com.alianga:jkit:2.0.0`。
 
-能力概要见 [README.md](README.md)：CSV / HTTP / JSON / YAML / 配置 / 表达式等均用纯 JDK 重写。从 ZmlTools 迁过来的项目可继续用 `relocated/zmltools` 把 `top.wuyongshi:ZmlTools:2.0.0` 重定向到本坐标（包名仍需手工替换）。
+能力概要见 [README.md](https://github.com/zhengmingliang/jkit/blob/develop/README.md)：CSV / HTTP / JSON / YAML / 配置 / 表达式等均用纯 JDK 重写。从 ZmlTools 迁过来的项目可继续用 `relocated/zmltools` 把 `top.wuyongshi:ZmlTools:2.0.0` 重定向到本坐标（包名仍需手工替换）。

@@ -7,7 +7,7 @@ import java.util.List;
 
 /**
  * USE / CALL / TRUNCATE / GRANT / REVOKE 等相对扁平的语句；{@link SqlStatementType#OTHER} 用于过程块与维护语句。
- * （SET → {@link SqlSetStatement}；EXPLAIN → 见对应结构化节点；SHOW → {@link SqlShowStatement}。）
+ * （SET → {@link SqlSetStatement}；EXPLAIN → {@link SqlExplainStatement}；SHOW → {@link SqlShowStatement}。）
  *
  * @author 郑明亮
  * @since 2.0.1

@@ -1,6 +1,7 @@
 package com.alianga.jkit.sql;
 
 import com.alianga.jkit.sql.ast.SqlCopyStatement;
+import com.alianga.jkit.sql.ast.SqlExplainStatement;
 import com.alianga.jkit.sql.ast.SqlExpr;
 import com.alianga.jkit.sql.ast.SqlFlushStatement;
 import com.alianga.jkit.sql.ast.SqlIdentifier;
@@ -299,25 +300,101 @@ public final class SqlParser {
         return body;
     }
 
+    /**
+     * {@code EXPLAIN [ANALYZE] [FORMAT …] stmt} / {@code DESCRIBE t} → {@link SqlExplainStatement}。
+     */
     private SqlStatement parseExplain() {
-        SqlSimpleStatement stmt = new SqlSimpleStatement();
-        stmt.setStatementType(SqlStatementType.EXPLAIN);
+        SqlExplainStatement stmt = new SqlExplainStatement();
         if (is(SqlTokenType.DESC) || is(SqlTokenType.DESCRIBE)) {
+            stmt.setDescribe(true);
             next();
-            stmt.setName(parseName());
+            if (identLike()) {
+                stmt.setName(parseName());
+            }
+            if (!atStmtBreak()) {
+                String rest = consumeRawUntilSemi();
+                if (rest != null && !rest.isEmpty()) {
+                    stmt.setRaw(rest);
+                }
+            }
             return stmt;
         }
         expect(SqlTokenType.EXPLAIN);
-        match(SqlTokenType.ANALYZE);
-        if (match(SqlTokenType.FORMAT)) {
-            match(SqlTokenType.EQ);
+        // MySQL / PG 简写：EXPLAIN ANALYZE …
+        if (is(SqlTokenType.ANALYZE) || (identLike() && "ANALYZE".equalsIgnoreCase(token.text()))
+                || (identLike() && "ANALYSE".equalsIgnoreCase(token.text()))) {
             next();
+            stmt.setAnalyze(true);
+        }
+        // PG：EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) …
+        if (is(SqlTokenType.LPAREN)) {
+            next();
+            do {
+                if (is(SqlTokenType.RPAREN) || is(SqlTokenType.EOF)) {
+                    break;
+                }
+                String opt = token.text() == null ? "" : token.text().toUpperCase();
+                next();
+                if ("ANALYZE".equals(opt) || "ANALYSE".equals(opt)) {
+                    stmt.setAnalyze(true);
+                    if (is(SqlTokenType.TRUE) || is(SqlTokenType.FALSE)
+                            || (identLike() && ("TRUE".equalsIgnoreCase(token.text())
+                            || "FALSE".equalsIgnoreCase(token.text())
+                            || "ON".equalsIgnoreCase(token.text())
+                            || "OFF".equalsIgnoreCase(token.text())))) {
+                        String v = token.text().toUpperCase();
+                        next();
+                        if ("FALSE".equals(v) || "OFF".equals(v)) {
+                            stmt.setAnalyze(false);
+                        }
+                    }
+                } else if ("FORMAT".equals(opt)) {
+                    match(SqlTokenType.EQ);
+                    if (!is(SqlTokenType.RPAREN) && !is(SqlTokenType.COMMA) && !is(SqlTokenType.EOF)) {
+                        stmt.setFormat(token.text().toUpperCase());
+                        next();
+                    }
+                } else if (opt.length() > 0) {
+                    StringBuilder one = new StringBuilder(opt);
+                    if (match(SqlTokenType.EQ)) {
+                        if (!is(SqlTokenType.RPAREN) && !is(SqlTokenType.COMMA) && !is(SqlTokenType.EOF)) {
+                            one.append('=').append(token.text().toUpperCase());
+                            next();
+                        }
+                    } else if (is(SqlTokenType.TRUE) || is(SqlTokenType.FALSE)
+                            || (identLike() && ("TRUE".equalsIgnoreCase(token.text())
+                            || "FALSE".equalsIgnoreCase(token.text())
+                            || "ON".equalsIgnoreCase(token.text())
+                            || "OFF".equalsIgnoreCase(token.text())))) {
+                        one.append(' ').append(token.text().toUpperCase());
+                        next();
+                    }
+                    stmt.options().add(one.toString());
+                }
+            } while (match(SqlTokenType.COMMA));
+            expect(SqlTokenType.RPAREN);
+        }
+        // MySQL：EXPLAIN FORMAT[=]JSON …
+        if (is(SqlTokenType.FORMAT) || (identLike() && "FORMAT".equalsIgnoreCase(token.text()))) {
+            next();
+            match(SqlTokenType.EQ);
+            if (!atStmtBreak()) {
+                stmt.setFormat(token.text().toUpperCase());
+                next();
+            }
         }
         if (isQueryStart() || is(SqlTokenType.INSERT) || is(SqlTokenType.UPDATE)
-                || is(SqlTokenType.DELETE) || is(SqlTokenType.WITH)) {
-            stmt.setInner(parseStatement());
+                || is(SqlTokenType.DELETE) || is(SqlTokenType.MERGE) || is(SqlTokenType.REPLACE)
+                || is(SqlTokenType.WITH)) {
+            stmt.setStatement(parseStatement());
         } else if (identLike()) {
             stmt.setName(parseName());
+        }
+        if (!atStmtBreak() && stmt.statement() == null && stmt.raw() == null) {
+            String rest = consumeRawUntilSemi();
+            if (rest != null && !rest.isEmpty()) {
+                stmt.setRaw(rest);
+            }
         }
         return stmt;
     }

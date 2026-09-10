@@ -1388,6 +1388,57 @@ public class SqlParserTest {
     }
 
     /**
+     * EXPLAIN / DESCRIBE 选项拆分 + 嵌套语句 → SqlExplainStatement。
+     */
+    @Test
+    public void parseExplainStructured() {
+        com.alianga.jkit.sql.ast.SqlExplainStatement plain =
+                (com.alianga.jkit.sql.ast.SqlExplainStatement) SQL.parse(
+                        "EXPLAIN SELECT * FROM t WHERE id = 1");
+        assertEquals(SqlStatementType.EXPLAIN, plain.type());
+        assertFalse(plain.describe());
+        assertFalse(plain.analyze());
+        assertNotNull(plain.statement());
+        assertEquals(SqlStatementType.SELECT, plain.statement().type());
+        assertTrue(plain.isReadOnly());
+        SQL.parse(SQL.toSqlString(plain));
+
+        com.alianga.jkit.sql.ast.SqlExplainStatement analyze =
+                (com.alianga.jkit.sql.ast.SqlExplainStatement) SQL.parse(
+                        "EXPLAIN ANALYZE SELECT 1");
+        assertTrue(analyze.analyze());
+        assertNotNull(analyze.statement());
+
+        com.alianga.jkit.sql.ast.SqlExplainStatement fmt =
+                (com.alianga.jkit.sql.ast.SqlExplainStatement) SQL.parse(
+                        "EXPLAIN FORMAT=JSON SELECT 1");
+        assertEquals("JSON", fmt.format());
+        assertNotNull(fmt.statement());
+
+        com.alianga.jkit.sql.ast.SqlExplainStatement pg =
+                (com.alianga.jkit.sql.ast.SqlExplainStatement) SQL.parse(
+                        "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) SELECT 1",
+                        SqlDialect.POSTGRES);
+        assertTrue(pg.analyze());
+        assertEquals("JSON", pg.format());
+        assertTrue(pg.options().contains("BUFFERS"));
+        assertNotNull(pg.statement());
+        String pgFmt = SQL.toSqlString(pg).toUpperCase();
+        assertTrue(pgFmt, pgFmt.contains("BUFFERS") && pgFmt.contains("ANALYZE"));
+
+        com.alianga.jkit.sql.ast.SqlExplainStatement desc =
+                (com.alianga.jkit.sql.ast.SqlExplainStatement) SQL.parse("DESCRIBE t");
+        assertTrue(desc.describe());
+        assertEquals("t", desc.name().simpleName());
+        assertEquals("t", SQL.tables(desc).get(0));
+
+        com.alianga.jkit.sql.ast.SqlExplainStatement desc2 =
+                (com.alianga.jkit.sql.ast.SqlExplainStatement) SQL.parse("DESC users");
+        assertTrue(desc2.describe());
+        assertEquals("users", desc2.name().simpleName());
+    }
+
+    /**
      * SET 多赋值 / NAMES / CHARACTER SET / SESSION → SqlSetStatement。
      */
     @Test

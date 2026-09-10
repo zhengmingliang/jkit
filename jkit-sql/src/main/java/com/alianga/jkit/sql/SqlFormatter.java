@@ -13,6 +13,7 @@ import com.alianga.jkit.sql.ast.SqlCopyStatement;
 import com.alianga.jkit.sql.ast.SqlDdlStatement;
 import com.alianga.jkit.sql.ast.SqlDeclareStatement;
 import com.alianga.jkit.sql.ast.SqlDelete;
+import com.alianga.jkit.sql.ast.SqlExplainStatement;
 import com.alianga.jkit.sql.ast.SqlExpr;
 import com.alianga.jkit.sql.ast.SqlFlushStatement;
 import com.alianga.jkit.sql.ast.SqlFunctionExpr;
@@ -161,6 +162,8 @@ public final class SqlFormatter {
             writeCommentOn((SqlCommentOnStatement) node);
         } else if (node instanceof SqlSetStatement) {
             writeSet((SqlSetStatement) node);
+        } else if (node instanceof SqlExplainStatement) {
+            writeExplain((SqlExplainStatement) node);
         } else if (node instanceof SqlShowStatement) {
             writeShow((SqlShowStatement) node);
         } else if (node instanceof SqlSimpleStatement) {
@@ -1181,6 +1184,72 @@ public final class SqlFormatter {
     private static boolean isIndexDdl(SqlDdlStatement ddl) {
         String objectType = ddl.objectType();
         return objectType != null && "INDEX".equalsIgnoreCase(objectType);
+    }
+
+    private void writeExplain(SqlExplainStatement ex) {
+        if (ex == null) {
+            return;
+        }
+        if (ex.describe()) {
+            out.append("DESCRIBE");
+            if (ex.name() != null) {
+                sp();
+                writeExpr(ex.name());
+            }
+            if (ex.raw() != null && ex.raw().length() > 0) {
+                sp();
+                out.append(ex.raw());
+            }
+            return;
+        }
+        out.append("EXPLAIN");
+        if (!ex.options().isEmpty()) {
+            sp();
+            out.append('(');
+            boolean needComma = false;
+            if (ex.analyze()) {
+                out.append("ANALYZE");
+                needComma = true;
+            }
+            for (int i = 0; i < ex.options().size(); i++) {
+                if (needComma) {
+                    out.append(", ");
+                }
+                out.append(ex.options().get(i));
+                needComma = true;
+            }
+            if (ex.format() != null && ex.format().length() > 0) {
+                if (needComma) {
+                    out.append(", ");
+                }
+                out.append("FORMAT");
+                sp();
+                out.append(ex.format());
+            }
+            out.append(')');
+        } else {
+            if (ex.analyze()) {
+                sp();
+                out.append("ANALYZE");
+            }
+            if (ex.format() != null && ex.format().length() > 0) {
+                sp();
+                out.append("FORMAT");
+                out.append('=');
+                out.append(ex.format());
+            }
+        }
+        if (ex.statement() != null) {
+            sp();
+            writeNode(ex.statement());
+        } else if (ex.name() != null) {
+            sp();
+            writeExpr(ex.name());
+        }
+        if (ex.raw() != null && ex.raw().length() > 0) {
+            sp();
+            out.append(ex.raw());
+        }
     }
 
     private void writeSet(SqlSetStatement set) {

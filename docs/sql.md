@@ -1,6 +1,6 @@
 # SQL 解析模块
 
-未完成项与给后续 agent 的开工顺序见 [next-plan.md](next-plan.md)（第 2 节是 SQL 主战场）。
+未完成项与给后续 agent 的开工顺序见 [next-plan.md](https://github.com/zhengmingliang/jkit/blob/develop/docs/next-plan.md)（第 2 节是 SQL 主战场）。
 
 `com.alianga:jkit-sql` 是零依赖的 SQL 解析器：手写词法（`char[]` + 关键字开地址哈希），递归下降生成 AST，支持格式化、表/列统计和改写。
 
@@ -235,7 +235,7 @@ List<Object> literals = SQL.exportParameterValues("SELECT * FROM t WHERE name = 
 - UPDATE / DELETE：JOIN、WHERE、ORDER BY、LIMIT、PG `UPDATE … FROM`、PG/MySQL `DELETE … USING`、`RETURNING`（多列）、SQL Server `OUTPUT` / `OUTPUT … INTO`（表 / `@var` / `#tmp`，进 `tables()`）
 - MERGE：INTO / USING / ON、多个 `WHEN MATCHED [AND pred]`、`WHEN NOT MATCHED [BY TARGET|SOURCE]`、`OUTPUT` / `OUTPUT … INTO`
 - DDL：CREATE/DROP/ALTER TABLE|VIEW|INDEX|DATABASE|PROCEDURE|FUNCTION|TRIGGER|EVENT（抽对象名；`CREATE OR REPLACE`；VIEW/CTAS 的 AS query；过程参数与 BEGIN…END 体进 tail；CREATE TABLE 列定义原文（`columnDefinitions`）+ ENGINE/CHARSET/COLLATE/COMMENT + 表级 FOREIGN KEY 引用表；ALTER ADD/DROP INDEX、RENAME TO、CHANGE/MODIFY 列定义、ADD CONSTRAINT）
-- EXPLAIN / DESC、`SET` → `SqlSetStatement`（多赋值 / NAMES / CHARACTER SET / SESSION|GLOBAL）、USE、SHOW、CALL（实参进 AST）、TRUNCATE、GRANT / REVOKE（权限 + ON 对象名；收件人 `user@host` 紧凑回写；REVOKE 用 FROM）
+- `EXPLAIN`/`DESCRIBE` → `SqlExplainStatement`（ANALYZE/FORMAT/BUFFERS 等选项 + 嵌套 statement）、`SET` → `SqlSetStatement`（多赋值 / NAMES / CHARACTER SET / SESSION|GLOBAL）、USE、SHOW、CALL（实参进 AST）、TRUNCATE、GRANT / REVOKE（权限 + ON 对象名；收件人 `user@host` 紧凑回写；REVOKE 用 FROM）
 - 过程块 / 维护 / 事务：`BEGIN … END` / 顶层匿名 `DECLARE … BEGIN … END` → `SqlBlockStatement`；会话式 `DECLARE x INT`（OTHER）；裸 `BEGIN` / `BEGIN WORK` / `START TRANSACTION` → `SqlStartTransactionStatement`（隔离级别 / READ WRITE|ONLY / WITH CONSISTENT SNAPSHOT）；`COMMIT` / `ROLLBACK [TO SAVEPOINT]` / `SAVEPOINT` / `RELEASE SAVEPOINT` → `SqlTransactionControlStatement`；`FLUSH …` → `SqlFlushStatement`（选项列表 / TABLES 表名）；`LOCK TABLES`/`UNLOCK TABLES` → `SqlLockTablesStatement`；`ANALYZE` / `VACUUM` / `OPTIMIZE|REPAIR|CHECK TABLE` → `SqlMaintenanceStatement`（tables + optionsRaw）；`SHOW CREATE TABLE|VIEW|DATABASE` / `SHOW COLUMNS|INDEX|TABLES` → `SqlShowStatement`；`COMMENT ON TABLE|COLUMN|…` → `SqlCommentOnStatement`（objectKind/name/comment）；SQL Server `GO` 批分隔；PG `COPY … FROM|TO` → `SqlCopyStatement`（表/列/STDIN·PROGRAM·文件 + WITH 原文）；MySQL `LOAD DATA [LOCAL] INFILE … INTO TABLE` → `SqlLoadDataStatement`（文件/表/列 + FIELDS·LINES·IGNORE 原文）；MySQL 表 `HANDLER t OPEN|READ|CLOSE` → `SqlTableHandlerStatement`；`PREPARE` / `EXECUTE` / `DEALLOCATE PREPARE` / `EXECUTE IMMEDIATE` → `SqlPrepareStatement`（名 / FROM·源 / USING）
 - 表达式：字面量、绑定 `?` / `:name` / `@var`、算术比较、AND/OR/XOR/NOT、IN（含 `IN :name` / `IN ?` 无括号绑定列表）/BETWEEN/LIKE/ILIKE/REGEXP、IS NULL、`IS DISTINCT FROM` / `IS NOT DISTINCT FROM`、CASE、CAST / `::`、函数、EXISTS、子查询、`INTERVAL '1 day'` / `INTERVAL 1 DAY`、`X'FF'` / `0xFF`、行构造 `(a,b)`、JSON `->` `->>` `#>` `#>>`、数组下标 `arr[1]`、`= ANY/SOME/ALL (...)`；另含 PG `@>`/`<@`/`~`/`~*`、MySQL `FORCE INDEX FOR …`/`<=>`/`INSERT DELAYED`/`BINARY`、SQL Server `TOP WITH TIES`、`TABLESAMPLE`/`SAMPLE`、Oracle `(+)` 外连接后缀
 - 注释：`--`、`/* */`、MySQL `#`；仅注释/空白的输入解析为 `OTHER` 空语句（不抛 empty SQL）；MySQL 可执行注释 `/*!40101 … */` 展开为内部 SQL（不整段丢弃）；优化器 hint `/*+ … */` 挂到 SELECT / 表并可 format 回写
