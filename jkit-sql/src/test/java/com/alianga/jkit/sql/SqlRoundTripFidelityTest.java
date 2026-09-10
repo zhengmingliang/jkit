@@ -136,6 +136,37 @@ public class SqlRoundTripFidelityTest {
                 {"mysql", "DELETE IGNORE FROM t WHERE a = 1"},
                 {"mysql", "SELECT HIGH_PRIORITY * FROM t WHERE id = 1"},
                 {"mysql", "SELECT SQL_CALC_FOUND_ROWS * FROM t LIMIT 20"},
+
+                // MySQL 复合 INTERVAL 单位 / WEIGHT_STRING 特殊尾段 / IS UNKNOWN
+                {"mysql", "SELECT DATE_ADD('2009-01-01', INTERVAL 6/4 HOUR_MINUTE)"},
+                {"mysql", "SELECT DATE_ADD('2009-01-01', INTERVAL '1:30' MINUTE_SECOND)"},
+                {"mysql", "SELECT DATE_ADD(d, INTERVAL '1-2' YEAR_MONTH) FROM t"},
+                {"mysql", "SELECT DATE_ADD(d, INTERVAL 1 QUARTER) FROM t"},
+                {"mysql", "SELECT WEIGHT_STRING(0x007fff LEVEL 1)"},
+                {"mysql", "SELECT WEIGHT_STRING(0x007fff LEVEL 1 DESC)"},
+                {"mysql", "SELECT WEIGHT_STRING(? AS CHAR(4))"},
+                {"mysql", "SELECT 1 FROM t WHERE a IS NOT UNKNOWN"},
+
+                // SQL/JSON 构造器原文保留 + UNNEST WITH ORDINALITY
+                {"postgres", "SELECT json_object('key1' : 1, 'key2' : true)"},
+                {"mysql", "SELECT json_object(KEY 'k' VALUE 1, KEY 'k2' VALUE true)"},
+                {"mysql", "SELECT json_object('k', 1, 'k2', 2)"},
+                {"mysql", "SELECT json_array(true, null, 1 ABSENT ON NULL)"},
+                {"postgres", "SELECT * FROM json_table('[{\"id\":1}]', '$[*]' COLUMNS (id INT PATH '$.id')) AS jt"},
+                {"postgres", "SELECT * FROM unnest(array[4,5,6]) WITH ORDINALITY"},
+
+                // DDL 吞咽：TYPE 对象体 / TABLESPACE / PURGE 尾段
+                {"oracle", "CREATE TYPE t_demo AS OBJECT (id NUMBER(6), name VARCHAR2(20))"},
+                {"oracle", "CREATE OR REPLACE TYPE arr_t AS VARRAY(10) OF NUMBER(6)"},
+                {"mysql", "DROP TABLESPACE ts1 ENGINE = NDB"},
+                {"oracle", "DROP TABLE t PURGE"},
+                {"oracle", "TRUNCATE TABLE t PURGE SNAPSHOT LOG"},
+                {"mysql", "CREATE OR REPLACE VIEW v AS SELECT * FROM t"},
+
+                // CAST 类型后缀 / TRANSLATE USING / 表达式级 COLLATE
+                {"mysql", "SELECT CAST('test' AS CHAR CHARACTER SET utf8) COLLATE utf8_bin"},
+                {"mysql", "SELECT CAST(x AS CHAR(10) ARRAY) FROM t"},
+                {"oracle", "SELECT TRANSLATE(SUBSTR(TRIM(T.BZ), 1, 35) USING CHAR_CS) FROM T"},
         });
     }
 

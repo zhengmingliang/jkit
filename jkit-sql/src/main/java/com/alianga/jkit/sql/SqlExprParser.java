@@ -288,6 +288,15 @@ final class SqlExprParser {
             sb.append(' ').append(p.token.text());
             p.next();
         }
+        // MySQL：CHAR CHARACTER SET utf8；MySQL 8 索引表达式：CHAR(10) ARRAY
+        if (p.match(SqlTokenType.CHARACTER)) {
+            p.expect(SqlTokenType.SET);
+            sb.append(' ').append("CHARACTER SET ").append(p.consumeIdentRaw());
+        }
+        while (p.is(SqlTokenType.ARRAY) || p.isIdent("ARRAY")) {
+            sb.append(' ').append(p.token.text());
+            p.next();
+        }
         return sb.toString();
     }
 
@@ -351,16 +360,27 @@ final class SqlExprParser {
         if (SqlParser.equalsIgnoreCase(fnName, "POSITION")) {
             return parsePosition(name);
         }
-        if (SqlParser.equalsIgnoreCase(fnName, "CONVERT")) {
+        if (SqlParser.equalsIgnoreCase(fnName, "CONVERT")
+                || SqlParser.equalsIgnoreCase(fnName, "TRANSLATE")) {
             return parseConvert(name);
         }
         if (SqlParser.equalsIgnoreCase(fnName, "GROUP_CONCAT") || SqlParser.equalsIgnoreCase(fnName, "STRING_AGG")) {
             return parseGroupConcatLike(name);
         }
+        if (SqlParser.equalsIgnoreCase(fnName, "WEIGHT_STRING")) {
+            return parseWeightString(name);
+        }
+        if (SqlParser.equalsIgnoreCase(fnName, "JSON_OBJECT")
+                || SqlParser.equalsIgnoreCase(fnName, "JSON_ARRAY")
+                || SqlParser.equalsIgnoreCase(fnName, "JSON_OBJECTAGG")
+                || SqlParser.equalsIgnoreCase(fnName, "JSON_ARRAYAGG")
+                || SqlParser.equalsIgnoreCase(fnName, "JSON_TABLE")) {
+            return parseRawArgsFunction(name);
+        }
         p.expect(SqlTokenType.LPAREN);
         SqlFunctionExpr fn = new SqlFunctionExpr();
         fn.setName(name);
-        if (p.match(SqlTokenType.DISTINCT)) {
+        if (p.match(SqlTokenType.DISTINCT) || p.match(SqlTokenType.UNIQUE)) {
             fn.setDistinct(true);
         }
         if (!p.is(SqlTokenType.RPAREN) && !p.is(SqlTokenType.ORDER)) {
@@ -750,11 +770,11 @@ final class SqlExprParser {
             p.next();
             SqlFunctionExpr fn = new SqlFunctionExpr();
             fn.setName(SqlIdentifier.of("INTERVAL"));
-            // INTERVAL '30 minutes' / INTERVAL 30 DAY / INTERVAL '1' HOUR
-            if (p.is(SqlTokenType.STRING) || p.is(SqlTokenType.NUMBER)) {
+            // INTERVAL '30 minutes' / INTERVAL 30 DAY / INTERVAL '1' HOUR / INTERVAL 6/4 HOUR_MINUTE
+            if (p.is(SqlTokenType.STRING)) {
                 fn.addArgument(parsePrimaryInner());
             } else {
-                fn.addArgument(parsePrimary());
+                fn.addArgument(parseBit());
             }
             // 仅吸收 DAY/HOUR/MINUTE 等单位；勿吞 OR/AND/THEN（CASE 内 INTERVAL '30 min' OR …）
             if (isIntervalUnitToken()) {
@@ -810,7 +830,100 @@ final class SqlExprParser {
                 || SqlParser.equalsIgnoreCase(t, "SECOND")
                 || SqlParser.equalsIgnoreCase(t, "SECONDS")
                 || SqlParser.equalsIgnoreCase(t, "MICROSECOND")
-                || SqlParser.equalsIgnoreCase(t, "MICROSECONDS");
+                || SqlParser.equalsIgnoreCase(t, "MICROSECONDS")
+                || SqlParser.equalsIgnoreCase(t, "QUARTER")
+                || SqlParser.equalsIgnoreCase(t, "QUARTERS")
+                || SqlParser.equalsIgnoreCase(t, "SECOND_MICROSECOND")
+                || SqlParser.equalsIgnoreCase(t, "MINUTE_MICROSECOND")
+                || SqlParser.equalsIgnoreCase(t, "MINUTE_SECOND")
+                || SqlParser.equalsIgnoreCase(t, "HOUR_MICROSECOND")
+                || SqlParser.equalsIgnoreCase(t, "HOUR_SECOND")
+                || SqlParser.equalsIgnoreCase(t, "HOUR_MINUTE")
+                || SqlParser.equalsIgnoreCase(t, "DAY_MICROSECOND")
+                || SqlParser.equalsIgnoreCase(t, "DAY_SECOND")
+                || SqlParser.equalsIgnoreCase(t, "DAY_MINUTE")
+                || SqlParser.equalsIgnoreCase(t, "DAY_HOUR")
+                || SqlParser.equalsIgnoreCase(t, "YEAR_MONTH");
+    }
+
+    /**
+     * MySQL 8 {@code WEIGHT_STRING(expr [AS CHAR(n)|AS BINARY(n)] [LEVEL n [ASC|DESC]])}。
+     * 普通调用按常规参数解析；出现 {@code AS 类型} / {@code LEVEL} 特殊尾段时，
+     * 括号内容整体按原文保留为单个参数（诊断函数，不做结构化）。
+     */
+    private SqlExpr parseWeightString(SqlIdentifier name) {
+        p.expect(SqlTokenType.LPAREN);
+        SqlFunctionExpr fn = new SqlFunctionExpr();
+        fn.setName(name);
+        if (p.match(SqlTokenType.RPAREN)) {
+            return fn;
+        }
+        int mark = p.token.start();
+        SqlExpr first = parseExpr();
+        if (p.match(SqlTokenType.RPAREN)) {
+            fn.addArgument(first);
+            parseFunctionTail(fn);
+            return fn;
+        }
+        if (p.is(SqlTokenType.AS) || p.isIdent("LEVEL")) {
+            int depth = 1;
+            while (depth > 0 && !p.is(SqlTokenType.EOF)) {
+                if (p.is(SqlTokenType.LPAREN)) {
+                    depth++;
+                } else if (p.is(SqlTokenType.RPAREN)) {
+                    depth--;
+                    if (depth == 0) {
+                        break;
+                    }
+                }
+                p.next();
+            }
+            String raw = p.lexer.rawSlice(mark, p.token.start()).trim();
+            p.expect(SqlTokenType.RPAREN);
+            fn.addArgument(SqlIdentifier.of(raw));
+            parseFunctionTail(fn);
+            return fn;
+        }
+        fn.addArgument(first);
+        while (p.match(SqlTokenType.COMMA)) {
+            fn.addArgument(parseExpr());
+        }
+        p.expect(SqlTokenType.RPAREN);
+        parseFunctionTail(fn);
+        return fn;
+    }
+
+    /**
+     * SQL/JSON 构造器与表函数（{@code JSON_OBJECT} / {@code JSON_ARRAY} / {@code JSON_TABLE} 等）：
+     * 括号内是 SQL/JSON 专用文法（key:value、KEY…VALUE、ABSENT|NULL ON NULL、
+     * WITH|WITHOUT UNIQUE KEYS、FORMAT JSON [ENCODING]、COLUMNS … PATH），
+     * 不属于通用表达式，整体按原文保留为单个参数。
+     * 注意：原文内的 {@code ?} 绑定不会进 {@code parameters()}。
+     */
+    private SqlExpr parseRawArgsFunction(SqlIdentifier name) {
+        p.expect(SqlTokenType.LPAREN);
+        SqlFunctionExpr fn = new SqlFunctionExpr();
+        fn.setName(name);
+        int start = p.token.start();
+        int depth = 1;
+        while (depth > 0 && !p.is(SqlTokenType.EOF)) {
+            if (p.is(SqlTokenType.LPAREN)) {
+                depth++;
+            } else if (p.is(SqlTokenType.RPAREN)) {
+                depth--;
+                if (depth == 0) {
+                    break;
+                }
+            }
+            p.next();
+        }
+        String raw = p.lexer.rawSlice(start, p.token.start()).trim();
+        p.expect(SqlTokenType.RPAREN);
+        if (!raw.isEmpty()) {
+            fn.addArgument(SqlIdentifier.of(raw));
+        }
+        parseFunctionTail(fn);
+        return fn;
     }
 
     private SqlExpr parseSubstring(SqlIdentifier name) {

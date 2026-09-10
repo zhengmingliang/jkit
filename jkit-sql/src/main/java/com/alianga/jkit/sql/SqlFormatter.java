@@ -1626,6 +1626,12 @@ public final class SqlFormatter {
             } else {
                 writeExpr(ft.function());
             }
+            if (ft.withOrdinality()) {
+                sp();
+                kw("WITH");
+                sp();
+                kw("ORDINALITY");
+            }
             if (ft.withDefinition() != null && !ft.withDefinition().isEmpty()) {
                 sp();
                 kw("WITH");

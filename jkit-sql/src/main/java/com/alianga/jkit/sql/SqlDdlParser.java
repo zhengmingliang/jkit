@@ -434,7 +434,9 @@ final class SqlDdlParser {
                 p.expect(SqlTokenType.RPAREN);
             }
         }
-        if (p.match(SqlTokenType.AS) || p.is(SqlTokenType.SELECT) || p.is(SqlTokenType.WITH)) {
+        boolean asQueryObject = "TABLE".equalsIgnoreCase(ddl.objectType())
+                || "VIEW".equalsIgnoreCase(ddl.objectType());
+        if ((asQueryObject && p.match(SqlTokenType.AS)) || p.is(SqlTokenType.SELECT) || p.is(SqlTokenType.WITH)) {
             p.match(SqlTokenType.AS);
             ddl.setQuery(p.parseStatement());
         } else if (!p.atStmtBreak()) {
@@ -1657,6 +1659,10 @@ final class SqlDdlParser {
         }
         p.match(SqlTokenType.CASCADE);
         p.match(SqlTokenType.RESTRICT);
+        if (!p.atStmtBreak()) {
+            // DROP … PURGE / DROP TABLESPACE … ENGINE 等尾段原文保留
+            ddl.setTail(p.consumeRawAllowingBeginEnd());
+        }
         return ddl;
     }
 
@@ -1723,6 +1729,10 @@ final class SqlDdlParser {
         SqlSimpleStatement stmt = new SqlSimpleStatement();
         stmt.setStatementType(SqlStatementType.TRUNCATE);
         stmt.setName(p.parseName());
+        if (!p.atStmtBreak()) {
+            // Oracle PURGE SNAPSHOT LOG / CASCADE 等尾段原文保留
+            stmt.setText(p.consumeRawAllowingBeginEnd());
+        }
         return stmt;
     }
 

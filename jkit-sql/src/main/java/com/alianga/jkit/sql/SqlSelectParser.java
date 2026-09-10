@@ -643,6 +643,12 @@ final class SqlSelectParser {
                 SqlFunctionTable ft = new SqlFunctionTable();
                 ft.setLateral(lateral);
                 ft.setFunction(p.exprParser.parseFunction(name));
+                if (p.is(SqlTokenType.WITH) && p.lexer.peek() != null && p.lexer.peek().text() != null
+                        && SqlParser.equalsIgnoreCase(p.lexer.peek().text(), "ORDINALITY")) {
+                    p.next();
+                    p.next();
+                    ft.setWithOrdinality(true);
+                }
                 parseTableAlias(ft);
                 parseFunctionTableWith(ft);
                 return ft;

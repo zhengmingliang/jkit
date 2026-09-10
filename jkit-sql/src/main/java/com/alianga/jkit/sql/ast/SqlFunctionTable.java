@@ -12,6 +12,7 @@ public final class SqlFunctionTable extends SqlTableSource {
     private SqlExpr function;
     private boolean tableKeyword;
     private boolean lateral;
+    private boolean withOrdinality;
     private String withDefinition;
 
     /**
@@ -54,6 +55,24 @@ public final class SqlFunctionTable extends SqlTableSource {
      */
     public void setLateral(boolean lateral) {
         this.lateral = lateral;
+    }
+
+    /**
+     * PG {@code FROM unnest(...) WITH ORDINALITY}：带序号列。
+     *
+     * @return 是否 WITH ORDINALITY
+     * @since 2.0.1
+     */
+    public boolean withOrdinality() {
+        return withOrdinality;
+    }
+
+    /**
+     * @param withOrdinality {@code WITH ORDINALITY}
+     * @since 2.0.1
+     */
+    public void setWithOrdinality(boolean withOrdinality) {
+        this.withOrdinality = withOrdinality;
     }
 
     /**
