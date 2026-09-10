@@ -19,8 +19,11 @@ import com.alianga.jkit.sql.ast.SqlJoin;
 import com.alianga.jkit.sql.ast.SqlLimit;
 import com.alianga.jkit.sql.ast.SqlListExpr;
 import com.alianga.jkit.sql.ast.SqlLiteral;
+import com.alianga.jkit.sql.ast.SqlMatchRecognize;
 import com.alianga.jkit.sql.ast.SqlMerge;
 import com.alianga.jkit.sql.ast.SqlMergeWhen;
+import com.alianga.jkit.sql.ast.SqlModelClause;
+import com.alianga.jkit.sql.ast.SqlNamedExpr;
 import com.alianga.jkit.sql.ast.SqlNode;
 import com.alianga.jkit.sql.ast.SqlOrderByItem;
 import com.alianga.jkit.sql.ast.SqlOverExpr;
@@ -125,6 +128,12 @@ public final class SqlFormatter {
             writeWithItem((SqlWithItem) node);
         } else if (node instanceof SqlWindowDefinition) {
             writeWindowDefinition((SqlWindowDefinition) node);
+        } else if (node instanceof SqlModelClause) {
+            writeModelClause((SqlModelClause) node);
+        } else if (node instanceof SqlMatchRecognize) {
+            writeMatchRecognizeBody((SqlMatchRecognize) node);
+        } else if (node instanceof SqlNamedExpr) {
+            writeNamedExpr((SqlNamedExpr) node);
         } else if (node instanceof SqlMergeWhen) {
             writeMergeWhen((SqlMergeWhen) node);
         } else if (node instanceof SqlInsertBranch) {
@@ -239,9 +248,9 @@ public final class SqlFormatter {
             sp();
             writeFrom(select.from());
         }
-        if (select.modelClause() != null && select.modelClause().length() > 0) {
+        if (select.modelClause() != null) {
             nl();
-            out.append(select.modelClause());
+            writeModelClause(select.modelClause());
         }
         if (select.where() != null) {
             nl();
@@ -1120,8 +1129,222 @@ public final class SqlFormatter {
                 out.append("MATCH_RECOGNIZE");
                 sp();
                 out.append('(');
-                out.append(t.matchRecognize());
+                writeMatchRecognizeBody(t.matchRecognize());
                 out.append(')');
+            }
+        }
+    }
+
+    private void writeModelClause(SqlModelClause model) {
+        if (model == null) {
+            return;
+        }
+        boolean structured = !model.partitionBy().isEmpty() || !model.dimensionBy().isEmpty()
+                || !model.measures().isEmpty() || (model.rules() != null && model.rules().length() > 0)
+                || (model.options() != null && model.options().length() > 0);
+        if (!structured) {
+            if (model.raw() != null && model.raw().length() > 0) {
+                out.append(model.raw());
+            } else if (model.tail() != null) {
+                out.append(model.tail());
+            }
+            return;
+        }
+        out.append("MODEL");
+        if (model.options() != null && model.options().length() > 0) {
+            sp();
+            out.append(model.options());
+        }
+        if (!model.partitionBy().isEmpty()) {
+            sp();
+            kw("PARTITION");
+            sp();
+            kw("BY");
+            sp();
+            out.append('(');
+            for (int i = 0; i < model.partitionBy().size(); i++) {
+                if (i > 0) {
+                    out.append(',');
+                    sp();
+                }
+                writeExpr(model.partitionBy().get(i));
+            }
+            out.append(')');
+        }
+        if (!model.dimensionBy().isEmpty()) {
+            sp();
+            out.append("DIMENSION");
+            sp();
+            kw("BY");
+            sp();
+            out.append('(');
+            for (int i = 0; i < model.dimensionBy().size(); i++) {
+                if (i > 0) {
+                    out.append(',');
+                    sp();
+                }
+                writeExpr(model.dimensionBy().get(i));
+            }
+            out.append(')');
+        }
+        if (!model.measures().isEmpty()) {
+            sp();
+            out.append("MEASURES");
+            sp();
+            out.append('(');
+            for (int i = 0; i < model.measures().size(); i++) {
+                if (i > 0) {
+                    out.append(',');
+                    sp();
+                }
+                writeExpr(model.measures().get(i));
+            }
+            out.append(')');
+        }
+        if (model.rules() != null) {
+            sp();
+            out.append("RULES");
+            if (model.rulesModifiers() != null && model.rulesModifiers().length() > 0) {
+                sp();
+                out.append(model.rulesModifiers());
+            }
+            sp();
+            out.append('(');
+            out.append(model.rules());
+            out.append(')');
+        }
+        if (model.tail() != null && model.tail().length() > 0) {
+            sp();
+            out.append(model.tail());
+        }
+    }
+
+    private void writeMatchRecognizeBody(SqlMatchRecognize mr) {
+        if (mr == null) {
+            return;
+        }
+        boolean structured = !mr.partitionBy().isEmpty() || !mr.orderBy().isEmpty()
+                || !mr.measures().isEmpty() || (mr.pattern() != null && mr.pattern().length() > 0)
+                || !mr.define().isEmpty() || (mr.rowsPerMatch() != null && mr.rowsPerMatch().length() > 0)
+                || (mr.afterMatch() != null && mr.afterMatch().length() > 0);
+        if (!structured) {
+            if (mr.raw() != null) {
+                out.append(mr.raw());
+            } else if (mr.optionsRaw() != null) {
+                out.append(mr.optionsRaw());
+            }
+            return;
+        }
+        boolean needSp = false;
+        if (!mr.partitionBy().isEmpty()) {
+            kw("PARTITION");
+            sp();
+            kw("BY");
+            sp();
+            for (int i = 0; i < mr.partitionBy().size(); i++) {
+                if (i > 0) {
+                    out.append(',');
+                    sp();
+                }
+                writeExpr(mr.partitionBy().get(i));
+            }
+            needSp = true;
+        }
+        if (!mr.orderBy().isEmpty()) {
+            if (needSp) {
+                sp();
+            }
+            kw("ORDER");
+            sp();
+            kw("BY");
+            sp();
+            writeOrder(mr.orderBy());
+            needSp = true;
+        }
+        if (!mr.measures().isEmpty()) {
+            if (needSp) {
+                sp();
+            }
+            out.append("MEASURES");
+            sp();
+            for (int i = 0; i < mr.measures().size(); i++) {
+                if (i > 0) {
+                    out.append(',');
+                    sp();
+                }
+                writeNamedExpr(mr.measures().get(i));
+            }
+            needSp = true;
+        }
+        if (mr.rowsPerMatch() != null && mr.rowsPerMatch().length() > 0) {
+            if (needSp) {
+                sp();
+            }
+            out.append(mr.rowsPerMatch());
+            needSp = true;
+        }
+        if (mr.afterMatch() != null && mr.afterMatch().length() > 0) {
+            if (needSp) {
+                sp();
+            }
+            out.append(mr.afterMatch());
+            needSp = true;
+        }
+        if (mr.pattern() != null) {
+            if (needSp) {
+                sp();
+            }
+            out.append("PATTERN");
+            sp();
+            out.append('(');
+            out.append(mr.pattern());
+            out.append(')');
+            needSp = true;
+        }
+        if (!mr.define().isEmpty()) {
+            if (needSp) {
+                sp();
+            }
+            out.append("DEFINE");
+            sp();
+            for (int i = 0; i < mr.define().size(); i++) {
+                if (i > 0) {
+                    out.append(',');
+                    sp();
+                }
+                writeNamedExpr(mr.define().get(i));
+            }
+            needSp = true;
+        }
+        if (mr.optionsRaw() != null && mr.optionsRaw().length() > 0) {
+            if (needSp) {
+                sp();
+            }
+            out.append(mr.optionsRaw());
+        }
+    }
+
+    private void writeNamedExpr(SqlNamedExpr item) {
+        if (item == null) {
+            return;
+        }
+        if (item.expr() == null && item.raw() != null) {
+            out.append(item.raw());
+            return;
+        }
+        if (item.nameFirst()) {
+            if (item.name() != null) {
+                out.append(item.name());
+                sp();
+                kw("AS");
+                sp();
+            }
+            writeExpr(item.expr());
+        } else {
+            writeExpr(item.expr());
+            if (item.name() != null) {
+                sp();
+                out.append(item.name());
             }
         }
     }

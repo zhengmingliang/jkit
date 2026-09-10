@@ -17,8 +17,11 @@ import com.alianga.jkit.sql.ast.SqlJoin;
 import com.alianga.jkit.sql.ast.SqlLimit;
 import com.alianga.jkit.sql.ast.SqlListExpr;
 import com.alianga.jkit.sql.ast.SqlLiteral;
+import com.alianga.jkit.sql.ast.SqlMatchRecognize;
 import com.alianga.jkit.sql.ast.SqlMerge;
 import com.alianga.jkit.sql.ast.SqlMergeWhen;
+import com.alianga.jkit.sql.ast.SqlModelClause;
+import com.alianga.jkit.sql.ast.SqlNamedExpr;
 import com.alianga.jkit.sql.ast.SqlNode;
 import com.alianga.jkit.sql.ast.SqlOrderByItem;
 import com.alianga.jkit.sql.ast.SqlOverExpr;
@@ -142,6 +145,15 @@ public class SqlAstVisitor implements SqlVisitor {
         }
         if (node instanceof SqlWindowDefinition) {
             return visitWindowDefinition((SqlWindowDefinition) node);
+        }
+        if (node instanceof SqlModelClause) {
+            return visitModelClause((SqlModelClause) node);
+        }
+        if (node instanceof SqlMatchRecognize) {
+            return visitMatchRecognize((SqlMatchRecognize) node);
+        }
+        if (node instanceof SqlNamedExpr) {
+            return visitNamedExpr((SqlNamedExpr) node);
         }
         if (node instanceof SqlMergeWhen) {
             return visitMergeWhen((SqlMergeWhen) node);
@@ -332,6 +344,21 @@ public class SqlAstVisitor implements SqlVisitor {
 
     /** @param node INSERT ALL 分支 @return 是否继续子节点 */
     protected boolean visitInsertBranch(SqlInsertBranch node) {
+        return true;
+    }
+
+    /** @param node MODEL 子句 @return 是否继续子节点 */
+    protected boolean visitModelClause(SqlModelClause node) {
+        return true;
+    }
+
+    /** @param node MATCH_RECOGNIZE @return 是否继续子节点 */
+    protected boolean visitMatchRecognize(SqlMatchRecognize node) {
+        return true;
+    }
+
+    /** @param node 具名表达式对 @return 是否继续子节点 */
+    protected boolean visitNamedExpr(SqlNamedExpr node) {
         return true;
     }
 }

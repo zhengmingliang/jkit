@@ -28,8 +28,8 @@ public final class SqlSelect extends SqlStatement {
     private String distributeBy;
     private String sortBy;
     private String clusterBy;
-    /** Oracle {@code MODEL …} 子句原文（含 MODEL 关键字）。 */
-    private String modelClause;
+    /** Oracle {@code MODEL …} 结构化子句。 */
+    private SqlModelClause modelClause;
     private SqlExpr having;
     private final List<SqlOrderByItem> orderBy = new ArrayList<SqlOrderByItem>(2);
     private SqlLimit limit;
@@ -301,18 +301,18 @@ public final class SqlSelect extends SqlStatement {
     }
 
     /**
-     * @return Oracle {@code MODEL …} 原文，可空
+     * @return Oracle {@code MODEL …} 结构化节点，可空
      * @since 2.0.1
      */
-    public String modelClause() {
+    public SqlModelClause modelClause() {
         return modelClause;
     }
 
     /**
-     * @param modelClause MODEL 子句原文
+     * @param modelClause MODEL 子句
      * @since 2.0.1
      */
-    public void setModelClause(String modelClause) {
+    public void setModelClause(SqlModelClause modelClause) {
         this.modelClause = modelClause;
     }
 
@@ -566,6 +566,7 @@ public final class SqlSelect extends SqlStatement {
         child(visitor, from);
         child(visitor, where);
         children(visitor, groupBy);
+        child(visitor, modelClause);
         child(visitor, having);
         children(visitor, orderBy);
         child(visitor, limit);

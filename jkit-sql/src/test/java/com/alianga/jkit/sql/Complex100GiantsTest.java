@@ -1,6 +1,8 @@
 package com.alianga.jkit.sql;
 
 import com.alianga.jkit.sql.ast.SqlFunctionExpr;
+import com.alianga.jkit.sql.ast.SqlMatchRecognize;
+import com.alianga.jkit.sql.ast.SqlModelClause;
 import com.alianga.jkit.sql.ast.SqlSelect;
 import com.alianga.jkit.sql.ast.SqlSelectItem;
 import com.alianga.jkit.sql.ast.SqlTable;
@@ -43,9 +45,19 @@ public class Complex100GiantsTest {
                 + "MEASURES (y2022,y2023,y2024) "
                 + "RULES (y2024[ANY] = y2023[CV()] * 1.1)";
         SqlSelect select = (SqlSelect) SQL.parse(sql, SqlDialect.ORACLE);
-        assertNotNull(select.modelClause());
-        assertTrue(select.modelClause().toUpperCase().startsWith("MODEL"));
-        assertTrue(select.modelClause().toUpperCase().contains("DIMENSION"));
+        SqlModelClause model = select.modelClause();
+        assertNotNull(model);
+        assertNotNull(model.raw());
+        assertTrue(model.raw().toUpperCase().startsWith("MODEL"));
+        assertNotNull(model.options());
+        assertTrue(model.options().toUpperCase().contains("RETURN"));
+        assertEquals(1, model.dimensionBy().size());
+        assertEquals(3, model.measures().size());
+        assertNotNull(model.rules());
+        assertTrue(model.rules().toUpperCase().contains("Y2024"));
+        String formatted = SQL.toSqlString(select, SqlDialect.ORACLE);
+        assertTrue(formatted.toUpperCase().contains("MODEL"));
+        assertTrue(formatted.toUpperCase().contains("DIMENSION"));
     }
 
     @Test
@@ -58,8 +70,26 @@ public class Complex100GiantsTest {
                 + "DEFINE A AS A.total_amount>0, B AS B.total_amount>0 )";
         SqlSelect select = (SqlSelect) SQL.parse(sql, SqlDialect.ORACLE);
         SqlTable table = (SqlTable) select.from();
-        assertNotNull(table.matchRecognize());
-        assertTrue(table.matchRecognize().toUpperCase().contains("PARTITION BY"));
+        SqlMatchRecognize mr = table.matchRecognize();
+        assertNotNull(mr);
+        assertEquals(1, mr.partitionBy().size());
+        assertEquals(1, mr.orderBy().size());
+        assertEquals(2, mr.measures().size());
+        assertEquals("start_dt", mr.measures().get(0).name());
+        assertEquals("end_dt", mr.measures().get(1).name());
+        assertNotNull(mr.rowsPerMatch());
+        assertTrue(mr.rowsPerMatch().toUpperCase().contains("ONE ROW"));
+        assertNotNull(mr.pattern());
+        assertTrue(mr.pattern().toUpperCase().contains("B"));
+        assertTrue(mr.pattern().contains("{"));
+        assertEquals(2, mr.define().size());
+        assertEquals("A", mr.define().get(0).name());
+        assertEquals("B", mr.define().get(1).name());
+        assertTrue(mr.define().get(0).nameFirst());
+        String formatted = SQL.toSqlString(select, SqlDialect.ORACLE);
+        assertTrue(formatted.toUpperCase().contains("MATCH_RECOGNIZE"));
+        assertTrue(formatted.toUpperCase().contains("PARTITION BY"));
+        assertTrue(formatted.toUpperCase().contains("DEFINE"));
     }
 
     @Test

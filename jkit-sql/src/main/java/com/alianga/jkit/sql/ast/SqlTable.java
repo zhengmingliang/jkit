@@ -18,8 +18,8 @@ public final class SqlTable extends SqlTableSource {
     private String sampleClause;
     /** Oracle {@code AS OF TIMESTAMP|SCN …} / SQL Server {@code FOR SYSTEM_TIME …} 原文。 */
     private String temporalClause;
-    /** Oracle {@code MATCH_RECOGNIZE (...)} 括号内原文（不含关键字与外层括号）。 */
-    private String matchRecognize;
+    /** Oracle {@code MATCH_RECOGNIZE (...)} 结构化节点。 */
+    private SqlMatchRecognize matchRecognize;
     private final List<SqlIdentifier> partitions = new ArrayList<SqlIdentifier>(2);
 
     /**
@@ -109,18 +109,18 @@ public final class SqlTable extends SqlTableSource {
     }
 
     /**
-     * @return {@code MATCH_RECOGNIZE} 括号内原文，可空
+     * @return {@code MATCH_RECOGNIZE} 结构化节点，可空
      * @since 2.0.1
      */
-    public String matchRecognize() {
+    public SqlMatchRecognize matchRecognize() {
         return matchRecognize;
     }
 
     /**
-     * @param matchRecognize 括号内原文
+     * @param matchRecognize MATCH_RECOGNIZE 节点
      * @since 2.0.1
      */
-    public void setMatchRecognize(String matchRecognize) {
+    public void setMatchRecognize(SqlMatchRecognize matchRecognize) {
         this.matchRecognize = matchRecognize;
     }
 
@@ -139,6 +139,7 @@ public final class SqlTable extends SqlTableSource {
     protected void acceptChildren(SqlVisitor visitor) {
         child(visitor, name);
         children(visitor, partitions);
+        child(visitor, matchRecognize);
         children(visitor, columnAliases());
     }
 }
