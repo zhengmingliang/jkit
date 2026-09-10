@@ -8,7 +8,8 @@ import java.util.List;
 /**
  * Oracle / 标准 {@code MATCH_RECOGNIZE (...)} 结构化节点。
  *
- * <p>常见子句尽量结构化（含 {@code PATTERN} 原文、{@code DEFINE}、{@code SUBSET}）；未识别片段进 {@link #optionsRaw()} / {@link #raw()}。</p>
+ * <p>常见子句尽量结构化（含 {@code PATTERN} 原文、{@code DEFINE}、{@code SUBSET}、
+ * {@code ROWS PER MATCH}/{@code AFTER MATCH}/{@code WITHIN}）；未识别片段进 {@link #optionsRaw()} / {@link #raw()}。</p>
  *
  * @author 郑明亮
  * @since 2.0.1
@@ -19,6 +20,8 @@ public final class SqlMatchRecognize extends SqlNode {
     private final List<SqlNamedExpr> measures = new ArrayList<SqlNamedExpr>(4);
     private String rowsPerMatch;
     private String afterMatch;
+    /** {@code WITHIN …}（常跟 PATTERN），可空。 */
+    private String within;
     private String pattern;
     private final List<SqlNamedExpr> define = new ArrayList<SqlNamedExpr>(4);
     private final List<SqlSubset> subsets = new ArrayList<SqlSubset>(2);
@@ -73,6 +76,22 @@ public final class SqlMatchRecognize extends SqlNode {
      */
     public void setAfterMatch(String afterMatch) {
         this.afterMatch = afterMatch;
+    }
+
+    /**
+     * @return {@code WITHIN …} 原文，可空
+     * @since 2.0.1
+     */
+    public String within() {
+        return within;
+    }
+
+    /**
+     * @param within WITHIN 子句
+     * @since 2.0.1
+     */
+    public void setWithin(String within) {
+        this.within = within;
     }
 
     /**

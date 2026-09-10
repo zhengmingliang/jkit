@@ -728,13 +728,15 @@ final class SqlSelectParser {
                 p.next();
                 p.expect(SqlTokenType.LPAREN);
                 mr.setPattern(p.skipBalancedParensContent());
+            } else if (p.isIdent("WITHIN")) {
+                mr.setWithin(consumeWithinClause());
             } else if (p.isIdent("DEFINE")) {
                 p.next();
                 parseMatchDefine(mr.define());
             } else if (p.isIdent("SUBSET")) {
                 p.next();
                 parseMatchSubsets(mr.subsets());
-            } else if (p.isIdent("WITHIN") || p.isIdent("MATCH_NUMBER")
+            } else if (p.isIdent("MATCH_NUMBER")
                     || p.isIdent("CLASSIFIER") || p.isIdent("PERMUTE")) {
                 appendLeftoverClause(leftover);
             } else {
@@ -829,7 +831,26 @@ final class SqlSelectParser {
         return p.is(SqlTokenType.PARTITION) || p.is(SqlTokenType.ORDER)
                 || p.isIdent("MEASURES") || p.isIdent("ONE") || p.is(SqlTokenType.ALL) || p.isIdent("ALL")
                 || p.isIdent("AFTER") || p.isIdent("PATTERN") || p.isIdent("DEFINE")
-                || p.isIdent("SUBSET");
+                || p.isIdent("SUBSET") || p.isIdent("WITHIN");
+    }
+
+    private String consumeWithinClause() {
+        int start = p.token.start();
+        p.next(); // WITHIN
+        if (p.match(SqlTokenType.LPAREN)) {
+            p.skipBalancedParensContent();
+        } else {
+            while (!p.is(SqlTokenType.EOF) && !p.is(SqlTokenType.SEMICOLON)
+                    && !p.is(SqlTokenType.RPAREN) && !isMatchRecognizeClauseStart()) {
+                if (p.is(SqlTokenType.LPAREN)) {
+                    p.next();
+                    p.skipBalancedParensContent();
+                } else {
+                    p.next();
+                }
+            }
+        }
+        return p.lexer.rawSlice(start, p.token.start()).trim();
     }
 
     private void appendLeftoverClause(StringBuilder leftover) {
@@ -1135,6 +1156,7 @@ final class SqlSelectParser {
         String cell = p.lexer.rawSlice(cellStart, p.token.start()).trim();
         if (!cell.isEmpty()) {
             rule.setCell(cell);
+            fillModelCellDims(rule, cell);
         }
         if (sawEq && (p.match(SqlTokenType.EQ) || p.match(SqlTokenType.ASSIGN))) {
             try {
@@ -1156,6 +1178,57 @@ final class SqlSelectParser {
         }
         rule.setRaw(p.lexer.rawSlice(start, p.token.start()).trim());
         return rule;
+    }
+
+    /** 从 {@code measure[d1, d2, …]} 原文拆出顶层维度片段。 */
+    private void fillModelCellDims(SqlModelRule rule, String cell) {
+        if (cell == null) {
+            return;
+        }
+        int lb = cell.indexOf('[');
+        int rb = cell.lastIndexOf(']');
+        if (lb < 0 || rb <= lb) {
+            return;
+        }
+        String inside = cell.substring(lb + 1, rb).trim();
+        if (inside.isEmpty()) {
+            return;
+        }
+        StringBuilder cur = new StringBuilder();
+        int depthParen = 0;
+        int depthBracket = 0;
+        for (int i = 0; i < inside.length(); i++) {
+            char c = inside.charAt(i);
+            if (c == '(') {
+                depthParen++;
+                cur.append(c);
+            } else if (c == ')') {
+                if (depthParen > 0) {
+                    depthParen--;
+                }
+                cur.append(c);
+            } else if (c == '[') {
+                depthBracket++;
+                cur.append(c);
+            } else if (c == ']') {
+                if (depthBracket > 0) {
+                    depthBracket--;
+                }
+                cur.append(c);
+            } else if (c == ',' && depthParen == 0 && depthBracket == 0) {
+                String part = cur.toString().trim();
+                if (!part.isEmpty()) {
+                    rule.cellDims().add(part);
+                }
+                cur.setLength(0);
+            } else {
+                cur.append(c);
+            }
+        }
+        String last = cur.toString().trim();
+        if (!last.isEmpty()) {
+            rule.cellDims().add(last);
+        }
     }
 
     private String skipBalancedBracketsContent() {
