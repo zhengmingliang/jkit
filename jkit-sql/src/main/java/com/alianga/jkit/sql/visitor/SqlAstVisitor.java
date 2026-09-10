@@ -5,6 +5,7 @@ import com.alianga.jkit.sql.ast.SqlBetweenExpr;
 import com.alianga.jkit.sql.ast.SqlBinaryExpr;
 import com.alianga.jkit.sql.ast.SqlCaseExpr;
 import com.alianga.jkit.sql.ast.SqlCastExpr;
+import com.alianga.jkit.sql.ast.SqlControlStatement;
 import com.alianga.jkit.sql.ast.SqlDdlStatement;
 import com.alianga.jkit.sql.ast.SqlDelete;
 import com.alianga.jkit.sql.ast.SqlFunctionExpr;
@@ -73,6 +74,9 @@ public class SqlAstVisitor implements SqlVisitor {
         }
         if (node instanceof SqlDdlStatement) {
             return visitDdl((SqlDdlStatement) node);
+        }
+        if (node instanceof SqlControlStatement) {
+            return visitControl((SqlControlStatement) node);
         }
         if (node instanceof SqlSimpleStatement) {
             return visitSimple((SqlSimpleStatement) node);
@@ -223,6 +227,11 @@ public class SqlAstVisitor implements SqlVisitor {
 
     /** @param node 简单语句 @return 是否继续子节点 */
     protected boolean visitSimple(SqlSimpleStatement node) {
+        return true;
+    }
+
+    /** @param node 控制流 @return 是否继续子节点 */
+    protected boolean visitControl(SqlControlStatement node) {
         return true;
     }
 

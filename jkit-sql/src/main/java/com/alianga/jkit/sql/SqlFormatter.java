@@ -6,6 +6,7 @@ import com.alianga.jkit.sql.ast.SqlBinaryExpr;
 import com.alianga.jkit.sql.ast.SqlBinaryOp;
 import com.alianga.jkit.sql.ast.SqlCaseExpr;
 import com.alianga.jkit.sql.ast.SqlCastExpr;
+import com.alianga.jkit.sql.ast.SqlControlStatement;
 import com.alianga.jkit.sql.ast.SqlDdlStatement;
 import com.alianga.jkit.sql.ast.SqlDelete;
 import com.alianga.jkit.sql.ast.SqlExpr;
@@ -115,6 +116,8 @@ public final class SqlFormatter {
             writeMerge((SqlMerge) node);
         } else if (node instanceof SqlDdlStatement) {
             writeDdl((SqlDdlStatement) node);
+        } else if (node instanceof SqlControlStatement) {
+            writeControl((SqlControlStatement) node);
         } else if (node instanceof SqlSimpleStatement) {
             writeSimple((SqlSimpleStatement) node);
         } else if (node instanceof SqlExpr) {
@@ -833,14 +836,66 @@ public final class SqlFormatter {
             kw("AS");
             sp();
             writeNode(ddl.query());
+        } else if (ddl.triggerTiming() != null || ddl.triggerEvent() != null
+                || ddl.triggerTable() != null
+                || (!ddl.bodyStatements().isEmpty() && "TRIGGER".equalsIgnoreCase(ddl.objectType()))
+                || (!ddl.bodyStatements().isEmpty() && "EVENT".equalsIgnoreCase(ddl.objectType()))) {
+            writeTriggerOrEvent(ddl);
         } else if (!ddl.parameters().isEmpty() || !ddl.bodyStatements().isEmpty()
-                || (ddl.bodyRaw() != null && ddl.bodyRaw().length() > 0)) {
+                || (ddl.bodyRaw() != null && ddl.bodyRaw().length() > 0)
+                || (ddl.returnsType() != null && ddl.returnsType().length() > 0)) {
             writeRoutineParamsAndBody(ddl);
         } else if (ddl.tail() != null && ddl.type() != SqlStatementType.ALTER) {
             sp();
             out.append(ddl.tail());
         }
         // ALTER 的 tail 由 writeAlterClauses 输出，避免重复
+    }
+
+    private void writeTriggerOrEvent(SqlDdlStatement ddl) {
+        if (ddl.triggerTiming() != null) {
+            sp();
+            out.append(ddl.triggerTiming());
+        }
+        if (ddl.triggerEvent() != null) {
+            sp();
+            out.append(ddl.triggerEvent());
+        }
+        if (ddl.triggerTable() != null) {
+            sp();
+            kw("ON");
+            sp();
+            writeExpr(ddl.triggerTable());
+        }
+        if (!ddl.bodyStatements().isEmpty()) {
+            boolean needBegin = ddl.bodyStatements().size() > 1
+                    || (ddl.bodyRaw() != null && ddl.bodyRaw().toUpperCase().contains("BEGIN"));
+            if (needBegin) {
+                sp();
+                kw("BEGIN");
+            } else {
+                sp();
+            }
+            for (int i = 0; i < ddl.bodyStatements().size(); i++) {
+                if (needBegin) {
+                    sp();
+                }
+                writeNode(ddl.bodyStatements().get(i));
+                if (needBegin || i < ddl.bodyStatements().size() - 1) {
+                    out.append(';');
+                }
+            }
+            if (needBegin) {
+                sp();
+                kw("END");
+            }
+        } else if (ddl.bodyRaw() != null && ddl.bodyRaw().length() > 0) {
+            sp();
+            out.append(ddl.bodyRaw());
+        } else if (ddl.tail() != null) {
+            sp();
+            out.append(ddl.tail());
+        }
     }
 
     private void writeRoutineParamsAndBody(SqlDdlStatement ddl) {
@@ -860,6 +915,12 @@ public final class SqlFormatter {
             sp();
             out.append(ddl.tail());
             return;
+        }
+        if (ddl.returnsType() != null && ddl.returnsType().length() > 0) {
+            sp();
+            out.append("RETURNS");
+            sp();
+            out.append(ddl.returnsType());
         }
         if (!ddl.bodyStatements().isEmpty()) {
             sp();
@@ -1440,6 +1501,88 @@ public final class SqlFormatter {
                 sp();
             }
             out.append(mr.optionsRaw());
+        }
+    }
+
+    private void writeControl(SqlControlStatement ctrl) {
+        if (ctrl == null) {
+            return;
+        }
+        if ((ctrl.condition() == null && ctrl.bodyStatements().isEmpty())
+                && ctrl.raw() != null) {
+            out.append(ctrl.raw());
+            return;
+        }
+        if (ctrl.label() != null) {
+            out.append(ctrl.label());
+            out.append(':');
+            sp();
+        }
+        if (ctrl.kind() == SqlControlStatement.Kind.IF) {
+            kw("IF");
+            sp();
+            writeExpr(ctrl.condition());
+            sp();
+            kw("THEN");
+            writeStmtListInline(ctrl.bodyStatements());
+            for (int i = 0; i < ctrl.elseIfs().size(); i++) {
+                SqlControlStatement br = ctrl.elseIfs().get(i);
+                sp();
+                out.append("ELSEIF");
+                sp();
+                writeExpr(br.condition());
+                sp();
+                kw("THEN");
+                writeStmtListInline(br.bodyStatements());
+            }
+            if (!ctrl.elseStatements().isEmpty()) {
+                sp();
+                kw("ELSE");
+                writeStmtListInline(ctrl.elseStatements());
+            }
+            sp();
+            kw("END");
+            sp();
+            kw("IF");
+        } else if (ctrl.kind() == SqlControlStatement.Kind.WHILE) {
+            out.append("WHILE");
+            sp();
+            writeExpr(ctrl.condition());
+            sp();
+            kw("DO");
+            writeStmtListInline(ctrl.bodyStatements());
+            sp();
+            kw("END");
+            sp();
+            out.append("WHILE");
+        } else if (ctrl.kind() == SqlControlStatement.Kind.LOOP) {
+            out.append("LOOP");
+            writeStmtListInline(ctrl.bodyStatements());
+            sp();
+            kw("END");
+            sp();
+            out.append("LOOP");
+        } else if (ctrl.kind() == SqlControlStatement.Kind.REPEAT) {
+            out.append("REPEAT");
+            writeStmtListInline(ctrl.bodyStatements());
+            sp();
+            out.append("UNTIL");
+            sp();
+            writeExpr(ctrl.condition());
+            sp();
+            kw("END");
+            sp();
+            out.append("REPEAT");
+        } else if (ctrl.raw() != null) {
+            out.append(ctrl.raw());
+        }
+    }
+
+    private void writeStmtListInline(java.util.List<SqlStatement> stmts) {
+        for (int i = 0; i < stmts.size(); i++) {
+            sp();
+            writeNode(stmts.get(i));
+            out.append(';');
         }
     }
 

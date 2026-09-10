@@ -9,7 +9,7 @@ import java.util.List;
  * CREATE / DROP / ALTER 等 DDL。抽取对象名；支持 {@code OR REPLACE}、VIEW / PROCEDURE 等；
  * CREATE TABLE 解析列定义原文、ENGINE/CHARSET/COMMENT 与表级 FOREIGN KEY 引用表；
  * ALTER 解析 ADD/DROP INDEX、RENAME TO、CHANGE/MODIFY 列定义、ADD CONSTRAINT；
- * 过程体等可留在 {@link #tail()}。
+ * 过程体等可留在 {@link #tail()}；FUNCTION {@code RETURNS}、TRIGGER 时机/事件/表可结构化。
  *
  * @author 郑明亮
  * @since 2.0.1
@@ -44,6 +44,14 @@ public final class SqlDdlStatement extends SqlStatement {
     private final List<SqlStatement> bodyStatements = new ArrayList<SqlStatement>(4);
     /** 过程体原文（含 BEGIN/END 或单语句），可空。 */
     private String bodyRaw;
+    /** FUNCTION {@code RETURNS} 类型原文，可空。 */
+    private String returnsType;
+    /** TRIGGER {@code BEFORE}/{@code AFTER}，可空。 */
+    private String triggerTiming;
+    /** TRIGGER 事件 {@code INSERT}/{@code UPDATE}/{@code DELETE}，可空。 */
+    private String triggerEvent;
+    /** TRIGGER {@code ON} 表名，可空。 */
+    private SqlIdentifier triggerTable;
 
     /**
      * {@inheritDoc}
@@ -385,6 +393,70 @@ public final class SqlDdlStatement extends SqlStatement {
     }
 
     /**
+     * @return FUNCTION RETURNS 类型原文，可空
+     * @since 2.0.1
+     */
+    public String returnsType() {
+        return returnsType;
+    }
+
+    /**
+     * @param returnsType RETURNS 类型
+     * @since 2.0.1
+     */
+    public void setReturnsType(String returnsType) {
+        this.returnsType = returnsType;
+    }
+
+    /**
+     * @return TRIGGER BEFORE/AFTER，可空
+     * @since 2.0.1
+     */
+    public String triggerTiming() {
+        return triggerTiming;
+    }
+
+    /**
+     * @param triggerTiming BEFORE/AFTER
+     * @since 2.0.1
+     */
+    public void setTriggerTiming(String triggerTiming) {
+        this.triggerTiming = triggerTiming;
+    }
+
+    /**
+     * @return TRIGGER INSERT/UPDATE/DELETE，可空
+     * @since 2.0.1
+     */
+    public String triggerEvent() {
+        return triggerEvent;
+    }
+
+    /**
+     * @param triggerEvent 事件
+     * @since 2.0.1
+     */
+    public void setTriggerEvent(String triggerEvent) {
+        this.triggerEvent = triggerEvent;
+    }
+
+    /**
+     * @return TRIGGER ON 表，可空
+     * @since 2.0.1
+     */
+    public SqlIdentifier triggerTable() {
+        return triggerTable;
+    }
+
+    /**
+     * @param triggerTable 表名
+     * @since 2.0.1
+     */
+    public void setTriggerTable(SqlIdentifier triggerTable) {
+        this.triggerTable = triggerTable;
+    }
+
+    /**
      * {@inheritDoc}
      */
     @Override
@@ -394,6 +466,7 @@ public final class SqlDdlStatement extends SqlStatement {
         children(visitor, columns);
         children(visitor, parameters);
         children(visitor, bodyStatements);
+        child(visitor, triggerTable);
         child(visitor, indexName);
         children(visitor, indexColumns);
         child(visitor, renameTo);

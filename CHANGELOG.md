@@ -45,6 +45,7 @@
 - `jkit-sql`：`MATCH_RECOGNIZE` 解析 `SUBSET name=(a,b,…)`（`SqlSubset`）；`MODEL RULES` 拆为 `SqlModelRule` 条目（`cell[…]=expr`，UPSERT 修饰；失败保留 raw）；`PATTERN`/`DEFINE` 保持既有字段。
 - `jkit-sql`：`SqlWallConfig` 可配置增强（denyDdl / 危险函数 / INTO OUTFILE / 可选 denyUnion·information_schema / selectOnly）；`SQL.wall(sql, dialect, config)` 重载；默认保持安全关键检查。
 - `jkit-sql`：CREATE PROCEDURE/FUNCTION 参数结构化（`SqlRoutineParam`）与 BEGIN 体 `bodyStatements`（尽力解析 SELECT/INSERT/SET 等；IF/WHILE 等进 OTHER）；保留 `bodyRaw`/`tail` 往返。
+- `jkit-sql`：过程体 `IF`/`WHILE`/`LOOP`/`REPEAT` → `SqlControlStatement`（条件+bodyStatements；ELSEIF/ELSE）；`FUNCTION RETURNS` → `returnsType`；`TRIGGER` 抽 `triggerTiming`/`triggerEvent`/`triggerTable` 与 `bodyStatements`；`EVENT` DO 体进 bodyStatements。
 
 - `jkit-sql`：点号后单引号名可作引用标识符（`T.'Group'`）；`INTERVAL` 仅吸收时间单位（不吞 `OR`/`AND`）；聚合内 `ORDER BY`（`ARRAY_AGG(x ORDER BY y)`）；`PIVOT`/`UNPIVOT`；Hive `LATERAL VIEW` / `DISTRIBUTE BY` / `SORT BY` / `CLUSTER BY`；`GROUP BY GROUPING SETS|CUBE|ROLLUP(...)`；Oracle `ORDER SIBLINGS BY`。
 
