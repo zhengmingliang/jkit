@@ -12,6 +12,7 @@ import com.alianga.jkit.sql.ast.SqlStartTransactionStatement;
 import com.alianga.jkit.sql.ast.SqlStatement;
 import com.alianga.jkit.sql.ast.SqlStatementType;
 import com.alianga.jkit.sql.ast.SqlTableHandlerStatement;
+import com.alianga.jkit.sql.ast.SqlTransactionControlStatement;
 import com.alianga.jkit.sql.ast.SqlWithItem;
 
 import java.util.ArrayList;
@@ -233,6 +234,7 @@ public final class SqlParser {
             case COMMIT:
             case ROLLBACK:
             case SAVEPOINT:
+            case RELEASE:
                 return parseTxControl();
             case FLUSH:
                 return parseFlush();
@@ -636,23 +638,63 @@ public final class SqlParser {
         return false;
     }
 
+    /**
+     * {@code COMMIT}/{@code ROLLBACK [TO [SAVEPOINT] name]}/{@code SAVEPOINT}/{@code RELEASE}
+     * → {@link SqlTransactionControlStatement}。
+     */
     private SqlStatement parseTxControl() {
         String kind = token.text().toUpperCase();
         next();
-        SqlSimpleStatement stmt = new SqlSimpleStatement();
-        stmt.setStatementType(SqlStatementType.OTHER);
-        StringBuilder text = new StringBuilder(kind);
-        if ("SAVEPOINT".equals(kind) && identLike()) {
-            stmt.setName(parseName());
-            text.append(' ').append(stmt.name().qualifiedName());
+        SqlTransactionControlStatement stmt = new SqlTransactionControlStatement();
+        stmt.setKind(kind);
+        StringBuilder leftover = new StringBuilder();
+        if ("RELEASE".equals(kind)) {
+            if (is(SqlTokenType.SAVEPOINT) || isIdent("SAVEPOINT")
+                    || (identLike() && "SAVEPOINT".equalsIgnoreCase(token.text()))) {
+                next();
+            }
+            if (identLike()) {
+                stmt.setSavepoint(parseName());
+            }
+        } else if ("SAVEPOINT".equals(kind)) {
+            if (identLike()) {
+                stmt.setSavepoint(parseName());
+            }
+        } else {
+            // COMMIT / ROLLBACK：可选 WORK
+            if (isIdent("WORK") || (identLike() && "WORK".equalsIgnoreCase(token.text()))) {
+                if (leftover.length() > 0) {
+                    leftover.append(' ');
+                }
+                leftover.append("WORK");
+                next();
+            }
+            if ("ROLLBACK".equals(kind)
+                    && (is(SqlTokenType.TO) || isIdent("TO")
+                    || (identLike() && "TO".equalsIgnoreCase(token.text())))) {
+                next();
+                stmt.setToSavepoint(true);
+                if (is(SqlTokenType.SAVEPOINT) || isIdent("SAVEPOINT")
+                        || (identLike() && "SAVEPOINT".equalsIgnoreCase(token.text()))) {
+                    next();
+                }
+                if (identLike()) {
+                    stmt.setSavepoint(parseName());
+                }
+            }
         }
         if (!atStmtBreak()) {
             String rest = consumeRawUntilSemi();
-            if (!rest.isEmpty()) {
-                text.append(' ').append(rest);
+            if (rest != null && !rest.isEmpty()) {
+                if (leftover.length() > 0) {
+                    leftover.append(' ');
+                }
+                leftover.append(rest);
             }
         }
-        stmt.setText(text.toString());
+        if (leftover.length() > 0) {
+            stmt.setRaw(leftover.toString().trim());
+        }
         return stmt;
     }
 

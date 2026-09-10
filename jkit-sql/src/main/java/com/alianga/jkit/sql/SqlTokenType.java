@@ -287,6 +287,7 @@ public enum SqlTokenType {
     COMMIT,
     ROLLBACK,
     SAVEPOINT,
+    RELEASE,
     TRANSACTION,
     OUTFILE,
     DUMPFILE,

@@ -46,6 +46,7 @@ import com.alianga.jkit.sql.ast.SqlSubqueryTable;
 import com.alianga.jkit.sql.ast.SqlSubset;
 import com.alianga.jkit.sql.ast.SqlTable;
 import com.alianga.jkit.sql.ast.SqlTableHandlerStatement;
+import com.alianga.jkit.sql.ast.SqlTransactionControlStatement;
 import com.alianga.jkit.sql.ast.SqlUnaryExpr;
 import com.alianga.jkit.sql.ast.SqlUpdate;
 import com.alianga.jkit.sql.ast.SqlValuesTable;
@@ -111,6 +112,9 @@ public class SqlAstVisitor implements SqlVisitor {
         }
         if (node instanceof SqlFlushStatement) {
             return visitFlush((SqlFlushStatement) node);
+        }
+        if (node instanceof SqlTransactionControlStatement) {
+            return visitTransactionControl((SqlTransactionControlStatement) node);
         }
         if (node instanceof SqlStartTransactionStatement) {
             return visitStartTransaction((SqlStartTransactionStatement) node);
@@ -312,6 +316,11 @@ public class SqlAstVisitor implements SqlVisitor {
 
     /** @param node FLUSH @return 是否继续子节点 */
     protected boolean visitFlush(SqlFlushStatement node) {
+        return true;
+    }
+
+    /** @param node COMMIT/ROLLBACK/SAVEPOINT/RELEASE @return 是否继续子节点 */
+    protected boolean visitTransactionControl(SqlTransactionControlStatement node) {
         return true;
     }
 

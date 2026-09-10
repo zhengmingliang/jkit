@@ -39,6 +39,7 @@ import com.alianga.jkit.sql.ast.SqlStatementType;
 import com.alianga.jkit.sql.ast.SqlSubqueryTable;
 import com.alianga.jkit.sql.ast.SqlTable;
 import com.alianga.jkit.sql.ast.SqlTableHandlerStatement;
+import com.alianga.jkit.sql.ast.SqlTransactionControlStatement;
 import com.alianga.jkit.sql.ast.SqlUnaryExpr;
 import com.alianga.jkit.sql.ast.SqlUpdate;
 import com.alianga.jkit.sql.ast.SqlValuesTable;
@@ -2073,17 +2074,40 @@ public class SqlParserTest {
         assertTrue(bare.beginForm());
         assertFalse(bare.work());
 
-        SqlSimpleStatement commit = (SqlSimpleStatement) SQL.parse("COMMIT");
-        assertTrue(commit.text().equalsIgnoreCase("COMMIT")
-                || commit.text().toUpperCase().startsWith("COMMIT"));
+        SqlTransactionControlStatement commit =
+                (SqlTransactionControlStatement) SQL.parse("COMMIT");
+        assertEquals(SqlStatementType.OTHER, commit.type());
+        assertEquals("COMMIT", commit.kind());
+        assertNull(commit.savepoint());
+        assertTrue(SQL.toSqlString(commit).equalsIgnoreCase("COMMIT"));
 
-        SqlSimpleStatement rollback = (SqlSimpleStatement) SQL.parse("ROLLBACK TO SAVEPOINT sp1");
-        assertTrue(rollback.text().toUpperCase().startsWith("ROLLBACK"));
-        assertTrue(rollback.text().toUpperCase().contains("SAVEPOINT"));
+        SqlTransactionControlStatement rollback =
+                (SqlTransactionControlStatement) SQL.parse("ROLLBACK TO SAVEPOINT sp1");
+        assertEquals("ROLLBACK", rollback.kind());
+        assertTrue(rollback.toSavepoint());
+        assertEquals("sp1", rollback.savepoint().simpleName());
+        String rbFmt = SQL.toSqlString(rollback).toUpperCase();
+        assertTrue(rbFmt, rbFmt.contains("ROLLBACK"));
+        assertTrue(rbFmt.contains("SAVEPOINT"));
+        assertTrue(rbFmt.contains("SP1"));
 
-        SqlSimpleStatement sp = (SqlSimpleStatement) SQL.parse("SAVEPOINT sp1");
-        assertEquals("sp1", sp.name().simpleName());
-        assertTrue(sp.text().toUpperCase().contains("SAVEPOINT"));
+        SqlTransactionControlStatement sp =
+                (SqlTransactionControlStatement) SQL.parse("SAVEPOINT sp1");
+        assertEquals("SAVEPOINT", sp.kind());
+        assertEquals("sp1", sp.savepoint().simpleName());
+        assertTrue(SQL.toSqlString(sp).toUpperCase().contains("SAVEPOINT"));
+
+        SqlTransactionControlStatement release =
+                (SqlTransactionControlStatement) SQL.parse("RELEASE SAVEPOINT sp1");
+        assertEquals("RELEASE", release.kind());
+        assertEquals("sp1", release.savepoint().simpleName());
+        assertTrue(SQL.toSqlString(release).toUpperCase().contains("RELEASE"));
+
+        SqlTransactionControlStatement commitWork =
+                (SqlTransactionControlStatement) SQL.parse("COMMIT WORK");
+        assertEquals("COMMIT", commitWork.kind());
+        assertNotNull(commitWork.raw());
+        assertTrue(commitWork.raw().toUpperCase().contains("WORK"));
 
         // 过程块仍可用（结构化 SqlBlockStatement）
         SqlBlockStatement block = (SqlBlockStatement) SQL.parse("BEGIN SELECT 1; END");

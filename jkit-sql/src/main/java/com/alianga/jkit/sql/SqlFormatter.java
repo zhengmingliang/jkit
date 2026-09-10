@@ -51,6 +51,7 @@ import com.alianga.jkit.sql.ast.SqlSubset;
 import com.alianga.jkit.sql.ast.SqlTable;
 import com.alianga.jkit.sql.ast.SqlTableHandlerStatement;
 import com.alianga.jkit.sql.ast.SqlTableSource;
+import com.alianga.jkit.sql.ast.SqlTransactionControlStatement;
 import com.alianga.jkit.sql.ast.SqlUnaryExpr;
 import com.alianga.jkit.sql.ast.SqlUpdate;
 import com.alianga.jkit.sql.ast.SqlValuesTable;
@@ -144,6 +145,8 @@ public final class SqlFormatter {
             writeCopy((SqlCopyStatement) node);
         } else if (node instanceof SqlFlushStatement) {
             writeFlush((SqlFlushStatement) node);
+        } else if (node instanceof SqlTransactionControlStatement) {
+            writeTransactionControl((SqlTransactionControlStatement) node);
         } else if (node instanceof SqlStartTransactionStatement) {
             writeStartTransaction((SqlStartTransactionStatement) node);
         } else if (node instanceof SqlLoadDataStatement) {
@@ -1891,6 +1894,46 @@ public final class SqlFormatter {
                 && !flush.raw().toUpperCase().startsWith("FLUSH")) {
             sp();
             out.append(flush.raw());
+        }
+    }
+
+    private void writeTransactionControl(SqlTransactionControlStatement tx) {
+        if (tx == null) {
+            return;
+        }
+        if (tx.kind() == null) {
+            if (tx.raw() != null) {
+                out.append(tx.raw());
+            }
+            return;
+        }
+        String kind = tx.kind().toUpperCase();
+        out.append(kind);
+        if ("RELEASE".equals(kind)) {
+            sp();
+            out.append("SAVEPOINT");
+            if (tx.savepoint() != null) {
+                sp();
+                writeExpr(tx.savepoint());
+            }
+        } else if ("SAVEPOINT".equals(kind)) {
+            if (tx.savepoint() != null) {
+                sp();
+                writeExpr(tx.savepoint());
+            }
+        } else if ("ROLLBACK".equals(kind) && tx.toSavepoint()) {
+            sp();
+            out.append("TO");
+            sp();
+            out.append("SAVEPOINT");
+            if (tx.savepoint() != null) {
+                sp();
+                writeExpr(tx.savepoint());
+            }
+        }
+        if (tx.raw() != null && tx.raw().length() > 0) {
+            sp();
+            out.append(tx.raw());
         }
     }
 

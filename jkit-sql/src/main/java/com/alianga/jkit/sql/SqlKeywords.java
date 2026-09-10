@@ -237,6 +237,7 @@ final class SqlKeywords {
         put("COMMIT", SqlTokenType.COMMIT);
         put("ROLLBACK", SqlTokenType.ROLLBACK);
         put("SAVEPOINT", SqlTokenType.SAVEPOINT);
+        put("RELEASE", SqlTokenType.RELEASE);
         put("TRANSACTION", SqlTokenType.TRANSACTION);
         put("OUTFILE", SqlTokenType.OUTFILE);
         put("DUMPFILE", SqlTokenType.DUMPFILE);
