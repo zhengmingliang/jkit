@@ -23,6 +23,7 @@ import com.alianga.jkit.sql.ast.SqlMatchRecognize;
 import com.alianga.jkit.sql.ast.SqlMerge;
 import com.alianga.jkit.sql.ast.SqlMergeWhen;
 import com.alianga.jkit.sql.ast.SqlModelClause;
+import com.alianga.jkit.sql.ast.SqlModelRule;
 import com.alianga.jkit.sql.ast.SqlNamedExpr;
 import com.alianga.jkit.sql.ast.SqlNode;
 import com.alianga.jkit.sql.ast.SqlOrderByItem;
@@ -36,6 +37,7 @@ import com.alianga.jkit.sql.ast.SqlSimpleStatement;
 import com.alianga.jkit.sql.ast.SqlStatement;
 import com.alianga.jkit.sql.ast.SqlStatementType;
 import com.alianga.jkit.sql.ast.SqlSubqueryTable;
+import com.alianga.jkit.sql.ast.SqlSubset;
 import com.alianga.jkit.sql.ast.SqlTable;
 import com.alianga.jkit.sql.ast.SqlTableSource;
 import com.alianga.jkit.sql.ast.SqlUnaryExpr;
@@ -135,6 +137,10 @@ public final class SqlFormatter {
             writeMatchRecognizeBody((SqlMatchRecognize) node);
         } else if (node instanceof SqlNamedExpr) {
             writeNamedExpr((SqlNamedExpr) node);
+        } else if (node instanceof SqlModelRule) {
+            writeModelRule((SqlModelRule) node);
+        } else if (node instanceof SqlSubset) {
+            writeSubset((SqlSubset) node);
         } else if (node instanceof SqlMergeWhen) {
             writeMergeWhen((SqlMergeWhen) node);
         } else if (node instanceof SqlInsertBranch) {
@@ -1227,6 +1233,7 @@ public final class SqlFormatter {
         }
         boolean structured = !model.partitionBy().isEmpty() || !model.dimensionBy().isEmpty()
                 || !model.measures().isEmpty() || (model.rules() != null && model.rules().length() > 0)
+                || !model.ruleEntries().isEmpty()
                 || (model.options() != null && model.options().length() > 0);
         if (!structured) {
             if (model.raw() != null && model.raw().length() > 0) {
@@ -1287,7 +1294,7 @@ public final class SqlFormatter {
             }
             out.append(')');
         }
-        if (model.rules() != null) {
+        if (model.rules() != null || !model.ruleEntries().isEmpty()) {
             sp();
             out.append("RULES");
             if (model.rulesModifiers() != null && model.rulesModifiers().length() > 0) {
@@ -1296,7 +1303,17 @@ public final class SqlFormatter {
             }
             sp();
             out.append('(');
-            out.append(model.rules());
+            if (!model.ruleEntries().isEmpty()) {
+                for (int i = 0; i < model.ruleEntries().size(); i++) {
+                    if (i > 0) {
+                        out.append(',');
+                        sp();
+                    }
+                    writeModelRule(model.ruleEntries().get(i));
+                }
+            } else {
+                out.append(model.rules());
+            }
             out.append(')');
         }
         if (model.tail() != null && model.tail().length() > 0) {
@@ -1311,7 +1328,8 @@ public final class SqlFormatter {
         }
         boolean structured = !mr.partitionBy().isEmpty() || !mr.orderBy().isEmpty()
                 || !mr.measures().isEmpty() || (mr.pattern() != null && mr.pattern().length() > 0)
-                || !mr.define().isEmpty() || (mr.rowsPerMatch() != null && mr.rowsPerMatch().length() > 0)
+                || !mr.define().isEmpty() || !mr.subsets().isEmpty()
+                || (mr.rowsPerMatch() != null && mr.rowsPerMatch().length() > 0)
                 || (mr.afterMatch() != null && mr.afterMatch().length() > 0);
         if (!structured) {
             if (mr.raw() != null) {
@@ -1402,6 +1420,21 @@ public final class SqlFormatter {
             }
             needSp = true;
         }
+        if (!mr.subsets().isEmpty()) {
+            if (needSp) {
+                sp();
+            }
+            out.append("SUBSET");
+            sp();
+            for (int i = 0; i < mr.subsets().size(); i++) {
+                if (i > 0) {
+                    out.append(',');
+                    sp();
+                }
+                writeSubset(mr.subsets().get(i));
+            }
+            needSp = true;
+        }
         if (mr.optionsRaw() != null && mr.optionsRaw().length() > 0) {
             if (needSp) {
                 sp();
@@ -1433,6 +1466,56 @@ public final class SqlFormatter {
                 out.append(item.name());
             }
         }
+    }
+
+    private void writeModelRule(SqlModelRule rule) {
+        if (rule == null) {
+            return;
+        }
+        if (rule.value() == null && rule.raw() != null) {
+            out.append(rule.raw());
+            return;
+        }
+        if (rule.modifiers() != null && rule.modifiers().length() > 0) {
+            out.append(rule.modifiers());
+            sp();
+        }
+        if (rule.cell() != null) {
+            out.append(rule.cell());
+        }
+        if (rule.value() != null) {
+            sp();
+            out.append('=');
+            sp();
+            writeExpr(rule.value());
+        } else if (rule.raw() != null && rule.cell() == null) {
+            out.append(rule.raw());
+        }
+    }
+
+    private void writeSubset(SqlSubset subset) {
+        if (subset == null) {
+            return;
+        }
+        if (subset.name() == null && subset.raw() != null) {
+            out.append(subset.raw());
+            return;
+        }
+        if (subset.name() != null) {
+            out.append(subset.name());
+        }
+        sp();
+        out.append('=');
+        sp();
+        out.append('(');
+        for (int i = 0; i < subset.members().size(); i++) {
+            if (i > 0) {
+                out.append(',');
+                sp();
+            }
+            out.append(subset.members().get(i));
+        }
+        out.append(')');
     }
 
     private void writeJoinType(SqlJoin.Type type) {

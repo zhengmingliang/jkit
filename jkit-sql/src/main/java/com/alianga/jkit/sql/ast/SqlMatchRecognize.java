@@ -8,7 +8,7 @@ import java.util.List;
 /**
  * Oracle / 标准 {@code MATCH_RECOGNIZE (...)} 结构化节点。
  *
- * <p>常见子句尽量结构化；未识别片段进 {@link #optionsRaw()} / {@link #raw()}。</p>
+ * <p>常见子句尽量结构化（含 {@code PATTERN} 原文、{@code DEFINE}、{@code SUBSET}）；未识别片段进 {@link #optionsRaw()} / {@link #raw()}。</p>
  *
  * @author 郑明亮
  * @since 2.0.1
@@ -21,6 +21,7 @@ public final class SqlMatchRecognize extends SqlNode {
     private String afterMatch;
     private String pattern;
     private final List<SqlNamedExpr> define = new ArrayList<SqlNamedExpr>(4);
+    private final List<SqlSubset> subsets = new ArrayList<SqlSubset>(2);
     private String optionsRaw;
     /** 括号内全文（不含外层括号），便于往返。 */
     private String raw;
@@ -96,6 +97,14 @@ public final class SqlMatchRecognize extends SqlNode {
     }
 
     /**
+     * @return SUBSET 列表
+     * @since 2.0.1
+     */
+    public List<SqlSubset> subsets() {
+        return subsets;
+    }
+
+    /**
      * @return 未结构化尾部 / 其它选项原文，可空
      */
     public String optionsRaw() {
@@ -132,5 +141,6 @@ public final class SqlMatchRecognize extends SqlNode {
         children(visitor, orderBy);
         children(visitor, measures);
         children(visitor, define);
+        children(visitor, subsets);
     }
 }

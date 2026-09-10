@@ -42,6 +42,7 @@
 
 - `jkit-sql`：ClickHouse 参数化函数 `fn(params)(args)`（如 `windowFunnel(n)(...)`）；Oracle `MODEL` / `MATCH_RECOGNIZE` / `AS OF TIMESTAMP|SCN`；SQL Server `FOR SYSTEM_TIME AS OF`（表级时态子句）。
 - `jkit-sql`：`MODEL` / `MATCH_RECOGNIZE` 升级为结构化 AST（`SqlModelClause` / `SqlMatchRecognize` / `SqlNamedExpr`），保留 `raw` 往返；Formatter / Visitor 同步；`Complex100GiantsTest` 断言结构化字段。
+- `jkit-sql`：`MATCH_RECOGNIZE` 解析 `SUBSET name=(a,b,…)`（`SqlSubset`）；`MODEL RULES` 拆为 `SqlModelRule` 条目（`cell[…]=expr`，UPSERT 修饰；失败保留 raw）；`PATTERN`/`DEFINE` 保持既有字段。
 - `jkit-sql`：`SqlWallConfig` 可配置增强（denyDdl / 危险函数 / INTO OUTFILE / 可选 denyUnion·information_schema / selectOnly）；`SQL.wall(sql, dialect, config)` 重载；默认保持安全关键检查。
 - `jkit-sql`：CREATE PROCEDURE/FUNCTION 参数结构化（`SqlRoutineParam`）与 BEGIN 体 `bodyStatements`（尽力解析 SELECT/INSERT/SET 等；IF/WHILE 等进 OTHER）；保留 `bodyRaw`/`tail` 往返。
 

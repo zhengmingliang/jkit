@@ -21,6 +21,7 @@ import com.alianga.jkit.sql.ast.SqlMatchRecognize;
 import com.alianga.jkit.sql.ast.SqlMerge;
 import com.alianga.jkit.sql.ast.SqlMergeWhen;
 import com.alianga.jkit.sql.ast.SqlModelClause;
+import com.alianga.jkit.sql.ast.SqlModelRule;
 import com.alianga.jkit.sql.ast.SqlNamedExpr;
 import com.alianga.jkit.sql.ast.SqlNode;
 import com.alianga.jkit.sql.ast.SqlOrderByItem;
@@ -32,6 +33,7 @@ import com.alianga.jkit.sql.ast.SqlSelect;
 import com.alianga.jkit.sql.ast.SqlSelectItem;
 import com.alianga.jkit.sql.ast.SqlSimpleStatement;
 import com.alianga.jkit.sql.ast.SqlSubqueryTable;
+import com.alianga.jkit.sql.ast.SqlSubset;
 import com.alianga.jkit.sql.ast.SqlTable;
 import com.alianga.jkit.sql.ast.SqlUnaryExpr;
 import com.alianga.jkit.sql.ast.SqlUpdate;
@@ -155,6 +157,12 @@ public class SqlAstVisitor implements SqlVisitor {
         }
         if (node instanceof SqlNamedExpr) {
             return visitNamedExpr((SqlNamedExpr) node);
+        }
+        if (node instanceof SqlModelRule) {
+            return visitModelRule((SqlModelRule) node);
+        }
+        if (node instanceof SqlSubset) {
+            return visitSubset((SqlSubset) node);
         }
         if (node instanceof SqlRoutineParam) {
             return visitRoutineParam((SqlRoutineParam) node);
@@ -363,6 +371,16 @@ public class SqlAstVisitor implements SqlVisitor {
 
     /** @param node 具名表达式对 @return 是否继续子节点 */
     protected boolean visitNamedExpr(SqlNamedExpr node) {
+        return true;
+    }
+
+    /** @param node MODEL RULE 条目 @return 是否继续子节点 */
+    protected boolean visitModelRule(SqlModelRule node) {
+        return true;
+    }
+
+    /** @param node MATCH_RECOGNIZE SUBSET @return 是否继续子节点 */
+    protected boolean visitSubset(SqlSubset node) {
         return true;
     }
 

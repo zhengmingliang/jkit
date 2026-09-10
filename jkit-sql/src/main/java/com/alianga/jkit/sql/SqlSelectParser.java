@@ -9,12 +9,14 @@ import com.alianga.jkit.sql.ast.SqlJoin;
 import com.alianga.jkit.sql.ast.SqlLimit;
 import com.alianga.jkit.sql.ast.SqlMatchRecognize;
 import com.alianga.jkit.sql.ast.SqlModelClause;
+import com.alianga.jkit.sql.ast.SqlModelRule;
 import com.alianga.jkit.sql.ast.SqlNamedExpr;
 import com.alianga.jkit.sql.ast.SqlOrderByItem;
 import com.alianga.jkit.sql.ast.SqlPivotTable;
 import com.alianga.jkit.sql.ast.SqlSelect;
 import com.alianga.jkit.sql.ast.SqlSelectItem;
 import com.alianga.jkit.sql.ast.SqlSubqueryTable;
+import com.alianga.jkit.sql.ast.SqlSubset;
 import com.alianga.jkit.sql.ast.SqlTable;
 import com.alianga.jkit.sql.ast.SqlTableSource;
 import com.alianga.jkit.sql.ast.SqlValuesTable;
@@ -729,7 +731,10 @@ final class SqlSelectParser {
             } else if (p.isIdent("DEFINE")) {
                 p.next();
                 parseMatchDefine(mr.define());
-            } else if (p.isIdent("SUBSET") || p.isIdent("WITHIN") || p.isIdent("MATCH_NUMBER")
+            } else if (p.isIdent("SUBSET")) {
+                p.next();
+                parseMatchSubsets(mr.subsets());
+            } else if (p.isIdent("WITHIN") || p.isIdent("MATCH_NUMBER")
                     || p.isIdent("CLASSIFIER") || p.isIdent("PERMUTE")) {
                 appendLeftoverClause(leftover);
             } else {
@@ -978,7 +983,7 @@ final class SqlSelectParser {
                     model.setRulesModifiers(mods.toString());
                 }
                 if (p.match(SqlTokenType.LPAREN)) {
-                    model.setRules(p.skipBalancedParensContent());
+                    parseModelRulesBody(model);
                 }
             } else if (isModelOptionToken()) {
                 if (options.length() > 0) {
@@ -1021,6 +1026,165 @@ final class SqlSelectParser {
         }
         model.setRaw(p.lexer.rawSlice(start, p.token.start()).trim());
         return model;
+    }
+
+    private void parseMatchSubsets(List<SqlSubset> subsets) {
+        do {
+            SqlSubset subset = new SqlSubset();
+            int start = p.token.start();
+            if (p.identLike() || (p.token.type() != null && p.token.type().keyword())) {
+                subset.setName(SqlParser.unquote(p.consumeIdentRaw()));
+            }
+            if (p.match(SqlTokenType.EQ) || p.match(SqlTokenType.ASSIGN)) {
+                if (p.match(SqlTokenType.LPAREN)) {
+                    if (!p.is(SqlTokenType.RPAREN)) {
+                        do {
+                            if (p.identLike() || (p.token.type() != null && p.token.type().keyword())) {
+                                subset.members().add(SqlParser.unquote(p.consumeIdentRaw()));
+                            } else {
+                                break;
+                            }
+                        } while (p.match(SqlTokenType.COMMA));
+                    }
+                    p.expect(SqlTokenType.RPAREN);
+                }
+            }
+            subset.setRaw(p.lexer.rawSlice(start, p.token.start()).trim());
+            subsets.add(subset);
+        } while (p.match(SqlTokenType.COMMA)
+                && (p.identLike() || (p.token.type() != null && p.token.type().keyword()))
+                && !isMatchRecognizeClauseStart());
+    }
+
+    private void parseModelRulesBody(SqlModelClause model) {
+        int start = p.token.start();
+        if (!p.is(SqlTokenType.RPAREN) && !p.is(SqlTokenType.EOF)) {
+            do {
+                model.ruleEntries().add(parseModelRuleEntry());
+            } while (p.match(SqlTokenType.COMMA) && !p.is(SqlTokenType.RPAREN) && !p.is(SqlTokenType.EOF));
+        }
+        while (!p.is(SqlTokenType.RPAREN) && !p.is(SqlTokenType.EOF) && !p.is(SqlTokenType.SEMICOLON)) {
+            if (p.is(SqlTokenType.LPAREN)) {
+                p.next();
+                p.skipBalancedParensContent();
+            } else if (p.is(SqlTokenType.LBRACKET)) {
+                p.next();
+                skipBalancedBracketsContent();
+            } else {
+                p.next();
+            }
+        }
+        model.setRules(p.lexer.rawSlice(start, p.token.start()).trim());
+        p.expect(SqlTokenType.RPAREN);
+    }
+
+    private SqlModelRule parseModelRuleEntry() {
+        SqlModelRule rule = new SqlModelRule();
+        int start = p.token.start();
+        StringBuilder mods = new StringBuilder();
+        while (p.identLike() || p.is(SqlTokenType.ALL) || p.isIdent("ALL")) {
+            String t = p.token.text().toUpperCase();
+            if ("UPSERT".equals(t) || "UPDATE".equals(t) || "ALL".equals(t)) {
+                if (mods.length() > 0) {
+                    mods.append(' ');
+                }
+                mods.append(t);
+                p.next();
+            } else {
+                break;
+            }
+        }
+        if (mods.length() > 0) {
+            rule.setModifiers(mods.toString());
+        }
+        int cellStart = p.token.start();
+        int depthParen = 0;
+        int depthBracket = 0;
+        boolean sawEq = false;
+        while (!p.is(SqlTokenType.EOF) && !p.is(SqlTokenType.SEMICOLON)) {
+            if (depthParen == 0 && depthBracket == 0
+                    && (p.is(SqlTokenType.EQ) || p.is(SqlTokenType.ASSIGN))) {
+                sawEq = true;
+                break;
+            }
+            if (depthParen == 0 && depthBracket == 0
+                    && (p.is(SqlTokenType.COMMA) || p.is(SqlTokenType.RPAREN))) {
+                break;
+            }
+            if (p.is(SqlTokenType.LPAREN)) {
+                depthParen++;
+                p.next();
+            } else if (p.is(SqlTokenType.RPAREN)) {
+                if (depthParen == 0) {
+                    break;
+                }
+                depthParen--;
+                p.next();
+            } else if (p.is(SqlTokenType.LBRACKET)) {
+                depthBracket++;
+                p.next();
+            } else if (p.is(SqlTokenType.RBRACKET)) {
+                if (depthBracket > 0) {
+                    depthBracket--;
+                }
+                p.next();
+            } else {
+                p.next();
+            }
+        }
+        String cell = p.lexer.rawSlice(cellStart, p.token.start()).trim();
+        if (!cell.isEmpty()) {
+            rule.setCell(cell);
+        }
+        if (sawEq && (p.match(SqlTokenType.EQ) || p.match(SqlTokenType.ASSIGN))) {
+            try {
+                rule.setValue(p.exprParser.parseExpr());
+            } catch (SqlParseException ex) {
+                while (!p.is(SqlTokenType.EOF) && !p.is(SqlTokenType.SEMICOLON)
+                        && !p.is(SqlTokenType.COMMA) && !p.is(SqlTokenType.RPAREN)) {
+                    if (p.is(SqlTokenType.LPAREN)) {
+                        p.next();
+                        p.skipBalancedParensContent();
+                    } else if (p.is(SqlTokenType.LBRACKET)) {
+                        p.next();
+                        skipBalancedBracketsContent();
+                    } else {
+                        p.next();
+                    }
+                }
+            }
+        }
+        rule.setRaw(p.lexer.rawSlice(start, p.token.start()).trim());
+        return rule;
+    }
+
+    private String skipBalancedBracketsContent() {
+        StringBuilder sb = new StringBuilder();
+        int depth = 1;
+        while (!p.is(SqlTokenType.EOF) && depth > 0) {
+            if (p.is(SqlTokenType.LBRACKET)) {
+                depth++;
+                sb.append(p.token.text());
+                p.next();
+            } else if (p.is(SqlTokenType.RBRACKET)) {
+                depth--;
+                if (depth == 0) {
+                    p.next();
+                    break;
+                }
+                sb.append(p.token.text());
+                p.next();
+            } else if (p.is(SqlTokenType.LPAREN)) {
+                sb.append('(');
+                p.next();
+                sb.append(p.skipBalancedParensContent());
+                sb.append(')');
+            } else {
+                sb.append(p.token.text());
+                p.next();
+            }
+        }
+        return sb.toString();
     }
 
     private void parseModelExprList(List<SqlExpr> target) {

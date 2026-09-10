@@ -8,7 +8,7 @@ import java.util.List;
 /**
  * Oracle {@code MODEL …} 结构化节点。
  *
- * <p>PARTITION / DIMENSION / MEASURES / RULES 尽量结构化；前缀选项与未识别片段进
+ * <p>PARTITION / DIMENSION / MEASURES / RULES（含 {@link #ruleEntries()}）尽量结构化；前缀选项与未识别片段进
  * {@link #options()} / {@link #tail()}；全文（含 MODEL）进 {@link #raw()}。</p>
  *
  * @author 郑明亮
@@ -22,6 +22,8 @@ public final class SqlModelClause extends SqlNode {
     private final List<SqlExpr> measures = new ArrayList<SqlExpr>(4);
     /** {@code RULES (...)} 括号内原文（不含 RULES 与外层括号）。 */
     private String rules;
+    /** 结构化规则条目（尽力）；失败条目仅有 {@link SqlModelRule#raw()}。 */
+    private final List<SqlModelRule> ruleEntries = new ArrayList<SqlModelRule>(4);
     private String rulesModifiers;
     private String tail;
     /** 含 {@code MODEL} 关键字的全文。 */
@@ -77,6 +79,14 @@ public final class SqlModelClause extends SqlNode {
     }
 
     /**
+     * @return 结构化 RULES 条目
+     * @since 2.0.1
+     */
+    public List<SqlModelRule> ruleEntries() {
+        return ruleEntries;
+    }
+
+    /**
      * @return {@code RULES UPSERT} / {@code RULES UPDATE} 等修饰，可空
      */
     public String rulesModifiers() {
@@ -126,5 +136,6 @@ public final class SqlModelClause extends SqlNode {
         children(visitor, partitionBy);
         children(visitor, dimensionBy);
         children(visitor, measures);
+        children(visitor, ruleEntries);
     }
 }

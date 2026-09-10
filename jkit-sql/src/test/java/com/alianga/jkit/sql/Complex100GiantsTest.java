@@ -55,6 +55,10 @@ public class Complex100GiantsTest {
         assertEquals(3, model.measures().size());
         assertNotNull(model.rules());
         assertTrue(model.rules().toUpperCase().contains("Y2024"));
+        assertTrue(model.ruleEntries().size() >= 1);
+        assertNotNull(model.ruleEntries().get(0).cell());
+        assertTrue(model.ruleEntries().get(0).cell().toUpperCase().contains("Y2024"));
+        assertNotNull(model.ruleEntries().get(0).value());
         String formatted = SQL.toSqlString(select, SqlDialect.ORACLE);
         assertTrue(formatted.toUpperCase().contains("MODEL"));
         assertTrue(formatted.toUpperCase().contains("DIMENSION"));
