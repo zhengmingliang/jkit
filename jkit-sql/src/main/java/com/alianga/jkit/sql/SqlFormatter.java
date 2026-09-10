@@ -4,6 +4,7 @@ import com.alianga.jkit.sql.ast.SqlAllColumns;
 import com.alianga.jkit.sql.ast.SqlBetweenExpr;
 import com.alianga.jkit.sql.ast.SqlBinaryExpr;
 import com.alianga.jkit.sql.ast.SqlBinaryOp;
+import com.alianga.jkit.sql.ast.SqlBlockStatement;
 import com.alianga.jkit.sql.ast.SqlCaseExpr;
 import com.alianga.jkit.sql.ast.SqlCastExpr;
 import com.alianga.jkit.sql.ast.SqlControlStatement;
@@ -42,6 +43,7 @@ import com.alianga.jkit.sql.ast.SqlStatementType;
 import com.alianga.jkit.sql.ast.SqlSubqueryTable;
 import com.alianga.jkit.sql.ast.SqlSubset;
 import com.alianga.jkit.sql.ast.SqlTable;
+import com.alianga.jkit.sql.ast.SqlTableHandlerStatement;
 import com.alianga.jkit.sql.ast.SqlTableSource;
 import com.alianga.jkit.sql.ast.SqlUnaryExpr;
 import com.alianga.jkit.sql.ast.SqlUpdate;
@@ -124,6 +126,10 @@ public final class SqlFormatter {
             writeDeclare((SqlDeclareStatement) node);
         } else if (node instanceof SqlHandlerStatement) {
             writeHandler((SqlHandlerStatement) node);
+        } else if (node instanceof SqlBlockStatement) {
+            writeBlock((SqlBlockStatement) node);
+        } else if (node instanceof SqlTableHandlerStatement) {
+            writeTableHandler((SqlTableHandlerStatement) node);
         } else if (node instanceof SqlSimpleStatement) {
             writeSimple((SqlSimpleStatement) node);
         } else if (node instanceof SqlExpr) {
@@ -848,6 +854,7 @@ public final class SqlFormatter {
                 || !ddl.triggerUpdateColumns().isEmpty()
                 || ddl.eventStarts() != null || ddl.eventEnds() != null
                 || ddl.eventEnabled() != null || ddl.eventComment() != null
+                || ddl.eventOnCompletion() != null || ddl.eventDisableOnSlave()
                 || (!ddl.bodyStatements().isEmpty() && "TRIGGER".equalsIgnoreCase(ddl.objectType()))
                 || (!ddl.bodyStatements().isEmpty() && "EVENT".equalsIgnoreCase(ddl.objectType()))) {
             writeTriggerOrEvent(ddl);
@@ -886,7 +893,22 @@ public final class SqlFormatter {
                 sp();
                 out.append(ddl.eventEnds());
             }
-            if (ddl.eventEnabled() != null) {
+            if (ddl.eventOnCompletion() != null && ddl.eventOnCompletion().length() > 0) {
+                sp();
+                out.append("ON");
+                sp();
+                out.append("COMPLETION");
+                sp();
+                out.append(ddl.eventOnCompletion());
+            }
+            if (ddl.eventDisableOnSlave()) {
+                sp();
+                out.append("DISABLE");
+                sp();
+                out.append("ON");
+                sp();
+                out.append("SLAVE");
+            } else if (ddl.eventEnabled() != null) {
                 sp();
                 out.append(ddl.eventEnabled().booleanValue() ? "ENABLE" : "DISABLE");
             }
@@ -1675,6 +1697,80 @@ public final class SqlFormatter {
         } else if (h.raw() != null) {
             sp();
             out.append(h.raw());
+        }
+    }
+
+    private void writeBlock(SqlBlockStatement block) {
+        if (block.raw() != null && block.bodyStatements().isEmpty() && block.declares().isEmpty()) {
+            out.append(block.raw());
+            return;
+        }
+        if (block.withDeclare()) {
+            kw("DECLARE");
+            if (block.declareRaw() != null && block.declareRaw().length() > 0
+                    && block.declares().isEmpty()) {
+                sp();
+                out.append(block.declareRaw());
+            } else {
+                for (int i = 0; i < block.declares().size(); i++) {
+                    nl();
+                    writeNode(block.declares().get(i));
+                    out.append(';');
+                }
+            }
+            nl();
+        }
+        kw("BEGIN");
+        for (int i = 0; i < block.bodyStatements().size(); i++) {
+            sp();
+            writeNode(block.bodyStatements().get(i));
+            out.append(';');
+        }
+        sp();
+        kw("END");
+    }
+
+    private void writeTableHandler(SqlTableHandlerStatement h) {
+        if (h.raw() != null && h.operation() == null) {
+            out.append(h.raw());
+            return;
+        }
+        out.append("HANDLER");
+        if (h.table() != null) {
+            sp();
+            writeExpr(h.table());
+        }
+        if (h.operation() != null) {
+            sp();
+            out.append(h.operation());
+        }
+        if ("OPEN".equals(h.operation()) && h.alias() != null && h.alias().length() > 0) {
+            sp();
+            out.append(h.alias());
+        }
+        if ("READ".equals(h.operation())) {
+            if (h.indexName() != null) {
+                sp();
+                writeExpr(h.indexName());
+            }
+            if (h.readDirection() != null) {
+                sp();
+                out.append(h.readDirection());
+            }
+            if (h.keyRaw() != null && h.keyRaw().length() > 0) {
+                sp();
+                out.append(h.keyRaw());
+            }
+            if (h.where() != null) {
+                sp();
+                kw("WHERE");
+                sp();
+                writeExpr(h.where());
+            }
+            if (h.limit() != null) {
+                sp();
+                writeLimit(h.limit());
+            }
         }
     }
 

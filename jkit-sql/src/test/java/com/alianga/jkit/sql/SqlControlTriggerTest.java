@@ -4,12 +4,14 @@ import com.alianga.jkit.sql.ast.SqlControlStatement;
 import com.alianga.jkit.sql.ast.SqlDdlStatement;
 import com.alianga.jkit.sql.ast.SqlDeclareStatement;
 import com.alianga.jkit.sql.ast.SqlHandlerStatement;
+import com.alianga.jkit.sql.ast.SqlTableHandlerStatement;
 import com.alianga.jkit.sql.ast.SqlStatementType;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 /**
@@ -231,6 +233,30 @@ public class SqlControlTriggerTest {
         assertTrue(formatted.toUpperCase().contains("STARTS"));
         assertTrue(formatted.toUpperCase().contains("DISABLE"));
         assertTrue(formatted.toUpperCase().contains("COMMENT"));
+        assertFalse(ev.eventDisableOnSlave());
+        assertNull(ev.eventOnCompletion());
+    }
+
+    @Test
+    public void eventOnCompletionAndDisableOnSlave() {
+        String sql = "CREATE EVENT ev_slave ON SCHEDULE EVERY 1 HOUR "
+                + "ON COMPLETION PRESERVE DISABLE ON SLAVE "
+                + "DO SET @a = 1";
+        SqlDdlStatement ev = (SqlDdlStatement) SQL.parse(sql, SqlDialect.MYSQL);
+        assertEquals("PRESERVE", ev.eventOnCompletion());
+        assertEquals(Boolean.FALSE, ev.eventEnabled());
+        assertTrue(ev.eventDisableOnSlave());
+        String formatted = SQL.toSqlString(ev, SqlDialect.MYSQL);
+        assertTrue(formatted.toUpperCase().contains("ON COMPLETION PRESERVE"));
+        assertTrue(formatted.toUpperCase().contains("DISABLE ON SLAVE"));
+
+        SqlDdlStatement ev2 = (SqlDdlStatement) SQL.parse(
+                "CREATE EVENT ev2 ON SCHEDULE AT CURRENT_TIMESTAMP "
+                + "ON COMPLETION NOT PRESERVE ENABLE DO SELECT 1",
+                SqlDialect.MYSQL);
+        assertEquals("NOT PRESERVE", ev2.eventOnCompletion());
+        assertEquals(Boolean.TRUE, ev2.eventEnabled());
+        assertFalse(ev2.eventDisableOnSlave());
     }
 
     @Test
@@ -286,4 +312,20 @@ public class SqlControlTriggerTest {
         assertTrue(formatted.toUpperCase().contains("HANDLER"));
         assertTrue(formatted.toUpperCase().contains("CURSOR"));
     }
+
+    @Test
+    public void tableHandlerReadWhereLimit() {
+        SqlTableHandlerStatement h = (SqlTableHandlerStatement) SQL.parse(
+                "HANDLER t READ FIRST WHERE id > 0 LIMIT 10", SqlDialect.MYSQL);
+        assertEquals("READ", h.operation());
+        assertEquals("FIRST", h.readDirection());
+        assertNotNull(h.where());
+        assertNotNull(h.limit());
+        assertTrue(SQL.tables(h).contains("t"));
+        String formatted = SQL.toSqlString(h, SqlDialect.MYSQL);
+        assertTrue(formatted.toUpperCase().contains("HANDLER"));
+        assertTrue(formatted.toUpperCase().contains("WHERE"));
+        assertTrue(formatted.toUpperCase().contains("LIMIT"));
+    }
+
 }

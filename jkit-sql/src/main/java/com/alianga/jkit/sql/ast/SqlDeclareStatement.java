@@ -9,7 +9,7 @@ import java.util.List;
  * 过程体内 {@code DECLARE}：变量 / {@code CONDITION} / {@code CURSOR FOR select}。
  *
  * <p>无法结构化时整段进 {@link #raw()}，语句种类仍为 {@link SqlStatementType#OTHER}。
- * 顶层匿名 {@code DECLARE} / 表 {@code HANDLER} 仍走 {@link SqlSimpleStatement}。</p>
+ * 顶层匿名 {@code DECLARE … BEGIN … END} 走 {@link SqlBlockStatement}；表 {@code HANDLER t OPEN} 走 {@link SqlTableHandlerStatement}。</p>
  *
  * @author 郑明亮
  * @since 2.0.1

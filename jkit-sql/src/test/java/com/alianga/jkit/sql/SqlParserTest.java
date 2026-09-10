@@ -8,6 +8,7 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import com.alianga.jkit.sql.ast.SqlBinaryExpr;
+import com.alianga.jkit.sql.ast.SqlBlockStatement;
 import com.alianga.jkit.sql.ast.SqlBinaryOp;
 import com.alianga.jkit.sql.ast.SqlCaseExpr;
 import com.alianga.jkit.sql.ast.SqlDdlStatement;
@@ -31,6 +32,7 @@ import com.alianga.jkit.sql.ast.SqlStatement;
 import com.alianga.jkit.sql.ast.SqlStatementType;
 import com.alianga.jkit.sql.ast.SqlSubqueryTable;
 import com.alianga.jkit.sql.ast.SqlTable;
+import com.alianga.jkit.sql.ast.SqlTableHandlerStatement;
 import com.alianga.jkit.sql.ast.SqlUnaryExpr;
 import com.alianga.jkit.sql.ast.SqlUpdate;
 import com.alianga.jkit.sql.ast.SqlValuesTable;
@@ -1239,10 +1241,10 @@ public class SqlParserTest {
      */
     @Test
     public void p15BeginDeclareBatch() {
-        SqlSimpleStatement block = (SqlSimpleStatement) SQL.parse("BEGIN SELECT 1; END");
+        SqlBlockStatement block = (SqlBlockStatement) SQL.parse("BEGIN SELECT 1; END");
         assertEquals(SqlStatementType.OTHER, block.type());
-        assertTrue(block.text(), block.text().startsWith("BEGIN"));
-        assertTrue(block.text(), block.text().contains("END"));
+        assertFalse(block.withDeclare());
+        assertFalse(block.bodyStatements().isEmpty());
 
         SqlSimpleStatement decl = (SqlSimpleStatement) SQL.parse("DECLARE x INT DEFAULT 1");
         assertEquals(SqlStatementType.OTHER, decl.type());
@@ -1251,6 +1253,7 @@ public class SqlParserTest {
         List<SqlStatement> batch = SQL.parseAll("BEGIN SELECT 1; END; SELECT 2");
         assertEquals(2, batch.size());
         assertEquals(SqlStatementType.OTHER, batch.get(0).type());
+        assertTrue(batch.get(0) instanceof SqlBlockStatement);
         assertEquals(SqlStatementType.SELECT, batch.get(1).type());
     }
 
@@ -1770,9 +1773,14 @@ public class SqlParserTest {
         assertEquals(3, all.size());
         for (int i = 0; i < all.size(); i++) {
             assertEquals(SqlStatementType.OTHER, all.get(i).type());
+            assertTrue(all.get(i) instanceof SqlTableHandlerStatement);
             assertTrue(SQL.tables(all.get(i)).contains("t"));
         }
-        assertTrue(((SqlSimpleStatement) all.get(1)).text().toUpperCase().contains("READ"));
+        SqlTableHandlerStatement read = (SqlTableHandlerStatement) all.get(1);
+        assertEquals("READ", read.operation());
+        assertEquals("FIRST", read.readDirection());
+        assertEquals("OPEN", ((SqlTableHandlerStatement) all.get(0)).operation());
+        assertEquals("CLOSE", ((SqlTableHandlerStatement) all.get(2)).operation());
     }
 
     /**
@@ -1977,10 +1985,13 @@ public class SqlParserTest {
         assertEquals("sp1", sp.name().simpleName());
         assertTrue(sp.text().toUpperCase().contains("SAVEPOINT"));
 
-        // 过程块仍可用
-        SqlSimpleStatement block = (SqlSimpleStatement) SQL.parse("BEGIN SELECT 1; END");
-        assertTrue(block.text(), block.text().toUpperCase().contains("SELECT"));
-        assertTrue(block.text().toUpperCase().contains("END"));
+        // 过程块仍可用（结构化 SqlBlockStatement）
+        SqlBlockStatement block = (SqlBlockStatement) SQL.parse("BEGIN SELECT 1; END");
+        assertFalse(block.withDeclare());
+        assertFalse(block.bodyStatements().isEmpty());
+        String blockFmt = SQL.toSqlString(block);
+        assertTrue(blockFmt, blockFmt.toUpperCase().contains("SELECT"));
+        assertTrue(blockFmt.toUpperCase().contains("END"));
 
         java.util.List<SqlStatement> batch = SQL.parseAll(
                 "UPDATE t SET a = 1; FLUSH PRIVILEGES");
@@ -2156,20 +2167,19 @@ public class SqlParserTest {
      */
     @Test
     public void anonymousDeclareBeginEnd() {
-        SqlSimpleStatement anon = (SqlSimpleStatement) SQL.parse(
+        SqlBlockStatement anon = (SqlBlockStatement) SQL.parse(
                 "declare\n"
                 + "begin\n"
                 + "  test_procedure();\n"
                 + "end;");
         assertEquals(SqlStatementType.OTHER, anon.type());
-        assertTrue(anon.text().toUpperCase().contains("DECLARE"));
-        assertTrue(anon.text().toUpperCase().contains("BEGIN"));
-        assertTrue(anon.text().toUpperCase().contains("END"));
+        assertTrue(anon.withDeclare());
+        assertFalse(anon.bodyStatements().isEmpty());
 
-        SqlSimpleStatement compact = (SqlSimpleStatement) SQL.parse(
+        SqlBlockStatement compact = (SqlBlockStatement) SQL.parse(
                 "DECLARE BEGIN NULL; END;");
         assertEquals(SqlStatementType.OTHER, compact.type());
-        assertTrue(compact.text().toUpperCase().contains("BEGIN"));
+        assertTrue(compact.withDeclare());
 
         SqlSimpleStatement decl = (SqlSimpleStatement) SQL.parse("DECLARE x INT DEFAULT 1");
         assertEquals("x", decl.name().simpleName());

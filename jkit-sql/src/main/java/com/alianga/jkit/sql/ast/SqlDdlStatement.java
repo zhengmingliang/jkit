@@ -73,6 +73,10 @@ public final class SqlDdlStatement extends SqlStatement {
     private Boolean eventEnabled;
     /** EVENT {@code COMMENT} 原文（含引号），可空。 */
     private String eventComment;
+    /** EVENT {@code ON COMPLETION}：{@code PRESERVE} / {@code NOT PRESERVE}，可空。 */
+    private String eventOnCompletion;
+    /** EVENT {@code DISABLE ON SLAVE}（相对普通 DISABLE）。 */
+    private boolean eventDisableOnSlave;
 
     /**
      * {@inheritDoc}
@@ -627,6 +631,38 @@ public final class SqlDdlStatement extends SqlStatement {
      */
     public void setEventComment(String eventComment) {
         this.eventComment = eventComment;
+    }
+
+    /**
+     * @return {@code PRESERVE} / {@code NOT PRESERVE}，未指定为 {@code null}
+     * @since 2.0.1
+     */
+    public String eventOnCompletion() {
+        return eventOnCompletion;
+    }
+
+    /**
+     * @param eventOnCompletion ON COMPLETION 值
+     * @since 2.0.1
+     */
+    public void setEventOnCompletion(String eventOnCompletion) {
+        this.eventOnCompletion = eventOnCompletion;
+    }
+
+    /**
+     * @return 是否 {@code DISABLE ON SLAVE}
+     * @since 2.0.1
+     */
+    public boolean eventDisableOnSlave() {
+        return eventDisableOnSlave;
+    }
+
+    /**
+     * @param eventDisableOnSlave DISABLE ON SLAVE
+     * @since 2.0.1
+     */
+    public void setEventDisableOnSlave(boolean eventDisableOnSlave) {
+        this.eventDisableOnSlave = eventDisableOnSlave;
     }
 
     /**

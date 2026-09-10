@@ -1,5 +1,6 @@
 package com.alianga.jkit.sql;
 
+import com.alianga.jkit.sql.ast.SqlBlockStatement;
 import com.alianga.jkit.sql.ast.SqlControlStatement;
 import com.alianga.jkit.sql.ast.SqlDdlStatement;
 import com.alianga.jkit.sql.ast.SqlDeclareStatement;
@@ -1026,6 +1027,7 @@ final class SqlDdlParser {
                         && isPeekIdent("SLAVE")) {
                     p.next();
                     p.next();
+                    ddl.setEventDisableOnSlave(true);
                 }
             } else if (p.is(SqlTokenType.COMMENT) || p.isIdent("COMMENT")
                     || (p.identLike() && p.token.textEqualsIgnoreCase("COMMENT"))) {
@@ -1035,15 +1037,18 @@ final class SqlDdlParser {
                     p.next();
                 }
             } else if (p.is(SqlTokenType.ON) || (p.identLike() && p.token.textEqualsIgnoreCase("ON"))) {
-                // ON COMPLETION [NOT] PRESERVE —— 仍进 bodyRaw，跳过关键词
+                // ON COMPLETION [NOT] PRESERVE
                 p.next();
                 if (p.isIdent("COMPLETION") || (p.identLike() && p.token.textEqualsIgnoreCase("COMPLETION"))) {
                     p.next();
+                    boolean notPreserve = false;
                     if (p.is(SqlTokenType.NOT) || p.isIdent("NOT")) {
+                        notPreserve = true;
                         p.next();
                     }
                     if (p.isIdent("PRESERVE") || (p.identLike() && p.token.textEqualsIgnoreCase("PRESERVE"))) {
                         p.next();
+                        ddl.setEventOnCompletion(notPreserve ? "NOT PRESERVE" : "PRESERVE");
                     }
                 } else {
                     break;
@@ -1642,5 +1647,35 @@ final class SqlDdlParser {
                 p.next();
             }
         }
+    }
+
+    /**
+     * 顶层 {@code BEGIN … END} / {@code DECLARE … BEGIN … END}：填充 body（及可选 declares）。
+     * 调用方已消费 {@code BEGIN}；若 {@code withDeclare} 则调用方已消费 {@code DECLARE} 且当前在 {@code BEGIN}。
+     */
+    SqlBlockStatement finishBlockBody(int start, boolean withDeclare, String declareRaw,
+                                      java.util.List<SqlStatement> declares) {
+        SqlBlockStatement block = new SqlBlockStatement();
+        block.setWithDeclare(withDeclare);
+        if (declareRaw != null && declareRaw.length() > 0) {
+            block.setDeclareRaw(declareRaw);
+        }
+        if (declares != null) {
+            block.declares().addAll(declares);
+        }
+        String savedDelim = p.stmtDelimiter;
+        p.stmtDelimiter = ";";
+        try {
+            parseStatementListUntilEnd(block.bodyStatements(), null);
+        } finally {
+            p.stmtDelimiter = savedDelim;
+        }
+        block.setRaw(p.lexer.rawSlice(start, p.token.start()).trim());
+        return block;
+    }
+
+    /** 供顶层解析复用：读至匹配 {@code END}。 */
+    void fillStatementsUntilEnd(java.util.List<SqlStatement> target, String endSuffix) {
+        parseStatementListUntilEnd(target, endSuffix);
     }
 }

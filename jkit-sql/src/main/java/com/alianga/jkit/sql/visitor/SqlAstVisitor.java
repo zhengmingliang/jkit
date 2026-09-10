@@ -3,6 +3,7 @@ package com.alianga.jkit.sql.visitor;
 import com.alianga.jkit.sql.ast.SqlAllColumns;
 import com.alianga.jkit.sql.ast.SqlBetweenExpr;
 import com.alianga.jkit.sql.ast.SqlBinaryExpr;
+import com.alianga.jkit.sql.ast.SqlBlockStatement;
 import com.alianga.jkit.sql.ast.SqlCaseExpr;
 import com.alianga.jkit.sql.ast.SqlCastExpr;
 import com.alianga.jkit.sql.ast.SqlControlStatement;
@@ -38,6 +39,7 @@ import com.alianga.jkit.sql.ast.SqlSimpleStatement;
 import com.alianga.jkit.sql.ast.SqlSubqueryTable;
 import com.alianga.jkit.sql.ast.SqlSubset;
 import com.alianga.jkit.sql.ast.SqlTable;
+import com.alianga.jkit.sql.ast.SqlTableHandlerStatement;
 import com.alianga.jkit.sql.ast.SqlUnaryExpr;
 import com.alianga.jkit.sql.ast.SqlUpdate;
 import com.alianga.jkit.sql.ast.SqlValuesTable;
@@ -85,6 +87,12 @@ public class SqlAstVisitor implements SqlVisitor {
         }
         if (node instanceof SqlHandlerStatement) {
             return visitHandler((SqlHandlerStatement) node);
+        }
+        if (node instanceof SqlBlockStatement) {
+            return visitBlock((SqlBlockStatement) node);
+        }
+        if (node instanceof SqlTableHandlerStatement) {
+            return visitTableHandler((SqlTableHandlerStatement) node);
         }
         if (node instanceof SqlSimpleStatement) {
             return visitSimple((SqlSimpleStatement) node);
@@ -250,6 +258,16 @@ public class SqlAstVisitor implements SqlVisitor {
 
     /** @param node HANDLER @return 是否继续子节点 */
     protected boolean visitHandler(SqlHandlerStatement node) {
+        return true;
+    }
+
+    /** @param node 匿名块 @return 是否继续子节点 */
+    protected boolean visitBlock(SqlBlockStatement node) {
+        return true;
+    }
+
+    /** @param node 表 HANDLER @return 是否继续子节点 */
+    protected boolean visitTableHandler(SqlTableHandlerStatement node) {
         return true;
     }
 

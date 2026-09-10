@@ -13,6 +13,7 @@ import com.alianga.jkit.sql.ast.SqlSimpleStatement;
 import com.alianga.jkit.sql.ast.SqlStatement;
 import com.alianga.jkit.sql.ast.SqlStatementType;
 import com.alianga.jkit.sql.ast.SqlTable;
+import com.alianga.jkit.sql.ast.SqlTableHandlerStatement;
 import com.alianga.jkit.sql.visitor.SqlVisitorAdapter;
 
 import java.util.ArrayDeque;
@@ -176,6 +177,10 @@ public final class SqlSchemaStat {
             }
             if (node instanceof SqlSimpleStatement) {
                 addTable(((SqlSimpleStatement) node).name(), accessStack.peek());
+                return true;
+            }
+            if (node instanceof SqlTableHandlerStatement) {
+                addTable(((SqlTableHandlerStatement) node).table(), accessStack.peek());
                 return true;
             }
             if (node instanceof SqlFunctionExpr) {

@@ -5,6 +5,7 @@ import com.alianga.jkit.sql.ast.SqlIdentifier;
 import com.alianga.jkit.sql.ast.SqlSimpleStatement;
 import com.alianga.jkit.sql.ast.SqlStatement;
 import com.alianga.jkit.sql.ast.SqlStatementType;
+import com.alianga.jkit.sql.ast.SqlTableHandlerStatement;
 import com.alianga.jkit.sql.ast.SqlWithItem;
 
 import java.util.ArrayList;
@@ -417,11 +418,12 @@ public final class SqlParser {
     }
 
     private SqlStatement parseBeginBlock() {
+        int start = token.start();
         expect(SqlTokenType.BEGIN);
-        SqlSimpleStatement stmt = new SqlSimpleStatement();
-        stmt.setStatementType(SqlStatementType.OTHER);
         // BEGIN WORK / BEGIN TRANSACTION / 裸 BEGIN; → 事务，不吞后续批语句
         if (is(SqlTokenType.TRANSACTION) || isIdent("WORK")) {
+            SqlSimpleStatement stmt = new SqlSimpleStatement();
+            stmt.setStatementType(SqlStatementType.OTHER);
             StringBuilder text = new StringBuilder("BEGIN");
             text.append(' ').append(token.text().toUpperCase());
             next();
@@ -435,11 +437,26 @@ public final class SqlParser {
             return stmt;
         }
         if (atStmtBreak()) {
+            SqlSimpleStatement stmt = new SqlSimpleStatement();
+            stmt.setStatementType(SqlStatementType.OTHER);
             stmt.setText("BEGIN");
             return stmt;
         }
-        String body = trailingRawAllowingBeginEnd(1);
-        stmt.setText(body.isEmpty() ? "BEGIN" : "BEGIN " + body);
+        // 结构化 BEGIN … END
+        try {
+            return ddlParser.finishBlockBody(start, false, null, null);
+        } catch (SqlParseException ex) {
+            // fall through to raw
+        }
+        String body = lexer.rawSlice(start, token.start()).trim();
+        if (body.isEmpty() || !body.toUpperCase().contains("END")) {
+            // 尚未消费完：用配对吞掉
+            String rest = trailingRawAllowingBeginEnd(1);
+            body = rest.isEmpty() ? "BEGIN" : "BEGIN " + rest;
+        }
+        SqlSimpleStatement stmt = new SqlSimpleStatement();
+        stmt.setStatementType(SqlStatementType.OTHER);
+        stmt.setText(body);
         return stmt;
     }
 
@@ -601,15 +618,19 @@ public final class SqlParser {
     }
 
     private SqlStatement parseDeclare() {
+        int start = token.start();
         expect(SqlTokenType.DECLARE);
+        // 匿名块 DECLARE [decls] BEGIN … END
+        if (is(SqlTokenType.BEGIN) || declareRemainderHasBeginBlock()) {
+            return parseAnonymousDeclareBlock(start);
+        }
+        // 会话式 / 单行 DECLARE x INT …
         SqlSimpleStatement stmt = new SqlSimpleStatement();
         stmt.setStatementType(SqlStatementType.OTHER);
-        // BEGIN 虽 keyword 且 identLike，但不能当变量名吃掉，否则匿名块在首个分号处截断
         if (identLike() && !is(SqlTokenType.BEGIN)) {
             stmt.setName(parseName());
         }
-        // PL/SQL 匿名块 DECLARE … BEGIN … END; 内部分号不截断；无 BEGIN 时仍止于首个分号
-        String rest = consumeRawAllowingBeginEnd();
+        String rest = consumeRawUntilSemi();
         StringBuilder text = new StringBuilder("DECLARE");
         if (stmt.name() != null) {
             text.append(' ').append(stmt.name().qualifiedName());
@@ -619,6 +640,158 @@ public final class SqlParser {
         }
         stmt.setText(text.toString());
         return stmt;
+    }
+
+    /**
+     * 在未消费的前提下，判断 DECLARE 后是否为匿名块（出现 BEGIN…END，且 BEGIN 前无语句终止分号）。
+     */
+    private boolean declareRemainderHasBeginBlock() {
+        String rest = lexer.rawSlice(token.start(), token.start() + 1_000_000);
+        if (rest.isEmpty()) {
+            return false;
+        }
+        int depth = 0;
+        int i = 0;
+        int n = rest.length();
+        while (i < n) {
+            char c = rest.charAt(i);
+            if (c == '\'' || c == '"') {
+                char q = c;
+                i++;
+                while (i < n) {
+                    char d = rest.charAt(i++);
+                    if (d == q) {
+                        break;
+                    }
+                    if (d == '\\' && i < n) {
+                        i++;
+                    }
+                }
+                continue;
+            }
+            if (c == '(') {
+                depth++;
+                i++;
+                continue;
+            }
+            if (c == ')') {
+                if (depth > 0) {
+                    depth--;
+                }
+                i++;
+                continue;
+            }
+            if (depth == 0 && c == ';') {
+                return false;
+            }
+            if (depth == 0 && isWordAt(rest, i, "BEGIN")) {
+                return true;
+            }
+            i++;
+        }
+        return false;
+    }
+
+    private static boolean isWordAt(String s, int i, String word) {
+        int n = word.length();
+        if (i + n > s.length()) {
+            return false;
+        }
+        if (i > 0) {
+            char p = s.charAt(i - 1);
+            if (Character.isLetterOrDigit(p) || p == '_') {
+                return false;
+            }
+        }
+        for (int k = 0; k < n; k++) {
+            if (Character.toUpperCase(s.charAt(i + k)) != word.charAt(k)) {
+                return false;
+            }
+        }
+        if (i + n < s.length()) {
+            char e = s.charAt(i + n);
+            if (Character.isLetterOrDigit(e) || e == '_') {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private SqlStatement parseAnonymousDeclareBlock(int start) {
+        java.util.List<SqlStatement> declares = new java.util.ArrayList<SqlStatement>(2);
+        String declareRaw = null;
+        if (!is(SqlTokenType.BEGIN)) {
+            int declStart = token.start();
+            // DECLARE 与 BEGIN 之间：尽力抽一条变量声明，其余进 declareRaw
+            try {
+                if (identLike()) {
+                    com.alianga.jkit.sql.ast.SqlDeclareStatement one =
+                            new com.alianga.jkit.sql.ast.SqlDeclareStatement();
+                    one.setKind(com.alianga.jkit.sql.ast.SqlDeclareStatement.Kind.VARIABLE);
+                    one.names().add(parseName());
+                    while (match(SqlTokenType.COMMA)) {
+                        one.names().add(parseName());
+                    }
+                    int typeStart = token.start();
+                    while (!is(SqlTokenType.EOF) && !is(SqlTokenType.BEGIN)
+                            && !is(SqlTokenType.DEFAULT) && !is(SqlTokenType.SEMICOLON)) {
+                        if (is(SqlTokenType.LPAREN)) {
+                            next();
+                            skipBalancedParensContent();
+                        } else {
+                            next();
+                        }
+                    }
+                    String typeRaw = lexer.rawSlice(typeStart, token.start()).trim();
+                    if (!typeRaw.isEmpty()) {
+                        one.setTypeRaw(typeRaw);
+                    }
+                    if (is(SqlTokenType.DEFAULT)) {
+                        next();
+                        one.setDefaultValue(exprParser.parseExpr());
+                    }
+                    one.setRaw(lexer.rawSlice(declStart, token.start()).trim());
+                    declares.add(one);
+                }
+            } catch (SqlParseException ignored) {
+                // keep raw
+            }
+            if (!is(SqlTokenType.BEGIN)) {
+                int rawStart = declares.isEmpty() ? declStart : token.start();
+                while (!is(SqlTokenType.EOF) && !is(SqlTokenType.BEGIN)) {
+                    next();
+                }
+                declareRaw = lexer.rawSlice(declStart, token.start()).trim();
+            } else if (!declares.isEmpty()) {
+                declareRaw = lexer.rawSlice(declStart, token.start()).trim();
+            }
+        }
+        if (!is(SqlTokenType.BEGIN)) {
+            // 回退：整段原文
+            String rest = consumeRawAllowingBeginEnd();
+            SqlSimpleStatement stmt = new SqlSimpleStatement();
+            stmt.setStatementType(SqlStatementType.OTHER);
+            stmt.setText(("DECLARE " + rest).trim());
+            return stmt;
+        }
+        next(); // BEGIN
+        try {
+            return ddlParser.finishBlockBody(start, true, declareRaw, declares);
+        } catch (SqlParseException ex) {
+            String body = trailingRawAllowingBeginEnd(1);
+            SqlSimpleStatement stmt = new SqlSimpleStatement();
+            stmt.setStatementType(SqlStatementType.OTHER);
+            StringBuilder sb = new StringBuilder("DECLARE");
+            if (declareRaw != null && !declareRaw.isEmpty()) {
+                sb.append(' ').append(declareRaw);
+            }
+            sb.append(" BEGIN");
+            if (!body.isEmpty()) {
+                sb.append(' ').append(body);
+            }
+            stmt.setText(sb.toString());
+            return stmt;
+        }
     }
 
     private SqlStatement parseMaintenance() {
@@ -720,22 +893,93 @@ public final class SqlParser {
     }
 
     private SqlStatement parseHandler() {
+        int start = token.start();
         expect(SqlTokenType.HANDLER);
-        SqlSimpleStatement stmt = new SqlSimpleStatement();
-        stmt.setStatementType(SqlStatementType.OTHER);
-        StringBuilder text = new StringBuilder("HANDLER");
+        SqlTableHandlerStatement h = new SqlTableHandlerStatement();
         if (identLike()) {
-            stmt.setName(parseName());
-            text.append(' ').append(stmt.name().qualifiedName());
+            h.setTable(parseName());
         }
-        if (!atStmtBreak()) {
-            String rest = consumeRawUntilSemi();
-            if (!rest.isEmpty()) {
-                text.append(' ').append(rest);
+        if (isIdent("OPEN") || isIdent("READ") || isIdent("CLOSE")
+                || (identLike() && ("OPEN".equalsIgnoreCase(token.text())
+                || "READ".equalsIgnoreCase(token.text())
+                || "CLOSE".equalsIgnoreCase(token.text())))) {
+            h.setOperation(token.text().toUpperCase());
+            next();
+            if ("OPEN".equals(h.operation())) {
+                if (is(SqlTokenType.AS)) {
+                    next();
+                }
+                if (identLike()) {
+                    h.setAlias(parseAlias());
+                }
+            } else if ("READ".equals(h.operation())) {
+                parseTableHandlerRead(h);
+            }
+            // CLOSE：无附加子句
+            if (is(SqlTokenType.WHERE)) {
+                next();
+                h.setWhere(exprParser.parseExpr());
+            }
+            if (is(SqlTokenType.LIMIT)) {
+                h.setLimit(selectParser.parseLimit());
             }
         }
-        stmt.setText(text.toString());
-        return stmt;
+        if (!atStmtBreak()) {
+            // 未识别残段并入 raw
+            consumeRawUntilSemi();
+        }
+        h.setRaw(lexer.rawSlice(start, token.start()).trim());
+        // 无表名时退回简单 OTHER，保持可解析
+        if (h.table() == null && (h.operation() == null || h.raw() == null)) {
+            SqlSimpleStatement stmt = new SqlSimpleStatement();
+            stmt.setStatementType(SqlStatementType.OTHER);
+            stmt.setText(h.raw() == null ? "HANDLER" : h.raw());
+            return stmt;
+        }
+        return h;
+    }
+
+    private void parseTableHandlerRead(SqlTableHandlerStatement h) {
+        if (isHandlerReadDirection()) {
+            h.setReadDirection(token.text().toUpperCase());
+            next();
+            return;
+        }
+        if (identLike()) {
+            // index_name { FIRST|NEXT|PREV|LAST | compare (values) }
+            h.setIndexName(parseName());
+            if (isHandlerReadDirection()) {
+                h.setReadDirection(token.text().toUpperCase());
+                next();
+                return;
+            }
+            if (is(SqlTokenType.EQ) || is(SqlTokenType.LT) || is(SqlTokenType.GT)
+                    || is(SqlTokenType.LE) || is(SqlTokenType.GE)
+                    || is(SqlTokenType.NE) || is(SqlTokenType.NULL_SAFE_EQ)) {
+                int keyStart = token.start();
+                next();
+                if (is(SqlTokenType.LPAREN)) {
+                    next();
+                    skipBalancedParensContent();
+                } else if (!atStmtBreak() && !is(SqlTokenType.WHERE) && !is(SqlTokenType.LIMIT)) {
+                    // 单值
+                    next();
+                }
+                h.setKeyRaw(lexer.rawSlice(keyStart, token.start()).trim());
+            }
+        }
+    }
+
+    private boolean isHandlerReadDirection() {
+        if (is(SqlTokenType.FIRST) || is(SqlTokenType.NEXT)) {
+            return true;
+        }
+        if (!identLike()) {
+            return false;
+        }
+        String t = token.text();
+        return "PREV".equalsIgnoreCase(t) || "LAST".equalsIgnoreCase(t)
+                || "FIRST".equalsIgnoreCase(t) || "NEXT".equalsIgnoreCase(t);
     }
 
     private SqlStatement parsePrepareFamily() {

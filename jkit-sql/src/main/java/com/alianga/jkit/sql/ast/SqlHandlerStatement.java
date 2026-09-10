@@ -9,7 +9,7 @@ import java.util.List;
  * 过程体内 {@code DECLARE {CONTINUE|EXIT|UNDO} HANDLER FOR … statement}。
  *
  * <p>条件以原文列表保留；处理体尽量结构化。失败时整段进 {@link #raw()}。
- * 语句种类仍为 {@link SqlStatementType#OTHER}。顶层表 {@code HANDLER t OPEN} 不走本节点。</p>
+ * 语句种类仍为 {@link SqlStatementType#OTHER}。顶层表 {@code HANDLER t OPEN} 走 {@link SqlTableHandlerStatement}。</p>
  *
  * @author 郑明亮
  * @since 2.0.1
