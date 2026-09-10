@@ -35,6 +35,8 @@ public final class SqlParser {
     SqlToken token;
     /** 当前方言。 */
     SqlDialectSpec dialect;
+    /** 自定义语句解析器注册表（default 分支兜底）。 */
+    SqlStatementParsers statementParsers;
     /** 是否保留普通注释。 */
     boolean keepComments;
     /** 待挂到下一条语句的注释。 */
@@ -86,6 +88,7 @@ public final class SqlParser {
         this.keepComments = options.keepComments();
         this.pendingComments = null;
         this.stmtDelimiter = ";";
+        this.statementParsers = options.statementParsers();
         lexer.reset(sql, this.dialect);
         lexer.setKeepComments(this.keepComments);
         lexer.setPipesAsConcat(options.pipesAsConcat());
@@ -269,8 +272,35 @@ public final class SqlParser {
             case LPAREN:
                 return selectParser.parseSelect();
             default:
+                SqlStatementParser custom = findCustomStatementParser();
+                if (custom != null) {
+                    SqlStatement stmt = custom.parse(new SqlParseContext(this));
+                    if (stmt == null) {
+                        throw error("custom statement parser returned null: " + token.text());
+                    }
+                    if (!atStmtBreak()) {
+                        throw error("custom statement parser left unconsumed input at: " + token.text());
+                    }
+                    return stmt;
+                }
                 throw error("unsupported statement starting with " + t);
         }
+    }
+
+    /**
+     * default 分支兜底：前导关键字命中注册表才返回解析器，否则 null。
+     *
+     * @return 自定义解析器，未注册返回 {@code null}
+     */
+    private SqlStatementParser findCustomStatementParser() {
+        if (statementParsers == null || statementParsers.isEmpty()) {
+            return null;
+        }
+        String keyword = token.text();
+        if (keyword == null || keyword.isEmpty()) {
+            return null;
+        }
+        return statementParsers.find(keyword);
     }
 
     private SqlStatement parseWith() {
@@ -2135,6 +2165,25 @@ public final class SqlParser {
             next();
         }
         return sb.toString();
+    }
+
+    /**
+     * 消费本条语句剩余部分到终止符为止（终止符留给调用方），返回原文切片（保留原始间距与大小写）。
+     * 供 {@link SqlParseContext#consumeRest()} 使用。
+     *
+     * @return 剩余原文，空返回空串
+     */
+    String consumeRawSliceUntilStmtBreak() {
+        if (atStmtBreak()) {
+            return "";
+        }
+        int from = token.start();
+        int to = token.end();
+        while (!atStmtBreak()) {
+            to = token.end();
+            next();
+        }
+        return lexer.rawSlice(from, to);
     }
 
     String consumeRawUntilType(SqlTokenType end) {

@@ -354,7 +354,7 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 
 1. **方言能力可覆盖** ✅ `e3ca817` — `SqlDialectSpec` 接口 + `SqlDialectWrapper` 包装层；4 处散落 `dialect == SqlDialect.X`（Lexer 方括号标识符 / Lexer 反斜杠转义 / ExprParser `~` 正则 / Rewriter 逗号分页）改回能力方法；全部方言参数放宽为 `SqlDialectSpec`（枚举调用点源码兼容）。
 2. **SqlWall 规则 SPI** ✅（见本轮提交）— `checkStatement` 的 if-else 拆成内置 5 条 `SqlWallRule` 规则链，`SqlWallConfig.rules(...)` 追加自定义规则；违规码收集走 `SqlWallViolations`（去重）。行为与违规码完全不变，`SqlWallTest` 全部原样通过。
-3. **语句解析注册表**（未做）— `SqlParser` 语句级 switch 后加 `Map<SqlTokenType, ParseFn>` fallback，新语句类型免改 switch。
+3. **语句解析注册表** ✅ — `SqlStatementParsers`（`SqlParseOptions.statementParsers()`，默认关闭）按前导关键字注册 `SqlStatementParser`，只兜内建 switch 未覆盖的 default 分支；`SqlParseContext` 暴露游标子集（token / is / match / isIdent / matchIdent / name / consumeRest（原文切片）/ error / atStmtBreak）；返回 null 或留未消费记号 → 带位置错误；内建语句不受影响（注册 SELECT 也不会覆盖）。
 4. **SqlFormatOptions 扩展**（未做）— 关键字大小写策略、pretty-print 细项。
 5. **改写规则链**（未做，低）— `SqlRewriter` 前后 hook。
 

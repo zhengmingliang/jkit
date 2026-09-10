@@ -128,6 +128,31 @@ SqlStatement stmt = SQL.parse(
 
 未配置时 `@age@` / `%s` / `<sheet>` 仍按原行为失败或拆成运算符。故意残缺的语句（如 `select * from`）即使开启占位符也会失败。
 
+## 自定义语句解析器（SPI，可选）
+
+内建分派未覆盖的语句（前导关键字不在 SELECT / INSERT / CREATE 等内建清单里，如 `BACKUP …` / `SIGNAL …`）默认抛 `unsupported statement`。需要接住这类语句时，通过 `SqlParseOptions.statementParsers()` 按前导关键字注册 `SqlStatementParser`（不区分大小写，仅兜内建未覆盖的关键字——注册 `SELECT` 不会覆盖内建解析）：
+
+```java
+SqlStatementParsers registry = SqlStatementParsers.create()
+        .add("BACKUP", ctx -> {
+            ctx.next(); // 消费 BACKUP 关键字
+            String rest = ctx.consumeRest().trim(); // 剩余原文（保留原始间距）
+            SqlSimpleStatement stmt = new SqlSimpleStatement();
+            stmt.setText(rest.isEmpty() ? "BACKUP" : "BACKUP " + rest);
+            return stmt;
+        });
+
+SqlParseOptions opt = SqlParseOptions.defaults().statementParsers(registry);
+SqlStatement stmt = SQL.parse("BACKUP DATABASE shop TO DISK='/tmp/shop.bak'",
+        SqlDialect.MYSQL, opt);
+```
+
+`SqlParseContext` 提供游标操作子集：`token()` / `dialect()` / `is(type)` / `isIdent(word)` / `match(type)` / `matchIdent(word)` / `next()` / `name()` / `atStmtBreak()` / `consumeRest()` / `error(message)`。实现约定：
+
+- 进入 `parse` 时当前记号即注册关键字；实现负责把语句消费到 `atStmtBreak()`（终止符留给框架），留下未消费记号会得到带位置的明确错误。
+- 返回 `null` 视为解析失败；抛出的 `SqlParseException` 在容错 `parseAll(..., true)` 下转为失败占位并继续。
+- 同关键字后注册覆盖先注册；`SQL.parse` / `parseAll` / `parseExpr` 的 options 重载均生效。
+
 ## DELIMITER（批处理终止符）
 
 MySQL 客户端的 `DELIMITER ;;` / `DELIMITER $` / `DELIMITER //` 等会解析为 `SqlSimpleStatement.OTHER`，并**切换**后续 `parseAll` / 过程体尾部的批处理终止符（默认 `;`）。`//` 与除法同形时，在语句终止处不再当二元运算符。过程体内部语句分隔仍用 `;`，不受客户端 DELIMITER 影响。

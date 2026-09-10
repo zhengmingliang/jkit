@@ -10,6 +10,7 @@ public final class SqlParseOptions {
     private boolean keepComments;
     private boolean pipesAsConcat;
     private SqlPlaceholders placeholders = SqlPlaceholders.none();
+    private SqlStatementParsers statementParsers = SqlStatementParsers.none();
 
     /**
      * @return 默认选项（不保留普通注释；MySQL {@code ||} 仍为 OR；模板占位符关闭）
@@ -77,6 +78,32 @@ public final class SqlParseOptions {
      */
     public SqlParseOptions placeholders(SqlPlaceholders placeholders) {
         this.placeholders = placeholders == null ? SqlPlaceholders.none() : placeholders;
+        return this;
+    }
+
+    /**
+     * 自定义语句解析器注册表；默认空（关闭）。注册后，内建分派未覆盖的前导关键字
+     * 交给 {@link SqlStatementParser} 处理，如 {@code BACKUP …} / {@code SIGNAL …}。
+     *
+     * @return 注册表（可直接链式 {@code options.statementParsers().add("BACKUP", fn)}）
+     * @since 2.0.1
+     */
+    public SqlStatementParsers statementParsers() {
+        if (statementParsers == null) {
+            statementParsers = SqlStatementParsers.none();
+        }
+        return statementParsers;
+    }
+
+    /**
+     * 替换整份语句解析器注册表。
+     *
+     * @param statementParsers 注册表，null 视为关闭
+     * @return this
+     * @since 2.0.1
+     */
+    public SqlParseOptions statementParsers(SqlStatementParsers statementParsers) {
+        this.statementParsers = statementParsers == null ? SqlStatementParsers.none() : statementParsers;
         return this;
     }
 }
