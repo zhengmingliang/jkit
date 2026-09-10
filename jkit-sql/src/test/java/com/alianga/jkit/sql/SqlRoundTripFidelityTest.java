@@ -127,6 +127,15 @@ public class SqlRoundTripFidelityTest {
                 {"sqlserver", "SELECT * FROM t WITH (NOLOCK)"},
                 {"sqlserver", "SELECT * FROM t AS x WITH (NOLOCK)"},
                 {"sqlserver", "SELECT * FROM t WITH (INDEX(ix))"},
+
+                // DML 修饰符回写：STRAIGHT_JOIN / IGNORE / LOW_PRIORITY / HIGH_PRIORITY / SQL_CALC_FOUND_ROWS
+                {"mysql", "SELECT * FROM a STRAIGHT_JOIN b ON a.id = b.id"},
+                {"mysql", "INSERT IGNORE INTO t SELECT * FROM s"},
+                {"mysql", "INSERT LOW_PRIORITY INTO t (a) VALUES (1)"},
+                {"mysql", "UPDATE LOW_PRIORITY t SET a = 1 WHERE b = 2"},
+                {"mysql", "DELETE IGNORE FROM t WHERE a = 1"},
+                {"mysql", "SELECT HIGH_PRIORITY * FROM t WHERE id = 1"},
+                {"mysql", "SELECT SQL_CALC_FOUND_ROWS * FROM t LIMIT 20"},
         });
     }
 

@@ -200,7 +200,7 @@ stmt.accept(new SqlAstVisitor() {
 
 ## 格式化
 
-`format` / `toSqlString` 是 AST 回写（不保留空白与注释）。**语义往返**（`parse → format → parse`）保证 `type()`、`tables()`（忽略大小写）、`isReadOnly()` 与原文一致；黄金集 `SqlGoldenCorpusTest` 全覆盖。**词级保真**由 `SqlRoundTripFidelityTest` 额外保证：回写文本与原文**归一化后逐字等价**（去注释 / 去全部空白 / 去独立 `AS` / 统一大小写，只容忍纯排版差异），覆盖 JOIN 修饰符、DDL 关键字、`RENAME` 多组、引号形态等 66 条坑位语料——回写**丢词**（如 `NATURAL LEFT JOIN` 丢 `LEFT`）会直接抓出，不会静默通过。
+`format` / `toSqlString` 是 AST 回写（不保留空白与注释）。**语义往返**（`parse → format → parse`）保证 `type()`、`tables()`（忽略大小写）、`isReadOnly()` 与原文一致；黄金集 `SqlGoldenCorpusTest` 全覆盖。**词级保真**由 `SqlRoundTripFidelityTest` 额外保证：回写文本与原文**归一化后逐字等价**（去注释 / 去全部空白 / 去独立 `AS` / 统一大小写，只容忍纯排版差异），覆盖 JOIN 修饰符、DDL 关键字、`RENAME` 多组、引号形态等 73 条坑位语料——回写**丢词**（如 `NATURAL LEFT JOIN` 丢 `LEFT`、`STRAIGHT_JOIN` 丢 `STRAIGHT`）会直接抓出，不会静默通过。同一方法在 `tools-test` 由 `SqlRoundTripFidelityCorpusTest` 批量应用到全部 379 条文件语料（另加语义等价写法归一与 5 条有据白名单，硬断言）。
 
 ```java
 SQL.format(stmt);                           // 换行缩进
@@ -293,8 +293,8 @@ SELECT 列表项与表源的别名用 **`alias()`** 读取：
 - Oracle / 时态：`MODEL` → `SqlModelClause`（`RULES` → `SqlModelRule`，`cellDims`/`cellDimExprs`，失败保留 `raw`）；`MATCH_RECOGNIZE` → `SqlMatchRecognize`（`PARTITION BY`/`ORDER BY`/`MEASURES`/`PATTERN` 字符串/`DEFINE`/`SUBSET`/`WITHIN`，`ROWS PER MATCH`/`AFTER MATCH` 字段；`PATTERN` 未建 DSL 树）；表级 `AS OF TIMESTAMP|SCN`、SQL Server `FOR SYSTEM_TIME AS OF`；ClickHouse 参数化函数 `fn(params)(args)`
 - 窗口函数：`OVER (PARTITION BY ... ORDER BY ... ROWS/RANGE BETWEEN ...)`、命名窗口引用 `OVER w`、SELECT 级 `WINDOW w AS (...)`（可多个；`w2 AS (w)` / `w2 AS (w ORDER BY …)` 继承）、`FILTER (WHERE ...)`
 - 特殊函数：`EXTRACT(field FROM expr)`、`TRIM(BOTH/LEADING/TRAILING ... FROM expr)`、`SUBSTRING(expr FROM n FOR m)`、`POSITION(a IN b)`、`IF(a,b,c)`（MySQL）、`CONVERT(expr USING charset)` / `CONVERT(type, expr)`（SQL Server）、`GROUP_CONCAT(... ORDER BY ... SEPARATOR ...)`、`STRING_AGG(... ORDER BY ...)` / `WITHIN GROUP (ORDER BY ...)`、`MATCH (cols) AGAINST (...)`
-- INSERT / REPLACE：列清单、VALUES 多行、INSERT SELECT、INSERT SET、ON DUPLICATE KEY UPDATE、PG `ON CONFLICT`（`DO NOTHING` / `DO UPDATE` / `ON CONSTRAINT`）、`RETURNING`（`*` 或多列列表）、SQL Server `OUTPUT` / `OUTPUT … INTO`、Oracle `INSERT ALL` / `INSERT FIRST`
-- UPDATE / DELETE：JOIN、WHERE、ORDER BY、LIMIT、PG `UPDATE … FROM`、PG/MySQL `DELETE … USING`、`RETURNING`（多列）、SQL Server `OUTPUT` / `OUTPUT … INTO`（表 / `@var` / `#tmp`，进 `tables()`）
+- INSERT / REPLACE：列清单、VALUES 多行、INSERT SELECT、INSERT SET、ON DUPLICATE KEY UPDATE、PG `ON CONFLICT`（`DO NOTHING` / `DO UPDATE` / `ON CONSTRAINT`）、`RETURNING`（`*` 或多列列表）、SQL Server `OUTPUT` / `OUTPUT … INTO`、Oracle `INSERT ALL` / `INSERT FIRST`；MySQL `LOW_PRIORITY` / `DELAYED` / `HIGH_PRIORITY` / `IGNORE` 修饰符保留并回写
+- UPDATE / DELETE：JOIN、WHERE、ORDER BY、LIMIT、PG `UPDATE … FROM`、PG/MySQL `DELETE … USING`、`RETURNING`（多列）、SQL Server `OUTPUT` / `OUTPUT … INTO`（表 / `@var` / `#tmp`，进 `tables()`）；MySQL `LOW_PRIORITY` / `QUICK` / `IGNORE` 修饰符保留并回写
 - MERGE：INTO / USING / ON、多个 `WHEN MATCHED [AND pred]`、`WHEN NOT MATCHED [BY TARGET|SOURCE]`、`OUTPUT` / `OUTPUT … INTO`
 - DDL：CREATE/DROP/ALTER TABLE|VIEW|INDEX|DATABASE|PROCEDURE|FUNCTION|TRIGGER|EVENT|USER（抽对象名；`CREATE OR REPLACE`；VIEW/CTAS 的 AS query；过程/函数参数 → `SqlRoutineParam`，`FUNCTION RETURNS` → `returnsType`，BEGIN 体 → `bodyStatements`（保留 `bodyRaw`/`tail` 往返）；CREATE TABLE 列定义原文（`columnDefinitions`）+ ENGINE/CHARSET/COLLATE/COMMENT + 表级 FOREIGN KEY 引用表；`CREATE TABLE t2 LIKE t1` 抽源表进 `tables()`；ALTER ADD/DROP INDEX（含 `ADD UNIQUE KEY|INDEX` 保留 `UNIQUE`）、`DROP INDEX idx ON t`、RENAME TO、CHANGE/MODIFY 列定义、ADD CONSTRAINT）；独立语句 `RENAME TABLE a TO b[, c TO d]`（多组完整回写）；`CREATE/DROP USER 'u'@'%'` 账号原文保留（`userSpec`）
 - `EXPLAIN`/`DESCRIBE` → `SqlExplainStatement`（ANALYZE/FORMAT/BUFFERS 等选项 + 嵌套 statement）、`SET` → `SqlSetStatement`（多赋值 / NAMES / CHARACTER SET / SESSION|GLOBAL）、USE、SHOW、CALL（实参进 AST）、TRUNCATE、GRANT / REVOKE（权限 + ON 对象名；收件人 `user@host` 紧凑回写；REVOKE 用 FROM）
@@ -330,6 +330,7 @@ mvn -Dtest=SqlParserCompareTest test
 
 - 模块内：`SqlGoldenCorpusTest`（约 **216** 条，含往返）、`SqlRoundTripFidelityTest`（**66** 条，回写与原文归一化后逐字比对）、`CommonModelSqlCorpusTest`（从 `icell/common-model` 收获，87 条可解析）、`Complex100GiantsTest` / `SqlModelMatchDeepenTest`（MODEL / MATCH_RECOGNIZE 结构化字段）。
 - 与 Druid / JSqlParser 对比只在上级工程 `tools-test` 的 `SqlParserCompareTest`（成功率 + 表名集合差分 + JMH；不进本库依赖）。
+- 回写保真批量验收：`tools-test` 的 `SqlRoundTripFidelityCorpusTest`（379 条文件语料批量归一化逐字比对，硬断言；5 条有据白名单，报告在 `target/sql-fidelity-report.txt`）。
 - 外部语料批量验收（同在 `tools-test`，不进本库依赖）：
   - `ExternalSqlCorpusTest` — bird / Spider / complex100 等 jkit 解析成功率（soft-assert）
   - `ExternalSqlCorpusCompareTest` — jkit vs Druid vs JSqlParser 正确率 + 速度；报告在 `target/sql-corpus-reports/`

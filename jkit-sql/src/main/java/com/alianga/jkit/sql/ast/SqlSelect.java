@@ -14,6 +14,8 @@ import java.util.List;
  */
 public final class SqlSelect extends SqlStatement {
     private boolean distinct;
+    private boolean highPriority;
+    private boolean calcFoundRows;
     private final List<SqlExpr> distinctOn = new ArrayList<SqlExpr>(2);
     private SqlExpr top;
     private boolean topWithTies;
@@ -118,6 +120,38 @@ public final class SqlSelect extends SqlStatement {
      */
     public void setDistinct(boolean distinct) {
         this.distinct = distinct;
+    }
+
+    /**
+     * @return MySQL {@code SELECT HIGH_PRIORITY}
+     * @since 2.0.1
+     */
+    public boolean highPriority() {
+        return highPriority;
+    }
+
+    /**
+     * @param highPriority {@code HIGH_PRIORITY}
+     * @since 2.0.1
+     */
+    public void setHighPriority(boolean highPriority) {
+        this.highPriority = highPriority;
+    }
+
+    /**
+     * @return MySQL {@code SELECT SQL_CALC_FOUND_ROWS}
+     * @since 2.0.1
+     */
+    public boolean calcFoundRows() {
+        return calcFoundRows;
+    }
+
+    /**
+     * @param calcFoundRows {@code SQL_CALC_FOUND_ROWS}
+     * @since 2.0.1
+     */
+    public void setCalcFoundRows(boolean calcFoundRows) {
+        this.calcFoundRows = calcFoundRows;
     }
 
     /**

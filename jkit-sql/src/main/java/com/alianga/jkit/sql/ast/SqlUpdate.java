@@ -13,6 +13,8 @@ import java.util.List;
  */
 public final class SqlUpdate extends SqlStatement {
     private SqlTableSource table;
+    private boolean ignore;
+    private boolean lowPriority;
     private final List<SqlBinaryExpr> setList = new ArrayList<SqlBinaryExpr>(4);
     private SqlExpr where;
     private SqlLimit limit;
@@ -43,6 +45,38 @@ public final class SqlUpdate extends SqlStatement {
      */
     public SqlTableSource table() {
         return table;
+    }
+
+    /**
+     * @return MySQL {@code UPDATE IGNORE}
+     * @since 2.0.1
+     */
+    public boolean ignore() {
+        return ignore;
+    }
+
+    /**
+     * @param ignore {@code IGNORE}
+     * @since 2.0.1
+     */
+    public void setIgnore(boolean ignore) {
+        this.ignore = ignore;
+    }
+
+    /**
+     * @return MySQL {@code UPDATE LOW_PRIORITY}
+     * @since 2.0.1
+     */
+    public boolean lowPriority() {
+        return lowPriority;
+    }
+
+    /**
+     * @param lowPriority {@code LOW_PRIORITY}
+     * @since 2.0.1
+     */
+    public void setLowPriority(boolean lowPriority) {
+        this.lowPriority = lowPriority;
     }
 
     /**

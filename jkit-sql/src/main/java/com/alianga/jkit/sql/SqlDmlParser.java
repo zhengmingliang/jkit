@@ -40,8 +40,16 @@ final class SqlDmlParser {
 
     SqlDelete parseDelete() {
         p.expect(SqlTokenType.DELETE);
-        p.match(SqlTokenType.IGNORE);
         SqlDelete delete = new SqlDelete();
+        if (p.match(SqlTokenType.LOW_PRIORITY)) {
+            delete.setLowPriority(true);
+        }
+        if (p.match(SqlTokenType.QUICK)) {
+            delete.setQuick(true);
+        }
+        if (p.match(SqlTokenType.IGNORE)) {
+            delete.setIgnore(true);
+        }
         if (p.match(SqlTokenType.FROM)) {
             delete.setTable(p.selectParser.parseJoinedTable());
             // PG: DELETE FROM t USING s WHERE …
@@ -80,22 +88,23 @@ final class SqlDmlParser {
 
     SqlInsert parseInsert(boolean replace) {
         p.next();
-        SqlInsert early = null;
+        SqlInsert insert = new SqlInsert();
         if (!replace && p.match(SqlTokenType.DELAYED)) {
-            early = new SqlInsert();
-            early.setDelayed(true);
+            insert.setDelayed(true);
+        } else if (p.match(SqlTokenType.LOW_PRIORITY)) {
+            insert.setLowPriority(true);
         } else {
-            p.match(SqlTokenType.LOW_PRIORITY);
-            p.match(SqlTokenType.HIGH_PRIORITY);
+            insert.setHighPriority(p.match(SqlTokenType.HIGH_PRIORITY));
         }
-        p.match(SqlTokenType.IGNORE);
+        if (p.match(SqlTokenType.IGNORE)) {
+            insert.setIgnore(true);
+        }
         if (!replace && (p.is(SqlTokenType.ALL) || p.is(SqlTokenType.FIRST))) {
             return parseMultiInsert();
         }
         p.match(SqlTokenType.INTO);
         // Hive / 部分引擎：INSERT INTO TABLE t
         p.match(SqlTokenType.TABLE);
-        SqlInsert insert = early != null ? early : new SqlInsert();
         insert.setReplace(replace);
         insert.setTable(SqlTable.of(p.parseName()));
         p.selectParser.parseTableHints(insert.table());
@@ -326,8 +335,13 @@ final class SqlDmlParser {
 
     SqlUpdate parseUpdate() {
         p.expect(SqlTokenType.UPDATE);
-        p.match(SqlTokenType.IGNORE);
         SqlUpdate update = new SqlUpdate();
+        if (p.match(SqlTokenType.LOW_PRIORITY)) {
+            update.setLowPriority(true);
+        }
+        if (p.match(SqlTokenType.IGNORE)) {
+            update.setIgnore(true);
+        }
         update.setTable(p.selectParser.parseJoinedTable());
         p.expect(SqlTokenType.SET);
         parseAssignList(update.setList());

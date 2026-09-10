@@ -89,14 +89,12 @@ final class SqlSelectParser {
                 }
                 p.match(SqlTokenType.OUTER);
                 p.expect(SqlTokenType.JOIN);
-            } else if (p.match(SqlTokenType.JOIN) || p.match(SqlTokenType.STRAIGHT_JOIN)
-                    || p.match(SqlTokenType.INNER)) {
+            } else if (p.token.type() == SqlTokenType.STRAIGHT_JOIN) {
+                p.next();
+                type = SqlJoin.Type.STRAIGHT;
+            } else if (p.match(SqlTokenType.JOIN) || p.match(SqlTokenType.INNER)) {
                 p.match(SqlTokenType.JOIN);
                 type = SqlJoin.Type.INNER;
-                if (p.token.type() == SqlTokenType.STRAIGHT_JOIN) {
-                    type = SqlJoin.Type.STRAIGHT;
-                    p.next();
-                }
             } else if (p.match(SqlTokenType.LEFT)) {
                 p.match(SqlTokenType.OUTER);
                 p.expect(SqlTokenType.JOIN);
@@ -246,8 +244,8 @@ final class SqlSelectParser {
         } else {
             p.match(SqlTokenType.ALL);
         }
-        p.match(SqlTokenType.HIGH_PRIORITY);
-        p.match(SqlTokenType.SQL_CALC_FOUND_ROWS);
+        select.setHighPriority(p.match(SqlTokenType.HIGH_PRIORITY));
+        select.setCalcFoundRows(p.match(SqlTokenType.SQL_CALC_FOUND_ROWS));
         if (p.match(SqlTokenType.TOP)) {
             select.setTop(p.exprParser.parsePrimary());
             p.match(SqlTokenType.PERCENT);

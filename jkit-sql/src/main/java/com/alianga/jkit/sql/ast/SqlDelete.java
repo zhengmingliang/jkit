@@ -15,6 +15,9 @@ public final class SqlDelete extends SqlStatement {
     private SqlTableSource table;
     private SqlTableSource from;
     private boolean usingKeyword;
+    private boolean ignore;
+    private boolean lowPriority;
+    private boolean quick;
     private SqlExpr where;
     private SqlLimit limit;
     private final List<SqlOrderByItem> orderBy = new ArrayList<SqlOrderByItem>(2);
@@ -127,6 +130,54 @@ public final class SqlDelete extends SqlStatement {
      */
     public void setUsingKeyword(boolean usingKeyword) {
         this.usingKeyword = usingKeyword;
+    }
+
+    /**
+     * @return MySQL {@code DELETE IGNORE}
+     * @since 2.0.1
+     */
+    public boolean ignore() {
+        return ignore;
+    }
+
+    /**
+     * @param ignore {@code IGNORE}
+     * @since 2.0.1
+     */
+    public void setIgnore(boolean ignore) {
+        this.ignore = ignore;
+    }
+
+    /**
+     * @return MySQL {@code DELETE LOW_PRIORITY}
+     * @since 2.0.1
+     */
+    public boolean lowPriority() {
+        return lowPriority;
+    }
+
+    /**
+     * @param lowPriority {@code LOW_PRIORITY}
+     * @since 2.0.1
+     */
+    public void setLowPriority(boolean lowPriority) {
+        this.lowPriority = lowPriority;
+    }
+
+    /**
+     * @return MySQL {@code DELETE QUICK}
+     * @since 2.0.1
+     */
+    public boolean quick() {
+        return quick;
+    }
+
+    /**
+     * @param quick {@code QUICK}
+     * @since 2.0.1
+     */
+    public void setQuick(boolean quick) {
+        this.quick = quick;
     }
 
     /**

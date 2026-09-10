@@ -14,6 +14,9 @@ import java.util.List;
 public final class SqlInsert extends SqlStatement {
     private boolean replace;
     private boolean delayed;
+    private boolean ignore;
+    private boolean lowPriority;
+    private boolean highPriority;
     private SqlTable table;
     private final List<SqlIdentifier> columns = new ArrayList<SqlIdentifier>(4);
     private final List<List<SqlExpr>> valuesList = new ArrayList<List<SqlExpr>>(2);
@@ -75,6 +78,54 @@ public final class SqlInsert extends SqlStatement {
      */
     public void setDelayed(boolean delayed) {
         this.delayed = delayed;
+    }
+
+    /**
+     * @return MySQL {@code INSERT IGNORE}（错误降级为警告）
+     * @since 2.0.1
+     */
+    public boolean ignore() {
+        return ignore;
+    }
+
+    /**
+     * @param ignore {@code IGNORE}
+     * @since 2.0.1
+     */
+    public void setIgnore(boolean ignore) {
+        this.ignore = ignore;
+    }
+
+    /**
+     * @return MySQL {@code INSERT LOW_PRIORITY}
+     * @since 2.0.1
+     */
+    public boolean lowPriority() {
+        return lowPriority;
+    }
+
+    /**
+     * @param lowPriority {@code LOW_PRIORITY}
+     * @since 2.0.1
+     */
+    public void setLowPriority(boolean lowPriority) {
+        this.lowPriority = lowPriority;
+    }
+
+    /**
+     * @return MySQL {@code INSERT HIGH_PRIORITY}
+     * @since 2.0.1
+     */
+    public boolean highPriority() {
+        return highPriority;
+    }
+
+    /**
+     * @param highPriority {@code HIGH_PRIORITY}
+     * @since 2.0.1
+     */
+    public void setHighPriority(boolean highPriority) {
+        this.highPriority = highPriority;
     }
 
     /**

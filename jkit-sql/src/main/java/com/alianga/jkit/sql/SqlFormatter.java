@@ -278,6 +278,14 @@ public final class SqlFormatter {
                 out.append(')');
             }
         }
+        if (select.highPriority()) {
+            sp();
+            kw("HIGH_PRIORITY");
+        }
+        if (select.calcFoundRows()) {
+            sp();
+            kw("SQL_CALC_FOUND_ROWS");
+        }
         if (select.top() != null) {
             sp();
             kw("TOP");
@@ -494,6 +502,16 @@ public final class SqlFormatter {
         if (insert.delayed()) {
             sp();
             kw("DELAYED");
+        } else if (insert.lowPriority()) {
+            sp();
+            kw("LOW_PRIORITY");
+        } else if (insert.highPriority()) {
+            sp();
+            kw("HIGH_PRIORITY");
+        }
+        if (insert.ignore()) {
+            sp();
+            kw("IGNORE");
         }
         if (insert.insertAll() || insert.insertFirst()) {
             sp();
@@ -639,6 +657,14 @@ public final class SqlFormatter {
     private void writeUpdate(SqlUpdate update) {
         writeWith(update);
         kw("UPDATE");
+        if (update.lowPriority()) {
+            sp();
+            kw("LOW_PRIORITY");
+        }
+        if (update.ignore()) {
+            sp();
+            kw("IGNORE");
+        }
         if (update.table() != null) {
             sp();
             writeFrom(update.table());
@@ -683,6 +709,18 @@ public final class SqlFormatter {
     private void writeDelete(SqlDelete delete) {
         writeWith(delete);
         kw("DELETE");
+        if (delete.lowPriority()) {
+            sp();
+            kw("LOW_PRIORITY");
+        }
+        if (delete.quick()) {
+            sp();
+            kw("QUICK");
+        }
+        if (delete.ignore()) {
+            sp();
+            kw("IGNORE");
+        }
         if (delete.table() != null) {
             // PG DELETE FROM t USING …；MySQL DELETE t FROM …
             if (delete.from() == null || delete.usingKeyword()) {
@@ -1608,7 +1646,7 @@ public final class SqlFormatter {
         }
         if (source.alias() != null) {
             sp();
-            writeIdentPart(source.alias(), options.quoteIdentifiers());
+            writeIdentPart(source.alias(), options.quoteIdentifiers() || needsIdentQuote(source.alias()));
             if (!source.columnAliases().isEmpty()) {
                 out.append('(');
                 commaIdents(source.columnAliases());
@@ -2813,8 +2851,25 @@ public final class SqlFormatter {
             sp();
             kw("AS");
             sp();
-            writeIdentPart(item.alias(), options.quoteIdentifiers());
+            writeIdentPart(item.alias(), options.quoteIdentifiers() || needsIdentQuote(item.alias()));
         }
+    }
+
+    /**
+     * 别名不是裸标识符（含空格、连字符等）时强制加引号，
+     * 避免 {@code AS -- a} 这类回写把别名输出成注释。
+     */
+    private static boolean needsIdentQuote(String s) {
+        if (s.isEmpty()) {
+            return true;
+        }
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (!Character.isLetterOrDigit(c) && c != '_' && c != '$') {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void writeOrderByItem(SqlOrderByItem item) {
