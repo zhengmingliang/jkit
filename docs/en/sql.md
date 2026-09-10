@@ -111,6 +111,19 @@ Rule summary:
 
 When not configured, `@age@` / `%s` / `<sheet>` still fail as before or get split into operators. Deliberately incomplete statements (e.g. `select * from`) fail even with placeholders enabled.
 
+## DELIMITER (Batch Terminator)
+
+MySQL client commands such as `DELIMITER ;;` / `DELIMITER $` / `DELIMITER //` parse as `SqlSimpleStatement.OTHER` and **switch** the batch terminator used by subsequent `parseAll` / procedure-body trailing splits (default `;`). When `//` coincides with division, it is not treated as a binary operator at statement boundaries. Statements inside a procedure body are still separated by `;`, independent of the client DELIMITER.
+
+```java
+List<SqlStatement> batch = SQL.parseAll(
+        "DELIMITER ;;\n"
+      + "CREATE PROCEDURE p() BEGIN SELECT 1; END;;\n"
+      + "DELIMITER ;\n"
+      + "CALL p()",
+        SqlDialect.MYSQL);
+```
+
 ## Statistics and Rewriting
 
 
@@ -138,7 +151,7 @@ SqlStatement copy = SQL.clone(stmt);
 `addLimit`: does not overwrite an existing LIMIT/TOP; writes `TOP` for SQL Server, `LIMIT` for everything else.
 `andWhere` / `replaceTable` / `replaceColumn`: like `addLimit`/`setPage`, they now **clone before modifying** (breaking change: old code relying on in-place mutation must switch to using the return value).
 `setLimit` / `setOffset` / `setPage`: **replace** pagination; in `setPage(pageNo, pageSize)`, pageNo starts at 1.
-Dialects: MySQL/PG/H2/ANSI → `LIMIT`/`OFFSET`; SQL Server uses `TOP` on page 1 and `OFFSET FETCH` afterwards; bare Oracle SELECT → `FETCH FIRST` (optionally with `OFFSET`). For pre-existing Oracle `ROWNUM` double-nesting / `WHERE ROWNUM<=n` and SQL Server `row_number` wrappers: `getLimit` returns the page size, and `setPage`/`setLimit` only adjust the numeric bounds (without stacking OFFSET/FETCH). A UNION's LIMIT hangs at the end of the set-operation chain.
+Dialects: MySQL/PG/H2/ANSI → `LIMIT`/`OFFSET`; SQL Server uses `TOP` on page 1 and `OFFSET FETCH` afterwards; **`SqlDialect.ORACLE` (pre-12c)** bare SELECT → **ROWNUM wrapping** (single-level `WHERE ROWNUM<=n`, double-level when offset > 0); **`ORACLE12` (12c+)** → `OFFSET … FETCH FIRST … ROWS ONLY`. For pre-existing Oracle `ROWNUM` double-nesting / `WHERE ROWNUM<=n` and SQL Server `row_number` wrappers: `getLimit` returns the page size, and `setPage`/`setLimit` only adjust the numeric bounds (without stacking OFFSET/FETCH). A UNION's LIMIT hangs at the end of the set-operation chain. `SqlBuilder.limit`/`offset`/`toSql(dialect)` share the same rewrite path (`toSql`'s dialect argument overrides the builder dialect).
 
 ## Parameterization / Wall / Evaluation (P2)
 
@@ -152,6 +165,15 @@ List<String> binds = SQL.parameters(sql);                 // "?", ":name"
 SqlWallResult wall = SQL.wall(sql); // parsing is not intercepted by default; call explicitly
 wall.passed();
 wall.violations(); // multi-statement / comment-bypass / always-true-condition / sleep-function / delete-without-where / update-without-where
+
+// Configurable rules (SqlWallConfig); defaults() enables the safety-critical checks;
+// denyUnion / denyInformationSchema / selectOnly are off by default
+SqlWallConfig cfg = SqlWallConfig.defaults()
+        .denyDdl(true)
+        .denyDangerousFunctions(true)  // SLEEP / BENCHMARK / LOAD_FILE …
+        .denyIntoOutfile(true)
+        .selectOnly(false);
+SqlWallResult w2 = SQL.wall(sql, SqlDialect.MYSQL, cfg);
 
 Object v = SQL.eval(expr); // literal arithmetic and comparison only; null when a column is read
 
@@ -168,9 +190,15 @@ stmt.accept(new SqlAstVisitor() {
 SQL.format(stmt);                           // newlines and indentation
 SQL.toSqlString(stmt);                      // compact single line
 SQL.format(stmt, SqlDialect.MYSQL, true);
+
+// Force dialect quotes on every identifier segment (default false; literals/keywords/*/function names untouched)
+SqlFormatOptions opts = SqlFormatOptions.defaults().quoteIdentifiers(true);
+SQL.format(stmt, SqlDialect.MYSQL, opts);
+SQL.toSqlString(stmt, SqlDialect.POSTGRES, opts);
 ```
 
-Quoted identifiers are written back per dialect: backticks for MySQL, double quotes for PostgreSQL/Oracle/ANSI/H2, `[]` for SQL Server.
+Identifiers that were already quoted in the input are written back per dialect: backticks for MySQL, double quotes for PostgreSQL/Oracle/ANSI/H2, `[]` for SQL Server.
+With `quoteIdentifiers` on, **unquoted** table/column names are force-quoted the same way.
 `||` is written back from the AST (`CONCAT`→`||`; `OR` parsed by MySQL by default →`OR`).
 
 The write-back is pretty-printing; **comment and whitespace round-trip is not guaranteed**.
@@ -183,7 +211,7 @@ The write-back is pretty-printing; **comment and whitespace round-trip is not gu
 | Double quotes | treated as string by default | treated as identifier |
 | `\|\|` | logical OR (`SqlParseOptions.pipesAsConcat(true)` switches to concatenation) | string concatenation |
 | `#` line comment | yes | no |
-| Pagination | `LIMIT` / `LIMIT off,n` (`supportsLimitOffset`) | PG/ANSI/H2: LIMIT+FETCH; Oracle: FETCH/ROWNUM; SQL Server: TOP + OFFSET FETCH |
+| Pagination | `LIMIT` / `LIMIT off,n` (`supportsLimitOffset`) | PG/ANSI/H2: LIMIT+FETCH; **ORACLE**: ROWNUM; **ORACLE12**: OFFSET/FETCH; SQL Server: TOP + OFFSET FETCH |
 | `\|\|` capability | `pipesAsOr()` | `pipesAreConcat()` |
 
 ## Quick Building (SqlBuilder)
@@ -204,6 +232,13 @@ String sql = SqlBuilder.select("id", "name")
         .unionAll(SqlBuilder.select("id", "name").from("archive"))
         .toSql();
 
+// Pagination follows the effective dialect: ORACLE→ROWNUM, ORACLE12/SQLSERVER→OFFSET/FETCH, MySQL→LIMIT
+SqlBuilder.select("*").from("t").limit(10).offset(20).toSql(SqlDialect.ORACLE);
+SqlBuilder.select("*").from("t").limit(10).offset(20).toSql(SqlDialect.ORACLE12);
+
+// Force identifier quotes (toggleable; off by default)
+SqlBuilder.select("id", "name").from("users").quoteIdentifiers(true).toSql();
+
 SqlBuilder.insertInto("t").columns("id", "name").values(1, "a").toSql();
 SqlBuilder.update("t").set("name", "b").where("id = 1").toSql();
 SqlBuilder.deleteFrom("t").where("id = 1").toSql();
@@ -214,7 +249,7 @@ SQL.concat(Arrays.asList(SQL.parse("SELECT 1"), SQL.parse("SELECT 2")));
 SQL.builder().from("t").where("id = ?").limit(5).toSql();
 ```
 
-The build result is an AST, which is then written back via `SQL.format` / `toSqlString`.
+The build result is an AST, which is then written back via `SQL.format` / `toSqlString`. The dialect argument to `toSql(dialect)` overrides the builder's own dialect and selects the pagination shape.
 
 ## Parameter Extraction
 
@@ -226,23 +261,35 @@ List<Object> literals = SQL.exportParameterValues("SELECT * FROM t WHERE name = 
 // ["a", 1]  — literal values (kept separate from parameters)
 ```
 
+
+## Alias API Note
+
+Read aliases with **`alias()`**:
+
+- `SqlSelectItem.alias()` — column alias (including dotted forms such as `AS a.b`)
+- `SqlTableSource.alias()` — table / subquery / table-function alias
+
+Do not treat indexes of `SqlIdentifier.names()` as "the N-th alias"; `names()` is the list of qualified-name segments (`db.schema.table`) and is unrelated to aliases.
+
 ## v1 Coverage
 
 - SELECT: columns, `*`, `t.*`, DISTINCT / DISTINCT ON, TOP, `INTO` table / `@var` / `OUTFILE` (target table extracted into `tables`/`INSERT`), FROM (including MySQL `PARTITION (p0,p1)` table partition restriction), JOIN (INNER/LEFT/RIGHT/FULL/CROSS/NATURAL/STRAIGHT/comma), `CROSS APPLY` / `OUTER APPLY`, `LATERAL` subquery/table function, `UNNEST(...)` / `TABLE(fn(...))` / `OPENJSON(...) WITH (...)` table functions, `(VALUES …) AS v(cols)`, ON/USING, WHERE, GROUP BY [WITH ROLLUP], HAVING, `WINDOW … AS (…)` (can inherit another window name), ORDER BY, LIMIT/OFFSET/`FETCH FIRST n ROWS ONLY`, FOR UPDATE [OF cols] [NOWAIT|SKIP LOCKED], LOCK IN SHARE MODE, UNION/UNION ALL/INTERSECT/EXCEPT/MINUS, CONNECT BY / START WITH / PRIOR, WITH CTE
+- Oracle / temporal: `MODEL` → `SqlModelClause` (`RULES` → `SqlModelRule`, `cellDims`/`cellDimExprs`, `raw` on failure); `MATCH_RECOGNIZE` → `SqlMatchRecognize` (`PARTITION BY`/`ORDER BY`/`MEASURES`/`PATTERN` string/`DEFINE`/`SUBSET`/`WITHIN`, `ROWS PER MATCH`/`AFTER MATCH` fields; no DSL tree for `PATTERN`); table-level `AS OF TIMESTAMP|SCN`, SQL Server `FOR SYSTEM_TIME AS OF`; ClickHouse parameterized functions `fn(params)(args)`
 - Window functions: `OVER (PARTITION BY ... ORDER BY ... ROWS/RANGE BETWEEN ...)`, named window reference `OVER w`, SELECT-level `WINDOW w AS (...)` (multiple allowed; `w2 AS (w)` / `w2 AS (w ORDER BY …)` inheritance), `FILTER (WHERE ...)`
 - Special functions: `EXTRACT(field FROM expr)`, `TRIM(BOTH/LEADING/TRAILING ... FROM expr)`, `SUBSTRING(expr FROM n FOR m)`, `POSITION(a IN b)`, `IF(a,b,c)` (MySQL), `CONVERT(expr USING charset)` / `CONVERT(type, expr)` (SQL Server), `GROUP_CONCAT(... ORDER BY ... SEPARATOR ...)`, `STRING_AGG(... ORDER BY ...)` / `WITHIN GROUP (ORDER BY ...)`, `MATCH (cols) AGAINST (...)`
 - INSERT / REPLACE: column list, multi-row VALUES, INSERT SELECT, INSERT SET, ON DUPLICATE KEY UPDATE, PG `ON CONFLICT` (`DO NOTHING` / `DO UPDATE` / `ON CONSTRAINT`), `RETURNING` (`*` or multi-column list), SQL Server `OUTPUT` / `OUTPUT … INTO`, Oracle `INSERT ALL` / `INSERT FIRST`
 - UPDATE / DELETE: JOIN, WHERE, ORDER BY, LIMIT, PG `UPDATE … FROM`, PG/MySQL `DELETE … USING`, `RETURNING` (multi-column), SQL Server `OUTPUT` / `OUTPUT … INTO` (table / `@var` / `#tmp`, included in `tables()`)
 - MERGE: INTO / USING / ON, multiple `WHEN MATCHED [AND pred]`, `WHEN NOT MATCHED [BY TARGET|SOURCE]`, `OUTPUT` / `OUTPUT … INTO`
-- DDL: CREATE/DROP/ALTER TABLE|VIEW|INDEX|DATABASE|PROCEDURE|FUNCTION|TRIGGER|EVENT (object name extracted; `CREATE OR REPLACE`; AS query for VIEW/CTAS; procedure parameters and BEGIN…END body go into tail; CREATE TABLE column definitions verbatim (`columnDefinitions`) + ENGINE/CHARSET/COLLATE/COMMENT + table-level FOREIGN KEY referenced tables; ALTER ADD/DROP INDEX, RENAME TO, CHANGE/MODIFY column definitions, ADD CONSTRAINT)
+- DDL: CREATE/DROP/ALTER TABLE|VIEW|INDEX|DATABASE|PROCEDURE|FUNCTION|TRIGGER|EVENT (object name extracted; `CREATE OR REPLACE`; AS query for VIEW/CTAS; routine parameters → `SqlRoutineParam`, `FUNCTION RETURNS` → `returnsType`, BEGIN body → `bodyStatements` (`bodyRaw`/`tail` kept for round-trip); CREATE TABLE column definitions verbatim (`columnDefinitions`) + ENGINE/CHARSET/COLLATE/COMMENT + table-level FOREIGN KEY referenced tables; ALTER ADD/DROP INDEX, RENAME TO, CHANGE/MODIFY column definitions, ADD CONSTRAINT)
 - `EXPLAIN`/`DESCRIBE` → `SqlExplainStatement` (options such as ANALYZE/FORMAT/BUFFERS + nested statement), `SET` → `SqlSetStatement` (multiple assignments / NAMES / CHARACTER SET / SESSION|GLOBAL), USE, SHOW, CALL (arguments into AST), TRUNCATE, GRANT / REVOKE (privileges + ON object name; recipient `user@host` written back compactly; REVOKE uses FROM)
-- Procedural blocks / maintenance / transactions: `BEGIN … END` / top-level anonymous `DECLARE … BEGIN … END` → `SqlBlockStatement`; session-style `DECLARE x INT` (OTHER); bare `BEGIN` / `BEGIN WORK` / `START TRANSACTION` → `SqlStartTransactionStatement` (isolation level / READ WRITE|ONLY / WITH CONSISTENT SNAPSHOT); `COMMIT` / `ROLLBACK [TO SAVEPOINT]` / `SAVEPOINT` / `RELEASE SAVEPOINT` → `SqlTransactionControlStatement`; `FLUSH …` → `SqlFlushStatement` (option list / TABLES table names); `LOCK TABLES`/`UNLOCK TABLES` → `SqlLockTablesStatement`; `ANALYZE` / `VACUUM` / `OPTIMIZE|REPAIR|CHECK TABLE` → `SqlMaintenanceStatement` (tables + optionsRaw); `SHOW CREATE TABLE|VIEW|DATABASE` / `SHOW COLUMNS|INDEX|TABLES` → `SqlShowStatement`; `COMMENT ON TABLE|COLUMN|…` → `SqlCommentOnStatement` (objectKind/name/comment); SQL Server `GO` batch separator; PG `COPY … FROM|TO` → `SqlCopyStatement` (table/columns/STDIN·PROGRAM·file + WITH verbatim); MySQL `LOAD DATA [LOCAL] INFILE … INTO TABLE` → `SqlLoadDataStatement` (file/table/columns + FIELDS·LINES·IGNORE verbatim); MySQL table `HANDLER t OPEN|READ|CLOSE` → `SqlTableHandlerStatement`; `PREPARE` / `EXECUTE` / `DEALLOCATE PREPARE` / `EXECUTE IMMEDIATE` → `SqlPrepareStatement` (name / FROM·source / USING)
+- Procedural blocks / maintenance / transactions: `BEGIN … END` / top-level anonymous `DECLARE … BEGIN … END` → `SqlBlockStatement`; session-style `DECLARE x INT` (OTHER); in-procedure `DECLARE`/`CURSOR FOR` → `SqlDeclareStatement`, `CONTINUE|EXIT|UNDO HANDLER` → `SqlHandlerStatement`; `IF`/`WHILE`/`LOOP`/`REPEAT`/`CASE…END CASE`/`LEAVE`/`ITERATE`/`RETURN` → `SqlControlStatement` (optional loop labels); `TRIGGER` extracts `triggerTiming`/`triggerEvent`/`triggerTable`/`triggerUpdateColumns`/`FOR EACH`/`FOLLOWS|PRECEDES`; `EVENT` extracts `ON SCHEDULE AT|EVERY`, `eventStarts`/`eventEnds`/`eventEnabled`/`eventComment`/`eventOnCompletion`/`eventDisableOnSlave`;  bare `BEGIN` / `BEGIN WORK` / `START TRANSACTION` → `SqlStartTransactionStatement` (isolation level / READ WRITE|ONLY / WITH CONSISTENT SNAPSHOT); `COMMIT` / `ROLLBACK [TO SAVEPOINT]` / `SAVEPOINT` / `RELEASE SAVEPOINT` → `SqlTransactionControlStatement`; `FLUSH …` → `SqlFlushStatement` (option list / TABLES table names); `LOCK TABLES`/`UNLOCK TABLES` → `SqlLockTablesStatement`; `ANALYZE` / `VACUUM` / `OPTIMIZE|REPAIR|CHECK TABLE` → `SqlMaintenanceStatement` (tables + optionsRaw); `SHOW CREATE TABLE|VIEW|DATABASE` / `SHOW COLUMNS|INDEX|TABLES` → `SqlShowStatement`; `COMMENT ON TABLE|COLUMN|…` → `SqlCommentOnStatement` (objectKind/name/comment); SQL Server `GO` batch separator; PG `COPY … FROM|TO` → `SqlCopyStatement` (table/columns/STDIN·PROGRAM·file + WITH verbatim); MySQL `LOAD DATA [LOCAL] INFILE … INTO TABLE` → `SqlLoadDataStatement` (file/table/columns + FIELDS·LINES·IGNORE verbatim); MySQL table `HANDLER t OPEN|READ|CLOSE` → `SqlTableHandlerStatement`; `PREPARE` / `EXECUTE` / `DEALLOCATE PREPARE` / `EXECUTE IMMEDIATE` → `SqlPrepareStatement` (name / FROM·source / USING)
 - Expressions: literals, binds `?` / `:name` / `@var`, arithmetic and comparison, AND/OR/XOR/NOT, IN (including parenthesis-free bind lists `IN :name` / `IN ?`)/BETWEEN/LIKE/ILIKE/REGEXP, IS NULL, `IS DISTINCT FROM` / `IS NOT DISTINCT FROM`, CASE, CAST / `::`, functions, EXISTS, subqueries, `INTERVAL '1 day'` / `INTERVAL 1 DAY`, `X'FF'` / `0xFF`, row constructors `(a,b)`, JSON `->` `->>` `#>` `#>>`, array subscript `arr[1]`, `= ANY/SOME/ALL (...)`; plus PG `@>`/`<@`/`~`/`~*`, MySQL `FORCE INDEX FOR …`/`<=>`/`INSERT DELAYED`/`BINARY`, SQL Server `TOP WITH TIES`, `TABLESAMPLE`/`SAMPLE`, Oracle `(+)` outer-join suffix
 - Comments: `--`, `/* */`, MySQL `#`; input containing only comments/whitespace parses as an `OTHER` empty statement (no empty SQL error); MySQL executable comments `/*!40101 … */` are expanded into inner SQL (not discarded wholesale); optimizer hints `/*+ … */` attach to the SELECT / table and can be written back by format
-- Identifiers: bare MySQL identifiers may start with digits (e.g. `32强国` / `1019使用`), as long as the whole token is not purely numeric; `32` / `32.5` / `32e1` / `0xFF` remain literals; the backquoted form worked all along
+- Identifiers: bare MySQL identifiers may start with digits (e.g. `32强国` / `1019使用`), as long as the whole token is not purely numeric; `32` / `32.5` / `32e1` / `0xFF` remain literals; the backquoted form worked all along; digit-leading segments after a dot in qualified names parse (`t.1_id` / `a.32强国`; leading decimals like `.5` stay NUMBER); single-quoted names after a dot act as quoted identifiers (`T.'Group'`); SELECT-list aliases may be dotted (`AS a.b`)
+- Client / batch: `DELIMITER xx` switches the `parseAll` terminator (see "DELIMITER"); SQL Server `GO` batch separator
 - Parse options: with `SqlParseOptions.keepComments(true)` (default false), regular comments go into `SqlStatement.comments()`; the hot path still discards them by default; `SqlParseOptions.pipesAsConcat(true)` makes `||` parse as concatenation under the MySQL dialect (equivalent to `PIPES_AS_CONCAT`); `SqlParseOptions.placeholders()` configures template placeholders (off by default, see "Template Placeholders"); `SQL.parseAll(sql, dialect, true)` enables fault-tolerant multi-statement parsing (failure placeholder + `parseError`, for auditing)
 
-Explicitly not done: structured execution of procedure bodies, an execution engine, a complete Wall rule set (only the `SQL.wall` subset is provided). CREATE TABLE column types/constraints are captured in `columnDefinitions` and can round-trip through format. Unknown functions parse as ordinary function calls and do not fail.
+Explicitly not done: a procedure-body **execution engine** (structured AST already covers DECLARE/HANDLER/control flow/TRIGGER/EVENT etc., but nothing is interpreted), a complete Wall rule set (`SqlWallConfig` is a configurable subset, not the full Druid WallFilter), or a DSL tree for `MATCH_RECOGNIZE.PATTERN` (still a string). CREATE TABLE column types/constraints are captured in `columnDefinitions` and can round-trip through format. Unknown functions parse as ordinary function calls and do not fail.
 
 ## Performance
 
@@ -259,11 +306,21 @@ For throughput, trust **JMH** (`SqlParseBenchmark` in `tools-test`, fork≥2); w
 
 | | Parse success rate (file corpus) | Notes |
 | --- | --- | --- |
-| **jkit-sql** | **379/379 (100%)** | in-module golden corpus ~216 statements (including round-trip); `mvn -pl jkit-sql test` runs about **647** tests |
+| **jkit-sql** | **379/379 (100%)** | in-module golden corpus ~216 statements (including round-trip; `SqlGoldenCorpusTest` ~432 assertions); `mvn -pl jkit-sql test` runs about **790** tests |
 | Druid 1.2.23 | below jkit (gaps in `target/sql-compare-fail.txt`) | comparison is not part of this library's dependencies |
 | JSqlParser 4.9 | below jkit | same as above |
 
 ## Corpus and Comparison
 
-- In-module: `SqlGoldenCorpusTest` (about **216** statements, including round-trip), `CommonModelSqlCorpusTest` (harvested from `icell/common-model`, 87 parseable statements).
+- In-module: `SqlGoldenCorpusTest` (about **216** statements, including round-trip), `CommonModelSqlCorpusTest` (harvested from `icell/common-model`, 87 parseable statements), `Complex100GiantsTest` / `SqlModelMatchDeepenTest` (structured MODEL / MATCH_RECOGNIZE fields).
 - Comparison against Druid / JSqlParser lives only in the parent project's `tools-test` module as `SqlParserCompareTest` (success rate + table-name set diff + JMH; not part of this library's dependencies).
+- External corpora batch checks (also in `tools-test`, not a dependency of this library):
+  - `ExternalSqlCorpusTest` — jkit parse success rates on bird / Spider / complex100 (soft-assert)
+  - `ExternalSqlCorpusCompareTest` — jkit vs Druid vs JSqlParser accuracy + speed; reports under `target/sql-corpus-reports/`
+  - Corpus notes: `tools-test/src/test/resources/sql-corpora/README.md` (recent compare: bird/spider_ddl/dev/train* / complex100 all 100%; spider_test ≈ 99.63%)
+
+```text
+cd ../tools-test
+mvn -Dtest=ExternalSqlCorpusTest test
+mvn -Dtest=ExternalSqlCorpusCompareTest test
+```
