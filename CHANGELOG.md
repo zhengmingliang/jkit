@@ -102,6 +102,7 @@
 
 
 ### 新增
+- `jkit-sql`：改写规则链 — `SqlRewriteHook`（函数式接口：收当前语句、返回继续传递的语句，可就地改或整体替换）+ `SqlRewrites`（`create()`/`none()`/`add()` 有序链，内建改写的规则适配器 `addLimit`/`setLimit`/`setOffset`/`setPage`/`andWhere`/`replaceTable`/`replaceColumn` 可与自定义规则任意混排，排在内建之前即"前 hook"、之后即"后 hook"）+ 门面 `SQL.rewrite(stmt, chain)`（先深拷贝再改，原 AST 不受影响；规则返回 null 抛 `IllegalArgumentException`）。既有 `SqlRewriter` 静态方法行为零变化。
 - `jkit-sql`：格式化关键字大小写策略 — `SqlFormatOptions.keywordCase(SqlKeywordCase)`（`AS_IS` 默认 = 原生输出 / `UPPER` / `LOWER`），`SQL.format` / `SQL.toSqlString` 的 options 重载直接生效；`SqlFormatter` 内 87 处关键字输出统一收敛到 `kw()`（含 84 处散落的 `out.append("KEYWORD")` 直写与二元运算符 `symbol()`、FLUSH 选项、事务 kind 变量路径），AS_IS 下输出逐字节不变；不影响标识符、字符串字面量与 raw 直通原文。
 - `jkit-sql`：语句解析注册表 — `SqlStatementParsers`（`SqlParseOptions.statementParsers()`，默认关闭）按前导关键字注册自定义 `SqlStatementParser`，兜住内建分派未覆盖的语句（如 `BACKUP …` / `SIGNAL …`）；配套 `SqlParseContext` 解析上下文（token / next / is / match / isIdent / matchIdent / name / dialect / atStmtBreak / consumeRest / error），`consumeRest()` 返回**原文切片**（保留原始间距）；自定义解析器返回 null 或留下未消费记号会得到带位置的明确错误；内建语句（SELECT / INSERT / CREATE 等）不受影响。
 - `jkit-sql`：SqlWall 规则 SPI — 语句级检查重构为 `List<SqlWallRule>` 规则链（内置 5 条：selectOnly / denyDdl / 无 WHERE 写 / SELECT 特性 / AST 扫描，行为与违规码不变）；新增 `SqlWallRule` 接口、`SqlWallViolations` 违规码收集器（去重）与 `SqlWallConfig.rules(SqlWallRule...)` 注册口——自定义规则在全部内置检查之后按注册顺序执行，新增检查项不再需要改 `SqlWall` 本体。

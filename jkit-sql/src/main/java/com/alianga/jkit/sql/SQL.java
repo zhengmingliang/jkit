@@ -589,6 +589,40 @@ public final class SQL {
     }
 
     /**
+     * 按链执行改写规则（先 {@link #clone(SqlStatement) 深拷贝} 再改，不污染原树）。
+     * 规则按 {@link SqlRewrites#add} 顺序执行，某条返回 null 抛 {@link IllegalArgumentException}。
+     *
+     * <pre>{@code
+     * SqlStatement out = SQL.rewrite(stmt, SqlRewrites.create()
+     *         .add(new TenantRule())                            // 前 hook：自定义
+     *         .add(SqlRewrites.replaceTable("t", "t_2026"))     // 内建
+     *         .add(SqlRewrites.addLimit(100, SqlDialect.MYSQL))); // 后 hook 位置随意
+     * }</pre>
+     *
+     * @param statement 语句
+     * @param chain 规则链（null 或空链时直接返回原语句）
+     * @return 改写后的新语句
+     * @since 2.0.1
+     */
+    public static SqlStatement rewrite(SqlStatement statement, SqlRewrites chain) {
+        if (statement == null || chain == null) {
+            return statement;
+        }
+        List<SqlRewriteHook> chainHooks = chain.hooks();
+        if (chainHooks.isEmpty()) {
+            return statement;
+        }
+        SqlStatement current = clone(statement);
+        for (SqlRewriteHook hook : chainHooks) {
+            current = hook.apply(current);
+            if (current == null) {
+                throw new IllegalArgumentException("rewrite hook returned null");
+            }
+        }
+        return current;
+    }
+
+    /**
      * 抽取绑定参数，顺序与出现顺序一致。{@code ?} 记为 {@code "?"}，{@code :name} 记为 {@code ":name"}。
      *
      * @param sql SQL

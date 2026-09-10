@@ -193,6 +193,23 @@ SqlStatement copy = SQL.clone(stmt);
 `addLimit`：已有 LIMIT/TOP 时不覆盖；SQL Server 写 `TOP`，其余写 `LIMIT`。
 `andWhere` / `replaceTable` / `replaceColumn`：现与 `addLimit`/`setPage` 一样 **clone 后再改**（破坏性：旧代码若依赖就地修改需改用返回值）。
 `setLimit` / `setOffset` / `setPage`：**替换**分页；`setPage(pageNo, pageSize)` 中 pageNo 从 1 起。
+
+### 改写规则链（可选）
+
+多个改写（自定义 + 内建）需要按序组合时，用 `SqlRewrites` 组链、`SQL.rewrite` 执行——
+自定义规则排在内建适配器之前即"前 hook"、之后即"后 hook"，`SQL.rewrite` 先深拷贝，原 AST 不受影响：
+
+```java
+SqlStatement out = SQL.rewrite(stmt, SqlRewrites.create()
+        .add(new TenantRule())                            // 前 hook：自定义规则
+        .add(SqlRewrites.replaceTable("users", "users_2026")) // 内建适配器
+        .add(SqlRewrites.andWhere(SQL.parseExpr("tenant_id = ?"))) // 内建适配器
+        .add(SqlRewrites.addLimit(100, SqlDialect.MYSQL))); // 后 hook 位置随意
+```
+
+规则是 `SqlRewriteHook` 函数式接口：收当前语句、返回继续传递的语句（就地修改返回原对象、或整体替换均可；返回 `null` 抛 `IllegalArgumentException`）。
+内建适配器与 `SqlRewriter` 对应静态方法等价（`addLimit`/`setLimit`/`setOffset`/`setPage`/`andWhere`/`replaceTable`/`replaceColumn`），就地作用于链上语句；
+只改一条且要"clone 后再改"语义时直接用 `SQL` 的对应门面方法即可，不必进链。
 方言：MySQL/PG/H2/ANSI → `LIMIT`/`OFFSET`；SQL Server 第 1 页 `TOP`，其后 `OFFSET FETCH`；**`SqlDialect.ORACLE`（12c 以下）** 裸 SELECT → **ROWNUM 包装**（单层 `WHERE ROWNUM<=n`，有 offset 时双层）；**`ORACLE12`（12c+）** → `OFFSET … FETCH FIRST … ROWS ONLY`。已存在的 Oracle `ROWNUM` 双层/`WHERE ROWNUM<=n` 与 SQL Server `row_number` 包装：`getLimit` 返回页大小，`setPage`/`setLimit` 只改数值边界（不叠 OFFSET/FETCH）。UNION 的 LIMIT 挂在集合运算链末端。`SqlBuilder.limit`/`offset`/`toSql(dialect)` 走同一套改写（`toSql` 的方言参数覆盖 builder 方言）。
 
 ## 参数化 / Wall / 求值（P2）
