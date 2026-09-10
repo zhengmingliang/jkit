@@ -79,6 +79,8 @@ SqlDialect.fromName("clickhouse");// CLICKHOUSE
 SqlDialect.fromName("trino");     // PRESTO
 // Domestic & mainstream aliases: goldendb/selectdb/analyticdb/matrixone/stonedb/oceanbase/polardb/tdsql/starrocks/doris → MYSQL;
 // highgo/uxdb/mogdb/vastbase/antdb/ivorysql/kingbase/opengauss/greenplum → POSTGRES; dm/oscar → ORACLE
+// Aligned with icell common-model data sources: argo/argodb → HIVE (Transwarp Hive JDBC),
+// xcloud → POSTGRES (XCloud), gbase8a → MYSQL, gbase8s → SQLITE (double quotes, LIMIT, no FETCH)
 
 // Capability queries (single source of truth for rewriting/formatting)
 SqlDialect.MYSQL.supportsLimitOffset();   // true

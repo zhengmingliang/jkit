@@ -41,6 +41,7 @@
 ### 新增
 
 - `jkit-sql`：**方言扩展**——新增一等枚举 `DB2`（仅 FETCH FIRST 分页）、`SQLITE`（LIMIT 族无 FETCH）、`HIVE`（反引号/拼接/双引号字符串，别名 maxcompute/odps）、`CLICKHOUSE`（反引号、双引号也是标识符、逗号 LIMIT）、`PRESTO`（别名 trino）；`fromName` 增补国产与主流别名：GoldenDB/SelectDB/AnalyticDB(ads)/MatrixOne/StoneDB→MYSQL，HighGo/UXDB/MogDB/Vastbase/AntDB/IvorySQL→POSTGRES。能力全部经 `SqlDialectSpec` 方法驱动，无散落 `== SqlDialect.X` 判断。
+- `jkit-sql`：方言别名对齐 icell `common-model` 数据源类型（`DbTypeEnum`）——`argo`/`argodb`→HIVE（ArgoDB 走 Transwarp Hive JDBC）、`xcloud`→POSTGRES（行云：双引号标识符 + LIMIT/OFFSET）、`gbase8a`→MYSQL（GBase 8a MPP 兼容）、`gbase8s`→SQLITE（GBase 8s：双引号、LIMIT、无 FETCH）；common-model 全部 SQL 型数据源（MYSQL/OceanBase/POSTGRESQL/GAUSSDB/SQLSERVER/DAMENG/HIVE/ARGO/GBASE8S/GBASE8A/ORACLE/XCLOUD/OSCAR/SQLITE）至此均有映射。
 
 ### 修复
 

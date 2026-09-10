@@ -14,8 +14,8 @@ package com.alianga.jkit.sql;
  *   <li>{@link #SQLSERVER}：方括号、TOP 与 OFFSET FETCH；别名含 mssql/tsql</li>
  *   <li>{@link #ANSI} / {@link #H2}：双引号、拼接、LIMIT/OFFSET（H2 兼认 {@code #} 注释）</li>
  *   <li>{@link #DB2}：双引号、拼接、仅 {@code FETCH FIRST} 分页（无 LIMIT/ROWNUM）</li>
- *   <li>{@link #SQLITE}：双引号、拼接、LIMIT/OFFSET，无 FETCH FIRST；别名含 presto/trino</li>
- *   <li>{@link #HIVE}：反引号、拼接、LIMIT（无 OFFSET）；别名含 maxcompute/odps</li>
+ *   <li>{@link #SQLITE}：双引号、拼接、LIMIT/OFFSET，无 FETCH FIRST；别名含 presto/trino、gbase8s</li>
+ *   <li>{@link #HIVE}：反引号、拼接、LIMIT（无 OFFSET）；别名含 maxcompute/odps、argo(argodb)</li>
  *   <li>{@link #CLICKHOUSE}：反引号、双引号也是标识符、拼接、LIMIT 含逗号风格</li>
  * </ul>
  *
@@ -102,7 +102,7 @@ public enum SqlDialect implements SqlDialectSpec {
                 || "memsql".equals(n) || "tdsql".equals(n) || "greatsql".equals(n)
                 || "goldendb".equals(n) || "adb".equals(n) || "analyticdb".equals(n)
                 || "ads".equals(n) || "selectdb".equals(n) || "matrixone".equals(n)
-                || "stonedb".equals(n)) {
+                || "stonedb".equals(n) || "gbase8a".equals(n)) {
             return MYSQL;
         }
         if ("postgres".equals(n) || "postgresql".equals(n) || "pgsql".equals(n)
@@ -110,7 +110,8 @@ public enum SqlDialect implements SqlDialectSpec {
                 || "kingbase".equals(n) || "opengauss".equals(n) || "cockroach".equals(n)
                 || "cockroachdb".equals(n) || "redshift".equals(n)
                 || "highgo".equals(n) || "uxdb".equals(n) || "mogdb".equals(n)
-                || "vastbase".equals(n) || "antdb".equals(n) || "ivorysql".equals(n)) {
+                || "vastbase".equals(n) || "antdb".equals(n) || "ivorysql".equals(n)
+                || "xcloud".equals(n)) {
             return POSTGRES;
         }
         if ("oracle12".equals(n) || "oracle12c".equals(n) || "12c".equals(n)
@@ -131,11 +132,12 @@ public enum SqlDialect implements SqlDialectSpec {
         if ("db2".equals(n) || "db2luw".equals(n)) {
             return DB2;
         }
-        if ("sqlite".equals(n) || "sqlite3".equals(n)) {
+        if ("sqlite".equals(n) || "sqlite3".equals(n) || "gbase8s".equals(n)) {
             return SQLITE;
         }
         if ("hive".equals(n) || "hive2".equals(n) || "hive3".equals(n)
-                || "maxcompute".equals(n) || "odps".equals(n)) {
+                || "maxcompute".equals(n) || "odps".equals(n)
+                || "argo".equals(n) || "argodb".equals(n)) {
             return HIVE;
         }
         if ("clickhouse".equals(n) || "ck".equals(n) || "ch".equals(n)) {

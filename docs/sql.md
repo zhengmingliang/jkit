@@ -81,6 +81,8 @@ SqlDialect.fromName("clickhouse");// CLICKHOUSE
 SqlDialect.fromName("trino");     // PRESTO
 // 国产与主流别名：goldendb/selectdb/analyticdb/matrixone/stonedb/oceanbase/polardb/tdsql/starrocks/doris → MYSQL；
 // highgo/uxdb/mogdb/vastbase/antdb/ivorysql/kingbase/opengauss/greenplum → POSTGRES；dm/oscar → ORACLE
+// common-model（icell）数据源对齐：argo/argodb → HIVE（Transwarp Hive JDBC）、xcloud → POSTGRES（行云）、
+// gbase8a → MYSQL、gbase8s → SQLITE（双引号、LIMIT、无 FETCH）
 
 // 能力查询（改写/格式化单一事实来源）
 SqlDialect.MYSQL.supportsLimitOffset();   // true

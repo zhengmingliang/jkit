@@ -55,6 +55,14 @@ public class SqlDialectTest {
         assertEquals(SqlDialect.CLICKHOUSE, SqlDialect.fromName("ck"));
         assertEquals(SqlDialect.PRESTO, SqlDialect.fromName("presto"));
         assertEquals(SqlDialect.PRESTO, SqlDialect.fromName("trino"));
+
+        // common-model（icell）数据源类型对齐：argo→HIVE（Transwarp Hive JDBC）、
+        // xcloud→POSTGRES（行云：双引号 + LIMIT/OFFSET）、gbase8a→MYSQL、gbase8s→SQLITE（LIMIT 无 FETCH）
+        assertEquals(SqlDialect.HIVE, SqlDialect.fromName("argo"));
+        assertEquals(SqlDialect.HIVE, SqlDialect.fromName("argodb"));
+        assertEquals(SqlDialect.POSTGRES, SqlDialect.fromName("xcloud"));
+        assertEquals(SqlDialect.MYSQL, SqlDialect.fromName("gbase8a"));
+        assertEquals(SqlDialect.SQLITE, SqlDialect.fromName("gbase8s"));
     }
 
     @Test
