@@ -39,6 +39,7 @@ import com.alianga.jkit.sql.ast.SqlRoutineParam;
 import com.alianga.jkit.sql.ast.SqlSelect;
 import com.alianga.jkit.sql.ast.SqlSelectItem;
 import com.alianga.jkit.sql.ast.SqlSimpleStatement;
+import com.alianga.jkit.sql.ast.SqlStartTransactionStatement;
 import com.alianga.jkit.sql.ast.SqlSubqueryTable;
 import com.alianga.jkit.sql.ast.SqlSubset;
 import com.alianga.jkit.sql.ast.SqlTable;
@@ -102,6 +103,9 @@ public class SqlAstVisitor implements SqlVisitor {
         }
         if (node instanceof SqlLockTablesStatement) {
             return visitLockTables((SqlLockTablesStatement) node);
+        }
+        if (node instanceof SqlStartTransactionStatement) {
+            return visitStartTransaction((SqlStartTransactionStatement) node);
         }
         if (node instanceof SqlLoadDataStatement) {
             return visitLoadData((SqlLoadDataStatement) node);
@@ -290,6 +294,11 @@ public class SqlAstVisitor implements SqlVisitor {
 
     /** @param node LOCK/UNLOCK TABLES @return 是否继续子节点 */
     protected boolean visitLockTables(SqlLockTablesStatement node) {
+        return true;
+    }
+
+    /** @param node START TRANSACTION / BEGIN @return 是否继续子节点 */
+    protected boolean visitStartTransaction(SqlStartTransactionStatement node) {
         return true;
     }
 

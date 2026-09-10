@@ -41,6 +41,7 @@ import com.alianga.jkit.sql.ast.SqlRoutineParam;
 import com.alianga.jkit.sql.ast.SqlSelect;
 import com.alianga.jkit.sql.ast.SqlSelectItem;
 import com.alianga.jkit.sql.ast.SqlSimpleStatement;
+import com.alianga.jkit.sql.ast.SqlStartTransactionStatement;
 import com.alianga.jkit.sql.ast.SqlStatement;
 import com.alianga.jkit.sql.ast.SqlStatementType;
 import com.alianga.jkit.sql.ast.SqlSubqueryTable;
@@ -137,6 +138,8 @@ public final class SqlFormatter {
             writePrepare((SqlPrepareStatement) node);
         } else if (node instanceof SqlLockTablesStatement) {
             writeLockTables((SqlLockTablesStatement) node);
+        } else if (node instanceof SqlStartTransactionStatement) {
+            writeStartTransaction((SqlStartTransactionStatement) node);
         } else if (node instanceof SqlLoadDataStatement) {
             writeLoadData((SqlLoadDataStatement) node);
         } else if (node instanceof SqlSimpleStatement) {
@@ -1780,6 +1783,74 @@ public final class SqlFormatter {
                 sp();
                 writeLimit(h.limit());
             }
+        }
+    }
+
+    private void writeStartTransaction(SqlStartTransactionStatement tx) {
+        if (tx == null) {
+            return;
+        }
+        boolean hasChar = tx.isolationLevel() != null || tx.readOnly() != null
+                || tx.consistentSnapshot() || tx.deferrable() != null || tx.work();
+        if (!tx.beginForm() && !hasChar && tx.raw() != null) {
+            out.append(tx.raw());
+            return;
+        }
+        if (tx.beginForm()) {
+            out.append("BEGIN");
+            if (tx.work()) {
+                sp();
+                out.append("WORK");
+            }
+        } else {
+            out.append("START");
+            sp();
+            out.append("TRANSACTION");
+        }
+        boolean needComma = false;
+        if (tx.isolationLevel() != null && tx.isolationLevel().length() > 0) {
+            sp();
+            out.append("ISOLATION");
+            sp();
+            out.append("LEVEL");
+            sp();
+            out.append(tx.isolationLevel());
+            needComma = true;
+        }
+        if (tx.readOnly() != null) {
+            if (needComma) {
+                out.append(',');
+            }
+            sp();
+            out.append(tx.readOnly().booleanValue() ? "READ ONLY" : "READ WRITE");
+            needComma = true;
+        }
+        if (tx.consistentSnapshot()) {
+            if (needComma) {
+                out.append(',');
+            }
+            sp();
+            out.append("WITH");
+            sp();
+            out.append("CONSISTENT");
+            sp();
+            out.append("SNAPSHOT");
+            needComma = true;
+        }
+        if (tx.deferrable() != null) {
+            if (needComma) {
+                out.append(',');
+            }
+            sp();
+            if (!tx.deferrable().booleanValue()) {
+                out.append("NOT");
+                sp();
+            }
+            out.append("DEFERRABLE");
+        }
+        if (tx.raw() != null && tx.raw().length() > 0) {
+            sp();
+            out.append(tx.raw());
         }
     }
 

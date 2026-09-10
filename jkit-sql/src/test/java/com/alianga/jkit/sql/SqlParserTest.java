@@ -31,6 +31,7 @@ import com.alianga.jkit.sql.ast.SqlPrepareStatement;
 import com.alianga.jkit.sql.ast.SqlSelect;
 import com.alianga.jkit.sql.ast.SqlSelectItem;
 import com.alianga.jkit.sql.ast.SqlSimpleStatement;
+import com.alianga.jkit.sql.ast.SqlStartTransactionStatement;
 import com.alianga.jkit.sql.ast.SqlStatement;
 import com.alianga.jkit.sql.ast.SqlStatementType;
 import com.alianga.jkit.sql.ast.SqlSubqueryTable;
@@ -1983,18 +1984,40 @@ public class SqlParserTest {
     }
 
     /**
-     * START TRANSACTION / COMMIT / ROLLBACK / SAVEPOINT；BEGIN…END 过程块不破坏。
+     * START TRANSACTION / BEGIN WORK → SqlStartTransactionStatement；BEGIN…END 过程块不破坏。
      */
     @Test
     public void transactionAndBeginBlock() {
-        SqlSimpleStatement start = (SqlSimpleStatement) SQL.parse("START TRANSACTION");
-        assertEquals(com.alianga.jkit.sql.ast.SqlStatementType.OTHER, start.type());
-        assertTrue(start.text().toUpperCase().contains("START"));
-        assertTrue(start.text().toUpperCase().contains("TRANSACTION"));
+        SqlStartTransactionStatement start = (SqlStartTransactionStatement) SQL.parse("START TRANSACTION");
+        assertEquals(SqlStatementType.OTHER, start.type());
+        assertFalse(start.beginForm());
+        assertFalse(start.consistentSnapshot());
+        assertNull(start.readOnly());
+        assertTrue(SQL.toSqlString(start).toUpperCase().contains("START"));
+        assertTrue(SQL.toSqlString(start).toUpperCase().contains("TRANSACTION"));
 
-        SqlSimpleStatement beginTx = (SqlSimpleStatement) SQL.parse("BEGIN WORK");
-        assertEquals(com.alianga.jkit.sql.ast.SqlStatementType.OTHER, beginTx.type());
-        assertTrue(beginTx.text().toUpperCase().startsWith("BEGIN"));
+        SqlStartTransactionStatement rich = (SqlStartTransactionStatement) SQL.parse(
+                "START TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY");
+        assertTrue(rich.consistentSnapshot());
+        assertEquals(Boolean.TRUE, rich.readOnly());
+        String richFmt = SQL.toSqlString(rich).toUpperCase();
+        assertTrue(richFmt, richFmt.contains("CONSISTENT"));
+        assertTrue(richFmt.contains("READ ONLY"));
+
+        SqlStartTransactionStatement iso = (SqlStartTransactionStatement) SQL.parse(
+                "START TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ WRITE",
+                SqlDialect.POSTGRES);
+        assertEquals("REPEATABLE READ", iso.isolationLevel());
+        assertEquals(Boolean.FALSE, iso.readOnly());
+
+        SqlStartTransactionStatement beginTx = (SqlStartTransactionStatement) SQL.parse("BEGIN WORK");
+        assertTrue(beginTx.beginForm());
+        assertTrue(beginTx.work());
+        assertTrue(SQL.toSqlString(beginTx).toUpperCase().startsWith("BEGIN"));
+
+        SqlStartTransactionStatement bare = (SqlStartTransactionStatement) SQL.parse("BEGIN");
+        assertTrue(bare.beginForm());
+        assertFalse(bare.work());
 
         SqlSimpleStatement commit = (SqlSimpleStatement) SQL.parse("COMMIT");
         assertTrue(commit.text().equalsIgnoreCase("COMMIT")
@@ -2019,16 +2042,16 @@ public class SqlParserTest {
         java.util.List<SqlStatement> batch = SQL.parseAll(
                 "UPDATE t SET a = 1; FLUSH PRIVILEGES");
         assertEquals(2, batch.size());
-        assertEquals(com.alianga.jkit.sql.ast.SqlStatementType.UPDATE, batch.get(0).type());
-        assertEquals(com.alianga.jkit.sql.ast.SqlStatementType.OTHER, batch.get(1).type());
+        assertEquals(SqlStatementType.UPDATE, batch.get(0).type());
+        assertEquals(SqlStatementType.OTHER, batch.get(1).type());
         assertTrue(((SqlSimpleStatement) batch.get(1)).text().toUpperCase().contains("FLUSH"));
 
         java.util.List<SqlStatement> txBatch = SQL.parseAll(
                 "START TRANSACTION; INSERT INTO t (id) VALUES (1); COMMIT");
         assertEquals(3, txBatch.size());
-        assertEquals(com.alianga.jkit.sql.ast.SqlStatementType.OTHER, txBatch.get(0).type());
-        assertEquals(com.alianga.jkit.sql.ast.SqlStatementType.INSERT, txBatch.get(1).type());
-        assertEquals(com.alianga.jkit.sql.ast.SqlStatementType.OTHER, txBatch.get(2).type());
+        assertTrue(txBatch.get(0) instanceof SqlStartTransactionStatement);
+        assertEquals(SqlStatementType.INSERT, txBatch.get(1).type());
+        assertEquals(SqlStatementType.OTHER, txBatch.get(2).type());
     }
 
     /**
@@ -2232,8 +2255,10 @@ public class SqlParserTest {
         SqlSimpleStatement decl = (SqlSimpleStatement) SQL.parse("DECLARE x INT DEFAULT 1");
         assertEquals("x", decl.name().simpleName());
 
-        SqlSimpleStatement beginTx = (SqlSimpleStatement) SQL.parse("BEGIN WORK");
-        assertTrue(beginTx.text().toUpperCase().contains("WORK"));
+        SqlStartTransactionStatement beginTx = (SqlStartTransactionStatement) SQL.parse("BEGIN WORK");
+        assertEquals(SqlStatementType.OTHER, beginTx.type());
+        assertTrue(beginTx.beginForm());
+        assertTrue(beginTx.work());
     }
 
     /**

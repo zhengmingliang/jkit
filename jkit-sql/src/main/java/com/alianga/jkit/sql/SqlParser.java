@@ -6,6 +6,7 @@ import com.alianga.jkit.sql.ast.SqlLoadDataStatement;
 import com.alianga.jkit.sql.ast.SqlLockTablesStatement;
 import com.alianga.jkit.sql.ast.SqlPrepareStatement;
 import com.alianga.jkit.sql.ast.SqlSimpleStatement;
+import com.alianga.jkit.sql.ast.SqlStartTransactionStatement;
 import com.alianga.jkit.sql.ast.SqlStatement;
 import com.alianga.jkit.sql.ast.SqlStatementType;
 import com.alianga.jkit.sql.ast.SqlTableHandlerStatement;
@@ -424,25 +425,26 @@ public final class SqlParser {
         int start = token.start();
         expect(SqlTokenType.BEGIN);
         // BEGIN WORK / BEGIN TRANSACTION / 裸 BEGIN; → 事务，不吞后续批语句
-        if (is(SqlTokenType.TRANSACTION) || isIdent("WORK")) {
-            SqlSimpleStatement stmt = new SqlSimpleStatement();
-            stmt.setStatementType(SqlStatementType.OTHER);
-            StringBuilder text = new StringBuilder("BEGIN");
-            text.append(' ').append(token.text().toUpperCase());
-            next();
-            if (!atStmtBreak()) {
-                String rest = consumeRawUntilSemi();
-                if (!rest.isEmpty()) {
-                    text.append(' ').append(rest);
-                }
+        if (is(SqlTokenType.TRANSACTION) || isIdent("WORK") || isIdent("TRANSACTION")) {
+            SqlStartTransactionStatement stmt = new SqlStartTransactionStatement();
+            stmt.setBeginForm(true);
+            if (isIdent("WORK") || (identLike() && "WORK".equalsIgnoreCase(token.text()))) {
+                stmt.setWork(true);
             }
-            stmt.setText(text.toString());
+            next(); // WORK | TRANSACTION
+            parseTransactionCharacteristics(stmt);
             return stmt;
         }
         if (atStmtBreak()) {
-            SqlSimpleStatement stmt = new SqlSimpleStatement();
-            stmt.setStatementType(SqlStatementType.OTHER);
-            stmt.setText("BEGIN");
+            SqlStartTransactionStatement stmt = new SqlStartTransactionStatement();
+            stmt.setBeginForm(true);
+            return stmt;
+        }
+        // 若紧跟事务特征（无 WORK/TRANSACTION 关键字），仍视为事务开启
+        if (isTxCharacteristicStart()) {
+            SqlStartTransactionStatement stmt = new SqlStartTransactionStatement();
+            stmt.setBeginForm(true);
+            parseTransactionCharacteristics(stmt);
             return stmt;
         }
         // 结构化 BEGIN … END
@@ -463,28 +465,173 @@ public final class SqlParser {
         return stmt;
     }
 
+    /**
+     * {@code START TRANSACTION [characteristics…]} → {@link SqlStartTransactionStatement}。
+     */
     private SqlStatement parseStartTransaction() {
         expect(SqlTokenType.START);
-        SqlSimpleStatement stmt = new SqlSimpleStatement();
-        stmt.setStatementType(SqlStatementType.OTHER);
-        StringBuilder text = new StringBuilder("START");
+        SqlStartTransactionStatement stmt = new SqlStartTransactionStatement();
+        stmt.setBeginForm(false);
         if (is(SqlTokenType.TRANSACTION) || isIdent("TRANSACTION")) {
-            text.append(' ').append(token.text().toUpperCase());
             next();
-        } else if (is(SqlTokenType.WITH)) {
-            // 不应把 SELECT 的 START WITH 当语句；此处仅顶层 START
-            text.append(' ').append(consumeRawUntilSemi());
-            stmt.setText(text.toString().trim());
+        } else if (is(SqlTokenType.WITH) || isTxCharacteristicStart()) {
+            // START 后直接跟特征（少见）或 WITH CONSISTENT SNAPSHOT
+        } else if (!atStmtBreak()) {
+            // 非事务 START（如不应到达的 START WITH）：回退全文
+            String rest = consumeRawUntilSemi();
+            stmt.setRaw(("START " + (rest == null ? "" : rest)).trim());
             return stmt;
         }
-        if (!atStmtBreak()) {
-            String rest = consumeRawUntilSemi();
-            if (!rest.isEmpty()) {
-                text.append(' ').append(rest);
-            }
-        }
-        stmt.setText(text.toString());
+        parseTransactionCharacteristics(stmt);
         return stmt;
+    }
+
+    private boolean isTxCharacteristicStart() {
+        if (is(SqlTokenType.WITH) || is(SqlTokenType.NOT) || is(SqlTokenType.ONLY)) {
+            return true;
+        }
+        if (identLike() || (token.type() != null && token.type().keyword())) {
+            String t = token.text();
+            return "WITH".equalsIgnoreCase(t) || "READ".equalsIgnoreCase(t)
+                    || "ISOLATION".equalsIgnoreCase(t) || "DEFERRABLE".equalsIgnoreCase(t)
+                    || "NOT".equalsIgnoreCase(t);
+        }
+        return false;
+    }
+
+    /**
+     * 解析事务特征：ISOLATION LEVEL / READ WRITE|ONLY / WITH CONSISTENT SNAPSHOT /
+     * [NOT] DEFERRABLE；其余进 raw。
+     */
+    private void parseTransactionCharacteristics(SqlStartTransactionStatement stmt) {
+        StringBuilder leftover = new StringBuilder();
+        while (!atStmtBreak()) {
+            if (matchCommaSep()) {
+                continue;
+            }
+            if (is(SqlTokenType.WITH) || isIdent("WITH")
+                    || (identLike() && "WITH".equalsIgnoreCase(token.text()))) {
+                int wStart = token.start();
+                next();
+                if (isIdent("CONSISTENT") || (identLike() && "CONSISTENT".equalsIgnoreCase(token.text()))) {
+                    next();
+                    if (isIdent("SNAPSHOT") || (identLike() && "SNAPSHOT".equalsIgnoreCase(token.text()))) {
+                        next();
+                        stmt.setConsistentSnapshot(true);
+                        continue;
+                    }
+                }
+                // 非 CONSISTENT SNAPSHOT：并入 raw
+                if (leftover.length() > 0) {
+                    leftover.append(' ');
+                }
+                leftover.append(lexer.rawSlice(wStart, token.start()).trim());
+                if (!atStmtBreak()) {
+                    String rest = consumeRawUntilSemi();
+                    if (rest != null && !rest.isEmpty()) {
+                        leftover.append(' ').append(rest);
+                    }
+                }
+                break;
+            }
+            if (isIdent("ISOLATION") || (identLike() && "ISOLATION".equalsIgnoreCase(token.text()))) {
+                next();
+                if (isIdent("LEVEL") || (identLike() && "LEVEL".equalsIgnoreCase(token.text()))
+                        || (token.type() != null && token.type().keyword()
+                        && "LEVEL".equalsIgnoreCase(token.text()))) {
+                    next();
+                }
+                StringBuilder level = new StringBuilder();
+                // READ UNCOMMITTED | READ COMMITTED | REPEATABLE READ | SERIALIZABLE
+                int parts = 0;
+                while (parts < 2 && !atStmtBreak() && !is(SqlTokenType.COMMA)
+                        && (identLike() || (token.type() != null && token.type().keyword()))) {
+                    String t = token.text().toUpperCase();
+                    if ("READ".equals(t) || "UNCOMMITTED".equals(t) || "COMMITTED".equals(t)
+                            || "REPEATABLE".equals(t) || "SERIALIZABLE".equals(t)) {
+                        if (level.length() > 0) {
+                            level.append(' ');
+                        }
+                        level.append(t);
+                        next();
+                        parts++;
+                        if ("SERIALIZABLE".equals(t)) {
+                            break;
+                        }
+                        continue;
+                    }
+                    break;
+                }
+                if (level.length() > 0) {
+                    stmt.setIsolationLevel(level.toString());
+                    continue;
+                }
+            }
+            if (isIdent("READ") || (identLike() && "READ".equalsIgnoreCase(token.text()))
+                    || (token.type() != null && token.type().keyword()
+                    && "READ".equalsIgnoreCase(token.text()))) {
+                next();
+                if (is(SqlTokenType.ONLY) || isIdent("ONLY")
+                        || (identLike() && "ONLY".equalsIgnoreCase(token.text()))) {
+                    next();
+                    stmt.setReadOnly(Boolean.TRUE);
+                    continue;
+                }
+                if (isIdent("WRITE") || (identLike() && "WRITE".equalsIgnoreCase(token.text()))
+                        || (token.type() != null && token.type().keyword()
+                        && "WRITE".equalsIgnoreCase(token.text()))) {
+                    next();
+                    stmt.setReadOnly(Boolean.FALSE);
+                    continue;
+                }
+                // READ 后非 WRITE/ONLY：残片
+                if (leftover.length() > 0) {
+                    leftover.append(' ');
+                }
+                leftover.append("READ");
+                break;
+            }
+            if (isIdent("NOT") || (identLike() && "NOT".equalsIgnoreCase(token.text()))
+                    || is(SqlTokenType.NOT)) {
+                int nStart = token.start();
+                next();
+                if (isIdent("DEFERRABLE") || (identLike() && "DEFERRABLE".equalsIgnoreCase(token.text()))) {
+                    next();
+                    stmt.setDeferrable(Boolean.FALSE);
+                    continue;
+                }
+                if (leftover.length() > 0) {
+                    leftover.append(' ');
+                }
+                leftover.append(lexer.rawSlice(nStart, token.start()).trim());
+                break;
+            }
+            if (isIdent("DEFERRABLE") || (identLike() && "DEFERRABLE".equalsIgnoreCase(token.text()))) {
+                next();
+                stmt.setDeferrable(Boolean.TRUE);
+                continue;
+            }
+            // 未知：吞到分号
+            String rest = consumeRawUntilSemi();
+            if (rest != null && !rest.isEmpty()) {
+                if (leftover.length() > 0) {
+                    leftover.append(' ');
+                }
+                leftover.append(rest);
+            }
+            break;
+        }
+        if (leftover.length() > 0) {
+            stmt.setRaw(leftover.toString().trim());
+        }
+    }
+
+    private boolean matchCommaSep() {
+        if (is(SqlTokenType.COMMA)) {
+            next();
+            return true;
+        }
+        return false;
     }
 
     private SqlStatement parseTxControl() {
