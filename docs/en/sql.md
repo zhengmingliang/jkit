@@ -1,7 +1,5 @@
 # SQL Parsing Module
 
-For outstanding items and the kickoff order for follow-up agents, see [next-plan.md](https://github.com/zhengmingliang/jkit/blob/develop/docs/next-plan.md) (Section 2 is the main battleground for SQL).
-
 `com.alianga:jkit-sql` is a zero-dependency SQL parser: a hand-written lexer (`char[]` + open-addressing keyword hashing) and recursive descent producing an AST, with support for formatting, table/column statistics, and rewriting.
 
 Design references:

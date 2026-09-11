@@ -1,7 +1,5 @@
 # SQL 解析模块
 
-未完成项与给后续 agent 的开工顺序见 [next-plan.md](https://github.com/zhengmingliang/jkit/blob/develop/docs/next-plan.md)（第 2 节是 SQL 主战场）。
-
 `com.alianga:jkit-sql` 是零依赖的 SQL 解析器：手写词法（`char[]` + 关键字开地址哈希），递归下降生成 AST，支持格式化、表/列统计和改写。
 
 设计上对标：

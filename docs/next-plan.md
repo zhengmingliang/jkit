@@ -1,6 +1,8 @@
-# jkit 后续计划（给后续 AI agent）
+# jkit 后续计划（内部，给后续 AI agent）
 
-本文是当前对话收口时的未完成清单。**先读约束和「已完成」，再按优先级改代码。** 不要重做已落地的模块，不要把第三方库引进 `jkit-sql` / `jkit-core`。
+**本文只给仓库维护者和后续 agent 看，不是用户文档。** 禁止在 README、`docs/sql.md`、`docs/en/sql.md`、`jkit-sql/README.md`、站点侧边栏或任何对外页面放入口。vitepress `srcExclude` 已排除本文件。
+
+当前待办从 **第 11 节** 读起。第 1–10 节是已完成历史，不要重做、不要推翻。不要把第三方库引进 `jkit-sql` / `jkit-core`。
 
 - 仓库：`/opt/workspace/zml/jkit`，父 POM `jkit-parent` **2.0.1**
 - 对比测试工程：`/opt/workspace/zml/tools-test`（可以引 Druid / JSqlParser）
@@ -494,12 +496,104 @@ cd ../tools-test && mvn -Dtest='SqlParserCompareTest,SqlRoundTripFidelityCorpusT
    （含老代码），不要试图清零，只保证自己新增代码守 160 列/花括号/无 tab。
 6. **文档站排除项**：`docs/next-plan.md`（内部计划）、`docs/csv.md`/`docs/expression.md`（空文件）
    在 `srcExclude` 里；csv/expression 两章补齐后记得从排除名单移除并进侧边栏。
+   **公开文档禁止再链到 next-plan**（2026-09-12 已从 README / docs/sql.md / docs/en/sql.md / jkit-sql/README 去掉）。
 
-### 10.7 建议的下一步（按用户价值）
+### 10.7 建议的下一步（已过时，改看第 11 节）
 
-1. **硬目标（用户）**：jsql-inline ≥90%、jsql-files ≥90%；druid-bvt **已达成**（超 Druid）。
-2. 继续按 gap 错误签名聚簇攻坚（Informix SKIP/FIRST、FOR XML PATH、UPDATE SET (a,b)=、RETURNING old/new、
-   PIVOT XML、MODEL measures AS、管道 `| |`、多语句无分号、负向样例等）；每批 commit+邮件。
-3. PL/SQL：`EXCEPTION WHEN` / `ELSIF` 已可进块体（EXCEPTION 段为 OTHER 原文节点）；更深结构化与 `DO $$` 体内再解析仍可做。
-4. 若用户要发版：`mvn clean package -Ppublish -Dgpg.skip=true`。
-5. GBK 乱码约 26 条与纯负向样例不要硬追。
+竞品三语料硬目标（jsql-inline / jsql-files ≥90%、druid-bvt 超 Druid）**已达成**。继续扫 164 条 gaps 收益递减，**不要**当默认开工项。当前待办见第 11 节。
+
+---
+
+## 11. 当前待办（2026-09-12 复审）
+
+对照现码：跨方言转换（类型表 / 函数 SPI / 自定义 `SqlDialectSpec` / 实体扫描）已经能用；`registerFunctions` 已进管线（`50746b3`）。下面是**还值得做**的，按对用户价值排。每条做完在本文件标 ✅ 并补测试。
+
+### 11.1 已落地、不要重做
+
+- 类型 Normal Form + SPI `registerTypes` / `registerAlias` / `LossyMapping`
+- 函数 `SqlFunctionRegistry` + `registerFunctions`（SPI 覆盖、`null` 回落内置）
+- 自定义方言 `SqlDialectSpec` / `SqlDialectWrapper`（派生方法跟原语）
+- 表内 `KEY` → 附录 `CREATE INDEX`；`ALTER CHANGE/MODIFY` → PG `ALTER COLUMN TYPE`
+- 实体扫描 `@SqlTable` / JPA `@Entity` 生成 DDL/DML
+- Wall / 语句解析 / 改写链：代码注册，不是 ServiceLoader
+
+### 11.2 P0 — 转换正确性（先做）
+
+#### P0.1 函数 walker 漏节点
+
+`FunctionAstRewriter` 只在 SELECT 列表 / WHERE / HAVING / ORDER / INSERT·UPDATE 上调用 `rewriteExpr`。`visitFunctionExpr` 没有覆写。结果：
+
+- `JOIN ON IF(...)` / `MERGE ON IFNULL(...)` **不会**改写
+- 窗口 `OVER (PARTITION BY IF(...))`、表函数参数、CTE 体内漏改的概率高
+- 列 `DEFAULT NOW()` 走 `DefaultValueCoercer`（只处理布尔 0/1），不走函数表
+
+验收：`SQL.convert("SELECT * FROM t JOIN u ON IF(a,1,0)=1", MYSQL, POSTGRES)` 含 `CASE` 不含 `IF(`；`CREATE TABLE t (ts DATETIME DEFAULT NOW())` 转到 PG 为 `CURRENT_TIMESTAMP`。补 `SqlSchemaConverterTest`。
+
+实现建议：`visitJoin` / `visitMerge` / `visitOverExpr` / `visitWithItem` / `visitFunctionTable` 里对子表达式走同一套 `rewriteExpr`；列 DEFAULT 若是函数调用，解析成 `SqlFunctionExpr` 再进注册表。
+
+#### P0.2 `ServiceLoader` 加载两次
+
+`SqlDataTypeRegistryBuiltins` 与 `SqlFunctionRegistry` 各自 `ServiceLoader.load`，provider **不是同一实例**。`registerTypes` 里设的字段，`registerFunctions` 看不见。文档已警告，但接口把两个方法放在同一类型上，使用者会踩。
+
+验收：抽 `SqlSchemaConverterProviders.loadSorted()` 一次，缓存不可变列表，两张表共用；单测用带字段的 provider 证明 `registerTypes` 之后 `registerFunctions` 能读到。注意 provider 构造器不得碰 `builtins()`（类初始化死锁）。
+
+### 11.3 P1 — 转换能力（迁移常见痛点）
+
+都走 `SqlFunctionRegistry.register` / 附录 SQL，**不要**改 `FunctionAstRewriter` 的分派结构（P0.1 的漏节点除外）。
+
+| 项 | 说明 | 验收 |
+|---|---|---|
+| 日期算术 | `DATE_ADD`/`DATE_SUB`/`DATEDIFF`/`TIMESTAMPDIFF` → PG `+ interval` / `AGE` 或告警保留 | 黄金一句 MYSQL→PG + 目标方言 parse |
+| 时间戳 | `FROM_UNIXTIME`/`UNIX_TIMESTAMP`/`STR_TO_DATE`/`TO_DATE` | 同上；格式符不对等要 `SEMANTIC_RISK` |
+| Oracle 条件 | `DECODE`/`NVL2` → `CASE` | MYSQL/PG 目标不含 DECODE |
+| 字符串 | `SUBSTRING_INDEX`/`FIND_IN_SET` 无干净等价则告警保留，不要装等价 | 有 warning |
+| `ALTER` 附录 | PG 已改 `TYPE`；`SET/DROP NOT NULL`、`SET/DROP DEFAULT` 仍丢。源列约束应进 `extraSql` | `MODIFY c INT NOT NULL` → TYPE + `SET NOT NULL` |
+| 独立 `CREATE INDEX` | 现只转表内 KEY。`CREATE INDEX … USING BTREE` / `CONCURRENTLY` / `INCLUDE` 原样 format | MYSQL→PG 去掉 `USING BTREE` 或改成 PG 写法 |
+| FULLTEXT/SPATIAL | 表内已删除且不生成附录 | 保持；补一句明确 `MANUAL_ACTION_REQUIRED` |
+
+`generateOracleSequence(true)` **已经**生成 SEQUENCE+TRIGGER（见 `ColumnDefinitionConverter.oracleSequenceSql`）。设计文档第十二节仍写「明确不做」——**改文档承认 opt-in**，不要再实现一遍。
+
+### 11.4 P2 — 实体扫描
+
+| 项 | 现状 | 建议 |
+|---|---|---|
+| JPA `@Table.indexes` / `@Index` | 只读 `@SqlTable.indexes` | 反射读 JPA 索引，生成附录 `CREATE INDEX` |
+| `@Enumerated` | 枚举一律 VARCHAR | ORDINAL→INT，STRING→VARCHAR |
+| `List`/`Set`/`Map` 字段 | `javaType` 落到 VARCHAR | 无 `@SqlColumn` 时 skip（避免把集合建成字符串列） |
+| `@Embedded` / 继承策略 | 只扫父类字段（`@MappedSuperclass` 碰巧能用） | 明确支持 `@MappedSuperclass`；`@Embedded` 展开或跳过并文档化 |
+| `createTables` 顺序 | 未按 FK 拓扑 | 有 `refTable` 时被引用表在前 |
+
+不要引入 Hibernate / Spring。继续零 JPA 编译依赖。
+
+### 11.5 P3 — 文档与工程
+
+| 项 | 说明 |
+|---|---|
+| 中英 `sql.md` | 英文转换/SPI 章节短一截（还停留在 KEY 被 strip，没写附录 INDEX / `registerFunctions`）。对外只维护这两份 + 设计文档，**不要**把 next-plan 链回去 |
+| 设计文档 §12 | 与 `generateOracleSequence` 对齐（opt-in 已实现） |
+| `SqlDdlStatement.columnDefinitions()` | 仍是 `List<String>`。结构化列是平行通路。**不要**为了好看改公开签名 |
+| pretty 缩进 | `SqlFormatter.indent` 是死代码（第 9 节）。有真实需求再做 subquery/CTE/UNION 缩进，勿硬接 |
+| lexer 短 ident intern | 仍需 profiling，别凭感觉做 |
+| 竞品 gaps ~164 | 长尾 DDL / 乱码 / 负向样例，**按真实用户 SQL 驱动**，不要当迭代 KPI |
+| `docs/csv.md` / `docs/expression.md` | 空文件，补齐后从 `srcExclude` 拿掉并进侧边栏 |
+| 仓库其它（第 4 节） | HTTP 可实例化客户端、流式 multipart、JWT/RSA 默认值……**SQL 转换 P0/P1 未做完前不要夹带** |
+
+### 11.6 建议开工顺序
+
+1. P0.1 函数 walker 漏节点（正确性，用户一写 JOIN 就踩）
+2. P0.2 ServiceLoader 单次加载
+3. P1 日期函数 + ALTER NOT NULL 附录（迁移最常见）
+4. P2 实体集合字段 skip + JPA `@Index`（小、边界清晰）
+5. 中英文档对齐；设计 §12 承认 SEQUENCE opt-in
+6. 其余按用户拿来的真实 SQL 再开
+
+验收命令不变：`mvn -pl jkit-sql test` 必须绿。改解析器时再 `install` 后跑 tools-test。
+
+### 11.7 明确仍不做
+
+- 存储过程 / 触发器 / 视图的跨方言转换（VIEW 内 SELECT 的函数可顺带改，不当目标）
+- 跨库数据搬迁、字符集排序结果一致
+- 把 MySQL `MODIFY` 自动变成 PG `ALTER COLUMN` **全套**语法（P1 只补 NOT NULL/DEFAULT 附录，不做 USING 表达式推断）
+- pairwise 类型表、为新产品改 `SqlDialect` 枚举
+- 在 `jkit-sql` 里执行 SQL / 引 JDBC / ORM
+- 公开文档或站点再放 next-plan 入口

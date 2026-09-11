@@ -4,6 +4,9 @@
 
 ## 2.0.1 / unreleased
 
+### 文档
+- README / `docs/sql.md` / `docs/en/sql.md` / `jkit-sql/README` 去掉内部开发计划入口（该文件不进文档站）。
+
 ### jkit-sql
 - **扩展**：函数改写真正走 `SqlSchemaConverterProvider.registerFunctions`（内置挂 `SqlFunctionRegistry`，SPI 后覆盖；`rewrite` 返回 `null` 回落内置）。`FunctionAstRewriter` 只遍历，第三方不必改它。
 - **修复**：`SqlDialectWrapper` 不再委托派生方法（`identQuoteClose` / `quoteIdent` / `pipesAreConcat` / `preferredLimitStyle`），子类只覆写原语时派生能力跟着变。

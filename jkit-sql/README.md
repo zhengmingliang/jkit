@@ -19,7 +19,7 @@ SQL.addLimit(stmt, 100);
 SQL.format(stmt);
 ```
 
-完整说明见 [docs/sql.md](../docs/sql.md)。后续未完成清单见 [docs/next-plan.md](../docs/next-plan.md)。
+完整说明见 [docs/sql.md](../docs/sql.md)。
 
 和 Druid / JSqlParser 的成功率与吞吐对比在上级目录 `tools-test`：
 
