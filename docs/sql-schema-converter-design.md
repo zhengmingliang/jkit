@@ -269,7 +269,13 @@ mvn -pl jkit-sql -Dtest=RegistryValidationTest,SqlDataTypeRegistryTest test
 
 未声明的 reverse 碰撞会在 **类加载内置表时** 直接 `IllegalStateException`，插件把内置表搞坏时应用起不来。
 
-测试源码里的例子：`TestAliasProvider` 给 MySQL 登记 `MIDINT`→`MEDIUMINT`。新方言插件可继承测试源码的 `SqlSchemaConverterProviderTestKit`（JUnit 在 test 依赖里，不进主 jar）。
+**仓库内置扩展示例**（对照 icell `FieldConstruct` / `FieldTypeConverter` 缺的源类型名）：
+
+`com.alianga.jkit.sql.schema.spi.CommonModelTypeAliasesProvider`
+
+登记：`BPCHAR`→CHAR、`FLOAT4`/`FLOAT8`→FLOAT/DOUBLE、`LONG`→BIGINT、`BIT`→BOOLEAN、`INT8`→BIGINT（**不含 ClickHouse**，因其 `Int8` 是 TINYINT）。主 jar 的 `META-INF/services/` 已挂上，复制该类即可做第三方插件模板。
+
+测试源码另有 `TestAliasProvider`（`MIDINT`→MEDIUMINT）。新方言插件可继承测试源码的 `SqlSchemaConverterProviderTestKit`（JUnit 在 test 依赖里，不进主 jar）。
 
 ---
 
