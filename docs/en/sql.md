@@ -456,7 +456,7 @@ java -jar target/benchmarks.jar com.alianga.test.sql.jmh.SqlParseBenchmark -f 2 
 
 | | Parse success rate (file corpus) | Notes |
 | --- | --- | --- |
-| **jkit-sql** | **379/379 (100%)** | in-module golden corpus ~216 statements (including round-trip; `SqlGoldenCorpusTest` ~432 assertions) + 118 round-trip fidelity statements (`SqlRoundTripFidelityTest`) + 379 batch fidelity lines (`SqlRoundTripFidelityCorpusTest` in tools-test); `mvn -pl jkit-sql test` runs **1371** tests |
+| **jkit-sql** | **379/379 (100%)** | in-module golden corpus ~216 statements (including round-trip; `SqlGoldenCorpusTest` ~432 assertions) + 118 round-trip fidelity statements (`SqlRoundTripFidelityTest`) + 379 batch fidelity lines (`SqlRoundTripFidelityCorpusTest` in tools-test); `mvn -pl jkit-sql test` runs **1376** tests |
 | Druid 1.2.23 | below jkit (gaps in `target/sql-compare-fail.txt`) | comparison is not part of this library's dependencies |
 | JSqlParser 4.9 | below jkit | same as above |
 

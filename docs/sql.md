@@ -566,7 +566,7 @@ java -jar target/benchmarks.jar com.alianga.test.sql.jmh.SqlParseBenchmark -f 2 
 
 | | 解析成功率（文件语料） | 备注 |
 | --- | --- | --- |
-| **jkit-sql** | **379/379 (100%)** | 模块内黄金集约 216 条（含往返，`SqlGoldenCorpusTest` 约 432 断言）+ 回写保真 118 条（`SqlRoundTripFidelityTest`）+ tools-test 批量保真 379 条（`SqlRoundTripFidelityCorpusTest`）；`mvn -pl jkit-sql test` **1371** 条 |
+| **jkit-sql** | **379/379 (100%)** | 模块内黄金集约 216 条（含往返，`SqlGoldenCorpusTest` 约 432 断言）+ 回写保真 118 条（`SqlRoundTripFidelityTest`）+ tools-test 批量保真 379 条（`SqlRoundTripFidelityCorpusTest`）；`mvn -pl jkit-sql test` **1376** 条 |
 | Druid 1.2.23 | 低于 jkit（缺口见 `target/sql-compare-fail.txt`） | 对比不进本库依赖 |
 | JSqlParser 4.9 | 低于 jkit | 同上 |
 
