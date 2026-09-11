@@ -566,13 +566,13 @@ java -jar target/benchmarks.jar com.alianga.test.sql.jmh.SqlParseBenchmark -f 2 
 
 | | 解析成功率（文件语料） | 备注 |
 | --- | --- | --- |
-| **jkit-sql** | **379/379 (100%)** | 模块内黄金集约 216 条（含往返，`SqlGoldenCorpusTest` 约 432 断言）+ 回写保真 118 条（`SqlRoundTripFidelityTest`）+ tools-test 批量保真 379 条（`SqlRoundTripFidelityCorpusTest`）；`mvn -pl jkit-sql test` **889** 条 |
+| **jkit-sql** | **379/379 (100%)** | 模块内黄金集约 216 条（含往返，`SqlGoldenCorpusTest` 约 432 断言）+ 回写保真 118 条（`SqlRoundTripFidelityTest`）+ tools-test 批量保真 379 条（`SqlRoundTripFidelityCorpusTest`）；`mvn -pl jkit-sql test` **1371** 条 |
 | Druid 1.2.23 | 低于 jkit（缺口见 `target/sql-compare-fail.txt`） | 对比不进本库依赖 |
 | JSqlParser 4.9 | 低于 jkit | 同上 |
 
 ## 语料与对比
 
-- 模块内：`SqlGoldenCorpusTest`（约 **216** 条，含往返）、`SqlRoundTripFidelityTest`（**66** 条，回写与原文归一化后逐字比对）、`CommonModelSqlCorpusTest`（从 `icell/common-model` 收获，87 条可解析）、`Complex100GiantsTest` / `SqlModelMatchDeepenTest`（MODEL / MATCH_RECOGNIZE 结构化字段）。
+- 模块内：`SqlGoldenCorpusTest`（约 **216** 条，含往返）、`SqlRoundTripFidelityTest`（**118** 条，回写与原文归一化后逐字比对）、`CommonModelSqlCorpusTest`（从 `icell/common-model` 收获，87 条可解析）、`Complex100GiantsTest` / `SqlModelMatchDeepenTest`（MODEL / MATCH_RECOGNIZE 结构化字段）。
 - 与 Druid / JSqlParser 对比只在上级工程 `tools-test` 的 `SqlParserCompareTest`（成功率 + 表名集合差分 + JMH；不进本库依赖）。
 - 回写保真批量验收：`tools-test` 的 `SqlRoundTripFidelityCorpusTest`（379 条文件语料批量归一化逐字比对，硬断言；5 条有据白名单，报告在 `target/sql-fidelity-report.txt`）。
 - 外部语料批量验收（同在 `tools-test`，不进本库依赖）：
@@ -585,3 +585,347 @@ cd ../tools-test
 mvn -Dtest=ExternalSqlCorpusTest test
 mvn -Dtest=ExternalSqlCorpusCompareTest test
 ```
+
+## 业务场景与实践案例
+
+`jkit-sql` 的能力可以落在下面 14 类业务场景里，每类配至少两个最佳实践案例。所有片段都取自
+`jkit-sql/src/test/java/com/alianga/jkit/sql/SqlBusinessScenarioTest.java`，可直接运行回归：
+
+```text
+mvn -pl jkit-sql test -Dtest=SqlBusinessScenarioTest
+```
+
+| # | 业务场景 | 主要 API | 案例 |
+| --- | --- | --- | --- |
+| 1 | SQL 审计与依赖分析 | `SQL.tables` / `SQL.stat` / `SqlStatement.isReadOnly` | 依赖提取、写操作标记 |
+| 2 | 读写分离路由 | `SqlStatement.isReadOnly` | 只读走从库、持锁 SELECT 走主库 |
+| 3 | SQL 注入防护 | `SQL.parameterize` / `SQL.exportParameterValues` | 字面量收编、绑定值导出 |
+| 4 | SQL 防火墙 | `SQL.wall` / `SqlWallConfig` | 危险语句拦截、按通道放行 DDL |
+| 5 | 跨方言数据库迁移 | `SQL.convertBatch` / `SqlSchemaConverter.convert` | DDL 翻译闭环、批量 DML 函数改写 |
+| 6 | 多方言分页 | `SQL.setPage` / `SQL.getLimit` / `SQL.getOffset` | MySQL/PG 的 LIMIT OFFSET、Oracle 经典 ROWNUM |
+| 7 | 多租户改写 | `SqlRewrites.replaceTable` / `SqlRewrites.andWhere` | 分表路由、租户条件注入 |
+| 8 | 数据脱敏与列级权限 | `SQL.removeSelectItem` / `SqlRewrites.replaceColumn` | 敏感列裁剪、物理列改名映射 |
+| 9 | 动态 SQL 构建 | `SqlBuilder` | 条件查询组装、INSERT/UPDATE |
+| 10 | 实体驱动多方言建表 | `SqlEntities.createTable` | MySQL 内联注释、PG 的 COMMENT ON |
+| 11 | SQL 格式化与规范统一 | `SQL.format` / `SqlFormatOptions` | 关键字大小写归一、pretty 多行 |
+| 12 | 遗留模板占位符迁移 | `SqlPlaceholders` / `SqlParseOptions.placeholders` | `@xx@`、`%s` 两种风格 |
+| 13 | 表达式预计算 | `SQL.eval` | 常量折叠、列引用返回 null |
+| 14 | 安全改写不污染原语句 | `SQL.clone` / clone-then-mutate | 复用缓存原语句、分页改写不改原句 |
+
+### 1. SQL 审计与依赖分析
+
+上线前要知道一条 SQL 动了哪些表、哪些列，做影响面评估与变更评审。
+
+**案例 1：提取表/列依赖**
+
+```java
+SqlStatement stmt = SQL.parse(
+        "SELECT u.id, u.name FROM users u JOIN orders o ON u.id = o.uid WHERE o.amount > 100");
+List<String> tables = SQL.tables(stmt);                  // [users, orders]
+boolean hit = SQL.stat(stmt).getColumns().contains("o.amount");
+```
+
+**案例 2：批量脚本里标记写操作**
+
+```java
+List<SqlStatement> stmts = SQL.parseAll("SELECT 1; UPDATE t SET a = 1 WHERE id = 2");
+long writes = 0;
+for (SqlStatement s : stmts) {
+    if (!s.isReadOnly()) {
+        writes++;                                        // 1
+    }
+}
+```
+
+### 2. 读写分离路由
+
+代理层按语句类型把流量分流到主库/从库。
+
+**案例 1：只读句子走从库**
+
+```java
+SqlStatement q = SQL.parse("SELECT * FROM t_user WHERE id = 1");
+boolean replica = q.isReadOnly();                        // true
+```
+
+**案例 2：持锁 SELECT 与写语句走主库**
+
+```java
+// SELECT ... FOR UPDATE 持锁，路由到从库会导致行锁失效
+boolean primary = !SQL.parse("SELECT * FROM t_user WHERE id = 1 FOR UPDATE").isReadOnly(); // true
+boolean write = !SQL.parse("INSERT INTO t_user(id, name) VALUES (1, 'a')").isReadOnly();   // true
+```
+
+> `FOR UPDATE` / `LOCK IN SHARE MODE` 会被判为写语句——这是有意的，否则读写分离路由会把持锁查询发到从库。
+
+### 3. SQL 注入防护
+
+把外部拼接进 SQL 的字面量收编成绑定参数，交给预编译语句执行。
+
+**案例 1：一行把字面量参数化**
+
+```java
+String out = SQL.parameterize(
+        "SELECT id FROM t_user WHERE name = 'alice' AND age = 18 AND deleted = false");
+// SELECT id FROM t_user WHERE name = ? AND age = ? AND deleted = ?
+```
+
+**案例 2：导出绑定值，两步安全下发**
+
+```java
+SqlStatement stmt = SQL.parse(
+        "SELECT * FROM t_user WHERE name = 'alice' AND age = 18 AND id = ?");
+List<Object> values = SQL.exportParameterValues(stmt);   // [alice, 18]
+String parameterized = SQL.parameterize(stmt);           // 值全部变成 ?，已存在的 ? 保持不变
+```
+
+### 4. SQL 防火墙（Wall）
+
+面向用户可编辑查询、开放接口、低代码平台等不可信入口做前置拦截。
+
+**案例 1：拦截典型危险模式**
+
+```java
+SQL.wall("SELECT 1; DELETE FROM t WHERE id = 1").violations(); // [multi-statement]
+SQL.wall("DELETE FROM t").violations();                        // [delete-without-where]
+SQL.wall("UPDATE t SET a = 1").violations();                   // [update-without-where]
+SQL.wall("SELECT SLEEP(5) FROM t").violations();               // [dangerous-function]
+SQL.wall("SELECT * FROM t WHERE name = 'x' --").violations();  // [comment-bypass]
+SQL.wall("SELECT * FROM t WHERE id = 1").passed();             // true，合法放行
+```
+
+**案例 2：运维通道按需放行 DDL**
+
+```java
+SQL.wall("DROP TABLE t").violations();                          // [deny-ddl]，默认拦截
+SqlWallConfig allowDdl = SqlWallConfig.defaults().denyDdl(false);
+SQL.wall("DROP TABLE t", SqlDialect.MYSQL, allowDdl).passed();   // true
+```
+
+### 5. 跨方言数据库迁移
+
+存量 MySQL 语句翻译到目标库，输出可被目标方言再解析，形成验证闭环。
+
+**案例 1：单条 DDL 翻译 + 复解析校验**
+
+```java
+ConversionResult r = SqlSchemaConverter.convert(
+        "ALTER TABLE t MODIFY c INT NOT NULL", SqlDialect.MYSQL, SqlDialect.POSTGRES);
+// ALTER TABLE t ALTER COLUMN c TYPE INTEGER
+SQL.parse(r.sql(), SqlDialect.POSTGRES);                 // 目标方言能解析才算翻译成功
+```
+
+**案例 2：批量 DML 翻译，顺带改写方言函数**
+
+```java
+List<ConversionResult> rs = SQL.convertBatch(
+        Arrays.asList("SELECT GROUP_CONCAT(name) FROM t", "SELECT IFNULL(a, b) FROM t"),
+        SqlDialect.MYSQL, SqlDialect.POSTGRES);
+// rs.get(0).sql() → SELECT STRING_AGG(name, ',') FROM t
+```
+
+### 6. 多方言分页适配
+
+同一份业务查询按目标方言生成分页语句。
+
+**案例 1：MySQL / PostgreSQL 的 LIMIT OFFSET**
+
+```java
+SqlStatement page = SQL.setPage(
+        SQL.parse("SELECT id FROM orders WHERE status = 1"), 2, 10, SqlDialect.MYSQL);
+SQL.getLimit(page);                                      // 10
+SQL.getOffset(page);                                     // 10
+```
+
+**案例 2：Oracle 12c 之前的 ROWNUM 两层子查询**
+
+```java
+SqlStatement page = SQL.setPage(
+        SQL.parse("SELECT * FROM emp", SqlDialect.ORACLE), 2, 8, SqlDialect.ORACLE);
+// 输出含 ROWNUM，不含 OFFSET/FETCH
+SQL.parse(SQL.toSqlString(page, SqlDialect.ORACLE), SqlDialect.ORACLE);
+```
+
+### 7. 多租户改写
+
+分表路由 + 统一注入租户过滤，防止漏加租户条件。
+
+**案例 1：按租户路由到分表**
+
+```java
+SqlStatement out = SQL.rewrite(SQL.parse("SELECT id, name FROM t_user WHERE status = 1"),
+        SqlRewrites.create().add(SqlRewrites.replaceTable("t_user", "t_user_2026")));
+// SELECT id, name FROM t_user_2026 WHERE status = 1
+```
+
+**案例 2：网关注入 tenant_id 条件**
+
+```java
+SqlStatement stmt = SQL.parse("SELECT id FROM t_order WHERE status = 1");
+SqlStatement out = SQL.rewrite(stmt, SqlRewrites.create()
+        .add(SqlRewrites.andWhere(SQL.parseExpr("tenant_id = 100"))));
+// SELECT id FROM t_order WHERE status = 1 AND tenant_id = 100
+SQL.toSqlString(stmt);                                   // 原语句未被改动
+```
+
+### 8. 数据脱敏与列级权限
+
+对外接口裁掉敏感列；库表重构后旧 SQL 不改代码即可适配。
+
+**案例 1：裁剪敏感列**
+
+```java
+SqlStatement stmt = SQL.parse("SELECT id, name, phone, id_card FROM t_customer WHERE id = 1");
+SqlStatement out = SQL.removeSelectItem(SQL.clone(stmt), "phone");
+out = SQL.removeSelectItem(out, "id_card");
+// SELECT id, name FROM t_customer WHERE id = 1
+```
+
+**案例 2：物理列改名映射**
+
+```java
+SqlStatement out = SQL.rewrite(SQL.parse("SELECT name FROM t_user WHERE name = 'a'"),
+        SqlRewrites.create().add(SqlRewrites.replaceColumn("name", "user_name")));
+// SELECT user_name FROM t_user WHERE user_name = 'a'
+```
+
+### 9. 动态 SQL 构建
+
+用链式构造器替代字符串拼接，杜绝注入与括号/逗号类语法错。
+
+**案例 1：条件查询链式组装**
+
+```java
+String sql = SqlBuilder.select("id", "name").from("users")
+        .where("status = 1").and("age > 18").orderBy("id").limit(10).toSql();
+// SELECT id, name FROM users WHERE status = 1 AND age > 18 ORDER BY id LIMIT 10
+SQL.parse(sql);                                          // 产物一定是合法 SQL
+```
+
+**案例 2：INSERT / UPDATE 零拼接**
+
+```java
+String insert = SqlBuilder.insertInto("t_user").columns("id", "name").values(1L, "alice").toSql();
+// INSERT INTO t_user(id, name) VALUES (1, 'alice')
+String update = SqlBuilder.update("t_user").set("name", "bob").where("id = 1").toSql();
+// UPDATE t_user SET name = 'bob' WHERE id = 1
+```
+
+### 10. 实体驱动多方言建表
+
+一套实体注解，按目标库产出对应 DDL，避免维护多份建表脚本。
+
+**案例 1：MySQL 内联 COMMENT**
+
+```java
+@SqlTable(name = "t_member", comment = "会员表")
+class Member {
+    @SqlId
+    Long id;
+    @SqlColumn(comment = "昵称")
+    String nick;
+}
+String ddl = SqlEntities.createTable(Member.class, SqlDialect.MYSQL);
+// CREATE TABLE t_member (...) COMMENT '会员表'，列上带 COMMENT '昵称'
+```
+
+**案例 2：PostgreSQL 走独立 COMMENT ON**
+
+```java
+String ddl = SqlEntities.createTable(Member.class, SqlDialect.POSTGRES);
+// COMMENT ON TABLE t_member IS '会员表';
+// COMMENT ON COLUMN t_member.nick IS '昵称';
+```
+
+### 11. SQL 格式化与规范统一
+
+日志脱乱、评审 diff 收敛、关键字大小写归一。
+
+**案例 1：关键字大小写归一**
+
+```java
+SqlStatement stmt = SQL.parse("select Id, Name from MyTable where Age > 18", SqlDialect.MYSQL);
+SQL.format(stmt, SqlDialect.MYSQL, false, SqlFormatOptions.defaults());
+// SELECT Id, Name FROM MyTable WHERE Age > 18（标识符大小写保持不变）
+SQL.format(stmt, SqlDialect.MYSQL, false,
+        SqlFormatOptions.defaults().keywordCase(SqlKeywordCase.LOWER));
+// select Id, Name from MyTable where Age > 18
+```
+
+**案例 2：pretty 多行 + 往返稳定**
+
+```java
+String pretty = SQL.format("select id,name,phone from t_user where status=1 and age>18 "
+        + "order by id desc limit 10");
+pretty.contains("\n");                                   // true
+// 美化后再解析，语义不变
+assertEquals(SQL.tables(SQL.parse(ugly)), SQL.tables(SQL.parse(pretty)));
+```
+
+### 12. 遗留模板占位符迁移
+
+老系统里的 `@xx@` / `%s` 风格 SQL，不改写文本也能直接解析。
+
+**案例 1：`@xx@` 风格**
+
+```java
+SqlStatement stmt = SQL.parse(
+        "select * from t_user where id = 1 and age > @minAge@ limit 10",
+        SqlDialect.MYSQL,
+        SqlParseOptions.defaults().placeholders(SqlPlaceholders.create().atWrapped()));
+SQL.tables(stmt);                                        // [t_user]
+SQL.getLimit(stmt);                                      // 10
+```
+
+**案例 2：`%s`（printf）风格**
+
+```java
+SqlStatement stmt = SQL.parse("SELECT %s FROM (SELECT '20221111' AS %s) AS a",
+        SqlDialect.MYSQL,
+        SqlParseOptions.defaults().placeholders(SqlPlaceholders.create().printf()));
+SQL.tables(stmt);                                        // []，FROM 的是派生表
+```
+
+### 13. 表达式预计算
+
+规则引擎、前端预览、报表预校验里先算常量折叠，算不出来就交给下游。
+
+**案例 1：常量折叠**
+
+```java
+SqlStatement stmt = SQL.parse("SELECT 1 + 2 * 3");
+Object v = SQL.eval(((SqlSelect) stmt).selectItems().get(0).expr());  // "7"
+```
+
+**案例 2：含列引用时不报错，返回 null**
+
+```java
+SqlStatement stmt = SQL.parse("SELECT price * 0.8 FROM t");
+Object v = SQL.eval(((SqlSelect) stmt).selectItems().get(0).expr());  // null
+```
+
+### 14. 安全改写不污染原语句
+
+网关/代理会缓存解析结果，改写必须是 clone-then-mutate，不能动到共享的原语句。
+
+**案例 1：裁剪列后原语句仍可复用**
+
+```java
+SqlStatement original = SQL.parse("SELECT id, name FROM t_user WHERE status = 1");
+SqlStatement masked = SQL.removeSelectItem(original, "name");   // 返回新语句
+SQL.toSqlString(original).contains("name");                     // true
+SQL.toSqlString(masked).contains("name");                       // false
+```
+
+**案例 2：分页改写不改原句**
+
+```java
+SqlStatement original = SQL.parse("SELECT id FROM users WHERE status = 1");
+SQL.setPage(original, 2, 10, SqlDialect.MYSQL);
+((SqlSelect) original).limit();                          // null，原语句无 LIMIT
+```
+
+### 新增场景的约定
+
+新场景先在 `SqlBusinessScenarioTest` 里落地（每个场景至少两个案例，且输出要能被目标方言
+`SQL.parse` 复解析），跑绿之后再补进本节，保持文档与可执行测试一一对应。

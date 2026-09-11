@@ -456,13 +456,13 @@ java -jar target/benchmarks.jar com.alianga.test.sql.jmh.SqlParseBenchmark -f 2 
 
 | | Parse success rate (file corpus) | Notes |
 | --- | --- | --- |
-| **jkit-sql** | **379/379 (100%)** | in-module golden corpus ~216 statements (including round-trip; `SqlGoldenCorpusTest` ~432 assertions) + 118 round-trip fidelity statements (`SqlRoundTripFidelityTest`) + 379 batch fidelity lines (`SqlRoundTripFidelityCorpusTest` in tools-test); `mvn -pl jkit-sql test` runs **889** tests |
+| **jkit-sql** | **379/379 (100%)** | in-module golden corpus ~216 statements (including round-trip; `SqlGoldenCorpusTest` ~432 assertions) + 118 round-trip fidelity statements (`SqlRoundTripFidelityTest`) + 379 batch fidelity lines (`SqlRoundTripFidelityCorpusTest` in tools-test); `mvn -pl jkit-sql test` runs **1371** tests |
 | Druid 1.2.23 | below jkit (gaps in `target/sql-compare-fail.txt`) | comparison is not part of this library's dependencies |
 | JSqlParser 4.9 | below jkit | same as above |
 
 ## Corpus and Comparison
 
-- In-module: `SqlGoldenCorpusTest` (about **216** statements, including round-trip), `SqlRoundTripFidelityTest` (**73** statements, formatted text compared verbatim against the original after normalization), `CommonModelSqlCorpusTest` (harvested from `icell/common-model`, 87 parseable statements), `Complex100GiantsTest` / `SqlModelMatchDeepenTest` (structured MODEL / MATCH_RECOGNIZE fields).
+- In-module: `SqlGoldenCorpusTest` (about **216** statements, including round-trip), `SqlRoundTripFidelityTest` (**118** statements, formatted text compared verbatim against the original after normalization), `CommonModelSqlCorpusTest` (harvested from `icell/common-model`, 87 parseable statements), `Complex100GiantsTest` / `SqlModelMatchDeepenTest` (structured MODEL / MATCH_RECOGNIZE fields).
 - Comparison against Druid / JSqlParser lives only in the parent project's `tools-test` module as `SqlParserCompareTest` (success rate + table-name set diff + JMH; not part of this library's dependencies).
 - Batch round-trip fidelity check: `SqlRoundTripFidelityCorpusTest` in `tools-test` (all **379** corpus lines compared verbatim after normalization, hard-asserted with 5 justified whitelist entries; report at `target/sql-fidelity-report.txt`).
 - External corpora batch checks (also in `tools-test`, not a dependency of this library):
@@ -475,3 +475,350 @@ cd ../tools-test
 mvn -Dtest=ExternalSqlCorpusTest test
 mvn -Dtest=ExternalSqlCorpusCompareTest test
 ```
+
+## Business Scenarios and Best Practices
+
+The capabilities of `jkit-sql` map onto the 14 business scenarios below, each with at least two best-practice
+examples. Every snippet is taken from
+`jkit-sql/src/test/java/com/alianga/jkit/sql/SqlBusinessScenarioTest.java` and can be re-run directly:
+
+```text
+mvn -pl jkit-sql test -Dtest=SqlBusinessScenarioTest
+```
+
+| # | Scenario | Main API | Examples |
+| --- | --- | --- | --- |
+| 1 | SQL auditing and dependency analysis | `SQL.tables` / `SQL.stat` / `SqlStatement.isReadOnly` | dependency extraction, write-op flagging |
+| 2 | Read/write splitting routing | `SqlStatement.isReadOnly` | read-only to replica, locking SELECT to primary |
+| 3 | SQL injection protection | `SQL.parameterize` / `SQL.exportParameterValues` | literal harvesting, bind-value export |
+| 4 | SQL firewall | `SQL.wall` / `SqlWallConfig` | dangerous-statement blocking, per-channel DDL allowance |
+| 5 | Cross-dialect database migration | `SQL.convertBatch` / `SqlSchemaConverter.convert` | DDL translation loop, batch DML function rewriting |
+| 6 | Multi-dialect pagination | `SQL.setPage` / `SQL.getLimit` / `SQL.getOffset` | MySQL/PG LIMIT OFFSET, classic Oracle ROWNUM |
+| 7 | Multi-tenant rewriting | `SqlRewrites.replaceTable` / `SqlRewrites.andWhere` | shard routing, tenant predicate injection |
+| 8 | Data masking and column-level access | `SQL.removeSelectItem` / `SqlRewrites.replaceColumn` | sensitive-column trimming, physical rename mapping |
+| 9 | Dynamic SQL building | `SqlBuilder` | conditional query assembly, INSERT/UPDATE |
+| 10 | Entity-driven multi-dialect DDL | `SqlEntities.createTable` | MySQL inline COMMENT, PG COMMENT ON |
+| 11 | SQL formatting and conventions | `SQL.format` / `SqlFormatOptions` | keyword case normalization, pretty multi-line |
+| 12 | Legacy template placeholder migration | `SqlPlaceholders` / `SqlParseOptions.placeholders` | `@xx@` and `%s` styles |
+| 13 | Expression pre-evaluation | `SQL.eval` | constant folding, column refs yield null |
+| 14 | Safe rewriting without polluting the original | `SQL.clone` / clone-then-mutate | reuse cached statements, page without mutating |
+
+### 1. SQL auditing and dependency analysis
+
+Before a release you need to know which tables and columns a statement touches, to assess impact and route review.
+
+**Example 1: extract table/column dependencies**
+
+```java
+SqlStatement stmt = SQL.parse(
+        "SELECT u.id, u.name FROM users u JOIN orders o ON u.id = o.uid WHERE o.amount > 100");
+List<String> tables = SQL.tables(stmt);                  // [users, orders]
+boolean hit = SQL.stat(stmt).getColumns().contains("o.amount");
+```
+
+**Example 2: flag write operations across a batch script**
+
+```java
+List<SqlStatement> stmts = SQL.parseAll("SELECT 1; UPDATE t SET a = 1 WHERE id = 2");
+long writes = 0;
+for (SqlStatement s : stmts) {
+    if (!s.isReadOnly()) {
+        writes++;                                        // 1
+    }
+}
+```
+
+### 2. Read/write splitting routing
+
+A proxy routes traffic to primary or replica based on statement type.
+
+**Example 1: read-only statements go to the replica**
+
+```java
+SqlStatement q = SQL.parse("SELECT * FROM t_user WHERE id = 1");
+boolean replica = q.isReadOnly();                        // true
+```
+
+**Example 2: locking SELECT and writes go to the primary**
+
+```java
+// SELECT ... FOR UPDATE holds a lock; routing it to a replica would break row locking
+boolean primary = !SQL.parse("SELECT * FROM t_user WHERE id = 1 FOR UPDATE").isReadOnly(); // true
+boolean write = !SQL.parse("INSERT INTO t_user(id, name) VALUES (1, 'a')").isReadOnly();   // true
+```
+
+> `FOR UPDATE` / `LOCK IN SHARE MODE` are deliberately treated as writes — otherwise a read/write split
+> router would send locking queries to a replica.
+
+### 3. SQL injection protection
+
+Turn literals spliced into SQL from the outside into bind parameters for a prepared statement.
+
+**Example 1: parameterize literals in one call**
+
+```java
+String out = SQL.parameterize(
+        "SELECT id FROM t_user WHERE name = 'alice' AND age = 18 AND deleted = false");
+// SELECT id FROM t_user WHERE name = ? AND age = ? AND deleted = ?
+```
+
+**Example 2: export values, then dispatch safely in two steps**
+
+```java
+SqlStatement stmt = SQL.parse(
+        "SELECT * FROM t_user WHERE name = 'alice' AND age = 18 AND id = ?");
+List<Object> values = SQL.exportParameterValues(stmt);   // [alice, 18]
+String parameterized = SQL.parameterize(stmt);           // literals become ?; existing ? untouched
+```
+
+### 4. SQL firewall (Wall)
+
+Pre-flight blocking for untrusted entry points: user-editable queries, open APIs, low-code platforms.
+
+**Example 1: block the classic dangerous patterns**
+
+```java
+SQL.wall("SELECT 1; DELETE FROM t WHERE id = 1").violations(); // [multi-statement]
+SQL.wall("DELETE FROM t").violations();                        // [delete-without-where]
+SQL.wall("UPDATE t SET a = 1").violations();                   // [update-without-where]
+SQL.wall("SELECT SLEEP(5) FROM t").violations();               // [dangerous-function]
+SQL.wall("SELECT * FROM t WHERE name = 'x' --").violations();  // [comment-bypass]
+SQL.wall("SELECT * FROM t WHERE id = 1").passed();             // true, legitimate query allowed
+```
+
+**Example 2: allow DDL only for the ops channel**
+
+```java
+SQL.wall("DROP TABLE t").violations();                          // [deny-ddl], blocked by default
+SqlWallConfig allowDdl = SqlWallConfig.defaults().denyDdl(false);
+SQL.wall("DROP TABLE t", SqlDialect.MYSQL, allowDdl).passed();   // true
+```
+
+### 5. Cross-dialect database migration
+
+Translate existing MySQL statements to the target database, then re-parse them with the target dialect to close the loop.
+
+**Example 1: single DDL translation + re-parse check**
+
+```java
+ConversionResult r = SqlSchemaConverter.convert(
+        "ALTER TABLE t MODIFY c INT NOT NULL", SqlDialect.MYSQL, SqlDialect.POSTGRES);
+// ALTER TABLE t ALTER COLUMN c TYPE INTEGER
+SQL.parse(r.sql(), SqlDialect.POSTGRES);                 // translation only counts if it re-parses
+```
+
+**Example 2: batch DML translation with function rewriting**
+
+```java
+List<ConversionResult> rs = SQL.convertBatch(
+        Arrays.asList("SELECT GROUP_CONCAT(name) FROM t", "SELECT IFNULL(a, b) FROM t"),
+        SqlDialect.MYSQL, SqlDialect.POSTGRES);
+// rs.get(0).sql() → SELECT STRING_AGG(name, ',') FROM t
+```
+
+### 6. Multi-dialect pagination
+
+Generate the pagination form the target dialect actually understands from one business query.
+
+**Example 1: MySQL / PostgreSQL LIMIT OFFSET**
+
+```java
+SqlStatement page = SQL.setPage(
+        SQL.parse("SELECT id FROM orders WHERE status = 1"), 2, 10, SqlDialect.MYSQL);
+SQL.getLimit(page);                                      // 10
+SQL.getOffset(page);                                     // 10
+```
+
+**Example 2: classic Oracle (pre-12c) ROWNUM subquery**
+
+```java
+SqlStatement page = SQL.setPage(
+        SQL.parse("SELECT * FROM emp", SqlDialect.ORACLE), 2, 8, SqlDialect.ORACLE);
+// output contains ROWNUM, no OFFSET/FETCH
+SQL.parse(SQL.toSqlString(page, SqlDialect.ORACLE), SqlDialect.ORACLE);
+```
+
+### 7. Multi-tenant rewriting
+
+Shard routing plus centrally injected tenant predicates, so no query ever misses its tenant filter.
+
+**Example 1: route to a tenant shard**
+
+```java
+SqlStatement out = SQL.rewrite(SQL.parse("SELECT id, name FROM t_user WHERE status = 1"),
+        SqlRewrites.create().add(SqlRewrites.replaceTable("t_user", "t_user_2026")));
+// SELECT id, name FROM t_user_2026 WHERE status = 1
+```
+
+**Example 2: inject the tenant_id predicate at the gateway**
+
+```java
+SqlStatement stmt = SQL.parse("SELECT id FROM t_order WHERE status = 1");
+SqlStatement out = SQL.rewrite(stmt, SqlRewrites.create()
+        .add(SqlRewrites.andWhere(SQL.parseExpr("tenant_id = 100"))));
+// SELECT id FROM t_order WHERE status = 1 AND tenant_id = 100
+SQL.toSqlString(stmt);                                   // the original statement is untouched
+```
+
+### 8. Data masking and column-level access
+
+Trim sensitive columns for external APIs; adapt old SQL to a physical rename without touching application code.
+
+**Example 1: trim sensitive columns**
+
+```java
+SqlStatement stmt = SQL.parse("SELECT id, name, phone, id_card FROM t_customer WHERE id = 1");
+SqlStatement out = SQL.removeSelectItem(SQL.clone(stmt), "phone");
+out = SQL.removeSelectItem(out, "id_card");
+// SELECT id, name FROM t_customer WHERE id = 1
+```
+
+**Example 2: map a physical column rename**
+
+```java
+SqlStatement out = SQL.rewrite(SQL.parse("SELECT name FROM t_user WHERE name = 'a'"),
+        SqlRewrites.create().add(SqlRewrites.replaceColumn("name", "user_name")));
+// SELECT user_name FROM t_user WHERE user_name = 'a'
+```
+
+### 9. Dynamic SQL building
+
+Replace string concatenation with a fluent builder to eliminate injection and comma/paren syntax errors.
+
+**Example 1: assemble a conditional query**
+
+```java
+String sql = SqlBuilder.select("id", "name").from("users")
+        .where("status = 1").and("age > 18").orderBy("id").limit(10).toSql();
+// SELECT id, name FROM users WHERE status = 1 AND age > 18 ORDER BY id LIMIT 10
+SQL.parse(sql);                                          // the output is always valid SQL
+```
+
+**Example 2: INSERT / UPDATE with zero concatenation**
+
+```java
+String insert = SqlBuilder.insertInto("t_user").columns("id", "name").values(1L, "alice").toSql();
+// INSERT INTO t_user(id, name) VALUES (1, 'alice')
+String update = SqlBuilder.update("t_user").set("name", "bob").where("id = 1").toSql();
+// UPDATE t_user SET name = 'bob' WHERE id = 1
+```
+
+### 10. Entity-driven multi-dialect DDL
+
+One set of entity annotations, one DDL per target database — no more maintaining several create-table scripts.
+
+**Example 1: MySQL inline COMMENT**
+
+```java
+@SqlTable(name = "t_member", comment = "Member table")
+class Member {
+    @SqlId
+    Long id;
+    @SqlColumn(comment = "Nickname")
+    String nick;
+}
+String ddl = SqlEntities.createTable(Member.class, SqlDialect.MYSQL);
+// CREATE TABLE t_member (...) COMMENT 'Member table', columns carry COMMENT 'Nickname'
+```
+
+**Example 2: PostgreSQL uses separate COMMENT ON statements**
+
+```java
+String ddl = SqlEntities.createTable(Member.class, SqlDialect.POSTGRES);
+// COMMENT ON TABLE t_member IS 'Member table';
+// COMMENT ON COLUMN t_member.nick IS 'Nickname';
+```
+
+### 11. SQL formatting and conventions
+
+De-noise logs, shrink review diffs, normalize keyword casing.
+
+**Example 1: normalize keyword case**
+
+```java
+SqlStatement stmt = SQL.parse("select Id, Name from MyTable where Age > 18", SqlDialect.MYSQL);
+SQL.format(stmt, SqlDialect.MYSQL, false, SqlFormatOptions.defaults());
+// SELECT Id, Name FROM MyTable WHERE Age > 18 (identifier case preserved)
+SQL.format(stmt, SqlDialect.MYSQL, false,
+        SqlFormatOptions.defaults().keywordCase(SqlKeywordCase.LOWER));
+// select Id, Name from MyTable where Age > 18
+```
+
+**Example 2: pretty multi-line output that round-trips**
+
+```java
+String pretty = SQL.format("select id,name,phone from t_user where status=1 and age>18 "
+        + "order by id desc limit 10");
+pretty.contains("\n");                                   // true
+// re-parsing the pretty form keeps the semantics intact
+assertEquals(SQL.tables(SQL.parse(ugly)), SQL.tables(SQL.parse(pretty)));
+```
+
+### 12. Legacy template placeholder migration
+
+Old `@xx@` / `%s` style SQL parses as-is, without rewriting the text.
+
+**Example 1: `@xx@` style**
+
+```java
+SqlStatement stmt = SQL.parse(
+        "select * from t_user where id = 1 and age > @minAge@ limit 10",
+        SqlDialect.MYSQL,
+        SqlParseOptions.defaults().placeholders(SqlPlaceholders.create().atWrapped()));
+SQL.tables(stmt);                                        // [t_user]
+SQL.getLimit(stmt);                                      // 10
+```
+
+**Example 2: `%s` (printf) style**
+
+```java
+SqlStatement stmt = SQL.parse("SELECT %s FROM (SELECT '20221111' AS %s) AS a",
+        SqlDialect.MYSQL,
+        SqlParseOptions.defaults().placeholders(SqlPlaceholders.create().printf()));
+SQL.tables(stmt);                                        // [], FROM is a derived table
+```
+
+### 13. Expression pre-evaluation
+
+Rule engines, UI previews and report pre-checks fold constants first; anything unresolvable is left to the caller.
+
+**Example 1: constant folding**
+
+```java
+SqlStatement stmt = SQL.parse("SELECT 1 + 2 * 3");
+Object v = SQL.eval(((SqlSelect) stmt).selectItems().get(0).expr());  // "7"
+```
+
+**Example 2: column references yield null instead of throwing**
+
+```java
+SqlStatement stmt = SQL.parse("SELECT price * 0.8 FROM t");
+Object v = SQL.eval(((SqlSelect) stmt).selectItems().get(0).expr());  // null
+```
+
+### 14. Safe rewriting without polluting the original statement
+
+Gateways and proxies cache parse results, so rewriting must be clone-then-mutate and never touch the shared original.
+
+**Example 1: the original stays reusable after trimming columns**
+
+```java
+SqlStatement original = SQL.parse("SELECT id, name FROM t_user WHERE status = 1");
+SqlStatement masked = SQL.removeSelectItem(original, "name");   // returns a new statement
+SQL.toSqlString(original).contains("name");                     // true
+SQL.toSqlString(masked).contains("name");                       // false
+```
+
+**Example 2: pagination rewriting leaves the original alone**
+
+```java
+SqlStatement original = SQL.parse("SELECT id FROM users WHERE status = 1");
+SQL.setPage(original, 2, 10, SqlDialect.MYSQL);
+((SqlSelect) original).limit();                          // null, the original has no LIMIT
+```
+
+### Convention for adding scenarios
+
+Land a new scenario in `SqlBusinessScenarioTest` first (at least two examples per scenario, and the output must
+re-parse with `SQL.parse` under the target dialect); only after it is green, add it to this section so the docs
+stay one-to-one with executable tests.
