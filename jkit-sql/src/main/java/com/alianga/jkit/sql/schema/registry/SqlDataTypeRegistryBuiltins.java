@@ -117,6 +117,12 @@ final class SqlDataTypeRegistryBuiltins {
         put(r, CanonicalType.YEAR,
                 "YEAR", "SMALLINT", "NUMBER(4)", "SMALLINT",
                 "SMALLINT", "SMALLINT", "INTEGER", "INT", "Int16", "SMALLINT");
+        put(r, CanonicalType.UUID,
+                "CHAR(36)", "UUID", "RAW(16)", "UNIQUEIDENTIFIER",
+                "UUID", "CHAR(36)", "TEXT", "STRING", "UUID", "UUID");
+        put(r, CanonicalType.INTERVAL,
+                "TEXT", "INTERVAL", "INTERVAL DAY TO SECOND", "VARCHAR(32)",
+                "INTERVAL", "VARCHAR(32)", "TEXT", "STRING", "String", "INTERVAL");
     }
 
     /**
@@ -194,6 +200,9 @@ final class SqlDataTypeRegistryBuiltins {
         r.registerAlias(SqlDialect.SQLSERVER, "VARCHAR(MAX)", CanonicalType.TEXT);
         r.registerAlias(SqlDialect.SQLSERVER, "NVARCHAR(MAX)", CanonicalType.JSON);
         r.registerAlias(SqlDialect.SQLSERVER, "VARBINARY(MAX)", CanonicalType.BLOB);
+        r.registerAliasAll("UNIQUEIDENTIFIER", CanonicalType.UUID);
+        r.registerAliasAll("UUID", CanonicalType.UUID);
+        r.registerAliasAll("INTERVAL", CanonicalType.INTERVAL);
     }
 
     private static void registerLossy(SqlDataTypeRegistry r) {
@@ -205,6 +214,9 @@ final class SqlDataTypeRegistryBuiltins {
         lossy(r, pgLike, "INTEGER", CanonicalType.INT, CanonicalType.MEDIUMINT);
         lossy(r, pgLike, "TIMESTAMP", CanonicalType.TIMESTAMP, CanonicalType.DATETIME);
         lossy(r, pgLike, "BYTEA", CanonicalType.BLOB, CanonicalType.BINARY);
+
+        lossy(r, new SqlDialect[] {SqlDialect.MYSQL}, "TEXT", CanonicalType.TEXT,
+                CanonicalType.INTERVAL);
 
         lossy(r, oracle, "TIMESTAMP", CanonicalType.TIMESTAMP,
                 CanonicalType.DATETIME, CanonicalType.TIME);
@@ -235,7 +247,8 @@ final class SqlDataTypeRegistryBuiltins {
         lossy(r, new SqlDialect[] {SqlDialect.SQLITE}, "REAL", CanonicalType.FLOAT,
                 CanonicalType.DOUBLE);
         lossy(r, new SqlDialect[] {SqlDialect.SQLITE}, "TEXT", CanonicalType.TEXT,
-                CanonicalType.VARCHAR, CanonicalType.TIME, CanonicalType.JSON);
+                CanonicalType.VARCHAR, CanonicalType.TIME, CanonicalType.JSON,
+                CanonicalType.UUID, CanonicalType.INTERVAL);
         lossy(r, new SqlDialect[] {SqlDialect.SQLITE}, "DATETIME", CanonicalType.DATETIME,
                 CanonicalType.TIMESTAMP);
         lossy(r, new SqlDialect[] {SqlDialect.SQLITE}, "BLOB", CanonicalType.BLOB,
@@ -246,7 +259,8 @@ final class SqlDataTypeRegistryBuiltins {
         lossy(r, new SqlDialect[] {SqlDialect.HIVE}, "TIMESTAMP", CanonicalType.TIMESTAMP,
                 CanonicalType.DATETIME);
         lossy(r, new SqlDialect[] {SqlDialect.HIVE}, "STRING", CanonicalType.TEXT,
-                CanonicalType.TIME, CanonicalType.JSON);
+                CanonicalType.TIME, CanonicalType.JSON, CanonicalType.UUID,
+                CanonicalType.INTERVAL);
         lossy(r, new SqlDialect[] {SqlDialect.HIVE}, "BINARY", CanonicalType.BLOB,
                 CanonicalType.BINARY);
 
@@ -257,7 +271,8 @@ final class SqlDataTypeRegistryBuiltins {
         lossy(r, new SqlDialect[] {SqlDialect.CLICKHOUSE}, "DateTime", CanonicalType.TIMESTAMP,
                 CanonicalType.DATETIME);
         lossy(r, new SqlDialect[] {SqlDialect.CLICKHOUSE}, "String", CanonicalType.TEXT,
-                CanonicalType.VARCHAR, CanonicalType.TIME, CanonicalType.JSON, CanonicalType.BLOB);
+                CanonicalType.VARCHAR, CanonicalType.TIME, CanonicalType.JSON, CanonicalType.BLOB,
+                CanonicalType.INTERVAL);
         lossy(r, new SqlDialect[] {SqlDialect.CLICKHOUSE}, "FixedString(10)", CanonicalType.CHAR,
                 CanonicalType.BINARY);
 

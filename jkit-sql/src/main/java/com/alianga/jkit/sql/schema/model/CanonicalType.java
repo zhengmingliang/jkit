@@ -28,7 +28,9 @@ public enum CanonicalType {
     BLOB(false, false),
     BOOLEAN(false, false),
     JSON(false, false),
-    YEAR(false, false);
+    YEAR(false, false),
+    UUID(false, false),
+    INTERVAL(false, false);
 
     private final boolean precision;
     private final boolean scale;

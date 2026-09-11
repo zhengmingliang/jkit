@@ -12,8 +12,31 @@ import java.util.List;
  */
 public final class ConversionReport {
     private final List<ConversionWarning> warnings;
+    private final List<String> extraSql;
     private final int columnsConverted;
     private final int columnsUnchanged;
+
+    /**
+     * @param warnings 警告
+     * @param extraSql 附录 SQL（CREATE INDEX / SEQUENCE 等）
+     * @param columnsConverted 已改写列数
+     * @param columnsUnchanged 原样保留列/表约束数
+     */
+    public ConversionReport(List<ConversionWarning> warnings, List<String> extraSql,
+                            int columnsConverted, int columnsUnchanged) {
+        if (warnings == null || warnings.isEmpty()) {
+            this.warnings = Collections.emptyList();
+        } else {
+            this.warnings = Collections.unmodifiableList(new ArrayList<ConversionWarning>(warnings));
+        }
+        if (extraSql == null || extraSql.isEmpty()) {
+            this.extraSql = Collections.emptyList();
+        } else {
+            this.extraSql = Collections.unmodifiableList(new ArrayList<String>(extraSql));
+        }
+        this.columnsConverted = columnsConverted;
+        this.columnsUnchanged = columnsUnchanged;
+    }
 
     /**
      * @param warnings 警告
@@ -22,20 +45,15 @@ public final class ConversionReport {
      */
     public ConversionReport(List<ConversionWarning> warnings, int columnsConverted,
                             int columnsUnchanged) {
-        if (warnings == null || warnings.isEmpty()) {
-            this.warnings = Collections.emptyList();
-        } else {
-            this.warnings = Collections.unmodifiableList(new ArrayList<ConversionWarning>(warnings));
-        }
-        this.columnsConverted = columnsConverted;
-        this.columnsUnchanged = columnsUnchanged;
+        this(warnings, Collections.<String>emptyList(), columnsConverted, columnsUnchanged);
     }
 
     /**
      * @return 空报告
      */
     public static ConversionReport empty() {
-        return new ConversionReport(Collections.<ConversionWarning>emptyList(), 0, 0);
+        return new ConversionReport(Collections.<ConversionWarning>emptyList(),
+                Collections.<String>emptyList(), 0, 0);
     }
 
     /**
@@ -43,6 +61,13 @@ public final class ConversionReport {
      */
     public List<ConversionWarning> warnings() {
         return warnings;
+    }
+
+    /**
+     * @return 附录 SQL（建索引、SEQUENCE 等），不含主 CREATE TABLE
+     */
+    public List<String> extraSql() {
+        return extraSql;
     }
 
     /**
@@ -93,6 +118,7 @@ public final class ConversionReport {
      */
     public static final class Builder {
         private final List<ConversionWarning> warnings = new ArrayList<ConversionWarning>(4);
+        private final List<String> extraSql = new ArrayList<String>(2);
         private int converted;
         private int unchanged;
 
@@ -103,6 +129,15 @@ public final class ConversionReport {
          */
         public void warn(ConversionWarning.Severity severity, String location, String message) {
             warnings.add(new ConversionWarning(severity, location, message));
+        }
+
+        /**
+         * @param sql 附录语句
+         */
+        public void extraSql(String sql) {
+            if (sql != null && !sql.isEmpty()) {
+                extraSql.add(sql);
+            }
         }
 
         /**
@@ -123,7 +158,7 @@ public final class ConversionReport {
          * @return 不可变报告
          */
         public ConversionReport build() {
-            return new ConversionReport(warnings, converted, unchanged);
+            return new ConversionReport(warnings, extraSql, converted, unchanged);
         }
     }
 }

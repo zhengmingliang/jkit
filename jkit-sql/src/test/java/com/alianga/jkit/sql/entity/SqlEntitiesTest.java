@@ -114,6 +114,19 @@ public class SqlEntitiesTest {
     }
 
     @Test
+    public void insertBatchAndIndexes() {
+        DemoUser a = new DemoUser();
+        a.setName("a");
+        DemoUser b = new DemoUser();
+        b.setName("b");
+        String batch = SqlEntities.insertBatch(java.util.Arrays.asList(a, b), SqlDialect.MYSQL);
+        assertTrue(batch, batch.contains("INSERT"));
+        assertTrue(batch.split(";").length >= 2);
+        String ddl = SqlEntities.createTable(DemoUser.class, SqlDialect.POSTGRES);
+        assertTrue(ddl, ddl.toUpperCase().contains("CREATE INDEX"));
+    }
+
+    @Test
     public void dropTable() {
         String sql = SqlEntities.dropTable(DemoUser.class, SqlDialect.MYSQL);
         assertTrue(sql.toUpperCase().contains("DROP TABLE"));

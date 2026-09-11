@@ -200,6 +200,13 @@ public final class FunctionAstRewriter {
             }
             rewriteOrderExprs(fn);
             String name = functionName(fn);
+            FunctionRewriteRule rule = SqlFunctionRegistry.builtins().find(name);
+            if (rule != null) {
+                SqlExpr rewritten = rule.rewrite(fn, source, target, report);
+                if (rewritten != null) {
+                    return rewritten;
+                }
+            }
             if (fn.usingCharset()) {
                 if (target != SqlDialect.MYSQL) {
                     report.warn(ConversionWarning.Severity.SEMANTIC_RISK, name,

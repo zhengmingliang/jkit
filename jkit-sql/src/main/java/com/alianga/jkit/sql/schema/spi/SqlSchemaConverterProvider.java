@@ -1,6 +1,7 @@
 package com.alianga.jkit.sql.schema.spi;
 
 import com.alianga.jkit.sql.schema.registry.SqlDataTypeRegistry;
+import com.alianga.jkit.sql.schema.rewrite.SqlFunctionRegistry;
 
 /**
  * 跨方言转换 SPI：为已有 canonical 类型追加方言写法，或覆盖内置声明。
@@ -18,6 +19,15 @@ public interface SqlSchemaConverterProvider {
      * @param registry 可变注册表（尚未 freeze）
      */
     default void registerTypes(SqlDataTypeRegistry registry) {
+        // 默认不追加
+    }
+
+    /**
+     * 追加或覆盖函数改写规则。
+     *
+     * @param registry 可变函数表（尚未 freeze）
+     */
+    default void registerFunctions(SqlFunctionRegistry registry) {
         // 默认不追加
     }
 

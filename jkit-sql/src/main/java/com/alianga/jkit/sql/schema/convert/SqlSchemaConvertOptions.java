@@ -33,6 +33,9 @@ public final class SqlSchemaConvertOptions {
     private boolean stripDialectOptions = true;
     private PostgresIdentityStyle postgresIdentityStyle = PostgresIdentityStyle.IDENTITY;
     private ConversionWarning.Severity failOnSeverity;
+    private boolean generateOracleSequence;
+    private boolean parallelBatch;
+    private boolean promoteLongVarchar = true;
 
     private SqlSchemaConvertOptions() {
     }
@@ -109,6 +112,54 @@ public final class SqlSchemaConvertOptions {
      */
     public SqlSchemaConvertOptions failOnSeverity(ConversionWarning.Severity failOnSeverity) {
         this.failOnSeverity = failOnSeverity;
+        return this;
+    }
+
+    /**
+     * @return Oracle ≤11g 是否生成 SEQUENCE+TRIGGER（默认 false，只告警）
+     */
+    public boolean generateOracleSequence() {
+        return generateOracleSequence;
+    }
+
+    /**
+     * @param generateOracleSequence 是否生成 SEQUENCE+TRIGGER
+     * @return this
+     */
+    public SqlSchemaConvertOptions generateOracleSequence(boolean generateOracleSequence) {
+        this.generateOracleSequence = generateOracleSequence;
+        return this;
+    }
+
+    /**
+     * @return 批量转换是否并行
+     */
+    public boolean parallelBatch() {
+        return parallelBatch;
+    }
+
+    /**
+     * @param parallelBatch 并行
+     * @return this
+     */
+    public SqlSchemaConvertOptions parallelBatch(boolean parallelBatch) {
+        this.parallelBatch = parallelBatch;
+        return this;
+    }
+
+    /**
+     * @return 超长 VARCHAR 是否提升为 TEXT/CLOB（默认 true，阈值按方言：MySQL/Oracle 4000）
+     */
+    public boolean promoteLongVarchar() {
+        return promoteLongVarchar;
+    }
+
+    /**
+     * @param promoteLongVarchar 是否提升
+     * @return this
+     */
+    public SqlSchemaConvertOptions promoteLongVarchar(boolean promoteLongVarchar) {
+        this.promoteLongVarchar = promoteLongVarchar;
         return this;
     }
 }

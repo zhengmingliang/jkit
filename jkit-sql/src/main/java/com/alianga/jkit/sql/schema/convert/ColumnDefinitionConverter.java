@@ -35,11 +35,27 @@ public final class ColumnDefinitionConverter {
     public static String convert(ColumnDefinition column, SqlDialect source, SqlDialect target,
                                  SqlSchemaConvertOptions options, SqlDataTypeRegistry registry,
                                  ConversionReport.Builder report) {
+        return convert(column, source, target, options, registry, report, "");
+    }
+
+    /**
+     * @param column 源列
+     * @param source 源方言
+     * @param target 目标方言
+     * @param options 选项
+     * @param registry 类型表
+     * @param report 报告
+     * @param tableName 表名（附录 CREATE INDEX / SEQUENCE）
+     * @return 目标列定义文本
+     */
+    public static String convert(ColumnDefinition column, SqlDialect source, SqlDialect target,
+                                 SqlSchemaConvertOptions options, SqlDataTypeRegistry registry,
+                                 ConversionReport.Builder report, String tableName) {
         if (column == null) {
             return "";
         }
         if (column.tableConstraint()) {
-            return convertTableConstraint(column, target, report);
+            return convertTableConstraint(column, target, report, tableName);
         }
         CanonicalType canonical = registry.fromDialect(column.dataType(), source);
         if (canonical == CanonicalType.UNKNOWN) {
@@ -51,6 +67,11 @@ public final class ColumnDefinitionConverter {
         CanonicalType afterUnsigned = applyUnsigned(canonical, column, options, report);
         Integer precision = column.dataType().precision();
         Integer scale = column.dataType().scale();
+        afterUnsigned = promoteVarchar(afterUnsigned, precision, target, options);
+        if (afterUnsigned == CanonicalType.TEXT) {
+            precision = null;
+            scale = null;
+        }
         String typeText = registry.toDialect(afterUnsigned, target, precision, scale);
         AutoIncrementStrategy.Result auto = null;
         ColumnConstraint.AutoIncrement autoC = column.find(ColumnConstraint.AutoIncrement.class);
@@ -60,10 +81,53 @@ public final class ColumnDefinitionConverter {
             if (auto.overrideType() != null) {
                 typeText = auto.overrideType();
             }
+            if (auto.dropped() && options.generateOracleSequence() && target == SqlDialect.ORACLE
+                    && tableName != null && !tableName.isEmpty()) {
+                report.extraSql(oracleSequenceSql(tableName, column.columnName()));
+            }
         }
         String rendered = render(column, typeText, afterUnsigned, auto, target, options, report);
         report.converted();
         return rendered;
+    }
+
+    private static CanonicalType promoteVarchar(CanonicalType canonical, Integer precision,
+                                                SqlDialect target, SqlSchemaConvertOptions options) {
+        if (!options.promoteLongVarchar() || canonical != CanonicalType.VARCHAR) {
+            return canonical;
+        }
+        int limit = varcharTextLimit(target);
+        if (limit <= 0) {
+            return canonical;
+        }
+        int p = precision == null ? 0 : precision.intValue();
+        if (p == 0 || p > limit) {
+            return CanonicalType.TEXT;
+        }
+        return canonical;
+    }
+
+    private static int varcharTextLimit(SqlDialect target) {
+        switch (target) {
+            case MYSQL:
+            case ORACLE:
+            case ORACLE12:
+                return 4000;
+            case SQLSERVER:
+                return 8000;
+            default:
+                return 0;
+        }
+    }
+
+    private static String oracleSequenceSql(String table, String column) {
+        String seq = table + "_" + column + "_seq";
+        String trg = table + "_" + column + "_bi";
+        return "CREATE SEQUENCE " + seq
+                + "; CREATE OR REPLACE TRIGGER " + trg
+                + " BEFORE INSERT ON " + table
+                + " FOR EACH ROW WHEN (NEW." + column + " IS NULL) BEGIN SELECT "
+                + seq + ".NEXTVAL INTO :NEW." + column + " FROM DUAL; END;";
     }
 
     private static CanonicalType applyUnsigned(CanonicalType canonical, ColumnDefinition column,
@@ -220,7 +284,7 @@ public final class ColumnDefinitionConverter {
     }
 
     private static String convertTableConstraint(ColumnDefinition column, SqlDialect target,
-                                                 ConversionReport.Builder report) {
+                                                 ConversionReport.Builder report, String tableName) {
         String raw = column.rawText() == null ? "" : column.rawText().trim();
         String u = raw.toUpperCase(Locale.ROOT);
         if ((u.startsWith("UNIQUE KEY") || u.startsWith("UNIQUE INDEX")) && target != SqlDialect.MYSQL) {
@@ -231,13 +295,55 @@ public final class ColumnDefinitionConverter {
             }
         }
         if (mysqlOnlyTableConstraint(raw) && !supportsMysqlIndex(target)) {
-            report.warn(ConversionWarning.Severity.SEMANTIC_RISK, "",
-                    "已去掉 MySQL 表内索引（请手工 CREATE INDEX）: " + raw);
+            String idx = toCreateIndex(raw, tableName);
+            if (idx != null) {
+                report.extraSql(idx);
+                report.warn(ConversionWarning.Severity.INFO, tableName,
+                        "表内 KEY 已改为附录: " + idx);
+            } else {
+                report.warn(ConversionWarning.Severity.SEMANTIC_RISK, "",
+                        "已去掉 MySQL 表内索引（请手工 CREATE INDEX）: " + raw);
+            }
             report.unchanged();
             return "";
         }
         report.unchanged();
         return raw;
+    }
+
+    static String toCreateIndex(String raw, String tableName) {
+        if (tableName == null || tableName.isEmpty() || raw == null) {
+            return null;
+        }
+        String t = raw.trim();
+        String u = t.toUpperCase(Locale.ROOT);
+        int start = 0;
+        if (u.startsWith("FULLTEXT") || u.startsWith("SPATIAL")) {
+            return null;
+        }
+        if (u.startsWith("KEY ")) {
+            start = 4;
+        } else if (u.startsWith("INDEX ")) {
+            start = 6;
+        } else {
+            return null;
+        }
+        String rest = t.substring(start).trim();
+        int paren = rest.indexOf('(');
+        if (paren < 0) {
+            return null;
+        }
+        String namePart = rest.substring(0, paren).trim();
+        String cols = rest.substring(paren);
+        String idxName = namePart;
+        int sp = namePart.indexOf(' ');
+        if (sp > 0) {
+            idxName = namePart.substring(0, sp);
+        }
+        if (idxName.isEmpty() || idxName.startsWith("(")) {
+            idxName = tableName + "_idx";
+        }
+        return "CREATE INDEX " + idxName + " ON " + tableName + " " + cols;
     }
 
     private static boolean supportsMysqlIndex(SqlDialect dialect) {

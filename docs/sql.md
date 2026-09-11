@@ -451,7 +451,9 @@ java -jar target/benchmarks.jar com.alianga.test.sql.jmh.SqlSchemaConvertBenchma
 
 当前 12 个一等方言（MySQL / PostgreSQL / Oracle 11g 与 12c / SQL Server / H2 / ANSI / DB2 / SQLite / Hive / ClickHouse / Presto）及 `fromName` 产品别名（达梦、Gauss、GBase、TiDB…）见 [sql-schema-converter-design.md 第四节](./sql-schema-converter-design.md)。任意两个一等方言可互为转换两端。
 
-如何加类型别名、覆盖某方言写法、加 canonical 类型、加数据库、加函数改写，见 [第九节](./sql-schema-converter-design.md)。类型别名/覆盖走 SPI（`SqlSchemaConverterProvider`）；新语义类型和新函数要改本模块（枚举 / `FunctionAstRewriter`）。
+`ConversionResult.sqlWithExtras()` 含附录 `CREATE INDEX` / Oracle SEQUENCE。`DATE_FORMAT` 经函数 SPI 改为 `TO_CHAR`。函数也可 `SqlSchemaConverterProvider.registerFunctions`。`VARCHAR` 超长默认提升为 TEXT/CLOB。
+
+如何加类型别名、覆盖某方言写法、加 canonical 类型、加数据库、加函数改写，见 [第九节](./sql-schema-converter-design.md)。
 
 ## 实体扫描生成 DDL / DML
 

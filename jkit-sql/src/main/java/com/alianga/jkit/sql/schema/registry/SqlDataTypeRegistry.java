@@ -130,7 +130,9 @@ public final class SqlDataTypeRegistry {
             return;
         }
         lossyMappings.add(mapping);
-        reverseExact.get(mapping.dialect()).put(normalize(mapping.literalForm()), mapping.primary());
+        String norm = normalize(mapping.literalForm());
+        reverseExact.get(mapping.dialect()).put(norm, mapping.primary());
+        aliases.get(mapping.dialect()).put(baseName(norm), mapping.primary());
     }
 
     /**

@@ -23,4 +23,11 @@ public @interface SqlTable {
      * @return 表注释，可空
      */
     String comment() default "";
+
+    /**
+     * 索引，元素为 {@code col} 或 {@code name:col1,col2}。
+     *
+     * @return 索引定义
+     */
+    String[] indexes() default {};
 }

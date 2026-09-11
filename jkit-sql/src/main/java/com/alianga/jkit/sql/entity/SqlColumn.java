@@ -43,4 +43,9 @@ public @interface SqlColumn {
      * @return 是否唯一
      */
     boolean unique() default false;
+
+    /**
+     * @return 原始类型字面量；非空则不再从 Java 类型推断
+     */
+    String columnDefinition() default "";
 }

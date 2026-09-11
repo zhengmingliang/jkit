@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 将原始列定义文本解析为结构化 {@link ColumnDefinition}。
@@ -27,6 +28,9 @@ import java.util.Locale;
  * @since 2.0.1
  */
 public final class SqlColumnDefinitionParser {
+    private static final ConcurrentHashMap<String, ColumnDefinition> CACHE =
+            new ConcurrentHashMap<String, ColumnDefinition>(64);
+
     private SqlColumnDefinitionParser() {
     }
 
@@ -46,11 +50,21 @@ public final class SqlColumnDefinitionParser {
         if (raw.isEmpty()) {
             return unknownColumn("", raw);
         }
-        try {
-            return new Parser(raw, d).parse();
-        } catch (RuntimeException ignored) {
-            return unknownColumn("", raw);
+        String cacheKey = d.name() + '\0' + raw;
+        ColumnDefinition cached = CACHE.get(cacheKey);
+        if (cached != null) {
+            return cached;
         }
+        ColumnDefinition parsed;
+        try {
+            parsed = new Parser(raw, d).parse();
+        } catch (RuntimeException ignored) {
+            parsed = unknownColumn("", raw);
+        }
+        if (CACHE.size() < 4096) {
+            CACHE.putIfAbsent(cacheKey, parsed);
+        }
+        return parsed;
     }
 
     /**

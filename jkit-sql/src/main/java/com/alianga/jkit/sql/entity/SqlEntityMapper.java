@@ -41,7 +41,7 @@ public final class SqlEntityMapper {
             }
             columns.add(column(f));
         }
-        return new SqlEntityModel(type, table, columns);
+        return new SqlEntityModel(type, table, columns, tableIndexes(type));
     }
 
     /**
@@ -133,9 +133,35 @@ public final class SqlEntityMapper {
         } else {
             name = snake(field.getName());
         }
+        String rawType = null;
+        if (col != null && col.columnDefinition().length() > 0) {
+            rawType = col.columnDefinition();
+        } else if (jpaCol != null) {
+            String cd = stringAttr(jpaCol, "columnDefinition");
+            if (cd != null && cd.length() > 0) {
+                rawType = cd;
+            }
+        }
         boolean lob = namedAnnotation(field, "javax.persistence.Lob") != null
                 || namedAnnotation(field, "jakarta.persistence.Lob") != null;
         CanonicalType canonical = javaType(field.getType(), lob);
+        String refTable = null;
+        String refCol = null;
+        if (rawType == null && SqlEntityMapper.isEntity(field.getType()) && field.getType() != field.getDeclaringClass()) {
+            SqlEntityModel ref = inspect(field.getType());
+            SqlEntityColumn refId = ref.idColumn();
+            canonical = refId == null ? CanonicalType.BIGINT : refId.canonical();
+            refTable = ref.tableName();
+            refCol = refId == null ? "id" : refId.columnName();
+            if (col == null || col.name().length() == 0) {
+                Object join = namedAnnotation(field, "javax.persistence.JoinColumn");
+                if (join == null) {
+                    join = namedAnnotation(field, "jakarta.persistence.JoinColumn");
+                }
+                String jn = join == null ? null : stringAttr(join, "name");
+                name = jn != null && jn.length() > 0 ? jn : snake(field.getName()) + "_id";
+            }
+        }
         Integer prec = null;
         Integer sc = null;
         if (canonical.requiresPrecision()) {
@@ -148,11 +174,28 @@ public final class SqlEntityMapper {
         if (id) {
             nullable = false;
         }
-        return new SqlEntityColumn(name, canonical, prec, sc, nullable, id, generated || (id && generated),
-                unique, field);
+        return new SqlEntityColumn(name, canonical, prec, sc, nullable, id, generated, unique,
+                rawType, refTable, refCol, field);
+    }
+
+    private static List<String> tableIndexes(Class<?> type) {
+        List<String> out = new ArrayList<String>(2);
+        SqlTable sqlTable = type.getAnnotation(SqlTable.class);
+        if (sqlTable != null) {
+            String[] ix = sqlTable.indexes();
+            for (int i = 0; i < ix.length; i++) {
+                if (ix[i] != null && ix[i].length() > 0) {
+                    out.add(ix[i]);
+                }
+            }
+        }
+        return out;
     }
 
     private static CanonicalType javaType(Class<?> type, boolean lob) {
+        if (type == java.util.UUID.class) {
+            return CanonicalType.UUID;
+        }
         if (type == String.class) {
             return lob ? CanonicalType.TEXT : CanonicalType.VARCHAR;
         }

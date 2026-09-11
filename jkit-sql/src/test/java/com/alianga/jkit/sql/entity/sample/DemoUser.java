@@ -13,7 +13,7 @@ import java.math.BigDecimal;
  *
  * @author 郑明亮
  */
-@SqlTable(name = "demo_user")
+@SqlTable(name = "demo_user", indexes = {"idx_email:email"})
 public class DemoUser {
     @SqlId
     @SqlGenerated

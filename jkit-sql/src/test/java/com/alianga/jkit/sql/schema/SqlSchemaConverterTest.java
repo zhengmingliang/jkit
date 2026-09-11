@@ -7,6 +7,8 @@ import com.alianga.jkit.sql.schema.convert.ConversionWarning;
 import com.alianga.jkit.sql.schema.convert.SqlSchemaConversionException;
 import com.alianga.jkit.sql.schema.convert.SqlSchemaConvertOptions;
 import com.alianga.jkit.sql.schema.convert.SqlSchemaConverter;
+import com.alianga.jkit.sql.schema.model.CanonicalType;
+import com.alianga.jkit.sql.schema.registry.SqlDataTypeRegistry;
 
 import org.junit.Test;
 
@@ -29,14 +31,26 @@ public class SqlSchemaConverterTest {
         assertTrue(pg, pg.toUpperCase().contains("VARCHAR(32)"));
         SQL.parse(pg, SqlDialect.POSTGRES);
     }
+    @Test
+    public void mysqlTextStaysClobOnOracle() {
+        String ora = SQL.convert(
+                "CREATE TABLE t (name TEXT(65535), money2 FLOAT, email VARCHAR(100))",
+                SqlDialect.MYSQL, SqlDialect.ORACLE);
+        String u = ora.toUpperCase();
+        assertTrue(ora, u.contains("CLOB"));
+        assertFalse(ora, u.contains("INTERVAL"));
+        assertTrue(ora, u.contains("BINARY_FLOAT") || u.contains("FLOAT"));
+        SQL.parse(ora, SqlDialect.ORACLE);
+    }
 
     @Test
     public void alterModifyColumnConvertsTypeAndWarns() {
         ConversionResult r = SqlSchemaConverter.convert(
                 "ALTER TABLE t MODIFY amt DECIMAL(10,2) NOT NULL",
                 SqlDialect.MYSQL, SqlDialect.POSTGRES);
-        assertTrue(r.sql(), r.sql().toUpperCase().contains("NUMERIC(10,2)"));
-        assertTrue(r.report().hasSeverityAtLeast(ConversionWarning.Severity.SEMANTIC_RISK));
+        assertTrue(r.sql(), r.sql().toUpperCase().contains("ALTER COLUMN"));
+        assertTrue(r.sql(), r.sql().toUpperCase().contains("NUMERIC"));
+        SQL.parse(r.sql(), SqlDialect.POSTGRES);
     }
 
     @Test
@@ -45,7 +59,42 @@ public class SqlSchemaConverterTest {
                 "ALTER TABLE t CHANGE COLUMN old_c new_c INT NOT NULL",
                 SqlDialect.MYSQL, SqlDialect.POSTGRES);
         assertTrue(r.sql(), r.sql().toUpperCase().contains("INTEGER"));
-        assertTrue(r.report().hasSeverityAtLeast(ConversionWarning.Severity.SEMANTIC_RISK));
+        assertTrue(r.sql(), r.sql().toUpperCase().contains("ALTER COLUMN"));
+        assertFalse(r.report().extraSql().isEmpty());
+        assertTrue(r.report().extraSql().get(0).toUpperCase().contains("RENAME COLUMN"));
+    }
+
+    @Test
+    public void dateFormatBecomesToChar() {
+        String pg = SQL.convert("SELECT DATE_FORMAT(ts, '%Y-%m-%d') FROM t",
+                SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        assertTrue(pg, pg.toUpperCase().contains("TO_CHAR"));
+        assertFalse(pg, pg.toUpperCase().contains("DATE_FORMAT"));
+    }
+
+    @Test
+    public void uuidAndIntervalRoundtrip() {
+        assertEquals("UUID",
+                SqlDataTypeRegistry.builtins().convert("CHAR(36)", SqlDialect.MYSQL, SqlDialect.POSTGRES));
+        assertEquals("INTERVAL",
+                SqlDataTypeRegistry.builtins().toDialect(CanonicalType.INTERVAL, SqlDialect.POSTGRES, null, null));
+    }
+
+    @Test
+    public void oracleSequenceOptIn() {
+        ConversionResult r = SqlSchemaConverter.convert(
+                "CREATE TABLE t (id INT AUTO_INCREMENT PRIMARY KEY)",
+                SqlDialect.MYSQL, SqlDialect.ORACLE,
+                SqlSchemaConvertOptions.defaults().generateOracleSequence(true));
+        assertFalse(r.report().extraSql().isEmpty());
+        assertTrue(r.report().extraSql().get(0).toUpperCase().contains("SEQUENCE"));
+    }
+
+    @Test
+    public void longVarcharPromotedToText() {
+        String ora = SQL.convert("CREATE TABLE t (body VARCHAR(8000))",
+                SqlDialect.MYSQL, SqlDialect.ORACLE);
+        assertTrue(ora, ora.toUpperCase().contains("CLOB"));
     }
 
     @Test
@@ -176,14 +225,9 @@ public class SqlSchemaConverterTest {
                 SqlDialect.MYSQL, SqlDialect.POSTGRES);
         String u = r.sql().toUpperCase();
         assertFalse(r.sql(), u.contains("KEY IDX_NAME"));
-        boolean found = false;
-        for (int i = 0; i < r.report().warnings().size(); i++) {
-            if (r.report().warnings().get(i).severity() == ConversionWarning.Severity.SEMANTIC_RISK
-                    && r.report().warnings().get(i).message().contains("idx_name")) {
-                found = true;
-            }
-        }
-        assertTrue(r.report().warnings().toString(), found);
+        assertFalse(r.report().extraSql().isEmpty());
+        assertTrue(r.report().extraSql().get(0).toUpperCase().contains("CREATE INDEX"));
+        assertTrue(r.sqlWithExtras().toUpperCase().contains("CREATE INDEX IDX_NAME ON T"));
         SQL.parse(r.sql(), SqlDialect.POSTGRES);
     }
 

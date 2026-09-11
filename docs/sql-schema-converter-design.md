@@ -60,6 +60,9 @@ SQL.convertBatch(sqls, SqlDialect.MYSQL, SqlDialect.POSTGRES);
 | `stripDialectOptions` | `true` | 目标不支持时去掉 ENGINE / CHARSET / COLLATE |
 | `postgresIdentityStyle` | `IDENTITY` | PG 自增：`GENERATED … AS IDENTITY` 或 `SERIAL` |
 | `failOnSeverity` | `null` | 达到该警告级别则抛 `SqlSchemaConversionException` |
+| `generateOracleSequence` | `false` | Oracle ≤11g 自增生成 SEQUENCE+TRIGGER 附录 |
+| `parallelBatch` | `false` | `convertBatch` 并行 |
+| `promoteLongVarchar` | `true` | VARCHAR 超长（MySQL/Oracle 4000、SQL Server 8000）提升为 TEXT/CLOB |
 
 ### 报告 `ConversionReport`
 

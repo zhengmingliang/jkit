@@ -1,5 +1,7 @@
 package com.alianga.jkit.sql.schema.convert;
 
+import java.util.List;
+
 /**
  * 转换结果：目标 SQL + {@link ConversionReport}。
  *
@@ -33,6 +35,26 @@ public final class ConversionResult {
      */
     public ConversionReport report() {
         return report;
+    }
+
+    /**
+     * 主 SQL 后接附录（CREATE INDEX / SEQUENCE），分号分隔。
+     *
+     * @return 可一并执行的脚本
+     */
+    public String sqlWithExtras() {
+        List<String> extra = report.extraSql();
+        if (extra.isEmpty()) {
+            return sql;
+        }
+        StringBuilder sb = new StringBuilder(sql);
+        for (int i = 0; i < extra.size(); i++) {
+            if (sb.length() > 0) {
+                sb.append(';').append(' ');
+            }
+            sb.append(extra.get(i));
+        }
+        return sb.toString();
     }
 
     /**

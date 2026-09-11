@@ -88,9 +88,46 @@ public final class SqlSchemaConverter {
         if (sqls == null || sqls.isEmpty()) {
             return new ArrayList<ConversionResult>(0);
         }
-        List<ConversionResult> out = new ArrayList<ConversionResult>(sqls.size());
-        for (int i = 0; i < sqls.size(); i++) {
-            out.add(convert(sqls.get(i), source, target, options));
+        SqlSchemaConvertOptions opt = options == null ? SqlSchemaConvertOptions.defaults() : options;
+        if (!opt.parallelBatch() || sqls.size() < 4) {
+            List<ConversionResult> out = new ArrayList<ConversionResult>(sqls.size());
+            for (int i = 0; i < sqls.size(); i++) {
+                out.add(convert(sqls.get(i), source, target, opt));
+            }
+            return out;
+        }
+        int n = sqls.size();
+        ConversionResult[] slots = new ConversionResult[n];
+        int threads = Math.min(4, n);
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(threads);
+        try {
+            java.util.concurrent.Future<?>[] futures = new java.util.concurrent.Future<?>[n];
+            for (int i = 0; i < n; i++) {
+                final int idx = i;
+                final String sql = sqls.get(i);
+                futures[i] = pool.submit(new Runnable() {
+                    /**
+                     * {@inheritDoc}
+                     */
+                    @Override
+                    public void run() {
+                        slots[idx] = convert(sql, source, target, opt);
+                    }
+                });
+            }
+            for (int i = 0; i < n; i++) {
+                try {
+                    futures[i].get();
+                } catch (Exception e) {
+                    slots[i] = new ConversionResult(sqls.get(i), ConversionReport.empty());
+                }
+            }
+        } finally {
+            pool.shutdown();
+        }
+        List<ConversionResult> out = new ArrayList<ConversionResult>(n);
+        for (int i = 0; i < n; i++) {
+            out.add(slots[i]);
         }
         return out;
     }
@@ -129,19 +166,20 @@ public final class SqlSchemaConverter {
             return;
         }
         SqlDataTypeRegistry registry = SqlDataTypeRegistry.builtins();
+        String table = tableName(ddl);
         List<ColumnDefinition> cols = SqlColumnDefinitionParser.fromDdl(ddl, source);
         if (!cols.isEmpty()) {
             List<String> rewritten = ddl.columnDefinitions();
             rewritten.clear();
             for (int i = 0; i < cols.size(); i++) {
                 String next = ColumnDefinitionConverter.convert(
-                        cols.get(i), source, target, options, registry, report);
+                        cols.get(i), source, target, options, registry, report, table);
                 if (next != null && !next.isEmpty()) {
                     rewritten.add(next);
                 }
             }
         }
-        convertAlterColumn(ddl, source, target, options, registry, report);
+        convertAlterColumn(ddl, source, target, options, registry, report, table);
         if (options.stripDialectOptions() && !supportsMysqlTableOptions(target)) {
             if (ddl.engine() != null) {
                 report.warn(ConversionWarning.Severity.INFO, tableName(ddl),
@@ -163,22 +201,41 @@ public final class SqlSchemaConverter {
 
     private static void convertAlterColumn(SqlDdlStatement ddl, SqlDialect source, SqlDialect target,
                                            SqlSchemaConvertOptions options, SqlDataTypeRegistry registry,
-                                           ConversionReport.Builder report) {
+                                           ConversionReport.Builder report, String table) {
         if (ddl.type() != SqlStatementType.ALTER
                 || ddl.columnDefinition() == null || ddl.columns().isEmpty()) {
             return;
         }
         String action = ddl.alterAction() == null ? "" : ddl.alterAction().toUpperCase();
-        String colName = ddl.columns().get(ddl.columns().size() - 1).simpleName();
+        String newName = ddl.columns().get(ddl.columns().size() - 1).simpleName();
+        String oldName = ddl.columns().get(0).simpleName();
         ColumnDefinition parsed = SqlColumnDefinitionParser.parse(
-                colName + " " + ddl.columnDefinition().trim(), source);
+                newName + " " + ddl.columnDefinition().trim(), source);
         String converted = ColumnDefinitionConverter.convert(
-                parsed, source, target, options, registry, report);
-        ddl.setColumnDefinition(stripLeadingColumnName(converted, colName));
-        if (target != SqlDialect.MYSQL && (action.startsWith("CHANGE") || action.startsWith("MODIFY"))) {
-            report.warn(ConversionWarning.Severity.SEMANTIC_RISK, colName,
+                parsed, source, target, options, registry, report, table);
+        String typeOnly = stripLeadingColumnName(converted, newName);
+        ddl.setColumnDefinition(typeOnly);
+        if (usesAlterColumn(target) && (action.startsWith("CHANGE") || action.startsWith("MODIFY"))) {
+            if (action.startsWith("CHANGE") && !oldName.equalsIgnoreCase(newName)) {
+                report.extraSql("ALTER TABLE " + table + " RENAME COLUMN " + oldName + " TO " + newName);
+            }
+            ddl.setAlterAction("ALTER COLUMN " + newName + " TYPE");
+            int space = typeOnly.indexOf(' ');
+            if (space > 0) {
+                ddl.setColumnDefinition(typeOnly.substring(0, space));
+            }
+            report.warn(ConversionWarning.Severity.INFO, newName,
+                    "MySQL " + action + " 已改写为 ALTER COLUMN TYPE");
+        } else if (target != SqlDialect.MYSQL
+                && (action.startsWith("CHANGE") || action.startsWith("MODIFY"))) {
+            report.warn(ConversionWarning.Severity.SEMANTIC_RISK, newName,
                     "MySQL " + action + " 在 " + target + " 无同款语法，已转换类型但仍需手工改写成 ALTER COLUMN");
         }
+    }
+
+    private static boolean usesAlterColumn(SqlDialect dialect) {
+        return dialect == SqlDialect.POSTGRES || dialect == SqlDialect.ANSI
+                || dialect == SqlDialect.H2 || dialect == SqlDialect.PRESTO;
     }
 
     private static String stripLeadingColumnName(String converted, String colName) {

@@ -14,6 +14,7 @@ public final class SqlEntityModel {
     private final Class<?> type;
     private final String tableName;
     private final List<SqlEntityColumn> columns;
+    private final List<String> indexes;
 
     /**
      * @param type 实体类
@@ -21,12 +22,28 @@ public final class SqlEntityModel {
      * @param columns 列
      */
     public SqlEntityModel(Class<?> type, String tableName, List<SqlEntityColumn> columns) {
+        this(type, tableName, columns, Collections.<String>emptyList());
+    }
+
+    /**
+     * @param type 实体类
+     * @param tableName 表名
+     * @param columns 列
+     * @param indexes 索引（{@code name:col1,col2} 或 {@code col1,col2}）
+     */
+    public SqlEntityModel(Class<?> type, String tableName, List<SqlEntityColumn> columns,
+                          List<String> indexes) {
         this.type = type;
         this.tableName = tableName == null ? "" : tableName;
         if (columns == null || columns.isEmpty()) {
             this.columns = Collections.emptyList();
         } else {
             this.columns = Collections.unmodifiableList(new ArrayList<SqlEntityColumn>(columns));
+        }
+        if (indexes == null || indexes.isEmpty()) {
+            this.indexes = Collections.emptyList();
+        } else {
+            this.indexes = Collections.unmodifiableList(new ArrayList<String>(indexes));
         }
     }
 
@@ -55,12 +72,28 @@ public final class SqlEntityModel {
      * @return 主键列，没有则 null
      */
     public SqlEntityColumn idColumn() {
+        List<SqlEntityColumn> ids = idColumns();
+        return ids.isEmpty() ? null : ids.get(0);
+    }
+
+    /**
+     * @return 全部主键列
+     */
+    public List<SqlEntityColumn> idColumns() {
+        List<SqlEntityColumn> ids = new ArrayList<SqlEntityColumn>(2);
         for (int i = 0; i < columns.size(); i++) {
             if (columns.get(i).primaryKey()) {
-                return columns.get(i);
+                ids.add(columns.get(i));
             }
         }
-        return null;
+        return ids;
+    }
+
+    /**
+     * @return 索引定义
+     */
+    public List<String> indexes() {
+        return indexes;
     }
 
     /**

@@ -19,6 +19,9 @@ public final class SqlEntityColumn {
     private final boolean primaryKey;
     private final boolean autoIncrement;
     private final boolean unique;
+    private final String rawType;
+    private final String referencesTable;
+    private final String referencesColumn;
     private final Field field;
 
     /**
@@ -35,6 +38,27 @@ public final class SqlEntityColumn {
     public SqlEntityColumn(String columnName, CanonicalType canonical, Integer precision, Integer scale,
                            boolean nullable, boolean primaryKey, boolean autoIncrement, boolean unique,
                            Field field) {
+        this(columnName, canonical, precision, scale, nullable, primaryKey, autoIncrement, unique,
+                null, null, null, field);
+    }
+
+    /**
+     * @param columnName 列名
+     * @param canonical canonical
+     * @param precision 精度
+     * @param scale 标度
+     * @param nullable 可空
+     * @param primaryKey 主键
+     * @param autoIncrement 自增
+     * @param unique 唯一
+     * @param rawType 原始类型字面量
+     * @param referencesTable 引用表
+     * @param referencesColumn 引用列
+     * @param field 源字段
+     */
+    public SqlEntityColumn(String columnName, CanonicalType canonical, Integer precision, Integer scale,
+                           boolean nullable, boolean primaryKey, boolean autoIncrement, boolean unique,
+                           String rawType, String referencesTable, String referencesColumn, Field field) {
         this.columnName = columnName;
         this.canonical = canonical == null ? CanonicalType.VARCHAR : canonical;
         this.precision = precision;
@@ -43,6 +67,9 @@ public final class SqlEntityColumn {
         this.primaryKey = primaryKey;
         this.autoIncrement = autoIncrement;
         this.unique = unique;
+        this.rawType = rawType;
+        this.referencesTable = referencesTable;
+        this.referencesColumn = referencesColumn;
         this.field = field;
     }
 
@@ -107,5 +134,26 @@ public final class SqlEntityColumn {
      */
     public Field field() {
         return field;
+    }
+
+    /**
+     * @return 原始类型字面量，可空
+     */
+    public String rawType() {
+        return rawType;
+    }
+
+    /**
+     * @return 引用表，可空
+     */
+    public String referencesTable() {
+        return referencesTable;
+    }
+
+    /**
+     * @return 引用列，可空
+     */
+    public String referencesColumn() {
+        return referencesColumn;
     }
 }

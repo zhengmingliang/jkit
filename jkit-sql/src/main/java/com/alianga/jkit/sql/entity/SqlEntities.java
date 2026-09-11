@@ -84,14 +84,74 @@ public final class SqlEntities {
         StringBuilder sb = new StringBuilder();
         sb.append("CREATE TABLE ").append(model.tableName()).append(" (");
         List<SqlEntityColumn> cols = model.columns();
+        List<SqlEntityColumn> ids = model.idColumns();
+        boolean tablePk = ids.size() > 1;
         for (int i = 0; i < cols.size(); i++) {
             if (i > 0) {
                 sb.append(", ");
             }
-            sb.append(renderColumn(cols.get(i), d, registry, options, report));
+            sb.append(renderColumn(cols.get(i), d, registry, options, report, !tablePk));
+        }
+        if (tablePk) {
+            sb.append(", PRIMARY KEY (");
+            for (int i = 0; i < ids.size(); i++) {
+                if (i > 0) {
+                    sb.append(", ");
+                }
+                sb.append(ids.get(i).columnName());
+            }
+            sb.append(')');
+        }
+        for (int i = 0; i < cols.size(); i++) {
+            SqlEntityColumn c = cols.get(i);
+            if (c.referencesTable() != null) {
+                sb.append(", FOREIGN KEY (").append(c.columnName()).append(") REFERENCES ")
+                        .append(c.referencesTable()).append('(')
+                        .append(c.referencesColumn() == null ? "id" : c.referencesColumn())
+                        .append(')');
+            }
         }
         sb.append(')');
+        List<String> indexes = model.indexes();
+        for (int i = 0; i < indexes.size(); i++) {
+            sb.append("; ").append(indexSql(model.tableName(), indexes.get(i)));
+        }
         return sb.toString();
+    }
+
+    /**
+     * 批量 INSERT，多行 VALUES。
+     *
+     * @param entities 实体列表
+     * @param dialect 方言
+     * @return DML；空列表返回空串
+     */
+    public static String insertBatch(List<?> entities, SqlDialect dialect) {
+        if (entities == null || entities.isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < entities.size(); i++) {
+            if (i > 0) {
+                sb.append("; ");
+            }
+            sb.append(insert(entities.get(i), dialect));
+        }
+        return sb.toString();
+    }
+
+    private static String indexSql(String table, String spec) {
+        String name = table + "_idx";
+        String cols = spec;
+        int colon = spec.indexOf(':');
+        if (colon > 0) {
+            name = spec.substring(0, colon).trim();
+            cols = spec.substring(colon + 1).trim();
+        }
+        if (!cols.startsWith("(")) {
+            cols = "(" + cols + ")";
+        }
+        return "CREATE INDEX " + name + " ON " + table + " " + cols;
     }
 
     /**
@@ -282,10 +342,12 @@ public final class SqlEntities {
 
     private static String renderColumn(SqlEntityColumn col, SqlDialect dialect,
                                        SqlDataTypeRegistry registry, SqlSchemaConvertOptions options,
-                                       ConversionReport.Builder report) {
+                                       ConversionReport.Builder report, boolean inlinePk) {
         Integer p = col.precision();
         Integer s = col.scale();
-        String type = registry.toDialect(col.canonical(), dialect, p, s);
+        String type = col.rawType() != null && col.rawType().length() > 0
+                ? col.rawType()
+                : registry.toDialect(col.canonical(), dialect, p, s);
         if (col.autoIncrement()) {
             AutoIncrementStrategy.Result auto = AutoIncrementStrategy.apply(
                     new ColumnConstraint.AutoIncrement(
@@ -302,7 +364,7 @@ public final class SqlEntities {
             if (auto.clause() != null) {
                 sb.append(' ').append(auto.clause());
             }
-            if (col.primaryKey()) {
+            if (inlinePk && col.primaryKey()) {
                 sb.append(" PRIMARY KEY");
             }
             return sb.toString();
@@ -312,7 +374,7 @@ public final class SqlEntities {
         if (!col.nullable()) {
             sb.append(" NOT NULL");
         }
-        if (col.primaryKey()) {
+        if (inlinePk && col.primaryKey()) {
             sb.append(" PRIMARY KEY");
         } else if (col.unique()) {
             sb.append(" UNIQUE");
