@@ -23,6 +23,8 @@ public final class SqlLexer {
 
     private final SqlToken tokA = new SqlToken();
     private final SqlToken tokB = new SqlToken();
+    private final SqlToken tokLook = new SqlToken();
+    private final SqlToken tokPeekSave = new SqlToken();
     private SqlToken peekBuf;
     private boolean peeked;
 
@@ -167,6 +169,50 @@ public final class SqlLexer {
             peeked = true;
         }
         return peekBuf;
+    }
+
+    /**
+     * 预读第 {@code n} 个后续记号（0=当前 peek / 下一 {@link #next()}），不前进逻辑位置。
+     * 仅供解析器消歧；返回的记号在下次调用前有效。
+     *
+     * @param n 向前偏移（0 等价 {@link #peek()}）
+     * @return 记号
+     * @since 2.0.1
+     */
+    public SqlToken lookahead(int n) {
+        if (n <= 0) {
+            return peek();
+        }
+        int savedPos = pos;
+        int savedLine = line;
+        int savedLineStart = lineStart;
+        boolean savedPeeked = peeked;
+        int savedExec = executableDepth;
+        if (peeked) {
+            tokPeekSave.copyFrom(peekBuf);
+        }
+        try {
+            // LA(0)=peek：若尚未 peek，先扫过 LA(0)（写入 tokLook 以免污染 peek 缓冲）
+            if (!peeked) {
+                scanInto(tokLook);
+            }
+            for (int i = 0; i < n; i++) {
+                scanInto(tokLook);
+            }
+            return tokLook;
+        } finally {
+            pos = savedPos;
+            line = savedLine;
+            lineStart = savedLineStart;
+            executableDepth = savedExec;
+            peeked = savedPeeked;
+            if (savedPeeked) {
+                tokB.copyFrom(tokPeekSave);
+                peekBuf = tokB;
+            } else {
+                peekBuf = null;
+            }
+        }
     }
 
     private void scanInto(SqlToken token) {

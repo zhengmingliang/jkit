@@ -2936,10 +2936,33 @@ public final class SqlFormatter {
      */
     private void writeReturning(SqlExpr expr) {
         if (expr instanceof SqlListExpr) {
-            commaExprs(((SqlListExpr) expr).items());
+            List<SqlExpr> items = ((SqlListExpr) expr).items();
+            for (int i = 0; i < items.size(); i++) {
+                if (i > 0) {
+                    out.append(',');
+                    sp();
+                }
+                writeReturningItem(items.get(i));
+            }
         } else {
-            writeExpr(expr);
+            writeReturningItem(expr);
         }
+    }
+
+    private void writeReturningItem(SqlExpr expr) {
+        if (expr instanceof SqlFunctionExpr) {
+            SqlFunctionExpr fn = (SqlFunctionExpr) expr;
+            if (fn.name() != null && "AS".equalsIgnoreCase(fn.name().simpleName())
+                    && fn.arguments().size() == 2) {
+                writeExpr(fn.arguments().get(0));
+                sp();
+                kw("AS");
+                sp();
+                writeExpr(fn.arguments().get(1));
+                return;
+            }
+        }
+        writeExpr(expr);
     }
 
     private void writeOrder(List<SqlOrderByItem> items) {

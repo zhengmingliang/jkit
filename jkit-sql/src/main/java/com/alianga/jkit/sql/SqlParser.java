@@ -156,19 +156,28 @@ public final class SqlParser {
                     list.add(parseStatement());
                     afterSeparator = false;
                 } catch (SqlParseException ex) {
-                    // 分号后的尾部垃圾且其后再无语句：返回已解析部分（select …; WHATEVER!!）
+                    // 分号后垃圾：可跨多段跳过直至下一条真实语句或 EOF（软停）
                     if (!list.isEmpty() && afterSeparator) {
                         pendingComments = null;
-                        skipToStmtEnd();
-                        while (isStmtSeparator() || isSoftStmtSeparator()) {
+                        boolean advanced = false;
+                        while (!is(SqlTokenType.EOF) && !lookingAtBatchStmtStart()) {
                             if (isStmtSeparator()) {
                                 consumeStmtSeparator();
+                                advanced = true;
+                            } else if (isSoftStmtSeparator()) {
+                                next();
+                                advanced = true;
                             } else {
                                 next();
+                                advanced = true;
                             }
                         }
                         if (is(SqlTokenType.EOF)) {
-                            break;
+                            break; // 尾部垃圾软停
+                        }
+                        if (lookingAtBatchStmtStart() && advanced) {
+                            afterSeparator = true;
+                            continue;
                         }
                     }
                     throw ex;
@@ -197,6 +206,18 @@ public final class SqlParser {
             return true;
         }
         return false;
+    }
+
+    private boolean lookingAtBatchStmtStart() {
+        if (token == null || token.type() == null) {
+            return false;
+        }
+        SqlTokenType t = token.type();
+        return t == SqlTokenType.SELECT || t == SqlTokenType.INSERT || t == SqlTokenType.UPDATE
+                || t == SqlTokenType.DELETE || t == SqlTokenType.MERGE || t == SqlTokenType.WITH
+                || t == SqlTokenType.CREATE || t == SqlTokenType.DROP || t == SqlTokenType.ALTER
+                || t == SqlTokenType.REPLACE || t == SqlTokenType.CALL || t == SqlTokenType.GRANT
+                || t == SqlTokenType.TRUNCATE || t == SqlTokenType.BEGIN || t == SqlTokenType.DECLARE;
     }
 
     private void skipToStmtEnd() {
@@ -2006,6 +2027,9 @@ public final class SqlParser {
             case CALL:
             case GRANT:
             case REVOKE:
+            case VALUES:
+            case VALUE:
+            case DEFAULT:
                 return true;
             default:
                 return false;

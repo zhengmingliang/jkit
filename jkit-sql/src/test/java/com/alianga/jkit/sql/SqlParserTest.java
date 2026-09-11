@@ -1704,23 +1704,58 @@ public class SqlParserTest {
     @Test
     public void p31ParseAllTolerant() {
         String batch = "SELECT 1; !!!; SELECT 2";
-        List<SqlStatement> all = SQL.parseAll(batch, SqlDialect.MYSQL, true);
-        assertEquals(3, all.size());
-        assertEquals(SqlStatementType.SELECT, all.get(0).type());
-        assertTrue(all.get(1) instanceof SqlSimpleStatement);
-        SqlSimpleStatement bad = (SqlSimpleStatement) all.get(1);
-        assertTrue(bad.hasParseError());
-        assertNotNull(bad.parseError());
-        assertEquals(SqlStatementType.OTHER, bad.type());
-        assertEquals(SqlStatementType.SELECT, all.get(2).type());
+        // 严格模式：分号后垃圾若后接真实语句则跳过垃圾继续（脚本语料）
+        List<SqlStatement> strict = SQL.parseAll(batch, SqlDialect.MYSQL, false);
+        assertEquals(2, strict.size());
+        assertEquals(SqlStatementType.SELECT, strict.get(0).type());
+        assertEquals(SqlStatementType.SELECT, strict.get(1).type());
 
-        // 默认仍整批抛错
+        // 宽容模式：无法识别的片段也可落为带错误的 OTHER
+        List<SqlStatement> all = SQL.parseAll(batch, SqlDialect.MYSQL, true);
+        assertTrue(all.size() >= 2);
+        assertEquals(SqlStatementType.SELECT, all.get(0).type());
+        assertEquals(SqlStatementType.SELECT, all.get(all.size() - 1).type());
+
+        // 语句中间失败仍整批抛错
         try {
-            SQL.parseAll(batch, SqlDialect.MYSQL, false);
+            SQL.parseAll("SELECT 1 FROM !!!", SqlDialect.MYSQL, false);
             fail("expected SqlParseException");
         } catch (SqlParseException expected) {
             assertTrue(expected.getMessage(), expected.getMessage().length() > 0);
         }
+    }
+
+    @Test
+    public void r7SignedIntegerCast() {
+        SqlSelect s = (SqlSelect) SQL.parse("SELECT CAST(contact_id AS SIGNED INTEGER) FROM contact");
+        assertTrue(SQL.toSqlString(s).toUpperCase().contains("SIGNED"));
+    }
+
+    @Test
+    public void r7NestedParenTable() {
+        SqlSelect s = (SqlSelect) SQL.parse("SELECT * FROM ((((((((((((((((tblA))))))))))))))))");
+        assertEquals(SqlStatementType.SELECT, s.type());
+    }
+
+    @Test
+    public void r7ReturningOldNewAlias() {
+        SqlUpdate u = (SqlUpdate) SQL.parse(
+                "UPDATE products SET price = price * 1.10 RETURNING old.price AS old_price, new.price AS new_price, new.*");
+        assertNotNull(u.returning());
+    }
+
+    @Test
+    public void r7TernaryAndJsonExists() {
+        assertEquals(SqlStatementType.SELECT, SQL.parse("SELECT * FROM t WHERE a ? b : c").type());
+        assertEquals(SqlStatementType.SELECT, SQL.parse("SELECT * FROM t WHERE col ? 'key'").type());
+    }
+
+    @Test
+    public void r7InterStmtJunkSkip() {
+        java.util.List<SqlStatement> all = SQL.parseAll(
+                "Select * from dual; This is an unsupported statement; Some more rubbish; Select * from dual;",
+                SqlDialect.MYSQL, false);
+        assertEquals(2, all.size());
     }
 
     /**

@@ -178,6 +178,83 @@ final class SqlExprParser {
         return left;
     }
 
+    private boolean lookingAtJsonExistsOp() {
+        if (!p.is(SqlTokenType.BIND)) {
+            return false;
+        }
+        if (lookingAtTernary()) {
+            return false;
+        }
+        SqlToken after = p.lexer.peek();
+        if (after == null) {
+            return false;
+        }
+        SqlTokenType t = after.type();
+        if (t == SqlTokenType.COMMA || t == SqlTokenType.RPAREN || t == SqlTokenType.EOF
+                || t == SqlTokenType.SEMICOLON || t == SqlTokenType.AND || t == SqlTokenType.OR
+                || t == SqlTokenType.ORDER || t == SqlTokenType.GROUP || t == SqlTokenType.LIMIT
+                || t == SqlTokenType.UNION || t == SqlTokenType.HAVING) {
+            return false;
+        }
+        // ?& / ?|
+        if (t == SqlTokenType.BIT_AND || t == SqlTokenType.BIT_OR) {
+            return true;
+        }
+        // col ? :name / col ? $1 类绑定键
+        if (t == SqlTokenType.NAMED_BIND || t == SqlTokenType.BIND || t == SqlTokenType.COLON) {
+            return true;
+        }
+        // col ? 'key' / col ? ident / col ? (...)
+        return t == SqlTokenType.STRING || t == SqlTokenType.IDENT || t == SqlTokenType.LPAREN
+                || (after.type() != null && after.type().keyword());
+    }
+
+    /** {@code a ? b : c}：? 后可解析中段且深度 0 处有冒号（非 jsonb ? / 非 ?|）。 */
+    private boolean lookingAtTernary() {
+        if (!p.is(SqlTokenType.BIND)) {
+            return false;
+        }
+        SqlToken after = p.lexer.peek();
+        if (after == null) {
+            return false;
+        }
+        SqlTokenType t0 = after.type();
+        if (t0 == SqlTokenType.BIT_AND || t0 == SqlTokenType.BIT_OR
+                || t0 == SqlTokenType.COMMA || t0 == SqlTokenType.RPAREN
+                || t0 == SqlTokenType.EOF || t0 == SqlTokenType.SEMICOLON
+                || t0 == SqlTokenType.NAMED_BIND || t0 == SqlTokenType.COLON) {
+            return false;
+        }
+        int depth = 0;
+        for (int i = 0; i < 64; i++) {
+            SqlToken tok = p.lexer.lookahead(i);
+            if (tok == null || tok.type() == SqlTokenType.EOF) {
+                return false;
+            }
+            SqlTokenType t = tok.type();
+            if (t == SqlTokenType.LPAREN || t == SqlTokenType.LBRACKET) {
+                depth++;
+                continue;
+            }
+            if (t == SqlTokenType.RPAREN || t == SqlTokenType.RBRACKET) {
+                depth--;
+                continue;
+            }
+            if (depth != 0) {
+                continue;
+            }
+            if (t == SqlTokenType.COLON) {
+                return true;
+            }
+            if (t == SqlTokenType.COMMA || t == SqlTokenType.AND || t == SqlTokenType.OR
+                    || t == SqlTokenType.SEMICOLON || t == SqlTokenType.FROM
+                    || t == SqlTokenType.WHERE || t == SqlTokenType.UNION) {
+                return false;
+            }
+        }
+        return false;
+    }
+
     private static boolean lookingAtStmtKeyword(SqlToken tok) {
         if (tok == null || tok.type() == null) {
             return false;
@@ -223,31 +300,45 @@ final class SqlExprParser {
         return cast;
     }
 
+    private SqlExpr parseBitOrScalarQuery() {
+        if (p.isQueryStart()) {
+            return SqlQueryExpr.of(p.parseStatement());
+        }
+        return parseBit();
+    }
+
     private SqlExpr parseComparison() {
         SqlExpr left = parseBit();
         while (true) {
             skipFloatingHints();
             if (p.is(SqlTokenType.EQ) || p.is(SqlTokenType.ASSIGN)) {
                 p.next();
-                left = SqlBinaryExpr.of(left, SqlBinaryOp.EQ, parseBit());
+                p.match(SqlTokenType.STAR); // 旧式 a =* b
+                left = SqlBinaryExpr.of(left, SqlBinaryOp.EQ, parseBitOrScalarQuery());
+            } else if (p.is(SqlTokenType.STAR) && p.lexer.peek() != null
+                    && p.lexer.peek().type() == SqlTokenType.EQ) {
+                // 旧式外连接：a *= b
+                p.next();
+                p.next();
+                left = SqlBinaryExpr.of(left, SqlBinaryOp.EQ, parseBitOrScalarQuery());
             } else if (p.is(SqlTokenType.NE)) {
                 p.next();
-                left = SqlBinaryExpr.of(left, SqlBinaryOp.NE, parseBit());
+                left = SqlBinaryExpr.of(left, SqlBinaryOp.NE, parseBitOrScalarQuery());
             } else if (p.is(SqlTokenType.LT)) {
                 p.next();
-                left = SqlBinaryExpr.of(left, SqlBinaryOp.LT, parseBit());
+                left = SqlBinaryExpr.of(left, SqlBinaryOp.LT, parseBitOrScalarQuery());
             } else if (p.is(SqlTokenType.GT)) {
                 p.next();
-                left = SqlBinaryExpr.of(left, SqlBinaryOp.GT, parseBit());
+                left = SqlBinaryExpr.of(left, SqlBinaryOp.GT, parseBitOrScalarQuery());
             } else if (p.is(SqlTokenType.LE)) {
                 p.next();
-                left = SqlBinaryExpr.of(left, SqlBinaryOp.LE, parseBit());
+                left = SqlBinaryExpr.of(left, SqlBinaryOp.LE, parseBitOrScalarQuery());
             } else if (p.is(SqlTokenType.GE)) {
                 p.next();
-                left = SqlBinaryExpr.of(left, SqlBinaryOp.GE, parseBit());
+                left = SqlBinaryExpr.of(left, SqlBinaryOp.GE, parseBitOrScalarQuery());
             } else if (p.is(SqlTokenType.NULL_SAFE_EQ)) {
                 p.next();
-                left = SqlBinaryExpr.of(left, SqlBinaryOp.NULL_SAFE_EQ, parseBit());
+                left = SqlBinaryExpr.of(left, SqlBinaryOp.NULL_SAFE_EQ, parseBitOrScalarQuery());
             } else if (p.is(SqlTokenType.AT_OP)) {
                 String opText = p.token.text();
                 p.next();
@@ -268,12 +359,35 @@ final class SqlExprParser {
                 } else {
                     left = SqlBinaryExpr.of(left, not ? SqlBinaryOp.IS_NOT : SqlBinaryOp.IS, parseBit());
                 }
+            } else if (p.is(SqlTokenType.BIND) && lookingAtJsonExistsOp()) {
+                // PG jsonb：col ? 'key' / col ?| array / col ?& array（? 与绑定同形）
+                String op = "?";
+                p.next();
+                if (p.is(SqlTokenType.BIT_OR) && p.token.length() == 1) {
+                    op = "?|";
+                    p.next();
+                } else if (p.is(SqlTokenType.BIT_AND) && p.token.length() == 1) {
+                    op = "?&";
+                    p.next();
+                }
+                SqlFunctionExpr fn = new SqlFunctionExpr();
+                fn.setName(SqlIdentifier.of(op));
+                fn.addArgument(left);
+                fn.addArgument(parseBit());
+                left = fn;
             } else if (p.is(SqlTokenType.LIKE) || p.is(SqlTokenType.ILIKE)
                     || p.is(SqlTokenType.REGEXP) || p.is(SqlTokenType.RLIKE)) {
                 SqlBinaryOp op = p.is(SqlTokenType.ILIKE) ? SqlBinaryOp.ILIKE
                         : (p.is(SqlTokenType.LIKE) ? SqlBinaryOp.LIKE : SqlBinaryOp.REGEXP);
                 p.next();
                 left = SqlBinaryExpr.of(left, op, parseBit());
+                if (p.match(SqlTokenType.ESCAPE)) {
+                    left = SqlBinaryExpr.of(left, SqlBinaryOp.ESCAPE, parseBit());
+                }
+            } else if (p.isIdent("SIMILAR")) {
+                p.next();
+                p.expect(SqlTokenType.TO);
+                left = SqlBinaryExpr.of(left, SqlBinaryOp.LIKE, parseBit());
                 if (p.match(SqlTokenType.ESCAPE)) {
                     left = SqlBinaryExpr.of(left, SqlBinaryOp.ESCAPE, parseBit());
                 }
@@ -318,6 +432,14 @@ final class SqlExprParser {
                     p.next();
                     p.next();
                     left = SqlBinaryExpr.of(left, SqlBinaryOp.NOT_ILIKE, parseBit());
+                    if (p.match(SqlTokenType.ESCAPE)) {
+                        left = SqlBinaryExpr.of(left, SqlBinaryOp.ESCAPE, parseBit());
+                    }
+                } else if (peeked.textEqualsIgnoreCase("SIMILAR")) {
+                    p.next();
+                    p.next();
+                    p.expect(SqlTokenType.TO);
+                    left = SqlBinaryExpr.of(left, SqlBinaryOp.NOT_LIKE, parseBit());
                     if (p.match(SqlTokenType.ESCAPE)) {
                         left = SqlBinaryExpr.of(left, SqlBinaryOp.ESCAPE, parseBit());
                     }
@@ -377,7 +499,17 @@ final class SqlExprParser {
         }
         while (p.is(SqlTokenType.UNSIGNED) || p.is(SqlTokenType.ZEROFILL) || p.is(SqlTokenType.VARYING)
                 || p.is(SqlTokenType.PRECISION) || p.is(SqlTokenType.ZONE) || p.is(SqlTokenType.WITHOUT)
-                || p.isIdent("TIME")) {
+                || p.isIdent("TIME") || p.isIdent("SIGNED")) {
+            sb.append(' ').append(p.token.text());
+            p.next();
+        }
+        // MySQL：SIGNED INTEGER / UNSIGNED INTEGER / SIGNED INT
+        String typeHead = sb.toString();
+        if ((SqlParser.equalsIgnoreCase(typeHead, "SIGNED") || SqlParser.equalsIgnoreCase(typeHead, "UNSIGNED")
+                || endsWithWord(typeHead, "SIGNED") || endsWithWord(typeHead, "UNSIGNED"))
+                && (p.isIdent("INTEGER") || p.isIdent("INT")
+                || (p.token != null && p.token.text() != null
+                && ("INTEGER".equalsIgnoreCase(p.token.text()) || "INT".equalsIgnoreCase(p.token.text()))))) {
             sb.append(' ').append(p.token.text());
             p.next();
         }
@@ -398,6 +530,15 @@ final class SqlExprParser {
             p.next();
         }
         return sb.toString();
+    }
+
+    private static boolean endsWithWord(String s, String word) {
+        if (s == null || word == null) {
+            return false;
+        }
+        String u = s.toUpperCase();
+        String w = word.toUpperCase();
+        return u.equals(w) || u.endsWith(" " + w);
     }
 
     private String consumeIntervalUnitRaw() {
@@ -498,6 +639,8 @@ final class SqlExprParser {
         fn.setName(name);
         if (p.match(SqlTokenType.DISTINCT) || p.match(SqlTokenType.UNIQUE)) {
             fn.setDistinct(true);
+        } else {
+            p.match(SqlTokenType.ALL); // count(ALL x)
         }
         if (!p.is(SqlTokenType.RPAREN) && !p.is(SqlTokenType.ORDER)) {
             do {
@@ -527,6 +670,13 @@ final class SqlExprParser {
             } else {
                 fn.addArgument(parsePrimary());
             }
+        }
+        // last_value(x IGNORE NULLS) / RESPECT NULLS
+        if ((p.is(SqlTokenType.IGNORE) || p.isIdent("RESPECT"))
+                && p.lexer.peek() != null && p.lexer.peek().textEqualsIgnoreCase("NULLS")) {
+            fn.setAggOption(p.token.text().toUpperCase() + " NULLS");
+            p.next();
+            p.next();
         }
         p.expect(SqlTokenType.RPAREN);
         // ClickHouse 参数化聚合：windowFunnel(n)(ts, cond…) / quantile(0.9)(x)
@@ -581,6 +731,13 @@ final class SqlExprParser {
             p.selectParser.parseOrderBy(fn.orderBy());
             p.expect(SqlTokenType.RPAREN);
             fn.setWithinGroup(true);
+        }
+        // lag(x) IGNORE NULLS OVER (...)
+        if (fn.aggOption() == null && (p.is(SqlTokenType.IGNORE) || p.isIdent("RESPECT"))
+                && p.lexer.peek() != null && p.lexer.peek().textEqualsIgnoreCase("NULLS")) {
+            fn.setAggOption(p.token.text().toUpperCase() + " NULLS");
+            p.next();
+            p.next();
         }
         if (p.match(SqlTokenType.OVER)) {
             fn.setOver(parseOver());
@@ -707,22 +864,17 @@ final class SqlExprParser {
             p.next();
             left = SqlBinaryExpr.of(left, SqlBinaryOp.OR, parseXor());
         }
-        // 三元：a ? b : c（? 与 JDBC 绑定同形，仅当后续有 : 时成立）
-        if (p.is(SqlTokenType.BIND)) {
-            SqlToken after = p.lexer.peek();
-            // 粗判：? 后不是运算符收尾位置时尝试三元；失败代价由 expect COLON 体现
-            if (after != null && after.type() != SqlTokenType.COMMA && after.type() != SqlTokenType.RPAREN
-                    && after.type() != SqlTokenType.EOF && after.type() != SqlTokenType.SEMICOLON) {
-                p.next(); // ?
-                SqlExpr mid = parseOr();
-                p.expect(SqlTokenType.COLON);
-                SqlFunctionExpr tern = new SqlFunctionExpr();
-                tern.setName(SqlIdentifier.of("IF"));
-                tern.addArgument(left);
-                tern.addArgument(mid);
-                tern.addArgument(parseOr());
-                return tern;
-            }
+        // 三元 a ? b : c（与 jsonb ? / JDBC ? 消歧见 lookingAtTernary）
+        if (lookingAtTernary()) {
+            p.next();
+            SqlExpr mid = parseOr();
+            p.expect(SqlTokenType.COLON);
+            SqlFunctionExpr tern = new SqlFunctionExpr();
+            tern.setName(SqlIdentifier.of("IF"));
+            tern.addArgument(left);
+            tern.addArgument(mid);
+            tern.addArgument(parseOr());
+            return tern;
         }
         return left;
     }
@@ -942,7 +1094,12 @@ final class SqlExprParser {
         fn.setArrayConstructor(true);
         if (!p.is(SqlTokenType.RBRACKET)) {
             do {
-                fn.arguments().add(parseExpr());
+                if (p.is(SqlTokenType.LBRACKET)) {
+                    // ARRAY[[1,2],[3,4]] 嵌套数组字面量
+                    fn.arguments().add(parseArrayConstructor());
+                } else {
+                    fn.arguments().add(parseExpr());
+                }
             } while (p.match(SqlTokenType.COMMA));
         }
         p.expect(SqlTokenType.RBRACKET);

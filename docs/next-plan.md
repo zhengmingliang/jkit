@@ -364,14 +364,14 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 
 ## 10. 竞品语料覆盖率三轮提升 + 方言扩展交接（2026-09-12，agent）
 
-### 10.1 现状快照（第四轮覆盖后）
+### 10.1 现状快照（R7 覆盖后）
 
-- 模块测试 **890 全绿**；保真回归 `SqlRoundTripFidelityTest` 118 条；379 语料 100%；保真批量 0 mismatch。
+- 模块测试 **890+ 全绿**；保真回归 `SqlRoundTripFidelityTest`；379 语料 100%；保真批量 0 mismatch。
 - 竞品语料（tools-test `CompetitorSuiteCorpusTest`，三方各用方言回退链、2s 超时护栏）：
-  - druid-bvt-inline（6483）：**jkit 93.2%（已超 Druid 92.3%）** / druid 92.3% / jsql 68.1%
-  - jsqlparser-inline（3078）：**jkit 84.2%（第一）** / druid 71.1% / jsql 70.1%（目标 ≥90%，仍差约 6pp）
-  - jsqlparser-files（460）：**jkit 78.5%** / druid 81.5% / jsql 74.8%（目标 ≥90%，仍差约 11pp）
-  - jkitGaps 合计 956 → **595**（312+231+52；R5 669 → R6 595）
+  - druid-bvt-inline（6483）：**jkit 94.5%（已超 Druid 92.3%）** / druid 92.3% / jsql 68.1%
+  - jsqlparser-inline（3078）：**jkit 85.4%（第一）** / druid 71.1% / jsql 70.1%（目标 ≥90%，仍差约 4.6pp / ~143 条）
+  - jsqlparser-files（460）：**jkit 78.9%** / druid 81.5% / jsql 74.8%（目标 ≥90%，仍差约 11pp / ~51 条）
+  - jkitGaps 合计 956 → **479**（239+190+50；R6 595 → R7 479）
   - jkit 全程 0 超时；druid 1.2.23 仍有 2 条 PG `ANALYZE` 死循环（jstack 实锤，勿追）
 - 方言：一等枚举 6+1 → 11（新增 `DB2`/`SQLITE`/`HIVE`/`CLICKHOUSE`/`PRESTO`），行为全部走
   `SqlDialectSpec` 能力方法，无散落 `== SqlDialect.X`；`fromName` 国产/主流别名已全
@@ -389,6 +389,10 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
   表达式层暂存、语句层挂到 SELECT）；Hive `INSERT OVERWRITE [TABLE] t [PARTITION(…)]`；
   `CONNECT BY NOCYCLE`；`GROUP BY … WITH CUBE`；Teradata/Snowflake `QUALIFY`（已入别名停用词）；
   MySQL 8 函数索引 `ADD KEY idx ((expr))`；XML 系 7 函数原文；Spark `OVER (DISTRIBUTE BY … SORT BY …)`。
+- **R7**：分号后多段垃圾跳过；`SIGNED INTEGER`；`((((t))))` 嵌套括号表；`RETURNING`/`OUTPUT` 别名与 `old.*`/`new.*`/`DELETED.*`；
+  `DELETE … OUTPUT … FROM`；`FOR XML PATH/AUTO…`/`FOR BROWSE`；三元 `a?b:c` 与 jsonb `?`/`?:bind` 消歧；
+  `ARRAY[[…]]`；`IGNORE/RESPECT NULLS`；`LIMIT n BY`；`SIMILAR TO`；无括号标量子查询；旧式 `*=` 外连接；
+  `lookahead` peek 污染修复。gaps 595→479；**94.5 / 85.4 / 78.9**。
 - **R6**：`|`+语句软分隔、`AT TIME ZONE`、`?1`、`FROM (WITH…)`、`catalog..t`、
   `FOR KEY SHARE`、三元运算、下标/成员链等。gaps 669→595；jsql-inline 84.2%。
 - **R5**：别名停用词补语句关键字；`|`/`/` 软分隔；分号后尾垃圾软停；`SET (a,b)=`/`:=`；

@@ -1,9 +1,11 @@
 package com.alianga.jkit.sql;
 
+import com.alianga.jkit.sql.ast.SqlAllColumns;
 import com.alianga.jkit.sql.ast.SqlBinaryExpr;
 import com.alianga.jkit.sql.ast.SqlBinaryOp;
 import com.alianga.jkit.sql.ast.SqlDelete;
 import com.alianga.jkit.sql.ast.SqlExpr;
+import com.alianga.jkit.sql.ast.SqlFunctionExpr;
 import com.alianga.jkit.sql.ast.SqlIdentifier;
 import com.alianga.jkit.sql.ast.SqlInsert;
 import com.alianga.jkit.sql.ast.SqlInsertBranch;
@@ -121,6 +123,10 @@ final class SqlDmlParser {
             }
         }
         delete.setOutputInto(parseOutputClause(delete.output()));
+        // SQL Server：DELETE t OUTPUT … FROM src …
+        if (delete.from() == null && p.match(SqlTokenType.FROM)) {
+            delete.setFrom(p.selectParser.parseJoinedTable());
+        }
         if (p.match(SqlTokenType.WHERE)) {
             delete.setWhere(p.exprParser.parseExpr());
         }
@@ -364,7 +370,7 @@ final class SqlDmlParser {
             return null;
         }
         do {
-            target.add(p.exprParser.parseExpr());
+            target.add(parseReturningItem());
         } while (p.match(SqlTokenType.COMMA));
         if (!p.match(SqlTokenType.INTO)) {
             return null;
@@ -394,7 +400,7 @@ final class SqlDmlParser {
      *（format 时不加外层括号）。
      */
     private SqlExpr parseReturningExpr() {
-        SqlExpr first = p.exprParser.parseExpr();
+        SqlExpr first = parseReturningItem();
         SqlExpr result;
         if (!p.match(SqlTokenType.COMMA)) {
             result = first;
@@ -402,7 +408,7 @@ final class SqlDmlParser {
             SqlListExpr list = new SqlListExpr();
             list.add(first);
             do {
-                list.add(p.exprParser.parseExpr());
+                list.add(parseReturningItem());
             } while (p.match(SqlTokenType.COMMA));
             result = list;
         }
@@ -413,6 +419,25 @@ final class SqlDmlParser {
             } while (p.match(SqlTokenType.COMMA));
         }
         return result;
+    }
+
+    /** RETURNING / OUTPUT 项：{@code expr [AS alias]} / {@code old.*} / {@code new.*} / {@code DELETED.*}。 */
+    private SqlExpr parseReturningItem() {
+        SqlExpr expr = p.exprParser.parseExpr();
+        if (expr instanceof SqlIdentifier && p.match(SqlTokenType.DOT) && p.match(SqlTokenType.STAR)) {
+            SqlAllColumns all = new SqlAllColumns();
+            all.setOwner((SqlIdentifier) expr);
+            expr = all;
+        }
+        String alias = p.parseAlias();
+        if (alias != null) {
+            SqlFunctionExpr as = new SqlFunctionExpr();
+            as.setName(SqlIdentifier.of("AS"));
+            as.addArgument(expr);
+            as.addArgument(SqlIdentifier.of(alias));
+            return as;
+        }
+        return expr;
     }
 
     SqlUpdate parseUpdate() {

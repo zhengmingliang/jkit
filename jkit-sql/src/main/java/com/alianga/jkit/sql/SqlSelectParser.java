@@ -200,6 +200,19 @@ final class SqlSelectParser {
     private void parseLimitFetch(SqlSelect select) {
         if (p.is(SqlTokenType.LIMIT)) {
             select.setLimit(parseLimit());
+            // ClickHouse：LIMIT n BY col[, col2]
+            if (p.is(SqlTokenType.BY) || p.isIdent("BY")) {
+                StringBuilder sb = new StringBuilder("BY");
+                p.next();
+                do {
+                    sb.append(' ');
+                    int start = p.token.start();
+                    p.exprParser.parseExpr();
+                    sb.append(p.lexer.rawSlice(start, p.token.start()).trim());
+                } while (p.match(SqlTokenType.COMMA));
+                String prev = select.queryOption();
+                select.setQueryOption(prev == null ? sb.toString() : prev + " " + sb);
+            }
         }
         if (p.match(SqlTokenType.OFFSET)) {
             SqlLimit limit = select.limit();
@@ -473,9 +486,13 @@ final class SqlSelectParser {
                 // 时态表查询更常见于表级；此处兜底吞掉残留 FOR SYSTEM_TIME …
                 select.setForUpdateTail("SYSTEM_TIME " + consumeSystemTimeBody());
             } else if (p.isIdent("XML")) {
-                // SQL Server：FOR XML PATH('') [, TYPE] …
+                // SQL Server：FOR XML PATH('') [, TYPE] [, ROOT('x')] …
                 p.next();
-                select.setForUpdateTail("XML " + p.consumeRawUntilClause());
+                select.setForUpdateTail("XML " + consumeForXmlTail());
+            } else if (p.isIdent("BROWSE")) {
+                // SQL Server：FOR BROWSE
+                p.next();
+                select.setForUpdateTail("BROWSE");
             } else if (p.isIdent("NO") && p.lexer.peek() != null
                     && p.lexer.peek().textEqualsIgnoreCase("KEY")) {
                 // PG：FOR NO KEY UPDATE
@@ -778,6 +795,35 @@ final class SqlSelectParser {
     /**
      * ODPS/MaxCompute：{@code FORCE PARTITION 'pt'} / {@code FORCE ALL PARTITIONS}（SELECT 列表后）。
      */
+    /** FOR XML 尾部：允许逗号与括号（PATH('') / ROOT('x')）。 */
+    private String consumeForXmlTail() {
+        StringBuilder sb = new StringBuilder();
+        while (!p.is(SqlTokenType.EOF) && !p.is(SqlTokenType.SEMICOLON)
+                && !p.is(SqlTokenType.UNION) && !p.is(SqlTokenType.INTERSECT)
+                && !p.is(SqlTokenType.EXCEPT) && !p.is(SqlTokenType.MINUS)
+                && !p.is(SqlTokenType.GO)) {
+            if (p.is(SqlTokenType.RPAREN) && sb.length() == 0) {
+                break;
+            }
+            // 语句级子句停止（非 XML 选项）
+            if (sb.length() > 0 && (p.is(SqlTokenType.ORDER) || p.is(SqlTokenType.LIMIT)
+                    || p.is(SqlTokenType.OFFSET) || p.is(SqlTokenType.FETCH)
+                    || p.is(SqlTokenType.FOR) || p.token.textEqualsIgnoreCase("OPTION"))) {
+                break;
+            }
+            if (sb.length() > 0) {
+                sb.append(' ');
+            }
+            if (p.is(SqlTokenType.LPAREN)) {
+                sb.append('(').append(p.skipBalancedParensContent()).append(')');
+                continue;
+            }
+            sb.append(p.token.text());
+            p.next();
+        }
+        return sb.toString();
+    }
+
     private void parseForcePartition(SqlSelect select) {
         if (!p.is(SqlTokenType.FORCE)) {
             return;
@@ -893,6 +939,37 @@ final class SqlSelectParser {
         }
     }
 
+    /**
+     * 当前在 {@code (} 上时，窥视嵌套括号内首个非括号记号是否为查询起头。
+     */
+    private boolean lookingAtNestedParenQuery() {
+        if (!p.is(SqlTokenType.LPAREN)) {
+            return false;
+        }
+        // p.token 已是 '('；lexer.lookahead(i) 相对当前记号之后
+        int depth = 1;
+        for (int i = 0; i < 64; i++) {
+            SqlToken tok = p.lexer.lookahead(i);
+            if (tok == null || tok.type() == SqlTokenType.EOF) {
+                return false;
+            }
+            if (tok.type() == SqlTokenType.LPAREN) {
+                depth++;
+                continue;
+            }
+            if (tok.type() == SqlTokenType.RPAREN) {
+                depth--;
+                if (depth <= 0) {
+                    return false;
+                }
+                continue;
+            }
+            return tok.type() == SqlTokenType.SELECT || tok.type() == SqlTokenType.WITH
+                    || tok.type() == SqlTokenType.VALUES;
+        }
+        return false;
+    }
+
     SqlTableSource parseTableSource() {
         // JDBC/ODBC 转义：{oj <join>} 解包为普通 JOIN 表源
         if (p.is(SqlTokenType.LBRACE) && p.lexer.peek() != null
@@ -922,17 +999,36 @@ final class SqlSelectParser {
             SqlTableSource source;
             if (p.is(SqlTokenType.VALUES)) {
                 source = parseValuesTable();
-            } else if (p.isQueryStart() || p.is(SqlTokenType.WITH) || p.is(SqlTokenType.LPAREN)) {
+            } else if (p.isQueryStart() || p.is(SqlTokenType.WITH)
+                    || (p.is(SqlTokenType.LPAREN) && lookingAtNestedParenQuery())) {
                 // (SELECT…) / ((SELECT…) UNION …) / (WITH … SELECT…)
                 SqlSubqueryTable sub = new SqlSubqueryTable();
                 sub.setQuery(parseSelect());
                 sub.setLateral(lateral);
                 source = sub;
             } else {
-                if (lateral) {
+                // ((((t)))) 多层括号表：先剥掉纯括号层再解析表/JOIN
+                if (lateral && !p.is(SqlTokenType.LPAREN) && !p.isQueryStart()) {
                     throw p.error("LATERAL requires a subquery or table function");
                 }
-                source = parseJoinedTable();
+                int wraps = 0;
+                while (p.is(SqlTokenType.LPAREN) && !lookingAtNestedParenQuery()
+                        && !p.isQueryStart() && !p.is(SqlTokenType.WITH) && !p.is(SqlTokenType.VALUES)) {
+                    p.next();
+                    wraps++;
+                }
+                if (p.isQueryStart() || p.is(SqlTokenType.WITH)
+                        || (p.is(SqlTokenType.LPAREN) && lookingAtNestedParenQuery())) {
+                    SqlSubqueryTable sub = new SqlSubqueryTable();
+                    sub.setQuery(parseSelect());
+                    sub.setLateral(lateral);
+                    source = sub;
+                } else {
+                    source = parseJoinedTable();
+                }
+                for (int i = 0; i < wraps; i++) {
+                    p.expect(SqlTokenType.RPAREN);
+                }
             }
             p.expect(SqlTokenType.RPAREN);
             parseTableAlias(source);

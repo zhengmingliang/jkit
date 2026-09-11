@@ -36,6 +36,15 @@
 
 ## 2.0.1 - 2026-09-09
 
+### jkit-sql（R7 竞品覆盖）
+- 脚本：分号后多段无法识别片段可跳过直至下一条真实语句或 EOF（软停）
+- 类型：`CAST(… AS SIGNED INTEGER|UNSIGNED INTEGER)`
+- 表源：`((((t))))` 多层括号表；与 `((SELECT) UNION …)` 消歧（`SqlLexer.lookahead`）
+- DML：`RETURNING`/`OUTPUT` 支持 `AS` 别名与 `old.*`/`new.*`/`DELETED.*`；`DELETE t OUTPUT … FROM src`
+- SELECT：`FOR XML PATH/AUTO/ROOT/…`、`FOR BROWSE`；ClickHouse `LIMIT n BY col`
+- 表达式：三元 `a ? b : c` 与 PG jsonb `?`/`?|`/`?&`/`? :bind` 消歧；嵌套 `ARRAY[[…]]`；
+  窗口/`last_value(x IGNORE NULLS)`；`SIMILAR TO`；比较右侧无括号标量子查询；旧式 `*=`/`=*` 外连接
+
 ### 新增（jkit-sql 覆盖率提升第六轮）
 - `|` 后接语句关键字时不按按位或（脚本分隔）；`AT TIME ZONE`；`?1` JDBC 绑定
 - 子查询/`FROM (WITH …)`；双点 `catalog..table`；`FOR KEY SHARE`/`NO KEY UPDATE`
