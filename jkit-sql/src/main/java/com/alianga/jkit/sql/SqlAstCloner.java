@@ -377,7 +377,9 @@ public final class SqlAstCloner {
     }
 
     private static SqlBinaryExpr copyBinaryExpr(SqlBinaryExpr src) {
-        return SqlBinaryExpr.of(copyExpr(src.left()), src.operator(), copyExpr(src.right()));
+        SqlBinaryExpr copy = SqlBinaryExpr.of(copyExpr(src.left()), src.operator(), copyExpr(src.right()));
+        copy.setParenthesized(src.parenthesized());
+        return copy;
     }
 
     private static SqlUnaryExpr copyUnaryExpr(SqlUnaryExpr src) {

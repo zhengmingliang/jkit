@@ -3165,12 +3165,18 @@ public final class SqlFormatter {
                 out.append('.');
                 writeExpr(bin.right());
             } else {
+                if (bin.parenthesized()) {
+                    out.append('(');
+                }
                 writeExpr(bin.left());
                 sp();
                 // CONCAT 一律回写 ||；MySQL 默认把 || 解析为 OR，故 AST 里的 OR 回写为 OR
                 kw(bin.operator().symbol());
                 sp();
                 writeExpr(bin.right());
+                if (bin.parenthesized()) {
+                    out.append(')');
+                }
             }
         } else if (expr instanceof SqlUnaryExpr) {
             SqlUnaryExpr u = (SqlUnaryExpr) expr;

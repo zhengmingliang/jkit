@@ -12,6 +12,7 @@ public final class SqlBinaryExpr extends SqlExpr {
     private SqlExpr left;
     private SqlBinaryOp operator;
     private SqlExpr right;
+    private boolean parenthesized;
 
     /**
      * @param left 左
@@ -67,6 +68,24 @@ public final class SqlBinaryExpr extends SqlExpr {
      */
     public void setRight(SqlExpr right) {
         this.right = right;
+    }
+
+    /**
+     * 回写时是否整体套一层括号。改写器把函数调用展开成运算符时用得着：
+     * {@code DATEDIFF(a,b) * 2} 若展开成 {@code a - b * 2} 会因优先级算错，
+     * 置 true 后输出 {@code (a - b) * 2}。
+     *
+     * @return true 输出 {@code (left op right)}
+     */
+    public boolean parenthesized() {
+        return parenthesized;
+    }
+
+    /**
+     * @param parenthesized true 回写时整体套括号
+     */
+    public void setParenthesized(boolean parenthesized) {
+        this.parenthesized = parenthesized;
     }
 
     /**

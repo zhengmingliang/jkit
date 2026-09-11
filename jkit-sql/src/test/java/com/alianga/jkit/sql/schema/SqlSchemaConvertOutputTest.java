@@ -96,6 +96,30 @@ public class SqlSchemaConvertOutputTest {
     }
 
     @Test
+    public void dateDiffTruncatesToDateOnPostgres() {
+        // MySQL DATEDIFF 只比日期部分返回天数；裸减法对 TIMESTAMP 在 PG 得 interval，语义不对
+        String pg = SQL.convert("SELECT DATEDIFF(a, b) FROM t", SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        assertEquals(pg, "SELECT (CAST(a AS DATE) - CAST(b AS DATE)) FROM t", norm(pg));
+        assertReparsable(pg, SqlDialect.POSTGRES);
+    }
+
+    @Test
+    public void dateDiffTruncatesToDateOnOracle() {
+        String ora = SQL.convert("SELECT DATEDIFF(a, b) FROM t", SqlDialect.MYSQL, SqlDialect.ORACLE);
+        assertEquals(ora, "SELECT (TRUNC(a) - TRUNC(b)) FROM t", norm(ora));
+        assertReparsable(ora, SqlDialect.ORACLE);
+    }
+
+    @Test
+    public void dateDiffWithExpressionArgsStaysValid() {
+        String pg = SQL.convert("SELECT DATEDIFF(NOW(), created_at) FROM t",
+                SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        assertEquals(pg, "SELECT (CAST(CURRENT_TIMESTAMP AS DATE) - CAST(created_at AS DATE)) FROM t",
+                norm(pg));
+        assertReparsable(pg, SqlDialect.POSTGRES);
+    }
+
+    @Test
     public void nowInWhereHasNoEmptyParensOnOracle() {
         String ora = SQL.convert("SELECT * FROM t WHERE created_at < NOW()",
                 SqlDialect.MYSQL, SqlDialect.ORACLE);

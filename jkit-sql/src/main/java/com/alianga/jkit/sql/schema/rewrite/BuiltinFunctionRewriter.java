@@ -423,23 +423,39 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
         if (args.size() < 2) {
             return fn;
         }
-        if (family == SqlDialect.POSTGRES || family == SqlDialect.ANSI || family == SqlDialect.PRESTO) {
-            SqlBinaryExpr bin = new SqlBinaryExpr();
-            bin.setOperator(SqlBinaryOp.MINUS);
-            bin.setLeft(args.get(0));
-            bin.setRight(args.get(1));
+        // MySQL DATEDIFF 只比日期部分、返回天数。直接展开成 a - b 只在两端都是 DATE 时才等价：
+        // PG 里 TIMESTAMP 相减得 interval 而非天数，语义不对。故显式截断到 DATE 再减。
+        if (family == SqlDialect.POSTGRES || family == SqlDialect.ANSI) {
+            SqlBinaryExpr bin = SqlBinaryExpr.of(castToDate(args.get(0)), SqlBinaryOp.MINUS,
+                    castToDate(args.get(1)));
+            bin.setParenthesized(true);
             return bin;
         }
+        // Oracle 的 DATE 自带时间部分，TRUNC 去掉时间后相减即得天数
         if (family == SqlDialect.ORACLE || family == SqlDialect.ORACLE12) {
-            SqlBinaryExpr bin = new SqlBinaryExpr();
-            bin.setOperator(SqlBinaryOp.MINUS);
-            bin.setLeft(args.get(0));
-            bin.setRight(args.get(1));
+            SqlBinaryExpr bin = SqlBinaryExpr.of(truncToDate(args.get(0)), SqlBinaryOp.MINUS,
+                    truncToDate(args.get(1)));
+            bin.setParenthesized(true);
             return bin;
         }
+        // PRESTO 的 date 相减得 interval，且 date_diff 参数顺序与 DATEDIFF 相反，不做推断
         report.warn(ConversionWarning.Severity.SEMANTIC_RISK, "DATEDIFF",
                 "DATEDIFF 在 " + family + " 无通用映射，已保留原文");
         return fn;
+    }
+
+    private static SqlCastExpr castToDate(SqlExpr expr) {
+        SqlCastExpr cast = new SqlCastExpr();
+        cast.setExpr(expr);
+        cast.setDataType("DATE");
+        return cast;
+    }
+
+    private static SqlFunctionExpr truncToDate(SqlExpr expr) {
+        SqlFunctionExpr trunc = new SqlFunctionExpr();
+        trunc.setName(SqlIdentifier.of("TRUNC"));
+        trunc.arguments().add(expr);
+        return trunc;
     }
 
     private static SqlExpr rewriteTimestampDiff(SqlFunctionExpr fn, SqlDialect family,
