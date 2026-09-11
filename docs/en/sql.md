@@ -305,6 +305,21 @@ Do not treat indexes of `SqlIdentifier.names()` as "the N-th alias"; `names()` i
 
 Explicitly not done: a procedure-body **execution engine** (structured AST already covers DECLARE/HANDLER/control flow/TRIGGER/EVENT etc., but nothing is interpreted), a complete Wall rule set (`SqlWallConfig` is a configurable subset, not the full Druid WallFilter), or a DSL tree for `MATCH_RECOGNIZE.PATTERN` (still a string). CREATE TABLE column types/constraints are captured in `columnDefinitions` and can round-trip through format. Unknown functions parse as ordinary function calls and do not fail.
 
+## Cross-dialect type conversion (in progress)
+
+Schema / SQL conversion uses a **Normal Form** (canonical types) so adding a dialect is O(K), not O(N²). Design: [sql-schema-converter-design-v3.md](../sql-schema-converter-design-v3.md).
+
+Phase 0–1 are in tree (JDK 8; `SqlDdlStatement.columnDefinitions()` stays `List<String>`):
+
+```java
+List<ColumnDefinition> cols = SqlColumnDefinitionParser.fromDdl(ddl, SqlDialect.MYSQL);
+SqlDataTypeRegistry types = SqlDataTypeRegistry.builtins();
+types.convert("VARCHAR(100)", SqlDialect.MYSQL, SqlDialect.ORACLE); // VARCHAR2(100)
+types.fromDialect("TINYINT(1)", SqlDialect.MYSQL);                  // BOOLEAN
+```
+
+Undeclared reverse collisions fail `RegistryValidator` at builtin-table build time. The statement-level converter facade, auto-increment strategy, and function rewrite land in later phases.
+
 ## Performance
 
 Hand-written lexer + `ThreadLocal` Parser reuse. Comparison tests against Druid / JSqlParser live in **`tools-test`** in the parent directory (kept out of this module to avoid pulling in third-party dependencies):

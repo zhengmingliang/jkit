@@ -384,6 +384,33 @@ SELECT 列表项与表源的别名用 **`alias()`** 读取：
 
 明确未做：过程体**执行引擎**（AST 结构化已覆盖 DECLARE/HANDLER/控制流/TRIGGER/EVENT 等，但不解释执行）、完整 Wall 规则集（`SqlWallConfig` 提供可配置子集，非 Druid WallFilter 全量）、`MATCH_RECOGNIZE.PATTERN` 的 DSL 树（仍为字符串）。CREATE TABLE 列类型/约束已进 `columnDefinitions` 并可 format 往返。未知函数按普通函数调用解析，不失败。
 
+## 跨方言类型转换（进行中）
+
+表结构 / SQL 跨方言转换走 **Normal Form 中转**（canonical 类型，避免 N² pairwise 映射）。设计见 [sql-schema-converter-design-v3.md](./sql-schema-converter-design-v3.md)。
+
+当前已落地 Phase 0–1（JDK 8，不改 `SqlDdlStatement.columnDefinitions()` 的 `List<String>` 签名）：
+
+```java
+import com.alianga.jkit.sql.schema.model.CanonicalType;
+import com.alianga.jkit.sql.schema.model.ColumnDefinition;
+import com.alianga.jkit.sql.schema.parse.SqlColumnDefinitionParser;
+import com.alianga.jkit.sql.schema.registry.SqlDataTypeRegistry;
+
+SqlDdlStatement ddl = (SqlDdlStatement) SQL.parse(
+        "CREATE TABLE t (id INT NOT NULL AUTO_INCREMENT, name VARCHAR(32))",
+        SqlDialect.MYSQL);
+List<ColumnDefinition> cols = SqlColumnDefinitionParser.fromDdl(ddl, SqlDialect.MYSQL);
+// cols.get(0): name=id, type=INT, NOT NULL + AUTO_INCREMENT
+
+SqlDataTypeRegistry types = SqlDataTypeRegistry.builtins();
+types.convert("VARCHAR(100)", SqlDialect.MYSQL, SqlDialect.ORACLE); // VARCHAR2(100)
+types.convert("DATETIME", SqlDialect.MYSQL, SqlDialect.POSTGRES);   // TIMESTAMP
+types.fromDialect("TINYINT(1)", SqlDialect.MYSQL);                  // BOOLEAN
+types.fromDialect("NUMBER(10,2)", SqlDialect.ORACLE);               // DECIMAL
+```
+
+未声明的类型碰撞由 `RegistryValidator` 在内置表构建时阻断；`RegistryValidationTest` 进 CI。DDL/DML/SELECT 整句转换门面、自增策略、函数改写仍按设计路线图后续阶段交付。
+
 ## 性能
 
 手写词法 + `ThreadLocal` 复用 Parser。和 Druid / JSqlParser 的对比测试在上级目录 **`tools-test`**（不进本模块，以免引入第三方依赖）：
