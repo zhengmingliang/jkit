@@ -311,9 +311,10 @@ public final class SQL {
                                 SqlFormatOptions options) {
         SqlDialectSpec d = dialect == null ? SqlDialect.MYSQL : dialect;
         SqlStatement toWrite = statement;
-        // 跨方言回写时按目标方言适配分页（先 raw clone 再 adapt，不改调用方 AST）
+        // 仅当分页形态与目标方言不兼容时才 clone+adapt（同形态零额外开销；
+        // 用 SQL.clone 保源形态，避免按目标方言 raw format 后再 parse 的双重扭曲）
         if (statement != null && SqlRewriter.paginationNeedsAdapt(statement, d)) {
-            toWrite = parse(new SqlFormatter(false, d, options).format(statement), d);
+            toWrite = clone(statement);
             SqlRewriter.adaptPagination(toWrite, d);
         }
         return new SqlFormatter(pretty, d, options).format(toWrite);

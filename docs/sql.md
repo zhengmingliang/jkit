@@ -229,7 +229,7 @@ SqlStatement out = SQL.rewrite(stmt, SqlRewrites.create()
 只改一条且要"clone 后再改"语义时直接用 `SQL` 的对应门面方法即可，不必进链。
 方言：MySQL/PG/H2/ANSI → `LIMIT`/`OFFSET`；SQL Server 第 1 页 `TOP`，其后 `OFFSET FETCH`；**`SqlDialect.ORACLE`（12c 以下）** 裸 SELECT → **ROWNUM 包装**（单层 `WHERE ROWNUM<=n`，有 offset 时双层）；**`ORACLE12`（12c+）** → `OFFSET … FETCH FIRST … ROWS ONLY`。已存在的 Oracle `ROWNUM` 双层/`WHERE ROWNUM<=n` 与 SQL Server `row_number` 包装：`getLimit` 返回页大小，`setPage`/`setLimit` 只改数值边界（不叠 OFFSET/FETCH）。UNION 的 LIMIT 挂在集合运算链末端。`SqlBuilder.limit`/`offset`/`toSql(dialect)` 走同一套改写（`toSql` 的方言参数覆盖 builder 方言）。
 
-**`format` / `toSqlString(..., dialect)` 按目标方言适配分页**：若 AST 上已有分页（MySQL `LIMIT` / TOP / ROWNUM / row_number）与目标方言不兼容，回写前先 clone 再 `adaptPagination`（不改入参 AST）。例如 MySQL `LIMIT 0,10000` → 经典 ORACLE 单层 ROWNUM；`LIMIT 10,20` → 双层 RN；→ ORACLE12 用 OFFSET/FETCH；→ SQLSERVER offset=0 用 TOP、有 offset 用 OFFSET FETCH。默认 MySQL 回写保真（逗号 LIMIT 等）不回退。`setPage`/`setLimit` 转经典 ORACLE 时也会清掉子查询内残留的旧 LIMIT/TOP。
+**`format` / `toSqlString(..., dialect)` 按目标方言适配分页**：若 AST 上已有分页（MySQL `LIMIT` / TOP / ROWNUM / row_number / FETCH）与目标方言形态不兼容（含 MySQL 逗号 `LIMIT` → PG/ANSI 等），回写前仅在 `paginationNeedsAdapt` 为 true 时 `SQL.clone` 再 `adaptPagination`（同形态零额外开销；不改入参 AST）。例如 MySQL `LIMIT 0,10000` → 经典 ORACLE 单层 ROWNUM；`LIMIT 10,20` → 双层 RN；→ ORACLE12/DB2 用 OFFSET/FETCH；→ SQLSERVER offset=0 用 TOP、有 offset 用 OFFSET FETCH；ROWNUM → POSTGRES/MYSQL 还原为 `LIMIT`（offset=0 可省略 OFFSET，不保留逗号风格）。显式 `adaptPagination` 与 format 自动路径共用 `isPaginationFormCompatible`。`setPage`/`setLimit` 转经典 ORACLE 时也会清掉子查询内残留的旧 LIMIT/TOP。
 
 ## 参数化 / Wall / 求值（P2）
 

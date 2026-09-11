@@ -763,7 +763,8 @@ public final class SqlRewriter {
         if (lim == null) {
             return statement;
         }
-        if (!paginationNeedsAdapt(statement, d)) {
+        // 形态兼容且无需规范化逗号 LIMIT 时 no-op（含 ROWNUM↔LIMIT 完整转换）
+        if (isPaginationFormCompatible(select, d) && !needsCommaLimitNormalize(select, d)) {
             return statement;
         }
         Long offObj = getOffset(statement);
@@ -776,9 +777,9 @@ public final class SqlRewriter {
 
     /**
      * 回写路径是否需要按目标方言改写分页（供 {@link SQL#format} 决定是否 clone+adapt）。
-     * 仅当 AST 上是普通 {@code LIMIT}（非 FETCH/TOP/ROWNUM 包装）且目标方言不支持 LIMIT 时为 true，
-     * 避免把 TOP/FETCH/ROWNUM 在默认 MySQL 回写时改编而破坏保真往返。
-     * 显式 {@link #adaptPagination} 仍可做完整跨形态转换。
+     * 基于 {@link #isPaginationFormCompatible}：LIMIT↔ROWNUM/FETCH/TOP 不兼容时 true；
+     * MySQL 逗号 {@code LIMIT off,n} 而目标不支持逗号风格时也 true（规范化为 {@code LIMIT n OFFSET m}）。
+     * 同形态同方言（如已是非逗号 PG LIMIT → format POSTGRES）为 false，零额外开销。
      *
      * @param statement 语句
      * @param dialect 目标方言
@@ -791,18 +792,23 @@ public final class SqlRewriter {
             return false;
         }
         SqlDialectSpec d = dialect == null ? SqlDialect.MYSQL : dialect;
-        if (detectRowNumPage(select) != null) {
+        if (!isPaginationFormCompatible(select, d)) {
+            return true;
+        }
+        return needsCommaLimitNormalize(select, d);
+    }
+
+    /**
+     * MySQL/ClickHouse 逗号 LIMIT 在目标方言不支持时需规范化。
+     */
+    private static boolean needsCommaLimitNormalize(SqlSelect select, SqlDialectSpec d) {
+        if (d.supportsCommaLimitOffset()) {
             return false;
         }
         SqlSelect owner = paginationOwner(select);
-        if (owner.top() != null) {
-            return false;
-        }
-        if (owner.limit() == null || owner.limit().fetchStyle()) {
-            return false;
-        }
-        // 普通 LIMIT → 目标不支持 LIMIT 时（ORACLE / ORACLE12 / SQLSERVER / DB2 …）才自动适配
-        return !d.supportsLimitOffset();
+        return owner.limit() != null
+                && !owner.limit().fetchStyle()
+                && owner.limit().mysqlCommaStyle();
     }
 
     /**
@@ -879,8 +885,8 @@ public final class SqlRewriter {
             if (page.kind == RowNumPage.Kind.SS_ROW_NUMBER) {
                 return d.supportsTop();
             }
-            // Oracle ROWNUM 包装：经典 ORACLE 原生；ORACLE12 仍识别，format 时保留以免无谓拆装
-            return d.supportsRownum();
+            // 经典 ORACLE 才以 ROWNUM 为原生形态；ORACLE12 宜改写为 OFFSET/FETCH
+            return d.supportsRownum() && !d.supportsFetchFirst();
         }
         SqlSelect owner = paginationOwner(select);
         if (owner.top() != null) {

@@ -5,6 +5,9 @@
 ## 2.0.1 / unreleased
 
 ### jkit-sql
+- **修复**：跨方言分页适配——`paginationNeedsAdapt`/`adaptPagination` 接入 `isPaginationFormCompatible`（ROWNUM↔LIMIT/FETCH、逗号 LIMIT→PG/ANSI）；`format` 仅在需要时 `clone`+adapt，避免按目标方言 raw format 再 parse。
+
+### jkit-sql
 - **修复**：`toSqlString`/`format` 按目标方言适配分页（MySQL `LIMIT` → 经典 ORACLE ROWNUM / ORACLE12 OFFSET·FETCH / SQLSERVER TOP|OFFSET FETCH）；`setLimit`/`setPage` 转经典 ORACLE 时清掉子查询内残留 LIMIT/TOP（`wrapOracleRownum` + `clearPagination`）。
 - **新增**：`SQL.adaptPagination` / `addSelectItem` / `removeSelectItem`；`SqlRewrites` 对应链 hook；`SqlRewriter.adaptPagination`。
 

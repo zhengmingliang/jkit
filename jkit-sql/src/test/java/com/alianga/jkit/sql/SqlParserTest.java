@@ -1641,16 +1641,21 @@ public class SqlParserTest {
         assertNotNull(fetch.limit());
         assertTrue(fetch.limit().fetchStyle());
         assertEquals("10", ((SqlLiteral) fetch.limit().rowCount()).value());
+        // 经典 ORACLE 回写自动把 FETCH 适配为 ROWNUM；ORACLE12 才保真 FETCH
         String ff = SQL.toSqlString(fetch, SqlDialect.ORACLE);
-        assertTrue(ff, ff.contains("FETCH FIRST"));
-        assertTrue(ff, ff.contains("ROWS ONLY"));
+        assertTrue(ff, ff.toUpperCase().contains("ROWNUM"));
+        assertFalse(ff, ff.toUpperCase().contains("FETCH"));
         SQL.parse(ff, SqlDialect.ORACLE);
+        String ff12 = SQL.toSqlString(fetch, SqlDialect.ORACLE12);
+        assertTrue(ff12, ff12.contains("FETCH FIRST"));
+        assertTrue(ff12, ff12.contains("ROWS ONLY"));
 
         SqlSelect fetchOrd = (SqlSelect) SQL.parse(
                 "SELECT id FROM emp ORDER BY id FETCH FIRST 5 ROWS ONLY", SqlDialect.ORACLE);
         assertTrue(fetchOrd.limit().fetchStyle());
         String fo = SQL.toSqlString(fetchOrd, SqlDialect.ORACLE);
-        assertTrue(fo, fo.contains("FETCH FIRST 5"));
+        assertTrue(fo, fo.toUpperCase().contains("ROWNUM"));
+        assertFalse(fo, fo.toUpperCase().contains("FETCH"));
         SQL.parse(fo, SqlDialect.ORACLE);
 
         SqlSelect minus = (SqlSelect) SQL.parse(

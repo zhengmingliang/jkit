@@ -227,6 +227,79 @@ public class SqlPaginationTest {
         assertTrue(sql, sql.contains("ROWNUM <= 100") || sql.contains("ROWNUM<= 100"));
     }
 
+
+    @Test
+    public void adaptOracleThenFormatPostgresDropsRownum() {
+        SqlStatement mysql = SQL.parse(
+                "SELECT id, name FROM t_user WHERE age > 18 limit 0,10000");
+        SqlStatement oracle = SQL.rewrite(mysql,
+                SqlRewrites.create().add(SqlRewrites.adaptPagination(SqlDialect.ORACLE)));
+        String oracleSql = SQL.format(oracle, SqlDialect.ORACLE).toUpperCase();
+        assertTrue(oracleSql, oracleSql.contains("ROWNUM"));
+        String pg = SQL.format(oracle, SqlDialect.POSTGRES).toUpperCase().replace(" ", "");
+        assertFalse("must not keep ROWNUM when formatting as POSTGRES", pg.contains("ROWNUM"));
+        assertFalse("must not keep MySQL comma LIMIT", pg.contains("LIMIT0,") || pg.contains("LIMIT0 ,"));
+        assertTrue(pg, pg.contains("LIMIT10000"));
+        assertFalse("offset=0 may omit OFFSET", pg.contains("OFFSET"));
+        assertTrue(pg, pg.contains("T_USER") && pg.contains("AGE>18"));
+    }
+
+    @Test
+    public void adaptOraclePage2ThenFormatPostgresLimitOffset() {
+        SqlStatement page = SQL.setPage(
+                SQL.parse("SELECT id, name FROM t_user WHERE age > 18 limit 0,10000"),
+                2, 30, SqlDialect.ORACLE);
+        String oracleSql = SQL.toSqlString(page, SqlDialect.ORACLE).toUpperCase();
+        assertTrue(oracleSql, oracleSql.contains("ROWNUM"));
+        String pg = SQL.format(page, SqlDialect.POSTGRES).toUpperCase().replace(" ", "");
+        assertFalse(pg, pg.contains("ROWNUM"));
+        assertTrue(pg, pg.contains("LIMIT30OFFSET30") || (pg.contains("LIMIT30") && pg.contains("OFFSET30")));
+        assertFalse(pg, pg.contains("LIMIT30,30") || pg.contains("LIMIT30,"));
+    }
+
+    @Test
+    public void adaptOracleThenFormatOracle12UsesFetch() {
+        SqlStatement oracle = SQL.adaptPagination(
+                SQL.parse("SELECT id, name FROM t_user WHERE age > 18 limit 0,10000"),
+                SqlDialect.ORACLE);
+        String sql = SQL.format(oracle, SqlDialect.ORACLE12).toUpperCase();
+        assertFalse(sql, sql.contains("ROWNUM"));
+        assertTrue(sql, sql.contains("FETCH"));
+        assertFalse("offset=0 need not emit OFFSET", sql.contains("OFFSET"));
+    }
+
+    @Test
+    public void adaptOracle12ThenFormatOracleUsesRownum() {
+        SqlStatement o12 = SQL.adaptPagination(
+                SQL.parse("SELECT id, name FROM t_user WHERE age > 18 limit 0,10000"),
+                SqlDialect.ORACLE12);
+        String sql = SQL.format(o12, SqlDialect.ORACLE).toUpperCase();
+        assertFalse(sql, sql.contains("LIMIT"));
+        assertFalse(sql, sql.contains("FETCH"));
+        assertTrue(sql, sql.contains("ROWNUM"));
+    }
+
+    @Test
+    public void adaptSqlServerThenFormatMysqlUsesLimit() {
+        SqlStatement ss = SQL.adaptPagination(
+                SQL.parse("SELECT id, name FROM t_user WHERE age > 18 limit 0,10000"),
+                SqlDialect.SQLSERVER);
+        String sql = SQL.format(ss, SqlDialect.MYSQL).toUpperCase().replace(" ", "");
+        assertFalse(sql, sql.contains("TOP") || sql.contains("ROWNUM"));
+        assertTrue(sql, sql.contains("LIMIT10000"));
+    }
+
+    @Test
+    public void paginationNeedsAdaptFalseForCompatiblePostgresLimit() {
+        SqlStatement stmt = SQL.parse("SELECT id FROM t LIMIT 10 OFFSET 5", SqlDialect.POSTGRES);
+        assertFalse(SqlRewriter.paginationNeedsAdapt(stmt, SqlDialect.POSTGRES));
+        assertFalse(SqlRewriter.paginationNeedsAdapt(stmt, SqlDialect.H2));
+        assertTrue(SqlRewriter.paginationNeedsAdapt(stmt, SqlDialect.ORACLE));
+        SqlStatement comma = SQL.parse("SELECT id FROM t LIMIT 5,15");
+        assertTrue(SqlRewriter.paginationNeedsAdapt(comma, SqlDialect.POSTGRES));
+        assertFalse(SqlRewriter.paginationNeedsAdapt(comma, SqlDialect.MYSQL));
+    }
+
     @Test
     public void adaptPaginationNoOpWithoutPaging() {
         SqlStatement stmt = SQL.parse("SELECT id FROM t_user WHERE age > 18");

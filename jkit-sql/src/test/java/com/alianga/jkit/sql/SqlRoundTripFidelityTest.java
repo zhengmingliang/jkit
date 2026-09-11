@@ -207,7 +207,8 @@ public class SqlRoundTripFidelityTest {
     public void formatKeepsOriginalWords() {
         SqlDialect d = SqlDialect.fromName(dialect);
         SqlStatement stmt = SQL.parse(sql, d);
-        String formatted = SQL.toSqlString(stmt);
+        // 必须带解析方言回写，否则默认 MYSQL 会按目标方言适配分页（TOP/FETCH/ROWNUM→LIMIT）
+        String formatted = SQL.toSqlString(stmt, d);
         assertEquals(sql + " -> " + formatted, normalize(sql), normalize(formatted));
     }
 
