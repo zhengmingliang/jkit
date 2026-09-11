@@ -409,7 +409,22 @@ types.fromDialect("TINYINT(1)", SqlDialect.MYSQL);                  // BOOLEAN
 types.fromDialect("NUMBER(10,2)", SqlDialect.ORACLE);               // DECIMAL
 ```
 
-未声明的类型碰撞由 `RegistryValidator` 在内置表构建时阻断；`RegistryValidationTest` 进 CI。DDL/DML/SELECT 整句转换门面、自增策略、函数改写仍按设计路线图后续阶段交付。
+未声明的类型碰撞由 `RegistryValidator` 在内置表构建时阻断；`RegistryValidationTest` 进 CI。
+
+Phase 2–3 已提供整句入口（CREATE TABLE 列类型/自增/UNSIGNED/默认值/表选项；其它语句按目标方言 format，分页复用现有适配）：
+
+```java
+String pg = SQL.convert(
+        "CREATE TABLE t (id INT AUTO_INCREMENT PRIMARY KEY, flag TINYINT(1) DEFAULT 0)",
+        SqlDialect.MYSQL, SqlDialect.POSTGRES);
+// id INTEGER NOT NULL GENERATED ALWAYS AS IDENTITY PRIMARY KEY, flag BOOLEAN DEFAULT false
+
+ConversionResult r = SQL.convert(sql, SqlDialect.MYSQL, SqlDialect.ORACLE,
+        SqlSchemaConvertOptions.defaults()
+                .failOnSeverity(ConversionWarning.Severity.MANUAL_ACTION_REQUIRED));
+```
+
+Oracle ≤11g 的自增会给出 `MANUAL_ACTION_REQUIRED`（需手工 SEQUENCE+TRIGGER），不会静默生成不完整 DDL。函数改写（IF→CASE 等）仍属后续 Phase 4。
 
 ## 性能
 

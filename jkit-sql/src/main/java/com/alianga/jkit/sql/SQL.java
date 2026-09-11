@@ -8,6 +8,9 @@ import com.alianga.jkit.sql.ast.SqlSelect;
 import com.alianga.jkit.sql.ast.SqlSimpleStatement;
 import com.alianga.jkit.sql.ast.SqlStatement;
 import com.alianga.jkit.sql.ast.SqlStatementType;
+import com.alianga.jkit.sql.schema.convert.ConversionResult;
+import com.alianga.jkit.sql.schema.convert.SqlSchemaConvertOptions;
+import com.alianga.jkit.sql.schema.convert.SqlSchemaConverter;
 import com.alianga.jkit.sql.visitor.SqlVisitorAdapter;
 
 import java.util.ArrayList;
@@ -107,6 +110,34 @@ public final class SQL {
      */
     public static String concat(List<SqlStatement> statements, SqlDialectSpec dialect) {
         return SqlBuilder.concatStatements(statements, dialect);
+    }
+
+    /**
+     * 跨方言转换 SQL（DDL 列类型/约束走 canonical 中转；其它语句按目标方言 format）。
+     *
+     * @param sql 源 SQL
+     * @param source 源方言
+     * @param target 目标方言
+     * @return 目标方言 SQL 文本
+     * @since 2.0.1
+     */
+    public static String convert(String sql, SqlDialect source, SqlDialect target) {
+        return SqlSchemaConverter.convert(sql, source, target).sql();
+    }
+
+    /**
+     * 跨方言转换 SQL，返回文本与 {@link ConversionResult#report()}。
+     *
+     * @param sql 源 SQL
+     * @param source 源方言
+     * @param target 目标方言
+     * @param options 选项，null 视为默认
+     * @return 转换结果
+     * @since 2.0.1
+     */
+    public static ConversionResult convert(String sql, SqlDialect source, SqlDialect target,
+                                           SqlSchemaConvertOptions options) {
+        return SqlSchemaConverter.convert(sql, source, target, options);
     }
 
     /**

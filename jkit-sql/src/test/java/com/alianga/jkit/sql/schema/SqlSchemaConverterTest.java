@@ -1,0 +1,170 @@
+package com.alianga.jkit.sql.schema;
+
+import com.alianga.jkit.sql.SQL;
+import com.alianga.jkit.sql.SqlDialect;
+import com.alianga.jkit.sql.schema.convert.ConversionResult;
+import com.alianga.jkit.sql.schema.convert.ConversionWarning;
+import com.alianga.jkit.sql.schema.convert.SqlSchemaConversionException;
+import com.alianga.jkit.sql.schema.convert.SqlSchemaConvertOptions;
+import com.alianga.jkit.sql.schema.convert.SqlSchemaConverter;
+
+import org.junit.Test;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+
+/**
+ * CREATE TABLE 跨方言转换。
+ *
+ * @author 郑明亮
+ */
+public class SqlSchemaConverterTest {
+
+    @Test
+    public void mysqlToPostgresBasicTypes() {
+        String pg = SQL.convert(
+                "CREATE TABLE t (id INT NOT NULL, name VARCHAR(100), amount DECIMAL(10,2))",
+                SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        String u = pg.toUpperCase();
+        assertTrue(pg, u.contains("INTEGER"));
+        assertTrue(pg, u.contains("VARCHAR(100)"));
+        assertTrue(pg, u.contains("NUMERIC(10,2)"));
+    }
+
+    @Test
+    public void mysqlAutoIncrementToPostgresIdentity() {
+        ConversionResult r = SqlSchemaConverter.convert(
+                "CREATE TABLE t (id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, name VARCHAR(32))",
+                SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        String u = r.sql().toUpperCase();
+        assertTrue(r.sql(), u.contains("GENERATED ALWAYS AS IDENTITY"));
+        assertTrue(r.sql(), u.contains("PRIMARY KEY"));
+        assertFalse(r.sql(), u.contains("AUTO_INCREMENT"));
+    }
+
+    @Test
+    public void mysqlAutoIncrementToPostgresSerial() {
+        SqlSchemaConvertOptions opt = SqlSchemaConvertOptions.defaults()
+                .postgresIdentityStyle(SqlSchemaConvertOptions.PostgresIdentityStyle.SERIAL);
+        String sql = SqlSchemaConverter.convert(
+                "CREATE TABLE t (id BIGINT AUTO_INCREMENT PRIMARY KEY)",
+                SqlDialect.MYSQL, SqlDialect.POSTGRES, opt).sql();
+        assertTrue(sql, sql.toUpperCase().contains("BIGSERIAL"));
+        assertFalse(sql, sql.toUpperCase().contains("GENERATED"));
+    }
+
+    @Test
+    public void mysqlAutoIncrementToOracle11Warns() {
+        ConversionResult r = SqlSchemaConverter.convert(
+                "CREATE TABLE t (id INT AUTO_INCREMENT PRIMARY KEY)",
+                SqlDialect.MYSQL, SqlDialect.ORACLE);
+        assertTrue(r.report().hasBlockingIssues());
+        assertTrue(r.sql().toUpperCase().contains("NUMBER(10)"));
+        assertFalse(r.sql().toUpperCase().contains("IDENTITY"));
+        assertFalse(r.sql().toUpperCase().contains("AUTO_INCREMENT"));
+    }
+
+    @Test
+    public void mysqlAutoIncrementToOracle12Identity() {
+        String sql = SQL.convert(
+                "CREATE TABLE t (id INT AUTO_INCREMENT PRIMARY KEY)",
+                SqlDialect.MYSQL, SqlDialect.ORACLE12);
+        assertTrue(sql.toUpperCase().contains("GENERATED ALWAYS AS IDENTITY"));
+        assertTrue(sql.toUpperCase().contains("NUMBER(10)"));
+    }
+
+    @Test
+    public void mysqlAutoIncrementToSqlServer() {
+        String sql = SQL.convert(
+                "CREATE TABLE t (id INT AUTO_INCREMENT PRIMARY KEY)",
+                SqlDialect.MYSQL, SqlDialect.SQLSERVER);
+        assertTrue(sql.toUpperCase().contains("IDENTITY(1,1)"));
+    }
+
+    @Test
+    public void mysqlDatetimeAndBooleanDefault() {
+        String pg = SQL.convert(
+                "CREATE TABLE t (flag TINYINT(1) DEFAULT 0, ts DATETIME)",
+                SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        String u = pg.toUpperCase();
+        assertTrue(pg, u.contains("BOOLEAN"));
+        assertTrue(pg, pg.contains("false") || pg.contains("FALSE"));
+        assertTrue(pg, u.contains("TIMESTAMP"));
+        assertFalse(pg, u.contains("DATETIME"));
+        assertFalse(pg, u.contains("TINYINT"));
+    }
+
+    @Test
+    public void unsignedUpsizeIntToBigint() {
+        ConversionResult r = SqlSchemaConverter.convert(
+                "CREATE TABLE t (n INT UNSIGNED)",
+                SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        assertTrue(r.sql().toUpperCase().contains("BIGINT"));
+        assertFalse(r.sql().toUpperCase().contains("UNSIGNED"));
+        assertFalse(r.report().warnings().isEmpty());
+    }
+
+    @Test
+    public void stripEngineAndCharset() {
+        String pg = SQL.convert(
+                "CREATE TABLE t (id INT) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+                SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        String u = pg.toUpperCase();
+        assertFalse(pg, u.contains("ENGINE"));
+        assertFalse(pg, u.contains("CHARSET"));
+        assertFalse(pg, u.contains("UTF8"));
+    }
+
+    @Test
+    public void failOnManualAction() {
+        SqlSchemaConvertOptions opt = SqlSchemaConvertOptions.defaults()
+                .failOnSeverity(ConversionWarning.Severity.MANUAL_ACTION_REQUIRED);
+        try {
+            SqlSchemaConverter.convert(
+                    "CREATE TABLE t (id INT AUTO_INCREMENT)",
+                    SqlDialect.MYSQL, SqlDialect.ORACLE, opt);
+            fail("expected SqlSchemaConversionException");
+        } catch (SqlSchemaConversionException expected) {
+            assertTrue(expected.report().hasBlockingIssues());
+        }
+    }
+
+    @Test
+    public void sameDialectReturnsOriginal() {
+        String sql = "CREATE TABLE t (id INT)";
+        assertEquals(sql, SQL.convert(sql, SqlDialect.MYSQL, SqlDialect.MYSQL));
+    }
+
+    @Test
+    public void selectIsFormattedForTargetDialect() {
+        String oracle = SQL.convert("SELECT id FROM t LIMIT 10", SqlDialect.MYSQL, SqlDialect.ORACLE);
+        assertTrue(oracle.toUpperCase().contains("ROWNUM"));
+    }
+
+    @Test
+    public void mysqlKeyIndexWarnsOnPostgres() {
+        ConversionResult r = SqlSchemaConverter.convert(
+                "CREATE TABLE t (id INT, name VARCHAR(8), KEY idx_name (name))",
+                SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        boolean found = false;
+        for (int i = 0; i < r.report().warnings().size(); i++) {
+            if (r.report().warnings().get(i).severity() == ConversionWarning.Severity.SEMANTIC_RISK) {
+                found = true;
+            }
+        }
+        assertTrue(r.report().warnings().toString(), found);
+    }
+
+    @Test
+    public void columnCharsetStripped() {
+        ConversionResult r = SqlSchemaConverter.convert(
+                "CREATE TABLE t (name VARCHAR(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin)",
+                SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        String u = r.sql().toUpperCase();
+        assertFalse(r.sql(), u.contains("CHARACTER SET"));
+        assertFalse(r.sql(), u.contains("COLLATE"));
+        assertTrue(u.contains("VARCHAR(32)"));
+    }
+}

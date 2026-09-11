@@ -318,7 +318,15 @@ types.convert("VARCHAR(100)", SqlDialect.MYSQL, SqlDialect.ORACLE); // VARCHAR2(
 types.fromDialect("TINYINT(1)", SqlDialect.MYSQL);                  // BOOLEAN
 ```
 
-Undeclared reverse collisions fail `RegistryValidator` at builtin-table build time. The statement-level converter facade, auto-increment strategy, and function rewrite land in later phases.
+Undeclared reverse collisions fail `RegistryValidator` at builtin-table build time.
+
+Phase 2–3 add `SQL.convert` for CREATE TABLE (types, identity, UNSIGNED, defaults, table options). Other statements are formatted for the target dialect (pagination reuses the existing adapter). Function rewrite (IF→CASE, …) is Phase 4.
+
+```java
+String pg = SQL.convert(
+        "CREATE TABLE t (id INT AUTO_INCREMENT PRIMARY KEY, flag TINYINT(1) DEFAULT 0)",
+        SqlDialect.MYSQL, SqlDialect.POSTGRES);
+```
 
 ## Performance
 
