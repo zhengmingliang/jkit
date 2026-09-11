@@ -68,4 +68,38 @@ public class SqlSchemaConvertOutputTest {
         assertFalse(ss, norm(ss).contains(", ,"));
         assertReparsable(ss, SqlDialect.SQLSERVER);
     }
+
+    @Test
+    public void nowHasNoEmptyParensOnPostgres() {
+        // CURRENT_TIMESTAMP 在 PG 是关键字，CURRENT_TIMESTAMP() 会报语法错
+        String pg = SQL.convert("SELECT NOW() FROM t", SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        assertEquals(pg, "SELECT CURRENT_TIMESTAMP FROM t", norm(pg));
+        assertReparsable(pg, SqlDialect.POSTGRES);
+    }
+
+    @Test
+    public void curdateAndCurtimeHaveNoEmptyParens() {
+        String d = SQL.convert("SELECT CURDATE() FROM t", SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        assertEquals(d, "SELECT CURRENT_DATE FROM t", norm(d));
+        assertReparsable(d, SqlDialect.POSTGRES);
+        String t = SQL.convert("SELECT CURTIME() FROM t", SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        assertEquals(t, "SELECT CURRENT_TIME FROM t", norm(t));
+        assertReparsable(t, SqlDialect.POSTGRES);
+    }
+
+    @Test
+    public void nowWithPrecisionKeepsParens() {
+        // MySQL NOW(3) → PG CURRENT_TIMESTAMP(3) 是合法的，精度参数必须保留
+        String pg = SQL.convert("SELECT NOW(3) FROM t", SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        assertEquals(pg, "SELECT CURRENT_TIMESTAMP(3) FROM t", norm(pg));
+        assertReparsable(pg, SqlDialect.POSTGRES);
+    }
+
+    @Test
+    public void nowInWhereHasNoEmptyParensOnOracle() {
+        String ora = SQL.convert("SELECT * FROM t WHERE created_at < NOW()",
+                SqlDialect.MYSQL, SqlDialect.ORACLE);
+        assertFalse(ora, norm(ora).toUpperCase().contains("CURRENT_TIMESTAMP()"));
+        assertReparsable(ora, SqlDialect.ORACLE);
+    }
 }

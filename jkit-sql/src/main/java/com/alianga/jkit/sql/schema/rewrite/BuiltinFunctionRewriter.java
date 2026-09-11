@@ -53,15 +53,27 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
             cse.setElseExpr(args.get(2));
             return cse;
         }
+        // CURRENT_TIMESTAMP / CURRENT_DATE / CURRENT_TIME 在 PG、Oracle、SQL Server 里是
+        // 关键字而非函数，写 CURRENT_TIMESTAMP() 会报语法错。无参时直接回标识符，
+        // 带精度参数（MySQL NOW(3) → PG CURRENT_TIMESTAMP(3)）才是合法的函数形式。
         if ("NOW".equals(name) && family != SqlDialect.MYSQL) {
+            if (args.isEmpty()) {
+                return SqlIdentifier.of("CURRENT_TIMESTAMP");
+            }
             fn.setName(SqlIdentifier.of("CURRENT_TIMESTAMP"));
             return fn;
         }
         if ("CURDATE".equals(name) && family != SqlDialect.MYSQL) {
+            if (args.isEmpty()) {
+                return SqlIdentifier.of("CURRENT_DATE");
+            }
             fn.setName(SqlIdentifier.of("CURRENT_DATE"));
             return fn;
         }
         if ("CURTIME".equals(name) && family != SqlDialect.MYSQL) {
+            if (args.isEmpty()) {
+                return SqlIdentifier.of("CURRENT_TIME");
+            }
             fn.setName(SqlIdentifier.of("CURRENT_TIME"));
             return fn;
         }

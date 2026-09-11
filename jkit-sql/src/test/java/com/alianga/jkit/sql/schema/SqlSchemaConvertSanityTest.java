@@ -38,6 +38,9 @@ import static org.junit.Assert.fail;
 public class SqlSchemaConvertSanityTest {
 
     private static final Pattern EMPTY_ARG = Pattern.compile(",\\s*,|\\(\\s*,|,\\s*\\)");
+    // CURRENT_TIMESTAMP / CURRENT_DATE / CURRENT_TIME 是关键字，带空括号在 PG/Oracle 会报语法错
+    private static final Pattern EMPTY_PAREN_KEYWORD_FN =
+            Pattern.compile("CURRENT_(?:TIMESTAMP|DATE|TIME)\\s*\\(\\s*\\)", Pattern.CASE_INSENSITIVE);
     private static final Pattern DUP_ALTER_COLUMN =
             Pattern.compile("ALTER\\s+COLUMN\\s+(\\w+)\\s+TYPE\\s+\\1\\b", Pattern.CASE_INSENSITIVE);
 
@@ -110,6 +113,7 @@ public class SqlSchemaConvertSanityTest {
         String where = SqlDialect.MYSQL + "->" + target + " :: " + sql + " => " + out;
 
         assertTrue("空参数列表 " + where, !EMPTY_ARG.matcher(out).find());
+        assertTrue("关键字式时间函数带空括号 " + where, !EMPTY_PAREN_KEYWORD_FN.matcher(out).find());
         assertTrue("ALTER COLUMN 列名重复 " + where, !DUP_ALTER_COLUMN.matcher(out).find());
 
         try {
