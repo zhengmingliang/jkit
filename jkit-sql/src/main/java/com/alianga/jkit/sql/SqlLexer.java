@@ -268,6 +268,25 @@ public final class SqlLexer {
                 return;
             }
         }
+        if (c == '$' && pos + 1 < limit
+                && (src[pos + 1] == '$' || isIdentStart(src[pos + 1]))) {
+            // $$…$$ 或 $tag$…$tag$；单一 $ident 仍走下方运算符/IDENT 回退
+            int look = pos + 1;
+            if (src[look] != '$') {
+                while (look < limit && src[look] != '$' && isIdentPart(src[look])) {
+                    look++;
+                }
+                if (look >= limit || src[look] != '$') {
+                    // 例如 $1 绑定：交给后续
+                } else {
+                    scanDollarString(token, tLine, tCol, tStart);
+                    return;
+                }
+            } else {
+                scanDollarString(token, tLine, tCol, tStart);
+                return;
+            }
+        }
         if (isIdentStart(c)) {
             scanIdent(token, tLine, tCol, tStart);
             return;
@@ -347,10 +366,6 @@ public final class SqlLexer {
                 pos++;
             }
             token.set(SqlTokenType.IDENT, src, tStart, pos, tLine, tCol);
-            return;
-        }
-        if (c == '$' && pos + 1 < limit && src[pos + 1] == '$') {
-            scanDollarString(token, tLine, tCol, tStart);
             return;
         }
         scanOperator(token, tLine, tCol, tStart, c);
@@ -439,17 +454,21 @@ public final class SqlLexer {
     }
 
     private SqlToken scanDollarString(SqlToken token, int tLine, int tCol, int tStart) {
-        int tagEnd = pos + 2;
-        while (tagEnd < limit && src[tagEnd] != '$' && isIdentPart(src[tagEnd])) {
-            tagEnd++;
-        }
-        if (tagEnd >= limit || src[tagEnd] != '$') {
+        // PG：`$tag$content$tag$` / `$$content$$`（tag 可空）
+        pos++; // 跳过首个 $
+        int tagBodyStart = pos;
+        while (pos < limit && src[pos] != '$' && isIdentPart(src[pos])) {
             pos++;
+        }
+        if (pos >= limit || src[pos] != '$') {
+            // 不是合法 dollar-quote，回退成单字符 IDENT "$"
+            pos = tStart + 1;
             token.set(SqlTokenType.IDENT, src, tStart, pos, tLine, tCol);
             return token;
         }
-        int tagLen = tagEnd - pos;
-        pos = tagEnd + 1;
+        // 开标签为 [tStart, pos]（含两侧 $）
+        int tagLen = pos - tStart + 1;
+        pos++; // 进入内容
         while (pos + tagLen <= limit) {
             if (src[pos] == '$' && regionEquals(pos, tStart, tagLen)) {
                 pos += tagLen;

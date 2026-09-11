@@ -637,6 +637,27 @@ final class SqlDdlParser {
 
     private void parseRoutineBody(SqlDdlStatement ddl, String paramTail) {
         int start = p.token.start();
+        // PG：AS $$ … $$ / AS $tag$ … $tag$
+        if ((p.is(SqlTokenType.AS) || p.isIdent("AS")) && p.lexer.peek() != null
+                && p.lexer.peek().type() == SqlTokenType.STRING) {
+            p.next(); // AS
+            p.next(); // dollar-string body
+            while (isRoutineCharacteristicStart()) {
+                if (p.isIdent("LANGUAGE") || (p.identLike() && p.token.textEqualsIgnoreCase("LANGUAGE"))) {
+                    p.next();
+                    if (p.identLike() || (p.token.type() != null && p.token.type().keyword())) {
+                        p.next();
+                    }
+                } else {
+                    p.next();
+                }
+            }
+            String bodyRaw = p.lexer.rawSlice(start, p.token.start()).trim();
+            ddl.setBodyRaw(bodyRaw);
+            ddl.setTail(paramTail == null || paramTail.isEmpty() ? bodyRaw
+                    : paramTail + " " + bodyRaw);
+            return;
+        }
         // 特性子句；RETURNS 单独建模，其余仍进 bodyRaw 前缀
         while (!p.is(SqlTokenType.EOF) && !p.atStmtBreak() && !p.is(SqlTokenType.BEGIN)
                 && !isRoutineExecutableStart()) {

@@ -93,6 +93,16 @@ final class SqlDmlParser {
                         slice.addArgument(from);
                         slice.addArgument(to);
                         left = slice;
+                    } else if (p.is(SqlTokenType.NAMED_BIND) && p.token.text() != null
+                            && p.token.text().length() > 1 && p.token.text().charAt(0) == ':') {
+                        String num = p.token.text().substring(1);
+                        p.next();
+                        SqlFunctionExpr slice = new SqlFunctionExpr();
+                        slice.setName(SqlIdentifier.of("[]"));
+                        slice.addArgument(left);
+                        slice.addArgument(from);
+                        slice.addArgument(SqlIdentifier.of(num));
+                        left = slice;
                     } else {
                         left = SqlBinaryExpr.of(left, SqlBinaryOp.SUBSCRIPT, from);
                     }
@@ -235,6 +245,11 @@ final class SqlDmlParser {
             }
         }
         p.selectParser.parseTableHints(insert.table());
+        // PG：INSERT INTO t AS x / INSERT INTO t x …
+        String insAlias = p.parseAlias();
+        if (insAlias != null) {
+            insert.table().setAlias(insAlias);
+        }
         if (p.match(SqlTokenType.LPAREN) && !p.isQueryStart()) {
             if (!p.is(SqlTokenType.RPAREN)) {
                 do {
@@ -244,16 +259,36 @@ final class SqlDmlParser {
             p.expect(SqlTokenType.RPAREN);
         }
         insert.setOutputInto(parseOutputClause(insert.output()));
+        // PG：OVERRIDING SYSTEM|USER VALUE
+        if (p.isIdent("OVERRIDING")) {
+            p.next();
+            while (!p.is(SqlTokenType.SELECT) && !p.is(SqlTokenType.WITH)
+                    && !p.is(SqlTokenType.VALUES) && !p.is(SqlTokenType.VALUE)
+                    && !p.is(SqlTokenType.DEFAULT) && !p.is(SqlTokenType.SET)
+                    && !p.is(SqlTokenType.LPAREN) && !p.atStmtBreak()
+                    && !p.is(SqlTokenType.EOF)) {
+                p.next();
+            }
+        }
         if (p.match(SqlTokenType.SET)) {
             parseAssignList(insert.setList());
+            // MySQL 8：INSERT … SET … AS new ON DUPLICATE …
+            if (p.is(SqlTokenType.AS) || (p.identLike() && p.lexer.peek() != null
+                    && p.lexer.peek().type() == SqlTokenType.ON)) {
+                if (p.match(SqlTokenType.AS)) {
+                    if (p.identLike() || (p.token.type() != null && p.token.type().keyword())) {
+                        p.next();
+                    }
+                } else if (p.identLike()) {
+                    p.next();
+                }
+            }
         } else if (p.is(SqlTokenType.SELECT) || p.is(SqlTokenType.WITH)) {
             insert.setQuery(p.parseStatement());
         } else if (p.is(SqlTokenType.LPAREN)) {
-            // (SELECT…) / (WITH … SELECT…) / ((SELECT…) UNION …)
             insert.setQuery(p.selectParser.parseSelect());
         } else if (p.match(SqlTokenType.DEFAULT)) {
             p.expect(SqlTokenType.VALUES);
-            // INSERT … DEFAULT VALUES：空行占位
             insert.valuesList().add(new ArrayList<SqlExpr>(0));
         } else if (p.match(SqlTokenType.VALUES) || p.match(SqlTokenType.VALUE)) {
             parseValuesRows(insert);

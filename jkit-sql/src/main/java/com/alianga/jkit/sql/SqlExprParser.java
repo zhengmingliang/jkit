@@ -403,10 +403,16 @@ final class SqlExprParser {
                 } else {
                     left = SqlBinaryExpr.of(left, not ? SqlBinaryOp.IS_NOT : SqlBinaryOp.IS, parseBit());
                 }
-            } else if (p.isIdent("ISNULL") || p.isIdent("NOTNULL")) {
-                // PostgreSQL 后缀：col ISNULL / col NOTNULL
+            } else if (p.isIdent("ISNULL") || p.isIdent("NOTNULL")
+                    || (p.is(SqlTokenType.NOT) && p.lexer.peek() != null
+                    && p.lexer.peek().textEqualsIgnoreCase("ISNULL"))) {
+                // PostgreSQL 后缀：col ISNULL / col NOTNULL / col NOT ISNULL
                 boolean notNull = p.isIdent("NOTNULL");
-                p.next();
+                if (p.is(SqlTokenType.NOT)) {
+                    p.next();
+                    notNull = true;
+                }
+                p.next(); // ISNULL / NOTNULL
                 left = SqlBinaryExpr.of(left, notNull ? SqlBinaryOp.IS_NOT : SqlBinaryOp.IS,
                         SqlIdentifier.of("NULL"));
             } else if (p.isIdent("MEMBER") && p.lexer.peek() != null
@@ -550,6 +556,10 @@ final class SqlExprParser {
     private String parseDataType() {
         StringBuilder sb = new StringBuilder();
         sb.append(p.consumeIdentRaw());
+        // PG：pg_catalog.text / schema.type
+        while (p.match(SqlTokenType.DOT)) {
+            sb.append('.').append(p.consumeIdentRaw());
+        }
         // INTERVAL DAY TO SECOND / INTERVAL YEAR(2) TO MONTH
         if (SqlParser.equalsIgnoreCase(sb.toString(), "INTERVAL") && isIntervalUnitToken()) {
             sb.append(' ').append(consumeIntervalUnitRaw());
@@ -809,13 +819,25 @@ final class SqlExprParser {
             fn.setKeepClause("(" + keep + ")");
         }
         // SQL Server / PG：PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY x) [OVER (...)]
+        if (p.isIdent("SEPARATOR")) {
+            p.next();
+            fn.setSeparator(parseExpr());
+        }
         if (p.isIdent("WITHIN")) {
             p.next();
             p.expect(SqlTokenType.GROUP);
             p.expect(SqlTokenType.LPAREN);
-            p.expect(SqlTokenType.ORDER);
-            p.expect(SqlTokenType.BY);
-            p.selectParser.parseOrderBy(fn.orderBy());
+            // Oracle：WITHIN GROUP (PARTITION BY … ORDER BY …)
+            if (p.match(SqlTokenType.PARTITION)) {
+                p.expect(SqlTokenType.BY);
+                do {
+                    fn.addArgument(parseExpr());
+                } while (p.match(SqlTokenType.COMMA));
+            }
+            if (p.match(SqlTokenType.ORDER)) {
+                p.expect(SqlTokenType.BY);
+                p.selectParser.parseOrderBy(fn.orderBy());
+            }
             p.expect(SqlTokenType.RPAREN);
             fn.setWithinGroup(true);
         }
@@ -1111,8 +1133,29 @@ final class SqlExprParser {
             boolean progressed = false;
             while (p.match(SqlTokenType.LBRACKET)) {
                 SqlExpr index = parseExpr();
+                if (p.match(SqlTokenType.COLON)) {
+                    SqlExpr end = parseExpr();
+                    SqlFunctionExpr slice = new SqlFunctionExpr();
+                    slice.setName(SqlIdentifier.of("[]"));
+                    slice.addArgument(expr);
+                    slice.addArgument(index);
+                    slice.addArgument(end);
+                    expr = slice;
+                } else if (p.is(SqlTokenType.NAMED_BIND) && p.token.text() != null
+                        && p.token.text().length() > 1 && p.token.text().charAt(0) == ':') {
+                    // arr[1:3] 中 :3 被词法成 NAMED_BIND
+                    String num = p.token.text().substring(1);
+                    p.next();
+                    SqlFunctionExpr slice = new SqlFunctionExpr();
+                    slice.setName(SqlIdentifier.of("[]"));
+                    slice.addArgument(expr);
+                    slice.addArgument(index);
+                    slice.addArgument(SqlIdentifier.of(num));
+                    expr = slice;
+                } else {
+                    expr = SqlBinaryExpr.of(expr, SqlBinaryOp.SUBSCRIPT, index);
+                }
                 p.expect(SqlTokenType.RBRACKET);
-                expr = SqlBinaryExpr.of(expr, SqlBinaryOp.SUBSCRIPT, index);
                 progressed = true;
             }
             while (p.is(SqlTokenType.DOT) && p.lexer.peek() != null

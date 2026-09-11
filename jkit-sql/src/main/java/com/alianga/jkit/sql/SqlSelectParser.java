@@ -173,8 +173,13 @@ final class SqlSelectParser {
                     type = SqlJoin.Type.CROSS;
                 }
             } else if (p.match(SqlTokenType.OUTER)) {
-                p.expect(SqlTokenType.APPLY);
-                type = SqlJoin.Type.OUTER_APPLY;
+                if (p.match(SqlTokenType.APPLY)) {
+                    type = SqlJoin.Type.OUTER_APPLY;
+                } else {
+                    // Informix：OUTER JOIN ≡ LEFT JOIN
+                    p.expect(SqlTokenType.JOIN);
+                    type = SqlJoin.Type.LEFT;
+                }
             } else {
                 break;
             }
@@ -209,7 +214,11 @@ final class SqlSelectParser {
                     }
                 }
                 // 嵌套 JOIN 链式 ON：t1 JOIN t2 JOIN t3 ON c3 ON c2
-                while (p.match(SqlTokenType.ON)) {
+                // 勿吞 INSERT…SELECT 的 ON CONFLICT / ON DUPLICATE
+                while (p.is(SqlTokenType.ON) && p.lexer.peek() != null
+                        && !p.lexer.peek().textEqualsIgnoreCase("CONFLICT")
+                        && !p.lexer.peek().textEqualsIgnoreCase("DUPLICATE")) {
+                    p.next();
                     SqlExpr extra = p.exprParser.parseExpr();
                     SqlJoin target = join;
                     while (target.left() instanceof SqlJoin
@@ -490,8 +499,10 @@ final class SqlSelectParser {
                 p.expect(SqlTokenType.LPAREN);
                 sb.append('(').append(p.skipBalancedParensContent()).append(')');
                 select.setGroupByExtension(sb.toString());
-            } else if (p.match(SqlTokenType.LPAREN) && p.is(SqlTokenType.RPAREN)) {
+            } else if (p.is(SqlTokenType.LPAREN) && p.lexer.peek() != null
+                    && p.lexer.peek().type() == SqlTokenType.RPAREN) {
                 // PG：GROUP BY () 空分组集
+                p.next();
                 p.next();
             } else {
                 do {
@@ -548,6 +559,8 @@ final class SqlSelectParser {
             parseOrderBy(select.orderBy());
         }
         parseHiveDistributeSort(select);
+        // EMIT CHANGES 常在 LIMIT 之前
+        consumeSelectDialectTails(select);
         parseLimitFetch(select);
         // MySQL：INTO 也可出现在 FROM/WHERE/ORDER/LIMIT 之后（与 SELECT 列表后 INTO 二选一）
         parseSelectInto(select);
@@ -766,11 +779,12 @@ final class SqlSelectParser {
     private void consumeExceptReplace(SqlSelectItem item) {
         StringBuilder sb = new StringBuilder();
         while (true) {
-            if (p.is(SqlTokenType.EXCEPT) && p.lexer.peek() != null
+            if ((p.is(SqlTokenType.EXCEPT) || p.isIdent("EXCLUDE")) && p.lexer.peek() != null
                     && p.lexer.peek().type() == SqlTokenType.LPAREN) {
+                String kw = p.token.text().toUpperCase();
                 p.next();
                 p.expect(SqlTokenType.LPAREN);
-                sb.append(" EXCEPT(").append(p.skipBalancedParensContent()).append(')');
+                sb.append(' ').append(kw).append('(').append(p.skipBalancedParensContent()).append(')');
             } else if ((p.is(SqlTokenType.REPLACE) || p.isIdent("REPLACE")) && p.lexer.peek() != null
                     && p.lexer.peek().type() == SqlTokenType.LPAREN) {
                 p.next();
@@ -1249,6 +1263,12 @@ final class SqlSelectParser {
                 }
             }
             p.expect(SqlTokenType.RPAREN);
+            parseTableAlias(source);
+            return source;
+        }
+        // Spark/PG：FROM VALUES … [AS] alias(cols)
+        if (p.is(SqlTokenType.VALUES)) {
+            SqlTableSource source = parseValuesTable();
             parseTableAlias(source);
             return source;
         }
@@ -2064,7 +2084,8 @@ final class SqlSelectParser {
         SqlValuesTable values = new SqlValuesTable();
         p.expect(SqlTokenType.VALUES);
         do {
-            values.rows().add(p.exprParser.parsePrimary());
+            // VALUES 1, 2 / VALUES (1, 2), (3, 4)
+            values.rows().add(p.exprParser.parseExpr());
         } while (p.match(SqlTokenType.COMMA));
         return values;
     }

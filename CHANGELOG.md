@@ -5,6 +5,15 @@
 ## 2.0.1 / unreleased
 
 ### jkit-sql
+- 覆盖率第十轮：修复 PG `$$…$$` dollar-quote（先于 IDENT 扫描）、GROUP BY 括号项、
+  EMIT 置于 LIMIT 前、数组切片 `arr[1:3]`、WITHIN GROUP PARTITION、CAST schema.type、
+  ON CONFLICT 勿被链式 ON 吞掉、EXCLUDE、INSERT 表别名/OVERRIDING/SET AS、
+  Informix OUTER JOIN、NOT ISNULL、SEPARATOR、FROM VALUES。
+  竞品率 **95.0 / 89.5 / 79.8**。
+
+## 2.0.1 / unreleased
+
+### jkit-sql
 - 覆盖率第九轮：空白夹缝运算符（`> =`/`| |`/`^=`）、`=>` 命名实参、`//` 行内备注、
   SAMPLE SEED、FOR NO KEY UPDATE、HASH JOIN、WITHIN 时窗 JOIN、链式 ON、
   BigQuery `* EXCEPT/REPLACE`、MEMBER OF、ISNULL、GLOBAL IN、PREWHERE/SETTINGS/EMIT/PREFERRING、
