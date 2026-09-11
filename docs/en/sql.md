@@ -307,7 +307,7 @@ Explicitly not done: a procedure-body **execution engine** (structured AST alrea
 
 ## Cross-dialect type conversion (in progress)
 
-Schema / SQL conversion uses a **Normal Form** (canonical types) so adding a dialect is O(K), not O(N²). Design: [sql-schema-converter-design-v3.md](../sql-schema-converter-design-v3.md).
+Schema / SQL conversion uses a **Normal Form** (canonical types) so adding a dialect is O(K), not O(N²). Design: [sql-schema-converter-design.md](../sql-schema-converter-design.md).
 
 Phase 0–1 are in tree (JDK 8; `SqlDdlStatement.columnDefinitions()` stays `List<String>`):
 

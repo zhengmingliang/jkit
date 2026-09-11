@@ -386,7 +386,7 @@ SELECT 列表项与表源的别名用 **`alias()`** 读取：
 
 ## 跨方言类型转换（进行中）
 
-表结构 / SQL 跨方言转换走 **Normal Form 中转**（canonical 类型，避免 N² pairwise 映射）。设计见 [sql-schema-converter-design-v3.md](./sql-schema-converter-design-v3.md)。
+表结构 / SQL 跨方言转换走 **Normal Form 中转**（canonical 类型，避免 N² pairwise 映射）。设计见 [sql-schema-converter-design.md](./sql-schema-converter-design.md)。
 
 当前已落地 Phase 0–1（JDK 8，不改 `SqlDdlStatement.columnDefinitions()` 的 `List<String>` 签名）：
 
