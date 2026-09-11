@@ -48,4 +48,9 @@ public @interface SqlColumn {
      * @return 原始类型字面量；非空则不再从 Java 类型推断
      */
     String columnDefinition() default "";
+
+    /**
+     * @return 列注释；空则不生成 COMMENT
+     */
+    String comment() default "";
 }

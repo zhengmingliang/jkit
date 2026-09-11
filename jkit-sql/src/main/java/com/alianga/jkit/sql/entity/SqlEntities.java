@@ -89,9 +89,24 @@ public final class SqlEntities {
      * @return DDL
      */
     public static String createTable(SqlEntityModel model, SqlDialect dialect, boolean includeIndexes) {
+        return createTable(model, dialect, includeIndexes, SqlSchemaConvertOptions.defaults());
+    }
+
+    /**
+     * {@code CREATE TABLE}，可覆盖转换选项（例如 PG 自增用 SERIAL）。
+     *
+     * @param model 映射
+     * @param dialect 目标方言
+     * @param includeIndexes 是否在同一批里拼索引
+     * @param convertOptions 转换选项，null 则用默认
+     * @return DDL
+     */
+    public static String createTable(SqlEntityModel model, SqlDialect dialect, boolean includeIndexes,
+                                     SqlSchemaConvertOptions convertOptions) {
         SqlDialect d = dialect == null ? SqlDialect.MYSQL : dialect;
         SqlDataTypeRegistry registry = SqlDataTypeRegistry.builtins();
-        SqlSchemaConvertOptions options = SqlSchemaConvertOptions.defaults();
+        SqlSchemaConvertOptions options = convertOptions == null
+                ? SqlSchemaConvertOptions.defaults() : convertOptions;
         ConversionReport.Builder report = new ConversionReport.Builder();
         StringBuilder sb = new StringBuilder();
         sb.append("CREATE TABLE ").append(model.tableName()).append(" (");
@@ -114,23 +129,197 @@ public final class SqlEntities {
             }
             sb.append(')');
         }
-        for (int i = 0; i < cols.size(); i++) {
-            SqlEntityColumn c = cols.get(i);
-            if (c.referencesTable() != null) {
-                sb.append(", FOREIGN KEY (").append(c.columnName()).append(") REFERENCES ")
-                        .append(c.referencesTable()).append('(')
-                        .append(c.referencesColumn() == null ? "id" : c.referencesColumn())
-                        .append(')');
+        if (options.includeForeignKeys()) {
+            for (int i = 0; i < cols.size(); i++) {
+                SqlEntityColumn c = cols.get(i);
+                if (c.referencesTable() != null) {
+                    sb.append(", FOREIGN KEY (").append(c.columnName()).append(") REFERENCES ")
+                            .append(c.referencesTable()).append('(')
+                            .append(c.referencesColumn() == null ? "id" : c.referencesColumn())
+                            .append(')');
+                }
             }
         }
         sb.append(')');
+        appendTableComment(sb, model, d);
         if (includeIndexes) {
             List<String> indexes = model.indexes();
             for (int i = 0; i < indexes.size(); i++) {
                 sb.append("; ").append(indexSql(model.tableName(), indexes.get(i)));
             }
+            List<String> extras = extraSql(model, d, options);
+            for (int i = 0; i < extras.size(); i++) {
+                sb.append("; ").append(extras.get(i));
+            }
         }
         return sb.toString();
+    }
+
+    /**
+     * 建表后的附录：{@code COMMENT ON}、无 IDENTITY 方言的 SEQUENCE。
+     *
+     * @param model 映射
+     * @param dialect 方言
+     * @param convertOptions 转换选项
+     * @return 附录 SQL，可能为空
+     */
+    public static List<String> extraSql(SqlEntityModel model, SqlDialect dialect,
+                                        SqlSchemaConvertOptions convertOptions) {
+        SqlDialect d = dialect == null ? SqlDialect.MYSQL : dialect;
+        SqlSchemaConvertOptions options = convertOptions == null
+                ? SqlSchemaConvertOptions.defaults() : convertOptions;
+        List<String> out = new ArrayList<String>(4);
+        if (!inlinesTableComment(d) && model.comment() != null && model.comment().length() > 0) {
+            String c = commentOnSql(d, "TABLE", model.tableName(), null, model.comment());
+            if (c != null) {
+                out.add(c);
+            }
+        }
+        if (!inlinesColumnComment(d)) {
+            List<SqlEntityColumn> cols = model.columns();
+            for (int i = 0; i < cols.size(); i++) {
+                SqlEntityColumn col = cols.get(i);
+                if (col.comment() == null || col.comment().isEmpty()) {
+                    continue;
+                }
+                String c = commentOnSql(d, "COLUMN", model.tableName(), col.columnName(), col.comment());
+                if (c != null) {
+                    out.add(c);
+                }
+            }
+        }
+        if (options.includeAutoIncrement()) {
+            List<SqlEntityColumn> cols = model.columns();
+            for (int i = 0; i < cols.size(); i++) {
+                SqlEntityColumn col = cols.get(i);
+                if (!col.autoIncrement()) {
+                    continue;
+                }
+                String seq = sequenceSql(model.tableName(), col, d);
+                if (seq == null) {
+                    continue;
+                }
+                int from = 0;
+                while (from < seq.length()) {
+                    int slash = seq.indexOf("\n/\n", from);
+                    String piece;
+                    if (slash < 0) {
+                        piece = seq.substring(from).trim();
+                        from = seq.length();
+                    } else {
+                        piece = seq.substring(from, slash).trim();
+                        from = slash + 3;
+                    }
+                    if (!piece.isEmpty()) {
+                        out.add(piece);
+                    }
+                }
+            }
+        }
+        return out;
+    }
+
+    /**
+     * 无 IDENTITY 的方言用序列代替自增。支持的返回 SQL，否则 null。
+     *
+     * @param table 表名
+     * @param column 列
+     * @param dialect 方言
+     * @return SQL 或 null
+     */
+    public static String sequenceSql(String table, SqlEntityColumn column, SqlDialect dialect) {
+        if (table == null || column == null || !column.autoIncrement()) {
+            return null;
+        }
+        SqlDialect d = dialect == null ? SqlDialect.MYSQL : dialect;
+        if (!needsSequenceFallback(d)) {
+            return null;
+        }
+        String col = column.columnName();
+        String seq = sequenceName(table, col);
+        if (d == SqlDialect.ORACLE) {
+            String trg = table + "_" + col + "_bi";
+            return "CREATE SEQUENCE " + seq
+                    + "\n/\nCREATE OR REPLACE TRIGGER " + trg
+                    + " BEFORE INSERT ON " + table
+                    + " FOR EACH ROW WHEN (NEW." + col + " IS NULL) BEGIN SELECT "
+                    + seq + ".NEXTVAL INTO :NEW." + col + " FROM DUAL; END;";
+        }
+        return "CREATE SEQUENCE " + seq + " START WITH 1 INCREMENT BY 1";
+    }
+
+    /**
+     * 该方言无 IDENTITY / AUTO_INCREMENT 时用序列代替自增。
+     *
+     * @param dialect 方言
+     * @return 是否需要 SEQUENCE
+     */
+    public static boolean needsSequenceFallback(SqlDialect dialect) {
+        SqlDialect d = dialect == null ? SqlDialect.MYSQL : dialect;
+        return d == SqlDialect.ORACLE;
+    }
+
+    /**
+     * 自增序列名 {@code {table}_{column}_seq}。
+     *
+     * @param table 表名
+     * @param column 列名
+     * @return 序列名
+     */
+    public static String sequenceName(String table, String column) {
+        return table + "_" + column + "_seq";
+    }
+
+    private static boolean inlinesTableComment(SqlDialect dialect) {
+        return dialect == SqlDialect.MYSQL || dialect == SqlDialect.HIVE
+                || dialect == SqlDialect.CLICKHOUSE || dialect == SqlDialect.PRESTO;
+    }
+
+    private static boolean inlinesColumnComment(SqlDialect dialect) {
+        return dialect == SqlDialect.MYSQL || dialect == SqlDialect.H2
+                || dialect == SqlDialect.HIVE || dialect == SqlDialect.CLICKHOUSE
+                || dialect == SqlDialect.PRESTO;
+    }
+
+    private static void appendTableComment(StringBuilder sb, SqlEntityModel model, SqlDialect dialect) {
+        if (model.comment() == null || model.comment().isEmpty()) {
+            return;
+        }
+        String body = escapeComment(model.comment());
+        if (dialect == SqlDialect.MYSQL || dialect == SqlDialect.HIVE
+                || dialect == SqlDialect.CLICKHOUSE) {
+            sb.append(" COMMENT '").append(body).append('\'');
+        } else if (dialect == SqlDialect.PRESTO) {
+            sb.append(" WITH (comment = '").append(body).append("')");
+        }
+    }
+
+    private static String commentOnSql(SqlDialect dialect, String kind, String table, String column,
+                                       String comment) {
+        if (comment == null || comment.isEmpty()) {
+            return null;
+        }
+        String body = escapeComment(comment);
+        if (dialect == SqlDialect.SQLSERVER) {
+            if ("TABLE".equals(kind)) {
+                return "EXEC sp_addextendedproperty N'MS_Description', N'" + body
+                        + "', N'SCHEMA', N'dbo', N'TABLE', N'" + table + "'";
+            }
+            return "EXEC sp_addextendedproperty N'MS_Description', N'" + body
+                    + "', N'SCHEMA', N'dbo', N'TABLE', N'" + table + "', N'COLUMN', N'" + column + "'";
+        }
+        if (dialect == SqlDialect.SQLITE || dialect == SqlDialect.HIVE
+                || dialect == SqlDialect.PRESTO || dialect == SqlDialect.CLICKHOUSE) {
+            return null;
+        }
+        if ("TABLE".equals(kind)) {
+            return "COMMENT ON TABLE " + table + " IS '" + body + "'";
+        }
+        return "COMMENT ON COLUMN " + table + "." + column + " IS '" + body + "'";
+    }
+
+    private static String escapeComment(String comment) {
+        return comment.replace("'", "''");
     }
 
     /**
@@ -164,12 +353,28 @@ public final class SqlEntities {
      * @return 列定义
      */
     public static String columnSql(SqlEntityColumn column, SqlDialect dialect, boolean inlinePk) {
+        return columnSql(column, dialect, inlinePk, SqlSchemaConvertOptions.defaults());
+    }
+
+    /**
+     * 单列定义文本，可覆盖转换选项。
+     *
+     * @param column 列
+     * @param dialect 方言
+     * @param inlinePk 是否内联主键
+     * @param convertOptions 转换选项
+     * @return 列定义
+     */
+    public static String columnSql(SqlEntityColumn column, SqlDialect dialect, boolean inlinePk,
+                                   SqlSchemaConvertOptions convertOptions) {
         if (column == null) {
             return "";
         }
         SqlDialect d = dialect == null ? SqlDialect.MYSQL : dialect;
+        SqlSchemaConvertOptions options = convertOptions == null
+                ? SqlSchemaConvertOptions.defaults() : convertOptions;
         return renderColumn(column, d, SqlDataTypeRegistry.builtins(),
-                SqlSchemaConvertOptions.defaults(), new ConversionReport.Builder(), inlinePk);
+                options, new ConversionReport.Builder(), inlinePk);
     }
 
     /**
@@ -512,7 +717,7 @@ public final class SqlEntities {
         String type = col.rawType() != null && col.rawType().length() > 0
                 ? col.rawType()
                 : registry.toDialect(col.canonical(), dialect, p, s);
-        if (col.autoIncrement()) {
+        if (col.autoIncrement() && options.includeAutoIncrement()) {
             AutoIncrementStrategy.Result auto = AutoIncrementStrategy.apply(
                     new ColumnConstraint.AutoIncrement(
                             ColumnConstraint.AutoIncrement.IdentityMode.UNSPECIFIED),
@@ -528,6 +733,7 @@ public final class SqlEntities {
                 if (auto.clause() != null) {
                     sb.append(' ').append(auto.clause());
                 }
+                appendComment(sb, col, dialect);
                 return sb.toString();
             }
             if (!col.nullable()) {
@@ -539,6 +745,7 @@ public final class SqlEntities {
             if (inlinePk && col.primaryKey()) {
                 sb.append(" PRIMARY KEY");
             }
+            appendComment(sb, col, dialect);
             return sb.toString();
         }
         StringBuilder sb = new StringBuilder();
@@ -551,7 +758,18 @@ public final class SqlEntities {
         } else if (col.unique()) {
             sb.append(" UNIQUE");
         }
+        appendComment(sb, col, dialect);
         return sb.toString();
+    }
+
+    private static void appendComment(StringBuilder sb, SqlEntityColumn col, SqlDialect dialect) {
+        if (col.comment() == null || col.comment().isEmpty()) {
+            return;
+        }
+        if (!inlinesColumnComment(dialect)) {
+            return;
+        }
+        sb.append(" COMMENT '").append(escapeComment(col.comment())).append('\'');
     }
 
     private static Object read(Field field, Object entity) {

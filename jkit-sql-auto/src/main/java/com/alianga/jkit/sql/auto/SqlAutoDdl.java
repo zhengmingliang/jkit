@@ -4,6 +4,7 @@ import com.alianga.jkit.sql.SqlDialect;
 import com.alianga.jkit.sql.entity.SqlEntities;
 import com.alianga.jkit.sql.entity.SqlEntityColumn;
 import com.alianga.jkit.sql.entity.SqlEntityModel;
+import com.alianga.jkit.sql.schema.convert.SqlSchemaConvertOptions;
 import com.alianga.jkit.sql.schema.model.CanonicalType;
 import com.alianga.jkit.sql.schema.registry.SqlDataTypeRegistry;
 
@@ -49,6 +50,7 @@ public final class SqlAutoDdl {
         if (mode == SqlAutoMode.CREATE || mode == SqlAutoMode.CREATE_DROP) {
             // DROP 由 SqlAuto.plan 按外键逆序统一发出，这里只建表。
             out.add(createTableChange(model, d, opt));
+            addExtraChanges(out, model, d, opt);
             addIndexChanges(out, model, null, d, opt);
             return out;
         }
@@ -58,6 +60,7 @@ public final class SqlAutoDdl {
                 return out;
             }
             out.add(createTableChange(model, d, opt));
+            addExtraChanges(out, model, d, opt);
             addIndexChanges(out, model, null, d, opt);
             return out;
         }
@@ -74,6 +77,7 @@ public final class SqlAutoDdl {
                 } else {
                     out.add(new SqlAutoChange(SqlAutoChange.Kind.ADD_COLUMN, table, col.columnName(),
                             addColumnSql(table, col, d, opt)));
+                    addColumnExtras(out, model, col, d, opt);
                 }
                 continue;
             }
@@ -102,6 +106,34 @@ public final class SqlAutoDdl {
     }
 
     /**
+     * 删表前先删该表自增序列（Oracle 11g / 达梦等）。
+     *
+     * @param model 实体
+     * @param dialect 方言
+     * @return DROP SEQUENCE 列表
+     */
+    public static List<String> dropSequenceSql(SqlEntityModel model, SqlDialect dialect) {
+        List<String> out = new ArrayList<String>(2);
+        if (model == null) {
+            return out;
+        }
+        List<SqlEntityColumn> cols = model.columns();
+        for (int i = 0; i < cols.size(); i++) {
+            SqlEntityColumn col = cols.get(i);
+            if (SqlEntities.sequenceSql(model.tableName(), col, dialect) == null) {
+                continue;
+            }
+            String name = SqlEntities.sequenceName(model.tableName(), col.columnName());
+            if (dialect == SqlDialect.ORACLE || dialect == SqlDialect.ORACLE12) {
+                out.add("DROP SEQUENCE " + name);
+            } else {
+                out.add("DROP SEQUENCE IF EXISTS " + name);
+            }
+        }
+        return out;
+    }
+
+    /**
      * 删表语句（CREATE_DROP 关机用）。
      *
      * @param tableName 表名
@@ -109,6 +141,7 @@ public final class SqlAutoDdl {
      * @param options 选项
      * @return DDL
      */
+
     public static String dropTableSql(String tableName, SqlDialect dialect, SqlAutoOptions options) {
         String name = ident(tableName, dialect, options);
         SqlDialect d = dialect == null ? SqlDialect.MYSQL : dialect;
@@ -312,7 +345,8 @@ public final class SqlAutoDdl {
 
     private static SqlAutoChange createTableChange(SqlEntityModel model, SqlDialect dialect,
                                                    SqlAutoOptions options) {
-        String sql = SqlEntities.createTable(model, dialect, false);
+        SqlSchemaConvertOptions convert = convertOptions(options);
+        String sql = SqlEntities.createTable(model, dialect, false, convert);
         if (options.quoteIdentifiers()) {
             sql = quoteCreateTable(sql, model, dialect);
         }
@@ -332,7 +366,7 @@ public final class SqlAutoDdl {
 
     private static String addColumnSql(String table, SqlEntityColumn col, SqlDialect dialect,
                                        SqlAutoOptions options) {
-        String def = SqlEntities.columnSql(col, dialect, false);
+        String def = SqlEntities.columnSql(col, dialect, false, convertOptions(options));
         return "ALTER TABLE " + ident(table, dialect, options) + " ADD " + addColumnKeyword(dialect) + def;
     }
 
@@ -367,6 +401,58 @@ public final class SqlAutoDdl {
                 + " DROP COLUMN " + ident(column, dialect, options);
     }
 
+    private static void addExtraChanges(List<SqlAutoChange> out, SqlEntityModel model,
+                                        SqlDialect dialect, SqlAutoOptions options) {
+        List<String> extras = SqlEntities.extraSql(model, dialect, convertOptions(options));
+        for (int i = 0; i < extras.size(); i++) {
+            String sql = extras.get(i);
+            SqlAutoChange.Kind kind = sql.toUpperCase(Locale.ROOT).contains("SEQUENCE")
+                    || sql.toUpperCase(Locale.ROOT).contains("TRIGGER")
+                    ? SqlAutoChange.Kind.SEQUENCE : SqlAutoChange.Kind.COMMENT;
+            splitExtra(out, kind, model.tableName(), sql);
+        }
+    }
+
+    private static void addColumnExtras(List<SqlAutoChange> out, SqlEntityModel model, SqlEntityColumn col,
+                                        SqlDialect dialect, SqlAutoOptions options) {
+        List<String> extras = SqlEntities.extraSql(
+                new SqlEntityModel(model.type(), model.tableName(),
+                        java.util.Collections.singletonList(col),
+                        java.util.Collections.<String>emptyList(), null),
+                dialect, convertOptions(options));
+        for (int i = 0; i < extras.size(); i++) {
+            String sql = extras.get(i);
+            SqlAutoChange.Kind kind = sql.toUpperCase(Locale.ROOT).contains("SEQUENCE")
+                    || sql.toUpperCase(Locale.ROOT).contains("TRIGGER")
+                    ? SqlAutoChange.Kind.SEQUENCE : SqlAutoChange.Kind.COMMENT;
+            splitExtra(out, kind, model.tableName(), sql);
+        }
+    }
+
+    private static void splitExtra(List<SqlAutoChange> out, SqlAutoChange.Kind kind, String table, String sql) {
+        if (sql == null || sql.isEmpty()) {
+            return;
+        }
+        int from = 0;
+        while (from < sql.length()) {
+            int slash = sql.indexOf("\n/\n", from);
+            String piece;
+            if (slash < 0) {
+                piece = sql.substring(from).trim();
+                from = sql.length();
+            } else {
+                piece = sql.substring(from, slash).trim();
+                from = slash + 3;
+            }
+            if (piece.endsWith(";") && piece.toUpperCase(Locale.ROOT).indexOf(" BEGIN ") < 0) {
+                piece = piece.substring(0, piece.length() - 1).trim();
+            }
+            if (!piece.isEmpty()) {
+                out.add(new SqlAutoChange(kind, table, "", piece));
+            }
+        }
+    }
+
     private static void addIndexChanges(List<SqlAutoChange> out, SqlEntityModel model,
                                         SqlAutoLiveTable live, SqlDialect dialect, SqlAutoOptions options) {
         if (!options.createIndex()) {
@@ -376,6 +462,9 @@ public final class SqlAutoDdl {
         for (int i = 0; i < indexes.size(); i++) {
             String spec = indexes.get(i);
             String name = indexName(model.tableName(), spec);
+            if (coveredByUniqueColumn(model, spec)) {
+                continue;
+            }
             if (live != null && indexPresent(live, name, spec)) {
                 continue;
             }
@@ -391,6 +480,21 @@ public final class SqlAutoDdl {
                 out.add(new SqlAutoChange(SqlAutoChange.Kind.CREATE_INDEX, model.tableName(), name, sql));
             }
         }
+    }
+
+    private static boolean coveredByUniqueColumn(SqlEntityModel model, String spec) {
+        String cols = indexColumns(spec).replace(" ", "");
+        if (cols.indexOf(',') >= 0) {
+            return false;
+        }
+        List<SqlEntityColumn> list = model.columns();
+        for (int i = 0; i < list.size(); i++) {
+            SqlEntityColumn c = list.get(i);
+            if (c.columnName().equalsIgnoreCase(cols) && (c.unique() || c.primaryKey())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean indexPresent(SqlAutoLiveTable live, String name, String spec) {
@@ -433,6 +537,16 @@ public final class SqlAutoDdl {
             sb.append(cols.get(i));
         }
         return sb.toString();
+    }
+
+    private static SqlSchemaConvertOptions convertOptions(SqlAutoOptions options) {
+        SqlSchemaConvertOptions convert = SqlSchemaConvertOptions.defaults();
+        if (options.postgresIdentityStyle() != null) {
+            convert.postgresIdentityStyle(options.postgresIdentityStyle());
+        }
+        convert.includeForeignKeys(options.foreignKeys());
+        convert.includeAutoIncrement(options.autoIncrement());
+        return convert;
     }
 
     private static String ident(String name, SqlDialect dialect, SqlAutoOptions options) {

@@ -49,7 +49,7 @@ public final class SqlEntityMapper {
             }
             columns.add(column(f));
         }
-        return new SqlEntityModel(type, table, columns, tableIndexes(type));
+        return new SqlEntityModel(type, table, columns, tableIndexes(type), tableComment(type));
     }
 
     /**
@@ -214,8 +214,20 @@ public final class SqlEntityMapper {
         if (id) {
             nullable = false;
         }
+        String comment = null;
+        if (col != null && col.comment() != null && col.comment().length() > 0) {
+            comment = col.comment();
+        }
         return new SqlEntityColumn(name, canonical, prec, sc, nullable, id, generated, unique,
-                rawType, refTable, refCol, field);
+                rawType, refTable, refCol, comment, field);
+    }
+
+    private static String tableComment(Class<?> type) {
+        SqlTable sqlTable = type.getAnnotation(SqlTable.class);
+        if (sqlTable != null && sqlTable.comment() != null && sqlTable.comment().length() > 0) {
+            return sqlTable.comment();
+        }
+        return null;
     }
 
     private static List<String> tableIndexes(Class<?> type) {

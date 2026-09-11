@@ -10,7 +10,7 @@ import com.alianga.jkit.sql.entity.SqlTable;
  *
  * @author 郑明亮
  */
-@SqlTable(name = "auto_user", indexes = {"idx_auto_email:email"})
+@SqlTable(name = "auto_user", indexes = {"idx_auto_name:user_name"})
 public class AutoUser {
     @SqlId
     @SqlGenerated

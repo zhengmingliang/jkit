@@ -2,6 +2,7 @@ package com.alianga.jkit.sql.auto;
 
 import com.alianga.jkit.config.ConfigPropertyResolver;
 import com.alianga.jkit.sql.SqlDialect;
+import com.alianga.jkit.sql.schema.convert.SqlSchemaConvertOptions;
 
 import javax.sql.DataSource;
 
@@ -38,6 +39,9 @@ public final class SqlAutoOptions {
     private boolean dryRun;
     private String catalog;
     private String schema;
+    private SqlSchemaConvertOptions.PostgresIdentityStyle postgresIdentityStyle;
+    private boolean foreignKeys = true;
+    private boolean autoIncrement = true;
 
     private SqlAutoOptions() {
     }
@@ -437,6 +441,61 @@ public final class SqlAutoOptions {
      */
     public String schema() {
         return schema;
+    }
+
+    /**
+     * @return PG / OpenGauss 自增写法；null 表示用转换器默认 IDENTITY
+     */
+    public SqlSchemaConvertOptions.PostgresIdentityStyle postgresIdentityStyle() {
+        return postgresIdentityStyle;
+    }
+
+    /**
+     * OpenGauss 老版本不认 {@code GENERATED … IDENTITY}，可改成 {@code SERIAL}。
+     *
+     * @param postgresIdentityStyle 自增写法
+     * @return this
+     */
+    public SqlAutoOptions postgresIdentityStyle(
+            SqlSchemaConvertOptions.PostgresIdentityStyle postgresIdentityStyle) {
+        this.postgresIdentityStyle = postgresIdentityStyle;
+        return this;
+    }
+
+    /**
+     * @return 是否在 CREATE TABLE 里写 FOREIGN KEY
+     */
+    public boolean foreignKeys() {
+        return foreignKeys;
+    }
+
+    /**
+     * GBase 8a 等不支持表内 FOREIGN KEY 算法时关掉。
+     *
+     * @param foreignKeys 是否生成外键
+     * @return this
+     */
+    public SqlAutoOptions foreignKeys(boolean foreignKeys) {
+        this.foreignKeys = foreignKeys;
+        return this;
+    }
+
+    /**
+     * @return 是否生成自增子句
+     */
+    public boolean autoIncrement() {
+        return autoIncrement;
+    }
+
+    /**
+     * DuckDB 等不认 AUTOINCREMENT / IDENTITY 时关掉，只保留主键。
+     *
+     * @param autoIncrement 是否自增
+     * @return this
+     */
+    public SqlAutoOptions autoIncrement(boolean autoIncrement) {
+        this.autoIncrement = autoIncrement;
+        return this;
     }
 
     /**

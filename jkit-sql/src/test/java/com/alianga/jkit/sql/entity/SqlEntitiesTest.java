@@ -17,6 +17,7 @@ import java.util.List;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 /**
@@ -25,6 +26,72 @@ import static org.junit.Assert.assertTrue;
  * @author 郑明亮
  */
 public class SqlEntitiesTest {
+
+    @Test
+    public void commentsAndOracleSequence() {
+        @SqlTable(name = "cmt", comment = "用户表")
+        class Cmt {
+            @SqlId
+            @SqlGenerated
+            long id;
+            @SqlColumn(comment = "用户名")
+            String name;
+        }
+        String mysql = SqlEntities.createTable(Cmt.class, SqlDialect.MYSQL);
+        assertTrue(mysql, mysql.contains("COMMENT '用户名'"));
+        assertTrue(mysql, mysql.contains("COMMENT '用户表'"));
+        String h2 = SqlEntities.createTable(Cmt.class, SqlDialect.H2);
+        assertTrue(h2, h2.contains("COMMENT '用户名'"));
+        assertTrue(h2, h2.contains("COMMENT ON TABLE"));
+
+        String pg = SqlEntities.createTable(Cmt.class, SqlDialect.POSTGRES);
+        assertTrue(pg, pg.contains("COMMENT ON TABLE cmt IS '用户表'"));
+        assertTrue(pg, pg.contains("COMMENT ON COLUMN cmt.name IS '用户名'"));
+        assertFalse(pg, pg.contains("COMMENT '用户名'"));
+
+        String oracle = SqlEntities.createTable(Cmt.class, SqlDialect.ORACLE);
+        assertTrue(oracle, oracle.contains("CREATE SEQUENCE cmt_id_seq"));
+        assertTrue(oracle, oracle.toUpperCase().contains("TRIGGER"));
+        assertTrue(oracle, oracle.contains("COMMENT ON TABLE cmt"));
+
+        String sqlserver = SqlEntities.createTable(Cmt.class, SqlDialect.SQLSERVER);
+        assertTrue(sqlserver, sqlserver.contains("sp_addextendedproperty"));
+        assertTrue(sqlserver, sqlserver.contains("MS_Description"));
+        assertTrue(sqlserver, sqlserver.contains("用户表"));
+        assertTrue(sqlserver, sqlserver.contains("用户名"));
+
+        String hive = SqlEntities.createTable(Cmt.class, SqlDialect.HIVE);
+        assertTrue(hive, hive.contains("COMMENT '用户表'"));
+        assertTrue(hive, hive.contains("COMMENT '用户名'"));
+
+        String clickhouse = SqlEntities.createTable(Cmt.class, SqlDialect.CLICKHOUSE);
+        assertTrue(clickhouse, clickhouse.contains("COMMENT '用户表'"));
+        assertTrue(clickhouse, clickhouse.contains("COMMENT '用户名'"));
+
+        String presto = SqlEntities.createTable(Cmt.class, SqlDialect.PRESTO);
+        assertTrue(presto, presto.contains("WITH (comment = '用户表')"));
+        assertTrue(presto, presto.contains("COMMENT '用户名'"));
+
+        String sqlite = SqlEntities.createTable(Cmt.class, SqlDialect.SQLITE);
+        assertFalse(sqlite, sqlite.toUpperCase().contains("COMMENT"));
+
+        String db2 = SqlEntities.createTable(Cmt.class, SqlDialect.DB2);
+        assertTrue(db2, db2.contains("COMMENT ON TABLE cmt IS '用户表'"));
+        assertTrue(db2, db2.contains("COMMENT ON COLUMN cmt.name IS '用户名'"));
+
+        String ansi = SqlEntities.createTable(Cmt.class, SqlDialect.ANSI);
+        assertTrue(ansi, ansi.contains("COMMENT ON TABLE cmt"));
+        assertTrue(ansi, ansi.contains("COMMENT ON COLUMN cmt.name"));
+
+        assertTrue(SqlEntities.needsSequenceFallback(SqlDialect.ORACLE));
+        assertFalse(SqlEntities.needsSequenceFallback(SqlDialect.ORACLE12));
+        assertFalse(SqlEntities.needsSequenceFallback(SqlDialect.MYSQL));
+        assertEquals("cmt_id_seq", SqlEntities.sequenceName("cmt", "id"));
+        assertTrue(SqlEntities.sequenceSql("cmt", SqlEntities.inspect(Cmt.class).idColumn(),
+                SqlDialect.ORACLE).contains("CREATE SEQUENCE"));
+        assertNull(SqlEntities.sequenceSql("cmt", SqlEntities.inspect(Cmt.class).idColumn(),
+                SqlDialect.MYSQL));
+    }
 
     @Test
     public void inspectMapsJavaTypesAndAnnotations() {

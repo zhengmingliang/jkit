@@ -23,6 +23,10 @@ public final class SqlAutoChange {
         DROP_COLUMN,
         /** 建索引。 */
         CREATE_INDEX,
+        /** 列 / 表注释。 */
+        COMMENT,
+        /** 序列 / 触发器（无 IDENTITY 的方言）。 */
+        SEQUENCE,
         /** 校验失败（不附带可执行 SQL）。 */
         VALIDATE
     }

@@ -162,8 +162,8 @@ When `dialect` is unset:
 Does:
 
 - Scan packages or an explicit entity list; referenced tables come first by foreign key
-- Missing table → `CREATE TABLE` (optional `CREATE INDEX` afterwards)
-- Table exists, column missing → `ALTER TABLE … ADD [COLUMN]`
+- Missing table → `CREATE TABLE` (optional `CREATE INDEX`, comment extras, SEQUENCE on dialects without IDENTITY)
+- Table exists, column missing → `ALTER TABLE … ADD [COLUMN]` (column comments as extras)
 - Missing index → `CREATE INDEX`
 - `VALIDATE` turns missing tables/columns / type mismatches into an exception
 - `CREATE` / `CREATE_DROP` drop then rebuild
@@ -182,5 +182,16 @@ Drop managed tables explicitly (reverse FK order):
 ```java
 SqlAuto.drop(SqlAutoOptions.defaults().url(url).entities(User.class));
 ```
+
+Table / column comments (`@SqlTable(comment)` / `@SqlColumn(comment)`) follow the dialect: MySQL / Hive / ClickHouse inline `COMMENT`; H2 inlines column comments and uses `COMMENT ON TABLE`; PostgreSQL / Oracle / DB2 / ANSI emit `COMMENT ON`; SQL Server uses `sp_addextendedproperty`; Presto table-level `WITH (comment=…)`; SQLite skips comments. Auto-DDL runs extras as separate statements (`CREATE TABLE` itself does not include them).
+
+Oracle ≤11g / Dameng (`ORACLE`) have no IDENTITY: auto-increment PKs become `CREATE SEQUENCE {table}_{column}_seq` plus a `BEFORE INSERT` trigger. `CREATE_DROP` / `drop` drop the sequence before the table. Oracle 12c+ still uses `GENERATED … AS IDENTITY`.
+
+Some products are narrower than the first-class dialect. Turn the matching DDL off:
+
+- Old OpenGauss rejects `GENERATED … IDENTITY`: `postgresIdentityStyle(SERIAL)`
+- GBase 8a may reject in-table `FOREIGN KEY` / standalone `CREATE INDEX` (`unsupported key algorithm`): `foreignKeys(false).createIndex(false)`
+- DuckDB rejects `AUTOINCREMENT` / `IDENTITY` / in-table FK: `autoIncrement(false).foreignKeys(false).createIndex(false)`
+- Oracle ≤11g / Dameng: SEQUENCE + TRIGGER is generated (no longer manual)
 
 For H2 in-memory `CREATE_DROP`, put `DB_CLOSE_DELAY=-1` on the URL so the database survives the startup connection closing.

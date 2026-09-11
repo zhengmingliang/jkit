@@ -147,7 +147,12 @@ public final class SqlAuto {
                 if (lives.get(i) == null) {
                     continue;
                 }
-                String table = models.get(i).tableName();
+                SqlEntityModel model = models.get(i);
+                String table = model.tableName();
+                List<String> seqs = SqlAutoDdl.dropSequenceSql(model, d);
+                for (int s = 0; s < seqs.size(); s++) {
+                    changes.add(new SqlAutoChange(SqlAutoChange.Kind.SEQUENCE, table, "", seqs.get(s)));
+                }
                 changes.add(new SqlAutoChange(SqlAutoChange.Kind.DROP_TABLE, table, "",
                         SqlAutoDdl.dropTableSql(table, d, opt)));
             }
@@ -206,6 +211,11 @@ public final class SqlAuto {
             String table = SqlEntities.inspect(ordered.get(i)).tableName();
             if (inspector.inspect(table) == null) {
                 continue;
+            }
+            SqlEntityModel model = SqlEntities.inspect(ordered.get(i));
+            List<String> seqs = SqlAutoDdl.dropSequenceSql(model, dialect);
+            for (int s = 0; s < seqs.size(); s++) {
+                changes.add(new SqlAutoChange(SqlAutoChange.Kind.SEQUENCE, table, "", seqs.get(s)));
             }
             changes.add(new SqlAutoChange(SqlAutoChange.Kind.DROP_TABLE, table, "",
                     SqlAutoDdl.dropTableSql(table, dialect, opt)));
@@ -319,32 +329,44 @@ public final class SqlAuto {
             holder = open(options);
             List<Class<?>> ordered = SqlEntities.orderByForeignKeys(types);
             for (int i = ordered.size() - 1; i >= 0; i--) {
-                String table = SqlEntities.inspect(ordered.get(i)).tableName();
-                String sql = SqlAutoDdl.dropTableSql(table, dialect, options);
-                if (options.showSql()) {
-                    LOG.info("{}", sql);
+                SqlEntityModel model = SqlEntities.inspect(ordered.get(i));
+                String table = model.tableName();
+                List<String> seqs = SqlAutoDdl.dropSequenceSql(model, dialect);
+                for (int s = 0; s < seqs.size(); s++) {
+                    executeQuiet(holder.connection, seqs.get(s), options, table);
                 }
-                Statement st = null;
-                try {
-                    st = holder.connection.createStatement();
-                    st.execute(sql);
-                } catch (SQLException e) {
-                    LOG.warn("drop {} failed: {}", table, e.getMessage());
-                } finally {
-                    if (st != null) {
-                        try {
-                            st.close();
-                        } catch (SQLException ignored) {
-                            // 忽略
-                        }
-                    }
-                }
+                executeQuiet(holder.connection, SqlAutoDdl.dropTableSql(table, dialect, options),
+                        options, table);
             }
         } catch (RuntimeException e) {
             LOG.warn("create-drop shutdown failed: {}", e.getMessage());
         } finally {
             if (holder != null) {
                 holder.close();
+            }
+        }
+    }
+
+    private static void executeQuiet(Connection connection, String sql, SqlAutoOptions options, String table) {
+        if (sql == null || sql.isEmpty()) {
+            return;
+        }
+        if (options.showSql()) {
+            LOG.info("{}", sql);
+        }
+        Statement st = null;
+        try {
+            st = connection.createStatement();
+            st.execute(sql);
+        } catch (SQLException e) {
+            LOG.warn("drop {} failed: {}", table, e.getMessage());
+        } finally {
+            if (st != null) {
+                try {
+                    st.close();
+                } catch (SQLException ignored) {
+                    // 忽略
+                }
             }
         }
     }

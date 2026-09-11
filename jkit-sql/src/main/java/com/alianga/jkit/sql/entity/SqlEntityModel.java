@@ -13,6 +13,7 @@ import java.util.List;
 public final class SqlEntityModel {
     private final Class<?> type;
     private final String tableName;
+    private final String comment;
     private final List<SqlEntityColumn> columns;
     private final List<String> indexes;
 
@@ -33,8 +34,21 @@ public final class SqlEntityModel {
      */
     public SqlEntityModel(Class<?> type, String tableName, List<SqlEntityColumn> columns,
                           List<String> indexes) {
+        this(type, tableName, columns, indexes, null);
+    }
+
+    /**
+     * @param type 实体类
+     * @param tableName 表名
+     * @param columns 列
+     * @param indexes 索引
+     * @param comment 表注释
+     */
+    public SqlEntityModel(Class<?> type, String tableName, List<SqlEntityColumn> columns,
+                          List<String> indexes, String comment) {
         this.type = type;
         this.tableName = tableName == null ? "" : tableName;
+        this.comment = comment;
         if (columns == null || columns.isEmpty()) {
             this.columns = Collections.emptyList();
         } else {
@@ -59,6 +73,13 @@ public final class SqlEntityModel {
      */
     public String tableName() {
         return tableName;
+    }
+
+    /**
+     * @return 表注释，可空
+     */
+    public String comment() {
+        return comment;
     }
 
     /**

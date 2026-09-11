@@ -605,3 +605,5 @@ P0–P2 已完成。余量：
 独立模块 `com.alianga:jkit-sql-auto`：启动时扫描实体、对照 `DatabaseMetaData`、执行 CREATE/ALTER。`jkit-sql` 仍不执行 SQL。模式 `none/validate/update/create/create-drop`；默认 UPDATE 只加不删。文档 `docs/sql-auto.md` + 英文。
 
 Spring Boot 2/3 starter：`jkit-sql-auto-spring-boot-2`（`spring.factories`）与 `jkit-sql-auto-spring-boot-3`（`AutoConfiguration.imports`）。`SqlAuto.drop` 显式删表。真库回归在 `tools-test` 的 `LocalDatasourceSqlAutoTest`。
+
+表 / 列注释按方言生成（MySQL/Hive/ClickHouse 内联、H2 列内 + `COMMENT ON TABLE`、PG/Oracle/DB2/ANSI `COMMENT ON`、SQL Server `sp_addextendedproperty`、Presto 表级 `WITH`、SQLite 忽略）。Oracle ≤11g / 达梦自增用 SEQUENCE + TRIGGER。`CREATE TABLE`（`includeIndexes=false`）不含附录，由 `extraSql` 单独执行。

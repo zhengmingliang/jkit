@@ -22,6 +22,7 @@ public final class SqlEntityColumn {
     private final String rawType;
     private final String referencesTable;
     private final String referencesColumn;
+    private final String comment;
     private final Field field;
 
     /**
@@ -39,7 +40,7 @@ public final class SqlEntityColumn {
                            boolean nullable, boolean primaryKey, boolean autoIncrement, boolean unique,
                            Field field) {
         this(columnName, canonical, precision, scale, nullable, primaryKey, autoIncrement, unique,
-                null, null, null, field);
+                null, null, null, null, field);
     }
 
     /**
@@ -59,6 +60,29 @@ public final class SqlEntityColumn {
     public SqlEntityColumn(String columnName, CanonicalType canonical, Integer precision, Integer scale,
                            boolean nullable, boolean primaryKey, boolean autoIncrement, boolean unique,
                            String rawType, String referencesTable, String referencesColumn, Field field) {
+        this(columnName, canonical, precision, scale, nullable, primaryKey, autoIncrement, unique,
+                rawType, referencesTable, referencesColumn, null, field);
+    }
+
+    /**
+     * @param columnName 列名
+     * @param canonical canonical
+     * @param precision 精度
+     * @param scale 标度
+     * @param nullable 可空
+     * @param primaryKey 主键
+     * @param autoIncrement 自增
+     * @param unique 唯一
+     * @param rawType 原始类型字面量
+     * @param referencesTable 引用表
+     * @param referencesColumn 引用列
+     * @param comment 列注释
+     * @param field 源字段
+     */
+    public SqlEntityColumn(String columnName, CanonicalType canonical, Integer precision, Integer scale,
+                           boolean nullable, boolean primaryKey, boolean autoIncrement, boolean unique,
+                           String rawType, String referencesTable, String referencesColumn, String comment,
+                           Field field) {
         this.columnName = columnName;
         this.canonical = canonical == null ? CanonicalType.VARCHAR : canonical;
         this.precision = precision;
@@ -70,6 +94,7 @@ public final class SqlEntityColumn {
         this.rawType = rawType;
         this.referencesTable = referencesTable;
         this.referencesColumn = referencesColumn;
+        this.comment = comment;
         this.field = field;
     }
 
@@ -155,5 +180,12 @@ public final class SqlEntityColumn {
      */
     public String referencesColumn() {
         return referencesColumn;
+    }
+
+    /**
+     * @return 列注释，可空
+     */
+    public String comment() {
+        return comment;
     }
 }

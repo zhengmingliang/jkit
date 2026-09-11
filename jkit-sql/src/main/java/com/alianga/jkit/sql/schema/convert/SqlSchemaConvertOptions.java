@@ -36,6 +36,8 @@ public final class SqlSchemaConvertOptions {
     private boolean generateOracleSequence;
     private boolean parallelBatch;
     private boolean promoteLongVarchar = true;
+    private boolean includeForeignKeys = true;
+    private boolean includeAutoIncrement = true;
 
     private SqlSchemaConvertOptions() {
     }
@@ -160,6 +162,38 @@ public final class SqlSchemaConvertOptions {
      */
     public SqlSchemaConvertOptions promoteLongVarchar(boolean promoteLongVarchar) {
         this.promoteLongVarchar = promoteLongVarchar;
+        return this;
+    }
+
+    /**
+     * @return 建表是否写 FOREIGN KEY
+     */
+    public boolean includeForeignKeys() {
+        return includeForeignKeys;
+    }
+
+    /**
+     * @param includeForeignKeys 是否写外键
+     * @return this
+     */
+    public SqlSchemaConvertOptions includeForeignKeys(boolean includeForeignKeys) {
+        this.includeForeignKeys = includeForeignKeys;
+        return this;
+    }
+
+    /**
+     * @return 是否生成自增子句
+     */
+    public boolean includeAutoIncrement() {
+        return includeAutoIncrement;
+    }
+
+    /**
+     * @param includeAutoIncrement 是否自增
+     * @return this
+     */
+    public SqlSchemaConvertOptions includeAutoIncrement(boolean includeAutoIncrement) {
+        this.includeAutoIncrement = includeAutoIncrement;
         return this;
     }
 }

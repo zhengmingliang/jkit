@@ -162,8 +162,8 @@ java com.alianga.jkit.sql.auto.SqlAuto
 做：
 
 - 扫描包或显式实体列表，按外键把被引用表排在前面
-- 表不存在 → `CREATE TABLE`（可选随后 `CREATE INDEX`）
-- 表在、列缺 → `ALTER TABLE … ADD [COLUMN]`
+- 表不存在 → `CREATE TABLE`（可选随后 `CREATE INDEX`、注释附录、无 IDENTITY 方言的 SEQUENCE）
+- 表在、列缺 → `ALTER TABLE … ADD [COLUMN]`（列注释同样按方言附录）
 - 索引缺 → `CREATE INDEX`
 - `VALIDATE` 把缺表/缺列/类型不兼容收成异常
 - `CREATE` / `CREATE_DROP` 先删再建模
@@ -182,5 +182,16 @@ java com.alianga.jkit.sql.auto.SqlAuto
 ```java
 SqlAuto.drop(SqlAutoOptions.defaults().url(url).entities(User.class));
 ```
+
+表 / 列注释（`@SqlTable(comment)` / `@SqlColumn(comment)`）按方言生成：MySQL / Hive / ClickHouse 内联 `COMMENT`；H2 列内 `COMMENT`、表级 `COMMENT ON TABLE`；PostgreSQL / Oracle / DB2 / ANSI 为 `COMMENT ON`；SQL Server 为 `sp_addextendedproperty`；Presto 表级 `WITH (comment=…)`；SQLite 忽略。自动建表把附录拆成独立语句执行（`CREATE TABLE` 本身不含这些附录）。
+
+Oracle ≤11g / 达梦（方言 `ORACLE`）没有 IDENTITY：自增主键改成 `CREATE SEQUENCE {table}_{column}_seq` + `BEFORE INSERT` 触发器；`CREATE_DROP` / `drop` 会先 `DROP SEQUENCE` 再删表。Oracle 12c+ 仍用 `GENERATED … AS IDENTITY`。
+
+部分产品建表能力比一等方言窄，可用选项关掉对应 DDL：
+
+- OpenGauss 老版本不认 `GENERATED … IDENTITY`：`postgresIdentityStyle(SERIAL)`
+- GBase 8a 表内 `FOREIGN KEY` / 独立 `CREATE INDEX` 可能报 `unsupported key algorithm`：`foreignKeys(false).createIndex(false)`
+- DuckDB 不认 `AUTOINCREMENT` / `IDENTITY` / 表内 FK：`autoIncrement(false).foreignKeys(false).createIndex(false)`
+- Oracle ≤11g / 达梦：自动生成 SEQUENCE + TRIGGER（不再需要手工写）
 
 H2 内存库做 `CREATE_DROP` 关机删表时，URL 需带 `DB_CLOSE_DELAY=-1`，否则连接一关库就没了。

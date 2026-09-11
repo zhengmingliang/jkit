@@ -461,6 +461,10 @@ java -jar target/benchmarks.jar com.alianga.test.sql.jmh.SqlSchemaConvertBenchma
 
 对标 data-set `EntityScanner`：扫描包下带 `@SqlTable`、JPA `@Entity`、MyBatis-Plus `@TableName`/`@TableId` 的类（不依赖 Spring / JPA / MyBatis 编译），再按方言生成建表与增删改查。也认 `@TableField`（`exist=false` 跳过）、JPA `@Index`/`@Enumerated`/`@Embedded`；`List`/`Set`/`@OneToMany` 默认不建列。`createTables` 按外键把被引用表排在前面。Java 类型走 canonical 类型表。
 
+表 / 列注释：`@SqlTable(comment=…)`、`@SqlColumn(comment=…)`。MySQL / Hive / ClickHouse 写成列内 / 表尾 `COMMENT '…'`；H2 列内 `COMMENT`，表级走 `COMMENT ON TABLE`；PostgreSQL / Oracle / DB2 / ANSI 走 `COMMENT ON TABLE|COLUMN`；SQL Server 走 `sp_addextendedproperty`；Presto 表级 `WITH (comment=…)`；SQLite 无注释语法，忽略。自动建表把这些附录拆成独立变更执行。
+
+无 IDENTITY 的方言（Oracle ≤11g / 达梦，枚举 `ORACLE`）用 `CREATE SEQUENCE {table}_{column}_seq` + `BEFORE INSERT` 触发器代替自增主键；Oracle 12c+ 仍用 `GENERATED … AS IDENTITY`。`SqlEntities.extraSql` / `sequenceSql` 可单独取附录。
+
 ```java
 import com.alianga.jkit.sql.entity.SqlEntities;
 import com.alianga.jkit.sql.entity.SqlTable;
@@ -502,8 +506,10 @@ String sel = SqlEntities.selectById(DemoUser.class, 1L, SqlDialect.MYSQL);
 | `columnSql(SqlEntityColumn, SqlDialect, boolean inlinePk)` | 单列定义文本；`ALTER TABLE … ADD` 传 `inlinePk=false` |
 | `columnTypeSql(SqlEntityColumn, SqlDialect)` | 只取类型文本，供结构对比 |
 | `createIndex(String tableName, String spec)` | 单独一条 `CREATE INDEX`；`spec` 为 `name:col1,col2` 或 `col1,col2` |
+| `extraSql(SqlEntityModel, SqlDialect, SqlSchemaConvertOptions)` | 建表附录：`COMMENT ON` / SQL Server 扩展属性 / 无 IDENTITY 方言的 SEQUENCE |
+| `sequenceSql(String table, SqlEntityColumn, SqlDialect)` | 无 IDENTITY 时生成 SEQUENCE（+ Oracle 触发器）；否则 `null` |
 
-后四个是给「按实体做结构对比 / 增量加列」用的——例如自动建表模块就靠它们拼 `ALTER TABLE … ADD`：
+`columnSql` / `columnTypeSql` / `createIndex` / `extraSql` / `sequenceSql` 给「按实体做结构对比 / 增量加列 / 附录注释与序列」用——自动建表模块靠它们拼 `ALTER TABLE … ADD` 和附录：
 
 ```java
 SqlEntityModel model = SqlEntities.inspect(DemoUser.class);

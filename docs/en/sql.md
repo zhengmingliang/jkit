@@ -345,6 +345,10 @@ Supported first-class dialects (MySQL, PostgreSQL, Oracle 11g/12c, SQL Server, H
 
 Like data-set `EntityScanner`, without Spring: scan classes annotated with `@SqlTable`, JPA `@Entity`, or MyBatis-Plus `@TableName`/`@TableId` (resolved by FQCN via reflection — no compile dependency on Spring / JPA / MyBatis), then generate DDL and CRUD per dialect. Also honours `@TableField` (`exist=false` skips the column), JPA `@Index`/`@Enumerated`/`@Embedded`; `List`/`Set`/`@OneToMany` fields are skipped unless annotated. `createTables` orders referenced tables first. Java types go through the canonical type registry.
 
+Table / column comments (`@SqlTable(comment=…)`, `@SqlColumn(comment=…)`): MySQL / Hive / ClickHouse inline `COMMENT '…'`; H2 inlines column comments and uses `COMMENT ON TABLE` for the table; PostgreSQL / Oracle / DB2 / ANSI emit `COMMENT ON TABLE|COLUMN`; SQL Server uses `sp_addextendedproperty`; Presto table-level `WITH (comment=…)`; SQLite has no comment syntax, so comments are skipped. Auto-DDL runs these as extra statements after `CREATE TABLE`.
+
+Dialects without IDENTITY (Oracle ≤11g / Dameng, enum `ORACLE`) get `CREATE SEQUENCE {table}_{column}_seq` plus a `BEFORE INSERT` trigger instead of an identity column; Oracle 12c+ still uses `GENERATED … AS IDENTITY`. `SqlEntities.extraSql` / `sequenceSql` expose the extras on their own.
+
 ```java
 import com.alianga.jkit.sql.entity.SqlEntities;
 import com.alianga.jkit.sql.entity.SqlTable;
@@ -388,8 +392,10 @@ String sel = SqlEntities.selectById(DemoUser.class, 1L, SqlDialect.MYSQL);
 | `columnSql(SqlEntityColumn, SqlDialect, boolean inlinePk)` | One column definition; pass `inlinePk=false` for `ALTER TABLE … ADD` |
 | `columnTypeSql(SqlEntityColumn, SqlDialect)` | Type text only, for schema comparison |
 | `createIndex(String tableName, String spec)` | A standalone `CREATE INDEX`; `spec` is `name:col1,col2` or `col1,col2` |
+| `extraSql(SqlEntityModel, SqlDialect, SqlSchemaConvertOptions)` | Post-create extras: `COMMENT ON` / SQL Server extended properties / SEQUENCE on dialects without IDENTITY |
+| `sequenceSql(String table, SqlEntityColumn, SqlDialect)` | SEQUENCE (+ Oracle trigger) when the dialect has no IDENTITY; otherwise `null` |
 
-The last four exist for schema diffing and incremental `ALTER TABLE … ADD` — that is exactly what the auto-DDL module builds on:
+`columnSql` / `columnTypeSql` / `createIndex` / `extraSql` / `sequenceSql` exist for schema diffing, incremental `ALTER TABLE … ADD`, and comment / sequence extras — that is exactly what the auto-DDL module builds on:
 
 ```java
 SqlEntityModel model = SqlEntities.inspect(DemoUser.class);

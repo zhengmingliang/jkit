@@ -4,6 +4,7 @@ import com.alianga.jkit.sql.ast.SqlSelect;
 import com.alianga.jkit.sql.ast.SqlStatement;
 import com.alianga.jkit.sql.entity.SqlColumn;
 import com.alianga.jkit.sql.entity.SqlEntities;
+import com.alianga.jkit.sql.entity.SqlGenerated;
 import com.alianga.jkit.sql.entity.SqlId;
 import com.alianga.jkit.sql.entity.SqlTable;
 import com.alianga.jkit.sql.schema.convert.ConversionResult;
@@ -328,6 +329,27 @@ public class SqlBusinessScenarioTest {
         // PG 建表语句不带 COMMENT，注释走独立的 COMMENT ON
         assertTrue(ddl, ddl.contains("COMMENT ON TABLE t_member IS '会员表'"));
         assertTrue(ddl, ddl.contains("COMMENT ON COLUMN t_member.nick IS '昵称'"));
+    }
+
+    @Test
+    public void entityGeneratesOracleSequenceAndSqlServerComment() {
+        @SqlTable(name = "t_member", comment = "会员表")
+        class Member {
+            @SqlId
+            @SqlGenerated
+            Long id;
+            @SqlColumn(comment = "昵称")
+            String nick;
+        }
+        String oracle = SqlEntities.createTable(Member.class, SqlDialect.ORACLE);
+        assertTrue(oracle, oracle.contains("CREATE SEQUENCE t_member_id_seq"));
+        assertTrue(oracle, oracle.toUpperCase().contains("TRIGGER"));
+        assertTrue(oracle, oracle.contains("COMMENT ON TABLE t_member IS '会员表'"));
+
+        String mssql = SqlEntities.createTable(Member.class, SqlDialect.SQLSERVER);
+        assertTrue(mssql, mssql.contains("sp_addextendedproperty"));
+        assertTrue(mssql, mssql.contains("会员表"));
+        assertTrue(mssql, mssql.contains("昵称"));
     }
 
     // ------------------------------------------------------------------

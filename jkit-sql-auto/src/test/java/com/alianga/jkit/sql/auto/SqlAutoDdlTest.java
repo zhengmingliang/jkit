@@ -2,9 +2,13 @@ package com.alianga.jkit.sql.auto;
 
 import com.alianga.jkit.sql.SqlDialect;
 import com.alianga.jkit.sql.auto.fixture.AutoUser;
+import com.alianga.jkit.sql.entity.SqlColumn;
 import com.alianga.jkit.sql.entity.SqlEntities;
 import com.alianga.jkit.sql.entity.SqlEntityColumn;
 import com.alianga.jkit.sql.entity.SqlEntityModel;
+import com.alianga.jkit.sql.entity.SqlGenerated;
+import com.alianga.jkit.sql.entity.SqlId;
+import com.alianga.jkit.sql.entity.SqlTable;
 import com.alianga.jkit.sql.schema.model.CanonicalType;
 
 import org.junit.Test;
@@ -25,6 +29,94 @@ import static org.junit.Assert.assertTrue;
  * @author 郑明亮
  */
 public class SqlAutoDdlTest {
+
+    @Test
+    public void postgresCommentsAreExtraChanges() {
+        @SqlTable(name = "cmt_t", comment = "t")
+        class CmtT {
+            @SqlId
+            @SqlGenerated
+            long id;
+            @SqlColumn(comment = "n")
+            String name;
+        }
+        SqlEntityModel model = SqlEntities.inspect(CmtT.class);
+        List<SqlAutoChange> changes = SqlAutoDdl.planTable(model, null, SqlDialect.POSTGRES,
+                SqlAutoOptions.defaults());
+        assertTrue(kind(changes, SqlAutoChange.Kind.CREATE_TABLE));
+        assertTrue(kind(changes, SqlAutoChange.Kind.COMMENT));
+    }
+
+    @Test
+    public void sqlServerCommentsAreExtraChanges() {
+        @SqlTable(name = "cmt_t", comment = "t")
+        class CmtT {
+            @SqlId
+            @SqlGenerated
+            long id;
+            @SqlColumn(comment = "n")
+            String name;
+        }
+        SqlEntityModel model = SqlEntities.inspect(CmtT.class);
+        List<SqlAutoChange> changes = SqlAutoDdl.planTable(model, null, SqlDialect.SQLSERVER,
+                SqlAutoOptions.defaults().createIndex(false));
+        assertTrue(kind(changes, SqlAutoChange.Kind.CREATE_TABLE));
+        assertTrue(kind(changes, SqlAutoChange.Kind.COMMENT));
+        String sql = sql(changes);
+        assertTrue(sql, sql.contains("sp_addextendedproperty"));
+        assertFalse(sql, sql.contains("CREATE SEQUENCE"));
+        assertFalse("CREATE TABLE 不应夹带附录 COMMENT",
+                changes.get(0).sql().contains("sp_addextendedproperty"));
+    }
+
+    @Test
+    public void hiveInlinesComments() {
+        @SqlTable(name = "cmt_t", comment = "t")
+        class CmtT {
+            @SqlId
+            long id;
+            @SqlColumn(comment = "n")
+            String name;
+        }
+        SqlEntityModel model = SqlEntities.inspect(CmtT.class);
+        List<SqlAutoChange> changes = SqlAutoDdl.planTable(model, null, SqlDialect.HIVE,
+                SqlAutoOptions.defaults().createIndex(false));
+        assertTrue(kind(changes, SqlAutoChange.Kind.CREATE_TABLE));
+        assertFalse(kind(changes, SqlAutoChange.Kind.COMMENT));
+        assertTrue(changes.get(0).sql(), changes.get(0).sql().contains("COMMENT 't'"));
+    }
+
+    @Test
+    public void oracleSequenceExtra() {
+        @SqlTable(name = "seq_t")
+        class SeqT {
+            @SqlId
+            @SqlGenerated
+            long id;
+            String name;
+        }
+        SqlEntityModel model = SqlEntities.inspect(SeqT.class);
+        List<SqlAutoChange> changes = SqlAutoDdl.planTable(model, null, SqlDialect.ORACLE,
+                SqlAutoOptions.defaults());
+        assertTrue(kind(changes, SqlAutoChange.Kind.SEQUENCE));
+        boolean sawSeq = false;
+        boolean sawTrigger = false;
+        for (int i = 0; i < changes.size(); i++) {
+            String s = changes.get(i).sql().toUpperCase();
+            if (s.contains("CREATE SEQUENCE")) {
+                sawSeq = true;
+            }
+            if (s.contains("TRIGGER")) {
+                sawTrigger = true;
+            }
+        }
+        assertTrue(sawSeq);
+        assertTrue(sawTrigger);
+        List<String> drops = SqlAutoDdl.dropSequenceSql(model, SqlDialect.ORACLE);
+        assertEquals(1, drops.size());
+        assertTrue(drops.get(0), drops.get(0).contains("DROP SEQUENCE seq_t_id_seq"));
+        assertTrue(SqlAutoDdl.dropSequenceSql(model, SqlDialect.MYSQL).isEmpty());
+    }
 
     @Test
     public void missingTableCreates() {
