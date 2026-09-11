@@ -107,7 +107,7 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
         }
         if ("DATE_ADD".equals(name) || "ADDDATE".equals(name)
                 || "DATE_SUB".equals(name) || "SUBDATE".equals(name)) {
-            return rewriteDateAddSub(fn, name, family);
+            return rewriteDateAddSub(fn, name, family, report);
         }
         if ("DATEDIFF".equals(name)) {
             return rewriteDateDiff(fn, family, report);
@@ -367,7 +367,8 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
         args.add(sep);
     }
 
-    private static SqlExpr rewriteDateAddSub(SqlFunctionExpr fn, String name, SqlDialect family) {
+    private static SqlExpr rewriteDateAddSub(SqlFunctionExpr fn, String name, SqlDialect family,
+                                               ConversionReport.Builder report) {
         if (family == SqlDialect.MYSQL || family == SqlDialect.H2 || family == SqlDialect.HIVE) {
             return fn;
         }
@@ -376,10 +377,35 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
             return fn;
         }
         boolean sub = "DATE_SUB".equals(name) || "SUBDATE".equals(name);
-        SqlExpr interval = toTargetInterval(args.get(1), family);
+        SqlExpr base = args.get(0);
+        String[] parts = intervalParts(args.get(1));
+        if (parts == null) {
+            report.warn(ConversionWarning.Severity.SEMANTIC_RISK, name,
+                    "无法识别的日期间隔参数，已保留原文");
+            return fn;
+        }
+        String num = parts[0];
+        String unit = parts[1];
+        // SQL Server / SQLite 没有 INTERVAL 字面量，得换成各自的函数
+        if (family == SqlDialect.SQLSERVER) {
+            return dateAddFunction("DATEADD", base, num, unit, sub, false);
+        }
+        if (family == SqlDialect.SQLITE) {
+            return dateAddFunction("datetime", base, num, unit, sub, true);
+        }
+        if (family == SqlDialect.DB2) {
+            report.warn(ConversionWarning.Severity.SEMANTIC_RISK, name,
+                    "DB2 没有 INTERVAL 字面量，需改写成 " + num + " " + unit + "S（例如 a + " + num
+                            + " " + unit + "S），已保留原文");
+            return fn;
+        }
+        SqlExpr interval = toTargetInterval(num, unit, family, name, report);
+        if (interval == null) {
+            return fn;
+        }
         SqlBinaryExpr bin = new SqlBinaryExpr();
         bin.setOperator(sub ? SqlBinaryOp.MINUS : SqlBinaryOp.PLUS);
-        bin.setLeft(args.get(0));
+        bin.setLeft(base);
         bin.setRight(interval);
         // 函数调用是最高优先级，展开成运算符后必须整体套括号：
         // DATE_ADD(a, INTERVAL 1 DAY) * 2 若写成 a + INTERVAL ... * 2 会被乘法抢走优先级
@@ -387,31 +413,103 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
         return bin;
     }
 
-    private static SqlExpr toTargetInterval(SqlExpr expr, SqlDialect family) {
+    /**
+     * 从 {@code INTERVAL 3 DAY} 里取出数量与单位。
+     *
+     * @param expr 间隔表达式
+     * @return {@code [数量, 单位]}，识别不了返回 null
+     */
+    private static String[] intervalParts(SqlExpr expr) {
         if (!(expr instanceof SqlFunctionExpr)) {
-            return expr;
+            return null;
         }
         SqlFunctionExpr iv = (SqlFunctionExpr) expr;
         if (!"INTERVAL".equals(functionName(iv))) {
-            return expr;
-        }
-        if (family != SqlDialect.POSTGRES && family != SqlDialect.ANSI
-                && family != SqlDialect.PRESTO && family != SqlDialect.H2) {
-            return expr;
+            return null;
         }
         List<SqlExpr> a = iv.arguments();
         if (a.size() >= 2 && a.get(0) instanceof SqlLiteral && a.get(1) instanceof SqlIdentifier) {
             String num = ((SqlLiteral) a.get(0)).value();
             String unit = ((SqlIdentifier) a.get(1)).simpleName();
-            if (num != null && unit != null) {
-                SqlFunctionExpr out = new SqlFunctionExpr();
-                out.setName(SqlIdentifier.of("INTERVAL"));
-                out.addArgument(SqlLiteral.of(SqlLiteral.Kind.STRING,
-                        num + " " + unit.toLowerCase(Locale.ROOT)));
-                return out;
+            if (num != null && unit != null && !num.isEmpty() && !unit.isEmpty()) {
+                return new String[] {num, unit};
             }
         }
-        return expr;
+        return null;
+    }
+
+    /**
+     * SQL Server 的 {@code DATEADD(day, 3, a)} 与 SQLite 的 {@code datetime(a, '+3 days')}。
+     *
+     * @param fnName 目标函数名
+     * @param base 基准表达式
+     * @param num 数量
+     * @param unit 单位
+     * @param sub 是否相减
+     * @param modifier SQLite 用字符串修饰符（{@code '+3 days'}）而非数值参数
+     * @return 函数调用
+     */
+    private static SqlFunctionExpr dateAddFunction(String fnName, SqlExpr base, String num,
+                                                   String unit, boolean sub, boolean modifier) {
+        String n = num.startsWith("-") ? num.substring(1) : num;
+        SqlFunctionExpr out = new SqlFunctionExpr();
+        out.setName(SqlIdentifier.of(fnName));
+        if (modifier) {
+            String sign = sub ? "-" : "+";
+            out.addArgument(base);
+            out.addArgument(SqlLiteral.of(SqlLiteral.Kind.STRING,
+                    "'" + sign + n + " " + unit.toLowerCase(Locale.ROOT) + "s'"));
+        } else {
+            out.addArgument(SqlIdentifier.of(unit.toLowerCase(Locale.ROOT)));
+            out.addArgument(SqlLiteral.of(SqlLiteral.Kind.NUMBER, sub ? "-" + n : n));
+            out.addArgument(base);
+        }
+        return out;
+    }
+
+    /**
+     * 按目标方言生成 INTERVAL 字面量。PG 系要带引号的字符串（{@code INTERVAL '3 day'}，
+     * 无引号的 {@code INTERVAL 3 day} 会报语法错），Oracle 用标准写法 {@code INTERVAL '3' DAY}。
+     *
+     * @param num 数量
+     * @param unit 单位
+     * @param family 目标方言族
+     * @param fnName 源函数名（告警用）
+     * @param report 报告
+     * @return 间隔表达式；目标方言无法表达时返回 null（调用方保留原文）
+     */
+    private static SqlExpr toTargetInterval(String num, String unit, SqlDialect family,
+                                            String fnName, ConversionReport.Builder report) {
+        if (family == SqlDialect.POSTGRES || family == SqlDialect.ANSI
+                || family == SqlDialect.PRESTO || family == SqlDialect.H2) {
+            SqlFunctionExpr out = new SqlFunctionExpr();
+            out.setName(SqlIdentifier.of("INTERVAL"));
+            out.addArgument(SqlLiteral.of(SqlLiteral.Kind.STRING,
+                    "'" + num + " " + unit.toLowerCase(Locale.ROOT) + "'"));
+            return out;
+        }
+        if (family == SqlDialect.ORACLE || family == SqlDialect.ORACLE12) {
+            SqlFunctionExpr out = new SqlFunctionExpr();
+            out.setName(SqlIdentifier.of("INTERVAL"));
+            out.addArgument(SqlLiteral.of(SqlLiteral.Kind.STRING, "'" + num + "'"));
+            out.addArgument(SqlIdentifier.of(unit.toUpperCase(Locale.ROOT)));
+            return out;
+        }
+        if (family == SqlDialect.CLICKHOUSE) {
+            // ClickHouse 支持 INTERVAL n UNIT，原样即可
+            return intervalOf(num, unit);
+        }
+        report.warn(ConversionWarning.Severity.SEMANTIC_RISK, fnName,
+                family + " 无通用 INTERVAL 字面量，已保留原文");
+        return null;
+    }
+
+    private static SqlFunctionExpr intervalOf(String num, String unit) {
+        SqlFunctionExpr out = new SqlFunctionExpr();
+        out.setName(SqlIdentifier.of("INTERVAL"));
+        out.addArgument(SqlLiteral.of(SqlLiteral.Kind.NUMBER, num));
+        out.addArgument(SqlIdentifier.of(unit.toUpperCase(Locale.ROOT)));
+        return out;
     }
 
     private static SqlExpr rewriteDateDiff(SqlFunctionExpr fn, SqlDialect family,

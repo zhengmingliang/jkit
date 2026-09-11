@@ -113,6 +113,53 @@ public class SqlSchemaConvertOutputTest {
     }
 
     @Test
+    public void dateAddIntervalIsQuotedOnPostgres() {
+        // PG 的 interval 字面量必须是带引号字符串，INTERVAL 3 day 会报语法错
+        String pg = SQL.convert("SELECT DATE_ADD(a, INTERVAL 3 DAY) FROM t",
+                SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        assertEquals(pg, "SELECT (a + INTERVAL '3 day') FROM t", norm(pg));
+        assertReparsable(pg, SqlDialect.POSTGRES);
+    }
+
+    @Test
+    public void dateAddOnOracleUsesStandardIntervalLiteral() {
+        String ora = SQL.convert("SELECT DATE_ADD(a, INTERVAL 3 DAY) FROM t",
+                SqlDialect.MYSQL, SqlDialect.ORACLE);
+        assertEquals(ora, "SELECT (a + INTERVAL '3' DAY) FROM t", norm(ora));
+    }
+
+    @Test
+    public void dateAddOnSqlServerUsesDateAddFunction() {
+        String ss = SQL.convert("SELECT DATE_ADD(a, INTERVAL 3 DAY) FROM t",
+                SqlDialect.MYSQL, SqlDialect.SQLSERVER);
+        assertEquals(ss, "SELECT DATEADD(day, 3, a) FROM t", norm(ss));
+    }
+
+    @Test
+    public void dateSubOnSqlServerUsesNegativeAmount() {
+        String ss = SQL.convert("SELECT DATE_SUB(a, INTERVAL 3 DAY) FROM t",
+                SqlDialect.MYSQL, SqlDialect.SQLSERVER);
+        assertEquals(ss, "SELECT DATEADD(day, -3, a) FROM t", norm(ss));
+    }
+
+    @Test
+    public void dateAddOnSqliteUsesDateTimeFunction() {
+        String lite = SQL.convert("SELECT DATE_ADD(a, INTERVAL 3 DAY) FROM t",
+                SqlDialect.MYSQL, SqlDialect.SQLITE);
+        assertEquals(lite, "SELECT datetime(a, '+3 days') FROM t", norm(lite));
+    }
+
+    @Test
+    public void dateAddOnDb2WarnsInsteadOfEmittingInterval() {
+        // DB2 要写 a + 3 DAYS（labeled duration），没有 INTERVAL 字面量；
+        // 现有 AST 无法干净表达 "3 DAYS"，故保留原文但必须告警，不能静默产出
+        ConversionResult r = SqlSchemaConverter.convert("SELECT DATE_ADD(a, INTERVAL 3 DAY) FROM t",
+                SqlDialect.MYSQL, SqlDialect.DB2);
+        assertTrue("DB2 未告警却输出了 INTERVAL: " + r.sql(),
+                r.report().hasSeverityAtLeast(ConversionWarning.Severity.SEMANTIC_RISK));
+    }
+
+    @Test
     public void sqliteAutoIncrementWithoutPrimaryKeyWarns() {
         // AUTOINCREMENT 在 SQLite 只能挂 PRIMARY KEY，无主键时必须告警而不是悄悄丢掉
         ConversionResult r = SqlSchemaConverter.convert("CREATE TABLE t (id BIGINT AUTO_INCREMENT)",
