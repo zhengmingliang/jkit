@@ -193,7 +193,12 @@ final class SqlExprParser {
     }
 
     private SqlCastExpr parseCast() {
-        p.expect(SqlTokenType.CAST);
+        // CAST / TRY_CAST / TRY_CONVERT
+        if (p.is(SqlTokenType.CAST)) {
+            p.next();
+        } else {
+            p.next(); // TRY_CAST / TRY_CONVERT ident
+        }
         p.expect(SqlTokenType.LPAREN);
         SqlCastExpr cast = new SqlCastExpr();
         cast.setExpr(parseExpr());
@@ -277,6 +282,13 @@ final class SqlExprParser {
                     p.next();
                     p.next();
                     left = SqlBinaryExpr.of(left, SqlBinaryOp.NOT_REGEXP, parseBit());
+                } else if (peeked.type() == SqlTokenType.ILIKE) {
+                    p.next();
+                    p.next();
+                    left = SqlBinaryExpr.of(left, SqlBinaryOp.NOT_ILIKE, parseBit());
+                    if (p.match(SqlTokenType.ESCAPE)) {
+                        left = SqlBinaryExpr.of(left, SqlBinaryOp.ESCAPE, parseBit());
+                    }
                 } else {
                     break;
                 }
@@ -312,6 +324,19 @@ final class SqlExprParser {
     private String parseDataType() {
         StringBuilder sb = new StringBuilder();
         sb.append(p.consumeIdentRaw());
+        // INTERVAL DAY TO SECOND / INTERVAL YEAR(2) TO MONTH
+        if (SqlParser.equalsIgnoreCase(sb.toString(), "INTERVAL") && isIntervalUnitToken()) {
+            sb.append(' ').append(consumeIntervalUnitRaw());
+            if (p.match(SqlTokenType.TO)) {
+                sb.append(" TO ");
+                if (isIntervalUnitToken()) {
+                    sb.append(consumeIntervalUnitRaw());
+                } else {
+                    sb.append(p.consumeIdentRaw());
+                }
+            }
+            return sb.toString();
+        }
         if (p.match(SqlTokenType.LPAREN)) {
             sb.append('(');
             sb.append(p.consumeRawUntilType(SqlTokenType.RPAREN));
@@ -329,11 +354,27 @@ final class SqlExprParser {
             p.expect(SqlTokenType.SET);
             sb.append(' ').append("CHARACTER SET ").append(p.consumeIdentRaw());
         }
+        // INTERVAL 单位也可写在类型名后：INTERVAL DAY(9) TO SECOND
+        if (SqlParser.equalsIgnoreCase(sb.toString(), "INTERVAL") || isIntervalUnitToken()) {
+            // already handled above when leading INTERVAL; keep TO chain for DATE TIME etc. no-op
+        }
+        if (p.match(SqlTokenType.TO) && isIntervalUnitToken()) {
+            sb.append(" TO ").append(consumeIntervalUnitRaw());
+        }
         while (p.is(SqlTokenType.ARRAY) || p.isIdent("ARRAY")) {
             sb.append(' ').append(p.token.text());
             p.next();
         }
         return sb.toString();
+    }
+
+    private String consumeIntervalUnitRaw() {
+        String u = p.consumeIdentRaw();
+        if (p.match(SqlTokenType.LPAREN)) {
+            u = u + "(" + p.consumeRawUntilType(SqlTokenType.RPAREN) + ")";
+            p.expect(SqlTokenType.RPAREN);
+        }
+        return u;
     }
 
     SqlExpr parseExpr() {
@@ -445,6 +486,15 @@ final class SqlExprParser {
         if (p.match(SqlTokenType.ORDER)) {
             p.expect(SqlTokenType.BY);
             p.selectParser.parseOrderBy(fn.orderBy());
+        }
+        // MySQL：CHAR(888 USING utf8) / CONVERT 已走专用路径；其它函数同样接受 USING
+        if (p.match(SqlTokenType.USING)) {
+            fn.setUsingCharset(true);
+            if (p.identLike() || (p.token.type() != null && p.token.type().keyword())) {
+                fn.addArgument(p.parseName());
+            } else {
+                fn.addArgument(parsePrimary());
+            }
         }
         p.expect(SqlTokenType.RPAREN);
         // ClickHouse 参数化聚合：windowFunnel(n)(ts, cond…) / quantile(0.9)(x)
@@ -711,6 +761,22 @@ final class SqlExprParser {
                 expr = id;
             }
         }
+        // PL/SQL 游标/隐式游标属性：SQL%FOUND / c1%NOTFOUND / SQL%ROWCOUNT
+        if (expr instanceof SqlIdentifier && p.isSymbolOp(SqlTokenType.PERCENT)
+                && isCursorAttribute(p.lexer.peek())) {
+            p.next(); // %
+            String attr = p.consumeIdentRaw();
+            SqlIdentifier id = (SqlIdentifier) expr;
+            java.util.List<String> names = new java.util.ArrayList<String>(id.names());
+            if (names.isEmpty()) {
+                names.add("%" + attr);
+            } else {
+                int last = names.size() - 1;
+                names.set(last, names.get(last) + "%" + attr);
+            }
+            id.setNames(names);
+            return id;
+        }
         // Oracle 外连接：col(+) / t.col(+)
         if (lookingAtOracleOuterJoin()) {
             p.next(); // (
@@ -721,6 +787,14 @@ final class SqlExprParser {
         if (p.is(SqlTokenType.LPAREN) && expr instanceof SqlIdentifier) {
             // 不直接 return：后面还要挂 ::type / [下标] / COLLATE 等后缀
             expr = parseFunction((SqlIdentifier) expr);
+        }
+        // 函数/子查询结果字段访问：f(args).f2.f3（标识符链已在上方 DOT 循环处理）
+        while (!(expr instanceof SqlIdentifier) && p.is(SqlTokenType.DOT)
+                && p.lexer.peek() != null
+                && p.lexer.peek().type() != SqlTokenType.STAR) {
+            p.next(); // DOT
+            String part = p.consumeIdentPartRaw();
+            expr = SqlBinaryExpr.of(expr, SqlBinaryOp.MEMBER, SqlIdentifier.of(SqlParser.unquote(part)));
         }
         if (isArrayConstructorHead(expr)) {
             expr = parseArrayConstructor();
@@ -794,11 +868,15 @@ final class SqlExprParser {
         }
         if (p.identLike() && p.token.text() != null && p.token.text().length() > 1
                 && p.token.text().charAt(0) == '_'
-                && p.lexer.peek().type() == SqlTokenType.STRING) {
-            // MySQL 字符集前缀字面量：_latin1'string' / _utf8mb4'中文' / _binary'x'
+                && (p.lexer.peek().type() == SqlTokenType.STRING
+                || p.lexer.peek().type() == SqlTokenType.HEX
+                || p.lexer.peek().type() == SqlTokenType.BIT)) {
+            // MySQL 字符集前缀：_latin1'string' / _utf32 X'...' / _utf32 0x...
             String prefix = p.token.text();
             p.next();
-            SqlLiteral lit = SqlLiteral.of(SqlLiteral.Kind.STRING, p.token.text());
+            SqlLiteral.Kind kind = p.is(SqlTokenType.HEX) ? SqlLiteral.Kind.HEX
+                    : (p.is(SqlTokenType.BIT) ? SqlLiteral.Kind.BIT : SqlLiteral.Kind.STRING);
+            SqlLiteral lit = SqlLiteral.of(kind, p.token.text());
             lit.setName(prefix);
             p.next();
             return lit;
@@ -806,6 +884,14 @@ final class SqlExprParser {
         if (p.is(SqlTokenType.STRING)) {
             SqlLiteral lit = SqlLiteral.of(SqlLiteral.Kind.STRING, p.token.text());
             p.next();
+            // MySQL 相邻字符串字面量隐式拼接：'a' 'b' / "%"'温'"%"
+            while (p.is(SqlTokenType.STRING)) {
+                lit = SqlLiteral.of(SqlLiteral.Kind.STRING, lit.value() + p.token.text());
+                if (lit.name() == null && p.token.text() != null) {
+                    // keep first prefix if any
+                }
+                p.next();
+            }
             return lit;
         }
         if (p.is(SqlTokenType.BIND)) {
@@ -831,7 +917,7 @@ final class SqlExprParser {
         if (p.is(SqlTokenType.CASE)) {
             return parseCase();
         }
-        if (p.is(SqlTokenType.CAST)) {
+        if (p.is(SqlTokenType.CAST) || p.isIdent("TRY_CAST") || p.isIdent("TRY_CONVERT")) {
             return parseCast();
         }
         if ((p.is(SqlTokenType.DATE) || p.is(SqlTokenType.TIME) || p.is(SqlTokenType.TIMESTAMP)
@@ -848,14 +934,18 @@ final class SqlExprParser {
             SqlFunctionExpr fn = new SqlFunctionExpr();
             fn.setName(SqlIdentifier.of("INTERVAL"));
             // INTERVAL '30 minutes' / INTERVAL 30 DAY / INTERVAL '1' HOUR / INTERVAL 6/4 HOUR_MINUTE
+            // / INTERVAL '123-2' YEAR(3) TO MONTH / INTERVAL '4 5:12:10.222' DAY TO SECOND(3)
             if (p.is(SqlTokenType.STRING)) {
                 fn.addArgument(parsePrimaryInner());
             } else {
                 fn.addArgument(parseBit());
             }
-            // 仅吸收 DAY/HOUR/MINUTE 等单位；勿吞 OR/AND/THEN（CASE 内 INTERVAL '30 min' OR …）
             if (isIntervalUnitToken()) {
-                fn.addArgument(SqlIdentifier.of(p.consumeIdentRaw()));
+                fn.addArgument(SqlIdentifier.of(consumeIntervalUnitRaw()));
+                if (p.match(SqlTokenType.TO) && isIntervalUnitToken()) {
+                    fn.addArgument(SqlIdentifier.of("TO"));
+                    fn.addArgument(SqlIdentifier.of(consumeIntervalUnitRaw()));
+                }
             }
             return fn;
         }
@@ -884,8 +974,22 @@ final class SqlExprParser {
         throw p.error("unexpected token " + p.token.type());
     }
 
+    private boolean isCursorAttribute(SqlToken tok) {
+        if (tok == null || tok.text() == null) {
+            return false;
+        }
+        String t = tok.text();
+        return SqlParser.equalsIgnoreCase(t, "FOUND")
+                || SqlParser.equalsIgnoreCase(t, "NOTFOUND")
+                || SqlParser.equalsIgnoreCase(t, "ROWCOUNT")
+                || SqlParser.equalsIgnoreCase(t, "ISOPEN")
+                || SqlParser.equalsIgnoreCase(t, "BULK_ROWCOUNT")
+                || SqlParser.equalsIgnoreCase(t, "BULK_EXCEPTIONS");
+    }
+
     private boolean isIntervalUnitToken() {
-        if (!p.identLike()) {
+        // INTERVAL 单位可为关键字 DAY/YEAR/MONTH/HOUR…（token.keyword==true）
+        if (!(p.identLike() || (p.token.type() != null && p.token.type().keyword()))) {
             return false;
         }
         String t = p.token.text();
@@ -1114,6 +1218,13 @@ final class SqlExprParser {
             prior.setName(SqlIdentifier.of("PRIOR"));
             prior.addArgument(parseUnary());
             return prior;
+        }
+        if (p.isIdent("CONNECT_BY_ROOT")) {
+            p.next();
+            SqlFunctionExpr root = new SqlFunctionExpr();
+            root.setName(SqlIdentifier.of("CONNECT_BY_ROOT"));
+            root.addArgument(parseUnary());
+            return root;
         }
         return parsePrimary();
     }

@@ -334,6 +334,10 @@ public final class SqlFormatter {
             }
             writeSelectItem(items.get(i));
         }
+        if (select.forcePartition() != null && select.forcePartition().length() > 0) {
+            sp();
+            out.append(select.forcePartition());
+        }
         writeSelectInto(select);
         if (select.from() != null) {
             nl();
@@ -734,6 +738,10 @@ public final class SqlFormatter {
             sp();
             kw("IGNORE");
         }
+        if (update.forcePartition() != null && update.forcePartition().length() > 0) {
+            sp();
+            out.append(update.forcePartition());
+        }
         if (update.table() != null) {
             sp();
             writeFrom(update.table());
@@ -789,6 +797,10 @@ public final class SqlFormatter {
         if (delete.ignore()) {
             sp();
             kw("IGNORE");
+        }
+        if (delete.forcePartition() != null && delete.forcePartition().length() > 0) {
+            sp();
+            out.append(delete.forcePartition());
         }
         if (!delete.targets().isEmpty()) {
             // MySQL 多表删除：DELETE FROM a1, a2 USING t1 a1 JOIN t2 a2
@@ -2793,8 +2805,36 @@ public final class SqlFormatter {
                 sp();
                 kw("JOIN");
                 break;
+            case LEFT_ANTI:
+                kw("LEFT");
+                sp();
+                kw("ANTI");
+                sp();
+                kw("JOIN");
+                break;
+            case LEFT_SEMI:
+                kw("LEFT");
+                sp();
+                kw("SEMI");
+                sp();
+                kw("JOIN");
+                break;
             case RIGHT:
                 kw("RIGHT");
+                sp();
+                kw("JOIN");
+                break;
+            case RIGHT_ANTI:
+                kw("RIGHT");
+                sp();
+                kw("ANTI");
+                sp();
+                kw("JOIN");
+                break;
+            case RIGHT_SEMI:
+                kw("RIGHT");
+                sp();
+                kw("SEMI");
                 sp();
                 kw("JOIN");
                 break;
@@ -2941,7 +2981,14 @@ public final class SqlFormatter {
 
     private void writeSelectItem(SqlSelectItem item) {
         writeExpr(item.expr());
-        if (item.alias() != null) {
+        if (!item.columnAliases().isEmpty()) {
+            sp();
+            kw("AS");
+            sp();
+            out.append('(');
+            commaIdents(item.columnAliases());
+            out.append(')');
+        } else if (item.alias() != null) {
             sp();
             kw("AS");
             sp();
@@ -3006,6 +3053,10 @@ public final class SqlFormatter {
                 out.append('[');
                 writeExpr(bin.right());
                 out.append(']');
+            } else if (bin.operator() == SqlBinaryOp.MEMBER) {
+                writeExpr(bin.left());
+                out.append('.');
+                writeExpr(bin.right());
             } else {
                 writeExpr(bin.left());
                 sp();

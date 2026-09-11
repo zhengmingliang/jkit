@@ -254,9 +254,17 @@ public final class SqlLexer {
             token.set(SqlTokenType.BIND, src, tStart, pos, tLine, tCol);
             return;
         }
-        if (c == ':' && pos + 1 < limit && isIdentStart(src[pos + 1])) {
+        if (c == ':' && pos + 1 < limit
+                && (isIdentStart(src[pos + 1]) || (src[pos + 1] >= '0' && src[pos + 1] <= '9'))) {
+            // Oracle / JDBC：:name / :1 / :0
             pos++;
-            scanIdentBody();
+            if (src[pos] >= '0' && src[pos] <= '9') {
+                while (pos < limit && src[pos] >= '0' && src[pos] <= '9') {
+                    pos++;
+                }
+            } else {
+                scanIdentBody();
+            }
             token.set(SqlTokenType.NAMED_BIND, src, tStart, pos, tLine, tCol);
             return;
         }

@@ -325,7 +325,7 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 
 ---
 
-## 8. 回写保真与表抽取精度收口（2026-09-10，agent）
+## 8. 回写保真与表抽取精度收口（2026-09-12，agent）
 
 第 7 节只覆盖语法/AST 深度；本轮按用户指示转向**回写保真**与**表抽取精度**，全部完成 ✅（`mvn -pl jkit-sql test` 796 全绿）。
 
@@ -348,7 +348,7 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 
 ---
 
-## 9. 扩展性改造（2026-09-10，agent）
+## 9. 扩展性改造（2026-09-12，agent）
 
 按 ROI 排序的五项扩展性改造，已全部完成 ✅（`mvn -pl jkit-sql test` 844 全绿）：
 
@@ -359,3 +359,118 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 5. **改写规则链** ✅ — `SqlRewriteHook`（函数式接口：收当前语句、返回继续传递的语句）+ `SqlRewrites`（`create`/`none`/`add` 有序链 + 内建适配器 `addLimit`/`setLimit`/`setOffset`/`setPage`/`andWhere`/`replaceTable`/`replaceColumn`）；自定义规则在内建之前即前 hook、之后即后 hook；门面 `SQL.rewrite(stmt, chain)` 先深拷贝再改，规则返回 null 抛 `IllegalArgumentException`；`SqlRewriter` 既有静态方法行为零变化。
 
 明确不做：`SqlKeywords`/`SqlTokenType` 动态注册化（零分配哈希是性能关键路径）；visitor 重设计（双轨制够用）。
+
+---
+
+## 10. 竞品语料覆盖率三轮提升 + 方言扩展交接（2026-09-12，agent）
+
+### 10.1 现状快照（第四轮覆盖后）
+
+- 模块测试 **890 全绿**；保真回归 `SqlRoundTripFidelityTest` 118 条；379 语料 100%；保真批量 0 mismatch。
+- 竞品语料（tools-test `CompetitorSuiteCorpusTest`，三方各用方言回退链、2s 超时护栏）：
+  - druid-bvt-inline（6483）：**jkit 92.4%（已超 Druid 92.3%）** / druid 92.3% / jsql 68.1%
+  - jsqlparser-inline（3078）：**jkit 79.6%（第一）** / druid 71.1% / jsql 70.1%（目标 ≥90%，仍差约 10pp）
+  - jsqlparser-files（460）：**jkit 75.4%** / druid 81.5% / jsql 74.8%（目标 ≥90%，仍差约 15pp）
+  - jkitGaps 合计 956 → **761**（356+339+66；明细 `target/sql-corpus-reports/competitor-*-jkit-gaps.tsv`）
+  - jkit 全程 0 超时；druid 1.2.23 仍有 2 条 PG `ANALYZE` 死循环（jstack 实锤，勿追）
+- 方言：一等枚举 6+1 → 11（新增 `DB2`/`SQLITE`/`HIVE`/`CLICKHOUSE`/`PRESTO`），行为全部走
+  `SqlDialectSpec` 能力方法，无散落 `== SqlDialect.X`；`fromName` 国产/主流别名已全
+  （含 common-model 数据源：`argo→HIVE`、`xcloud→POSTGRES`、`gbase8a→MYSQL`、`gbase8s→SQLITE`）。
+- 竞品语料对比基线表：`tools-test/src/test/resources/sql-corpora/README.md`（每轮提升后记得同步）。
+
+### 10.2 本轮已落地（不要重做）
+
+- **R1**（`6d92cde`）：INTERVAL 复合单位（`HOUR_MINUTE`/`YEAR_MONTH`）与表达式值（`6/4`）；
+  `count(UNIQUE…)`；`WEIGHT_STRING(AS CHAR(n)/LEVEL)`；`IS [NOT] UNKNOWN`；SQL/JSON 构造器
+  （`json_object`/`json_array`/`json_objectagg`/`json_arrayagg`/`json_table` 专用文法**原文保留**为单参数）；
+  `UNNEST…WITH ORDINALITY`；DDL 吞咽（`CREATE TYPE…AS OBJECT/VARRAY/ENUM`、`DROP…PURGE/TABLESPACE`、
+  `TRUNCATE…PURGE SNAPSHOT LOG` 尾段）；CAST 后缀 `CHARACTER SET`/`ARRAY`；`TRANSLATE(…USING CHAR_CS)`。
+- **R2**（`8bc016f`）：位置游离 hint 统一吸收（WHERE/AND/函数参数中的 `/*+TDDL*/`、Trino hint，
+  表达式层暂存、语句层挂到 SELECT）；Hive `INSERT OVERWRITE [TABLE] t [PARTITION(…)]`；
+  `CONNECT BY NOCYCLE`；`GROUP BY … WITH CUBE`；Teradata/Snowflake `QUALIFY`（已入别名停用词）；
+  MySQL 8 函数索引 `ADD KEY idx ((expr))`；XML 系 7 函数原文；Spark `OVER (DISTRIBUTE BY … SORT BY …)`。
+- **R4**（本轮）：ODPS `FORCE PARTITION`/`FORCE ALL PARTITIONS`；Hive UDTF `AS (c0,c1)`；
+  Oracle `VERSIONS BETWEEN` / `CONNECT_BY_ROOT` / `TRY_CAST` / `INTERVAL … TO …`；
+  相邻字符串拼接、`:0` 数字绑定、`_utf32 X'…'`；`LEFT|RIGHT ANTI|SEMI JOIN`；
+  括号集合运算子查询；`INSERT … (WITH … SELECT …)`；`DELETE t1.*`；`SQL%FOUND`；
+  函数 `USING charset`；别名后 `FORCE INDEX`；`SELECT INTO (c,d)`。jkitGaps 956→761；
+  **druid-bvt 已超 Druid**。
+- **R3**（`31286c8`）：MySQL SELECT 修饰符链（`STRAIGHT_JOIN`/`SQL_SMALL_RESULT`/`SQL_BIG_RESULT`/
+  `SQL_BUFFER_RESULT`/`SQL_CACHE`/`SQL_NO_CACHE`/`DISTINCTROW`）；`replace(...)` 按函数调用解析；
+  多表删除第二形式 `DELETE FROM a1, a2 USING …`（`SqlDelete.targets`，`parseJoinChain` 已抽出复用）；
+  字符集前缀字面量 `_latin1'x'`（`SqlLiteral.name` 存前缀）；`NOT REGEXP`；模板占位 `#{}` 不再被
+  `#` 行注释吞掉（lexer 占位匹配优先于注释跳过）；JDBC/ODBC 转义解包
+  `{fn}`/`{d|t|ts}`/`{oj}`/`{call}`/`{escape}`；MODEL MEASURES 裸别名；`UNPIVOT INCLUDE|EXCLUDE NULLS`；
+  `GROUP BY [DISTINCT] a GROUPING SETS(…)`；Oracle `fn@dblink`/`t@dblink`（`SqlIdentifier.dblink`）；
+  CTAS 尾缀 `WITH [NO] DATA`（query+tail 回写）。
+- **方言**（`2116546`/`6fba9db`）：5 个新枚举 + 国产/主流/common-model 别名。
+- **竞品测试集**（tools-test `ec2393e`/`5a3d929`）：收割 druid bvt 2465 个 Java 文件内联 SQL 6483 条 +
+  jsqlparser 内联 3078 + 资源文件 460，共 10001 条；占位符兜底（`#{}/${}/@x@/%s/<sheet>`）已计入通过率。
+
+### 10.3 已知陷阱（本会话踩过三次，后续开发必读）
+
+1. **`isIdent()` 只认 `SqlTokenType.IDENT`**。`DISTRIBUTE`/`INCLUDE`/`WITH`/`CUBE` 等若是关键字记号，
+   `isIdent` 永远 false。按文本匹配时用：
+   `(p.identLike() || p.token.type().keyword()) && p.token.textEqualsIgnoreCase("X")`。
+2. **`match()` 会消费**：`if (match(A) || match(B))` 里做类型判断，A/B 已被吃掉（STRAIGHT_JOIN 旧 bug 的成因）。
+   需要"看一眼不消费"时用 `p.token.type()` / `p.lexer.peek()`。
+3. **解析分支互斥**：新增子句关键字（如 QUALIFY）要同步加进 `parseAlias` 的停用词，否则被当表别名吞掉。
+4. **`OVER (...)` 的继承窗口名识别**有排除清单，新增 OVER 内子句（DISTRIBUTE/SORT）要加排除，否则被当窗口名。
+5. **原文保留参数**（JSON 构造器 / WEIGHT_STRING 特殊尾段）内的 `?` 绑定**不进** `parameters()`（已知取舍，勿改）。
+6. **`groupByExtension` 与 `groupBy` 列表**可共存（`GROUP BY DISTINCT a GROUPING SETS(…)`），回写两者都要输出。
+
+### 10.4 剩余缺口构成与可选方向（956 条，收益递减，按真实需求驱动）
+
+| 方向 | 规模 | 说明 |
+| --- | --- | --- |
+| PL/SQL 深度 | ~50+ | `SQL%FOUND`/`SQL%NOTFOUND`/`EXCEPTION WHEN`/`ELSIF` 结构化（现在靠 `SqlBlockStatement` 尽力 raw 兜底）；`CONNECT_BY_ROOT`/`SYS_CONNECT_BY_PATH`/`LEVEL` 伪列 |
+| 长尾一次性变体 | ~700 | 各库专属 DDL/函数/怪异写法，单点收益极低，**不建议扫尾** |
+| 多语句/批处理行 | ~50 | 测试集结构问题为主 |
+| MERGE 变体 | ~20 | 罕见 WHEN 组合、UPSERT 方言形 |
+| ODPS 专属 | ✅ R4 | `FORCE PARTITION` / UDTF `AS (c0,c1)` 已落地 |
+| Oracle 闪回 | ✅ R4 | `VERSIONS BETWEEN` / `CONNECT_BY_ROOT` 已落地 |
+| 不可修 | ~26 | GBK 乱码（编码问题，非语法） |
+
+其它老遗留：`aggOption` 余量（其它聚合的 WITHIN GROUP 字符串）；lexer 短 ident intern（仍需 profiling，
+别凭感觉做）；`SqlFormatter.indent` 是死代码（见第 9 节，勿硬接）。
+
+### 10.5 验证流程（改解析器后必跑，顺序不要乱）
+
+```bash
+mvn -pl jkit-sql test                                   # 模块 889 必须全绿
+mvn -q -pl jkit-sql,jkit-core install -DskipTests       # tools-test 才能用到新代码
+cd ../tools-test && mvn -Dtest='SqlParserCompareTest,SqlRoundTripFidelityCorpusTest,CompetitorSuiteCorpusTest' test
+# 379 语料必须仍 100%；保真批量必须 0 mismatch；竞品三语料看 jkitGaps 是否下降
+# 报告：target/sql-corpus-reports/competitor-*-jkit-gaps.tsv / sql-fidelity-report.txt
+```
+
+- 竞品语料重收割：`/tmp/sql-suites/harvest.py`（sparse clone alibaba/druid 与 JSQLParser/JSqlParser
+  到 /tmp/sql-suites；**/tmp 会被清理**，重跑前确认存在）。
+- 探针：`/tmp/sqlprobe/Probe.java`（多方言 parseAll 探针）与 `ProbePh.java`（占位符探针），同样易失。
+
+### 10.6 协作与工程约定（本会话实测有效的做法）
+
+1. **共享工作区 + 共享 git index**：另一 agent 进程长期活跃（SQL 解析器主力）。**提交前必看
+   `git status`/`git log`**：它的暂存可能被你的 commit 卷带（本会话发生两次，消息里已注明）。
+   `jkit-core/.../JSONTest.java` 的 M 是历史遗留，**永远别带进提交**。
+2. **发版叙事**：父 POM `2.0.1`；jkit-sql 新公开 API 一律 `@since 2.0.1`；用户明确要求
+   **docs/sql.md 按"初版特性"口径写，不写修复叙事**（f44f30e 已按此同步，后续照此办理）。
+3. **每完成一块**：`@since` + `docs/sql.md`（中英同步）+ CHANGELOG 顶部 `2.0.1 - 2026-09-09` 追加条目。
+   文档站构建：`npx vitepress build docs`（预览 `npx vitepress preview docs --port 4173`）。
+4. **邮件通知**：每轮完成后用 jkit-notify SMTP 发 `mpro@vip.qq.com`。
+   脚本 `/tmp/jkit-mail-send/SendNotify.java`（/tmp 易失需重建）；凭证在
+   `/opt/workspace/zml/z-notify-hub/z-notify.db` 表 `channel_config`（`config_id='email-aliyun'`，
+   列名是 `config_json`），用 jkit 自家 JSON 解析；类路径 = jkit-2.0.1.jar + jkit-notify-2.0.1.jar。
+5. **checkstyle**：`mvn checkstyle:check -Dcheckstyle.skip=false` 基线本身有 3632 条违规
+   （含老代码），不要试图清零，只保证自己新增代码守 160 列/花括号/无 tab。
+6. **文档站排除项**：`docs/next-plan.md`（内部计划）、`docs/csv.md`/`docs/expression.md`（空文件）
+   在 `srcExclude` 里；csv/expression 两章补齐后记得从排除名单移除并进侧边栏。
+
+### 10.7 建议的下一步（按用户价值）
+
+1. **硬目标（用户）**：jsql-inline ≥90%、jsql-files ≥90%；druid-bvt **已达成**（超 Druid）。
+2. 继续按 gap 错误签名聚簇攻坚（Informix SKIP/FIRST、FOR XML PATH、UPDATE SET (a,b)=、RETURNING old/new、
+   PIVOT XML、MODEL measures AS、管道 `| |`、多语句无分号、负向样例等）；每批 commit+邮件。
+3. PL/SQL：`EXCEPTION WHEN` / `ELSIF` 结构化仍可做；`SQL%FOUND` 已可解析。
+4. 若用户要发版：`mvn clean package -Ppublish -Dgpg.skip=true`。
+5. GBK 乱码约 26 条与纯负向样例不要硬追。

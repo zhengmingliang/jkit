@@ -15,6 +15,8 @@ public final class SqlUpdate extends SqlStatement {
     private SqlTableSource table;
     private boolean ignore;
     private boolean lowPriority;
+    /** ODPS/MaxCompute {@code FORCE PARTITION …} / {@code FORCE ALL PARTITIONS} 原文。 */
+    private String forcePartition;
     private final List<SqlBinaryExpr> setList = new ArrayList<SqlBinaryExpr>(4);
     private SqlExpr where;
     private SqlLimit limit;
@@ -77,6 +79,24 @@ public final class SqlUpdate extends SqlStatement {
      */
     public void setLowPriority(boolean lowPriority) {
         this.lowPriority = lowPriority;
+    }
+
+    /**
+     * ODPS/MaxCompute {@code FORCE PARTITION …} 原文。
+     *
+     * @return 原文，可空
+     * @since 2.0.1
+     */
+    public String forcePartition() {
+        return forcePartition;
+    }
+
+    /**
+     * @param forcePartition {@code FORCE PARTITION …} 原文
+     * @since 2.0.1
+     */
+    public void setForcePartition(String forcePartition) {
+        this.forcePartition = forcePartition;
     }
 
     /**

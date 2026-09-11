@@ -2833,5 +2833,71 @@ public class SqlParserTest {
         assertTrue(s.orderSiblings());
     }
 
+
+    /**
+     * 覆盖率提升：ODPS FORCE PARTITION、UDTF 别名、闪回、CONNECT_BY_ROOT 等。
+     */
+    @Test
+    public void parseCoverageBatchForceAndOracle() {
+        assertEquals(SqlStatementType.DELETE,
+                SQL.parse("DELETE FORCE PARTITION 'pt001' car_tt FROM runoob_tbl WHERE runoob_id=3",
+                        SqlDialect.MYSQL).type());
+        assertEquals(SqlStatementType.UPDATE,
+                SQL.parse("UPDATE FORCE PARTITION 'pt001' car_tt SET gps_url=null WHERE id = 1",
+                        SqlDialect.MYSQL).type());
+        assertEquals(SqlStatementType.SELECT,
+                SQL.parse("SELECT app_key FORCE PARTITION 'MASSDEVICE40' FROM ktvs_device_info",
+                        SqlDialect.MYSQL).type());
+        SqlStatement ins = SQL.parse(
+                "INSERT OVERWRITE TABLE ttt PARTITION (ds='20150710',hh='07') "
+                        + "SELECT tt_split(content, 60) AS (f0, f1, f2, f3) FROM xxx",
+                SqlDialect.HIVE);
+        assertEquals(SqlStatementType.INSERT, ins.type());
+        SqlSelect q = (SqlSelect) ((SqlInsert) ins).query();
+        assertFalse(q.selectItems().get(0).columnAliases().isEmpty());
+
+        assertEquals(SqlStatementType.SELECT,
+                SQL.parse("SELECT salary FROM employees VERSIONS BETWEEN TIMESTAMP "
+                                + "SYSTIMESTAMP - INTERVAL '10' MINUTE AND SYSTIMESTAMP "
+                                + "WHERE last_name = 'Chung'",
+                        SqlDialect.ORACLE).type());
+        assertEquals(SqlStatementType.SELECT,
+                SQL.parse("SELECT CONNECT_BY_ROOT last_name AS name FROM employees "
+                                + "CONNECT BY PRIOR employee_id = manager_id",
+                        SqlDialect.ORACLE).type());
+        assertEquals(SqlStatementType.SELECT,
+                SQL.parse("SELECT CAST(col AS INTERVAL DAY TO SECOND) FROM t", SqlDialect.ORACLE).type());
+        assertEquals(SqlStatementType.SELECT,
+                SQL.parse("SELECT TRY_CAST('abc' AS INTEGER) FROM dual", SqlDialect.ORACLE).type());
+        assertEquals(SqlStatementType.SELECT,
+                SQL.parse("SELECT * FROM ((SELECT 1 AS a FROM dual) UNION (SELECT 2 FROM dual)) x",
+                        SqlDialect.ORACLE).type());
+        assertEquals(SqlStatementType.SELECT,
+                SQL.parse("SELECT \"%\"'温'\"%\" FROM dual", SqlDialect.MYSQL).type());
+        assertEquals(SqlStatementType.SELECT,
+                SQL.parse("SELECT :0, :1 FROM dual", SqlDialect.ORACLE).type());
+        assertEquals(SqlStatementType.SELECT,
+                SQL.parse("SELECT * FROM mytable1 a LEFT ANTI JOIN mytable2 b ON a.id=b.id",
+                        SqlDialect.HIVE).type());
+        assertEquals(SqlStatementType.SELECT,
+                SQL.parse("SELECT char(888 USING utf8)", SqlDialect.MYSQL).type());
+        assertEquals(SqlStatementType.DELETE,
+                SQL.parse("DELETE t1.* FROM xxx t1 JOIN yyy t2 ON t1.id = t2.id",
+                        SqlDialect.MYSQL).type());
+        assertEquals(SqlStatementType.SELECT,
+                SQL.parse("SELECT column FROM testtable AS t0 FORCE INDEX (index1)",
+                        SqlDialect.MYSQL).type());
+        assertEquals(SqlStatementType.SELECT,
+                SQL.parse("SELECT a,b INTO (c,d) FROM test", SqlDialect.MYSQL).type());
+        assertEquals(SqlStatementType.SELECT,
+                SQL.parse("SELECT name FROM test WHERE c NOT ILIKE 'a%'", SqlDialect.POSTGRES).type());
+        assertEquals(SqlStatementType.SELECT,
+                SQL.parse("SELECT f1(arguments).f2.f3 FROM dual", SqlDialect.ORACLE).type());
+        assertEquals(SqlStatementType.INSERT,
+                SQL.parse("INSERT INTO mytable (mycolumn) (WITH a AS (SELECT mycolumn FROM mytable) "
+                                + "SELECT mycolumn FROM a)",
+                        SqlDialect.POSTGRES).type());
+    }
+
 }
 

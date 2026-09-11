@@ -28,7 +28,15 @@ public final class SqlJoin extends SqlTableSource {
         /** SQL Server OUTER APPLY */
         OUTER_APPLY,
         /** Hive LATERAL VIEW */
-        LATERAL_VIEW
+        LATERAL_VIEW,
+        /** Spark/Hive {@code LEFT ANTI JOIN} */
+        LEFT_ANTI,
+        /** Spark/Hive {@code LEFT SEMI JOIN} */
+        LEFT_SEMI,
+        /** Spark {@code RIGHT ANTI JOIN} */
+        RIGHT_ANTI,
+        /** Spark {@code RIGHT SEMI JOIN} */
+        RIGHT_SEMI
     }
 
     private Type joinType;

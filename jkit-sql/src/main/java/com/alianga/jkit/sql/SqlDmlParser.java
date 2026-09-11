@@ -42,6 +42,9 @@ final class SqlDmlParser {
     SqlDelete parseDelete() {
         p.expect(SqlTokenType.DELETE);
         SqlDelete delete = new SqlDelete();
+        while (p.is(SqlTokenType.HINT)) {
+            p.next(); // 游离 hint：DELETE /*+ INDEX(t1 i1) */ FROM …
+        }
         if (p.match(SqlTokenType.LOW_PRIORITY)) {
             delete.setLowPriority(true);
         }
@@ -50,6 +53,13 @@ final class SqlDmlParser {
         }
         if (p.match(SqlTokenType.IGNORE)) {
             delete.setIgnore(true);
+        }
+        String fp = parseForcePartitionClause();
+        if (fp != null) {
+            delete.setForcePartition(fp);
+        }
+        while (p.is(SqlTokenType.HINT)) {
+            p.next();
         }
         if (p.match(SqlTokenType.FROM)) {
             SqlTableSource first = p.selectParser.parseTableSource();
@@ -70,13 +80,28 @@ final class SqlDmlParser {
                     delete.setUsingKeyword(true);
                 }
             }
-        } else if (p.identLike()) {
-            delete.setTable(p.selectParser.parseJoinedTable());
-            if (p.match(SqlTokenType.USING)) {
-                delete.setFrom(p.selectParser.parseJoinedTable());
-                delete.setUsingKeyword(true);
-            } else if (p.match(SqlTokenType.FROM)) {
-                delete.setFrom(p.selectParser.parseJoinedTable());
+        } else if (p.identLike() || (p.token.type() != null && p.token.type().keyword()
+                && !p.is(SqlTokenType.WHERE) && !p.is(SqlTokenType.SET))) {
+            // DELETE t1.*, t2.* FROM …  / DELETE a FROM users a …
+            if (lookingAtDeleteStarTargets()) {
+                do {
+                    SqlIdentifier target = p.parseName();
+                    if (p.match(SqlTokenType.DOT)) {
+                        p.expect(SqlTokenType.STAR);
+                    }
+                    delete.targets().add(target);
+                } while (p.match(SqlTokenType.COMMA));
+                if (p.match(SqlTokenType.FROM)) {
+                    delete.setFrom(p.selectParser.parseJoinedTable());
+                }
+            } else {
+                delete.setTable(p.selectParser.parseJoinedTable());
+                if (p.match(SqlTokenType.USING)) {
+                    delete.setFrom(p.selectParser.parseJoinedTable());
+                    delete.setUsingKeyword(true);
+                } else if (p.match(SqlTokenType.FROM)) {
+                    delete.setFrom(p.selectParser.parseJoinedTable());
+                }
             }
         }
         delete.setOutputInto(parseOutputClause(delete.output()));
@@ -145,8 +170,11 @@ final class SqlDmlParser {
         insert.setOutputInto(parseOutputClause(insert.output()));
         if (p.match(SqlTokenType.SET)) {
             parseAssignList(insert.setList());
-        } else if (p.is(SqlTokenType.SELECT) || p.is(SqlTokenType.WITH) || p.is(SqlTokenType.LPAREN)) {
+        } else if (p.is(SqlTokenType.SELECT) || p.is(SqlTokenType.WITH)) {
             insert.setQuery(p.parseStatement());
+        } else if (p.is(SqlTokenType.LPAREN)) {
+            // (SELECT…) / (WITH … SELECT…) / ((SELECT…) UNION …)
+            insert.setQuery(p.selectParser.parseSelect());
         } else if (p.match(SqlTokenType.VALUES) || p.match(SqlTokenType.VALUE)) {
             parseValuesRows(insert);
         }
@@ -362,11 +390,21 @@ final class SqlDmlParser {
     SqlUpdate parseUpdate() {
         p.expect(SqlTokenType.UPDATE);
         SqlUpdate update = new SqlUpdate();
+        while (p.is(SqlTokenType.HINT)) {
+            p.next(); // UPDATE /*+ hint */ t SET …
+        }
         if (p.match(SqlTokenType.LOW_PRIORITY)) {
             update.setLowPriority(true);
         }
         if (p.match(SqlTokenType.IGNORE)) {
             update.setIgnore(true);
+        }
+        String fp = parseForcePartitionClause();
+        if (fp != null) {
+            update.setForcePartition(fp);
+        }
+        while (p.is(SqlTokenType.HINT)) {
+            p.next();
         }
         update.setTable(p.selectParser.parseJoinedTable());
         p.expect(SqlTokenType.SET);
@@ -406,5 +444,66 @@ final class SqlDmlParser {
             p.expect(SqlTokenType.RPAREN);
             insert.valuesList().add(row);
         } while (p.match(SqlTokenType.COMMA));
+    }
+
+    /**
+     * ODPS/MaxCompute：{@code FORCE PARTITION 'pt'} / {@code FORCE ALL PARTITIONS}。
+     *
+     * @return 原文或 null
+     */
+    private String parseForcePartitionClause() {
+        if (!p.is(SqlTokenType.FORCE)) {
+            return null;
+        }
+        SqlToken peeked = p.lexer.peek();
+        if (peeked == null) {
+            return null;
+        }
+        boolean all = peeked.textEqualsIgnoreCase("ALL");
+        boolean part = peeked.type() == SqlTokenType.PARTITION
+                || peeked.textEqualsIgnoreCase("PARTITION")
+                || peeked.textEqualsIgnoreCase("PARTITIONS");
+        if (!all && !part) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append(p.token.text());
+        p.next();
+        if (p.isIdent("ALL")) {
+            sb.append(' ').append(p.token.text());
+            p.next();
+            if (p.is(SqlTokenType.PARTITION) || p.isIdent("PARTITIONS") || p.isIdent("PARTITION")) {
+                sb.append(' ').append(p.token.text());
+                p.next();
+            }
+        } else {
+            sb.append(' ').append(p.token.text());
+            p.next();
+            if (p.is(SqlTokenType.STRING) || p.is(SqlTokenType.NUMBER) || p.identLike()) {
+                sb.append(' ').append(p.token.text());
+                p.next();
+            } else if (p.match(SqlTokenType.LPAREN)) {
+                sb.append('(').append(p.skipBalancedParensContent()).append(')');
+            }
+        }
+        return sb.toString();
+    }
+
+    /** {@code DELETE t1.*, t2.* FROM …} 目标形态。 */
+    private boolean lookingAtDeleteStarTargets() {
+        if (!p.identLike() && !(p.token.type() != null && p.token.type().keyword())) {
+            return false;
+        }
+        SqlToken a = p.lexer.peek();
+        if (a != null && a.type() == SqlTokenType.DOT) {
+            // t1.*  — 需要再看一眼，但环形 peek 只有一层；用 text 扫描不划算。
+            // 约定：下一记号为 DOT 即视为 star-target 形态（随后 expect STAR）。
+            return true;
+        }
+        if (a != null && a.type() == SqlTokenType.COMMA) {
+            // t1, t2 FROM … 多目标（无 .*）也走 targets 列表
+            return true;
+        }
+        return false;
     }
 }

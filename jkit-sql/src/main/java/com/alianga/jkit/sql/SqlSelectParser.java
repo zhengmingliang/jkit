@@ -105,13 +105,33 @@ final class SqlSelectParser {
                 p.match(SqlTokenType.JOIN);
                 type = SqlJoin.Type.INNER;
             } else if (p.match(SqlTokenType.LEFT)) {
-                p.match(SqlTokenType.OUTER);
-                p.expect(SqlTokenType.JOIN);
-                type = SqlJoin.Type.LEFT;
+                if (p.isIdent("ANTI")) {
+                    p.next();
+                    p.expect(SqlTokenType.JOIN);
+                    type = SqlJoin.Type.LEFT_ANTI;
+                } else if (p.isIdent("SEMI")) {
+                    p.next();
+                    p.expect(SqlTokenType.JOIN);
+                    type = SqlJoin.Type.LEFT_SEMI;
+                } else {
+                    p.match(SqlTokenType.OUTER);
+                    p.expect(SqlTokenType.JOIN);
+                    type = SqlJoin.Type.LEFT;
+                }
             } else if (p.match(SqlTokenType.RIGHT)) {
-                p.match(SqlTokenType.OUTER);
-                p.expect(SqlTokenType.JOIN);
-                type = SqlJoin.Type.RIGHT;
+                if (p.isIdent("ANTI")) {
+                    p.next();
+                    p.expect(SqlTokenType.JOIN);
+                    type = SqlJoin.Type.RIGHT_ANTI;
+                } else if (p.isIdent("SEMI")) {
+                    p.next();
+                    p.expect(SqlTokenType.JOIN);
+                    type = SqlJoin.Type.RIGHT_SEMI;
+                } else {
+                    p.match(SqlTokenType.OUTER);
+                    p.expect(SqlTokenType.JOIN);
+                    type = SqlJoin.Type.RIGHT;
+                }
             } else if (p.match(SqlTokenType.FULL)) {
                 p.match(SqlTokenType.OUTER);
                 p.expect(SqlTokenType.JOIN);
@@ -229,7 +249,17 @@ final class SqlSelectParser {
     SqlSelect parseSelect() {
         if (p.is(SqlTokenType.LPAREN)) {
             p.next();
-            SqlSelect inner = parseSelect();
+            SqlSelect inner;
+            if (p.is(SqlTokenType.WITH)) {
+                // (WITH cte AS (…) SELECT …)
+                com.alianga.jkit.sql.ast.SqlStatement w = p.parseStatement();
+                if (!(w instanceof SqlSelect)) {
+                    throw p.error("expected SELECT after WITH");
+                }
+                inner = (SqlSelect) w;
+            } else {
+                inner = parseSelect();
+            }
             p.expect(SqlTokenType.RPAREN);
             parseSelectTail(inner);
             // (SELECT ...) UNION (SELECT ...) ORDER BY / LIMIT 挂在集合运算链末端
@@ -306,6 +336,8 @@ final class SqlSelectParser {
         do {
             select.addSelectItem(parseSelectItem());
         } while (p.match(SqlTokenType.COMMA));
+        // ODPS/MaxCompute：SELECT … FORCE PARTITION 'pt' FROM …
+        parseForcePartition(select);
         parseSelectInto(select);
         if (p.match(SqlTokenType.FROM)) {
             select.setFrom(parseJoinedTable());
@@ -504,6 +536,28 @@ final class SqlSelectParser {
             } while (p.match(SqlTokenType.COMMA));
             return;
         }
+        // SELECT a,b INTO (c,d) FROM t  /  SELECT a,b INTO c,d FROM t
+        if (p.match(SqlTokenType.LPAREN)) {
+            do {
+                select.intoVariables().add(p.parseName());
+            } while (p.match(SqlTokenType.COMMA));
+            p.expect(SqlTokenType.RPAREN);
+            return;
+        }
+        if (p.identLike() || (p.token.type() != null && p.token.type().keyword())) {
+            // 多变量 INTO c,d 与单表 INTO t 歧义：若下一记号为逗号则按变量列表
+            SqlIdentifier first = p.parseName();
+            if (p.is(SqlTokenType.COMMA)) {
+                select.intoVariables().add(first);
+                while (p.match(SqlTokenType.COMMA)) {
+                    select.intoVariables().add(p.parseName());
+                }
+                return;
+            }
+            p.match(SqlTokenType.TABLE);
+            select.setIntoTable(SqlTable.of(first));
+            return;
+        }
         p.match(SqlTokenType.TABLE);
         SqlTable into = SqlTable.of(p.parseName());
         select.setIntoTable(into);
@@ -523,7 +577,16 @@ final class SqlSelectParser {
             item.setExpr(all);
         } else {
             item.setExpr(expr);
-            item.setAlias(p.parseAlias());
+            // Hive UDTF：fn(...) AS (c0, c1, c2)
+            if (p.match(SqlTokenType.AS) && p.is(SqlTokenType.LPAREN)) {
+                p.next();
+                do {
+                    item.columnAliases().add(p.parseName());
+                } while (p.match(SqlTokenType.COMMA));
+                p.expect(SqlTokenType.RPAREN);
+            } else {
+                item.setAlias(p.parseAlias());
+            }
         }
         return item;
     }
@@ -634,6 +697,76 @@ final class SqlSelectParser {
         p.expect(SqlTokenType.RPAREN);
     }
 
+    /**
+     * ODPS/MaxCompute：{@code FORCE PARTITION 'pt'} / {@code FORCE ALL PARTITIONS}（SELECT 列表后）。
+     */
+    private void parseForcePartition(SqlSelect select) {
+        if (!p.is(SqlTokenType.FORCE)) {
+            return;
+        }
+        SqlToken peeked = p.lexer.peek();
+        if (peeked == null) {
+            return;
+        }
+        boolean all = peeked.textEqualsIgnoreCase("ALL");
+        boolean part = peeked.type() == SqlTokenType.PARTITION
+                || peeked.textEqualsIgnoreCase("PARTITION")
+                || peeked.textEqualsIgnoreCase("PARTITIONS");
+        if (!all && !part) {
+            return;
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append(p.token.text());
+        p.next();
+        if (p.isIdent("ALL")) {
+            sb.append(' ').append(p.token.text());
+            p.next();
+            if (p.is(SqlTokenType.PARTITION) || p.isIdent("PARTITIONS") || p.isIdent("PARTITION")) {
+                sb.append(' ').append(p.token.text());
+                p.next();
+            }
+        } else {
+            sb.append(' ').append(p.token.text());
+            p.next();
+            if (p.is(SqlTokenType.STRING) || p.is(SqlTokenType.NUMBER) || p.identLike()) {
+                sb.append(' ').append(p.token.text());
+                p.next();
+            } else if (p.match(SqlTokenType.LPAREN)) {
+                sb.append('(').append(p.skipBalancedParensContent()).append(')');
+            }
+        }
+        select.setForcePartition(sb.toString());
+    }
+
+    /**
+     * Oracle 闪回：{@code VERSIONS BETWEEN TIMESTAMP|SCN expr AND expr}。
+     */
+    private void parseVersionsBetween(SqlTable table) {
+        if (!(p.identLike() || (p.token.type() != null && p.token.type().keyword()))
+                || !p.token.textEqualsIgnoreCase("VERSIONS")) {
+            return;
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append(p.token.text());
+        p.next();
+        if (p.match(SqlTokenType.BETWEEN)) {
+            sb.append(" BETWEEN");
+        }
+        // TIMESTAMP | SCN
+        if (p.identLike() || (p.token.type() != null && p.token.type().keyword())) {
+            sb.append(' ').append(p.token.text());
+            p.next();
+        }
+        int start = p.token.start();
+        p.exprParser.parseExpr();
+        if (p.match(SqlTokenType.AND)) {
+            p.exprParser.parseExpr();
+        }
+        sb.append(' ').append(p.lexer.rawSlice(start, p.token.start()).trim());
+        String prev = table.temporalClause();
+        table.setTemporalClause(prev == null || prev.isEmpty() ? sb.toString() : prev + " " + sb.toString());
+    }
+
     private void parseTableSample(SqlTable table) {
         // PG: TABLESAMPLE SYSTEM|BERNOULLI (p) [REPEATABLE (seed)]
         if (p.isIdent("TABLESAMPLE")) {
@@ -711,9 +844,10 @@ final class SqlSelectParser {
             SqlTableSource source;
             if (p.is(SqlTokenType.VALUES)) {
                 source = parseValuesTable();
-            } else if (p.isQueryStart() || p.is(SqlTokenType.WITH)) {
+            } else if (p.isQueryStart() || p.is(SqlTokenType.WITH) || p.is(SqlTokenType.LPAREN)) {
+                // (SELECT…) / ((SELECT…) UNION …) / (WITH … SELECT…)
                 SqlSubqueryTable sub = new SqlSubqueryTable();
-                sub.setQuery(p.parseStatement());
+                sub.setQuery(parseSelect());
                 sub.setLateral(lateral);
                 source = sub;
             } else {
@@ -760,6 +894,10 @@ final class SqlSelectParser {
             } else {
                 parseTableAlias(table);
             }
+            // 别名之后仍可出现 USE/FORCE/IGNORE INDEX（MySQL）
+            parseTableHints(table);
+            // Oracle 闪回版本：VERSIONS BETWEEN TIMESTAMP … AND …
+            parseVersionsBetween(table);
             parseWithTableHint(table);
             parseTableSample(table);
             parseMatchRecognize(table);

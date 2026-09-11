@@ -71,6 +71,8 @@ public final class SqlSelect extends SqlStatement {
     private String intoOutfile;
     /** {@code OUTFILE} 或 {@code DUMPFILE}，可空 */
     private String intoFileKind;
+    /** ODPS/MaxCompute {@code FORCE PARTITION …} / {@code FORCE ALL PARTITIONS} 原文。 */
+    private String forcePartition;
 
     /**
      * {@inheritDoc}
@@ -774,6 +776,24 @@ public final class SqlSelect extends SqlStatement {
      */
     public void setIntoFileKind(String intoFileKind) {
         this.intoFileKind = intoFileKind;
+    }
+
+    /**
+     * ODPS/MaxCompute {@code FORCE PARTITION …} 原文。
+     *
+     * @return 原文，可空
+     * @since 2.0.1
+     */
+    public String forcePartition() {
+        return forcePartition;
+    }
+
+    /**
+     * @param forcePartition {@code FORCE PARTITION …} 原文
+     * @since 2.0.1
+     */
+    public void setForcePartition(String forcePartition) {
+        this.forcePartition = forcePartition;
     }
 
     /**

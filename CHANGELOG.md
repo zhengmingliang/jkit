@@ -36,6 +36,15 @@
 
 ## 2.0.1 - 2026-09-09
 
+### 新增（jkit-sql 覆盖率提升第四轮）
+- ODPS/MaxCompute `FORCE PARTITION` / `FORCE ALL PARTITIONS`（SELECT / UPDATE / DELETE）
+- Hive UDTF 多列别名 `SELECT fn(...) AS (c0, c1, c2)`
+- Oracle 闪回 `VERSIONS BETWEEN TIMESTAMP|SCN … AND …`；`CONNECT_BY_ROOT expr`
+- `TRY_CAST` / `CAST(… AS INTERVAL DAY TO SECOND)`；`INTERVAL … YEAR(n) TO MONTH`
+- 相邻字符串隐式拼接、字符集前缀十六进制字面量、`:0`/`:1` 数字命名绑定
+- `LEFT|RIGHT ANTI|SEMI JOIN`；函数 `USING charset`；游标属性 `SQL%FOUND`
+- 括号集合运算子查询 `((SELECT…) UNION …)`；`INSERT … (WITH … SELECT …)`；`DELETE t1.*`
+
 新模块 `jkit-sql` 随父 POM **2.0.1** 一并交付（同版本号下的新增 artifact；下方保留 2026-09-01 的历史 `2.0.1` 小节）。
 
 ### 新增

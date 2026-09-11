@@ -20,6 +20,8 @@ public enum SqlBinaryOp {
     LIKE("LIKE"),
     NOT_LIKE("NOT LIKE"),
     ILIKE("ILIKE"),
+    /** PostgreSQL {@code NOT ILIKE} */
+    NOT_ILIKE("NOT ILIKE"),
     REGEXP("REGEXP"),
     NOT_REGEXP("NOT REGEXP"),
     AND("AND"),
@@ -50,6 +52,8 @@ public enum SqlBinaryOp {
     REGEX_NOT_MATCH_CI("!~*"),
     NULL_SAFE_EQ("<=>"),
     SUBSCRIPT("[]"),
+    /** 函数/表达式结果字段访问 {@code f(x).y} */
+    MEMBER("."),
     ASSIGN(":="),
     ESCAPE("ESCAPE"),
     COLLATE("COLLATE"),

@@ -20,6 +20,8 @@ public final class SqlDelete extends SqlStatement {
     private boolean ignore;
     private boolean lowPriority;
     private boolean quick;
+    /** ODPS/MaxCompute {@code FORCE PARTITION …} 原文。 */
+    private String forcePartition;
     private SqlExpr where;
     private SqlLimit limit;
     private final List<SqlOrderByItem> orderBy = new ArrayList<SqlOrderByItem>(2);
@@ -190,6 +192,24 @@ public final class SqlDelete extends SqlStatement {
      */
     public void setQuick(boolean quick) {
         this.quick = quick;
+    }
+
+    /**
+     * ODPS/MaxCompute {@code FORCE PARTITION …} 原文。
+     *
+     * @return 原文，可空
+     * @since 2.0.1
+     */
+    public String forcePartition() {
+        return forcePartition;
+    }
+
+    /**
+     * @param forcePartition {@code FORCE PARTITION …} 原文
+     * @since 2.0.1
+     */
+    public void setForcePartition(String forcePartition) {
+        this.forcePartition = forcePartition;
     }
 
     /**
