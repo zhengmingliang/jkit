@@ -9,36 +9,23 @@
 
 ### jkit-sql
 - **实体**：公开 `columnSql` / `columnTypeSql` / `createIndex` / `orderByForeignKeys`，`createTable(..., includeIndexes)` 可供自动建表拆开索引。
-
-### jkit-sql
+- **修复**：`GROUP_CONCAT` 无显式 `SEPARATOR` 时转 `STRING_AGG`/`LISTAGG` 丢分隔符（产出 `STRING_AGG(a, ,)`）；MySQL `MODIFY`/`CHANGE` 转 PG/ANSI/H2/PRESTO 时列名重复（产出 `ALTER COLUMN c TYPE c INTEGER`）。
 - **转换**：函数改写覆盖 JOIN ON / MERGE / OVER / 列 `DEFAULT NOW()`；`DATE_ADD`/`DATEDIFF`/`FROM_UNIXTIME`/`DECODE`/`NVL2` 等内置规则；PG `ALTER COLUMN` 附录 `SET NOT NULL`/`DEFAULT`；独立 `CREATE INDEX` 去掉 `USING BTREE`；FULLTEXT 升为 `MANUAL_ACTION_REQUIRED`。
 - **SPI**：`SqlSchemaConverterProviders.loadSorted()` 一次加载，类型表与函数表共用实例。
 - **实体**：JPA `@Index`/`@Enumerated`/`@Embedded`、集合字段默认跳过、`createTables` 按外键排序；反射认 MyBatis-Plus `@TableName`/`@TableId`/`@TableField` 与 MyBatis `@Alias`（无编译依赖）。
+- **扩展**：函数改写真正走 `SqlSchemaConverterProvider.registerFunctions`（内置挂 `SqlFunctionRegistry`，SPI 后覆盖；`rewrite` 返回 `null` 回落内置）。`FunctionAstRewriter` 只遍历，第三方不必改它。
+- **修复**：`SqlDialectWrapper` 不再委托派生方法（`identQuoteClose` / `quoteIdent` / `pipesAreConcat` / `preferredLimitStyle`），子类只覆写原语时派生能力跟着变。
+- **性能**：继续压 MySQL→ORACLE 分页 format 热路径——offset=0 单层 ROWNUM **免 clone** 包装回写、线程本地 `SqlFormatter` 复用、`wrapOracleRownum`/`adaptPagination` LIMIT→经典 ORACLE 快路径、冻结 ROWNUM/RN/XX、小整数数字字面量缓存至 10000、`detachSelectBody` 跳过空列表。
+- **性能**：`SQL.clone` 改为真正的 AST 树拷贝（`SqlAstCloner` / `SqlNode.copy`），热路径不再 format→parse；跨方言 `format`/`adaptPagination`/`setPage` 等「先 clone 再改」显著加速。
+- **性能**：`adaptPagination` 一次探测 ROWNUM/row_number，避免 getLimit/getOffset/strip 重复扫描；分页数字字面量复用小整数串缓存。
+- **修复**：跨方言分页适配——`paginationNeedsAdapt`/`adaptPagination` 接入 `isPaginationFormCompatible`（ROWNUM↔LIMIT/FETCH、逗号 LIMIT→PG/ANSI）；`format` 仅在需要时 `clone`+adapt，避免按目标方言 raw format 再 parse。
+- **修复**：`toSqlString`/`format` 按目标方言适配分页（MySQL `LIMIT` → 经典 ORACLE ROWNUM / ORACLE12 OFFSET·FETCH / SQLSERVER TOP|OFFSET FETCH）；`setLimit`/`setPage` 转经典 ORACLE 时清掉子查询内残留 LIMIT/TOP（`wrapOracleRownum` + `clearPagination`）。
+- **新增**：`SQL.adaptPagination` / `addSelectItem` / `removeSelectItem`；`SqlRewrites` 对应链 hook；`SqlRewriter.adaptPagination`。
 
 ### 文档
 - README / `docs/sql.md` / `docs/en/sql.md` / `jkit-sql/README` 去掉内部开发计划入口（该文件不进文档站）。
 
-### jkit-sql
-- **扩展**：函数改写真正走 `SqlSchemaConverterProvider.registerFunctions`（内置挂 `SqlFunctionRegistry`，SPI 后覆盖；`rewrite` 返回 `null` 回落内置）。`FunctionAstRewriter` 只遍历，第三方不必改它。
-- **修复**：`SqlDialectWrapper` 不再委托派生方法（`identQuoteClose` / `quoteIdent` / `pipesAreConcat` / `preferredLimitStyle`），子类只覆写原语时派生能力跟着变。
-
-### jkit-sql
-- **性能**：继续压 MySQL→ORACLE 分页 format 热路径——offset=0 单层 ROWNUM **免 clone** 包装回写、线程本地 `SqlFormatter` 复用、`wrapOracleRownum`/`adaptPagination` LIMIT→经典 ORACLE 快路径、冻结 ROWNUM/RN/XX、小整数数字字面量缓存至 10000、`detachSelectBody` 跳过空列表。
-
-### jkit-sql
-- **性能**：`SQL.clone` 改为真正的 AST 树拷贝（`SqlAstCloner` / `SqlNode.copy`），热路径不再 format→parse；跨方言 `format`/`adaptPagination`/`setPage` 等「先 clone 再改」显著加速。
-- **性能**：`adaptPagination` 一次探测 ROWNUM/row_number，避免 getLimit/getOffset/strip 重复扫描；分页数字字面量复用小整数串缓存。
-
-### jkit-sql
-- **修复**：跨方言分页适配——`paginationNeedsAdapt`/`adaptPagination` 接入 `isPaginationFormCompatible`（ROWNUM↔LIMIT/FETCH、逗号 LIMIT→PG/ANSI）；`format` 仅在需要时 `clone`+adapt，避免按目标方言 raw format 再 parse。
-
-### jkit-sql
-- **修复**：`toSqlString`/`format` 按目标方言适配分页（MySQL `LIMIT` → 经典 ORACLE ROWNUM / ORACLE12 OFFSET·FETCH / SQLSERVER TOP|OFFSET FETCH）；`setLimit`/`setPage` 转经典 ORACLE 时清掉子查询内残留 LIMIT/TOP（`wrapOracleRownum` + `clearPagination`）。
-- **新增**：`SQL.adaptPagination` / `addSelectItem` / `removeSelectItem`；`SqlRewrites` 对应链 hook；`SqlRewriter.adaptPagination`。
-
-## 2.0.1 / unreleased
-
-### jkit-sql
+### jkit-sql（竞品覆盖率）
 - 覆盖率第十三轮：PG `DO $$…$$` / `DO $tag$…$tag$`；块内 `ELSIF`/`EXCEPTION WHEN`；
   标签化 `lab: BEGIN…END lab`；MySQL `CREATE ALGORITHM/DEFINER/SQL SECURITY VIEW|PROCEDURE`（含 `user@%`）；
   `INSERT/REPLACE` 可叠加 `LOW_PRIORITY|DELAYED|HIGH_PRIORITY`；`AS` 关键字别名（修 match 误消费）；
@@ -47,27 +34,18 @@
   Hive `LATERAL VIEW OUTER`；`CONTAINS`；PG `@@` tsquery（勿当 DB link）。
   竞品率 **96.3 / 92.3 / 90.0**（gaps 173+52+4 → 128+32+4）。
 
-## 2.0.1 / unreleased
-
-### jkit-sql
 - 覆盖率第十二轮：Oracle MODEL（RULES SEQUENTIAL ORDER、MEASURES 字面量别名、WHERE 后 MODEL）、
   MERGE `UPDATE…DELETE WHERE` / `INSERT…WHERE`、括号内 PIVOT/UNPIVOT、分区外连接 `PARTITION BY`、
   `INSERT WHEN`（无 ALL/FIRST）、多 `GROUPING SETS`、递归 CTE `SEARCH`/`CYCLE`、
   `TABLE(SELECT…)`、`(expr) DAY(n) TO SECOND`、Oracle 数值后缀、运算符夹块注释、
   选择列表括号集合运算。竞品率 **95.6 / 91.5 / 90.0**。
 
-## 2.0.1 / unreleased
-
-### jkit-sql
 - 覆盖率第十轮：修复 PG `$$…$$` dollar-quote（先于 IDENT 扫描）、GROUP BY 括号项、
   EMIT 置于 LIMIT 前、数组切片 `arr[1:3]`、WITHIN GROUP PARTITION、CAST schema.type、
   ON CONFLICT 勿被链式 ON 吞掉、EXCLUDE、INSERT 表别名/OVERRIDING/SET AS、
   Informix OUTER JOIN、NOT ISNULL、SEPARATOR、FROM VALUES。
   竞品率 **95.0 / 89.5 / 79.8**。
 
-## 2.0.1 / unreleased
-
-### jkit-sql
 - 覆盖率第九轮：空白夹缝运算符（`> =`/`| |`/`^=`）、`=>` 命名实参、`//` 行内备注、
   SAMPLE SEED、FOR NO KEY UPDATE、HASH JOIN、WITHIN 时窗 JOIN、链式 ON、
   BigQuery `* EXCEPT/REPLACE`、MEMBER OF、ISNULL、GLOBAL IN、PREWHERE/SETTINGS/EMIT/PREFERRING、
