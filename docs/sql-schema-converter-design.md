@@ -65,7 +65,69 @@ SQL.convertBatch(sqls, SqlDialect.MYSQL, SqlDialect.POSTGRES);
 
 警告三级：`INFO`、`SEMANTIC_RISK`、`MANUAL_ACTION_REQUIRED`。另计已转换列数 / 原样保留数。
 
-## 四、列模型与解析
+## 四、当前支持哪些数据库
+
+`SQL.convert(sql, source, target)` 的 `source` / `target` 是 `SqlDialect`。**一等方言 12 个**，类型表对这 12 个都登记了全部 canonical；解析、分页 format、DDL 列转换都可以互转。产品名通过 `SqlDialect.fromName` 归到某一等方言（无法识别时默认 MySQL）。
+
+转换覆盖的语句：`CREATE TABLE`（列类型/约束/自增）、`ALTER TABLE ADD/MODIFY/CHANGE` 的列类型、SELECT/DML 里的函数与分页（分页复用 `format`）。不转换存储过程、触发器、视图。
+
+### 4.1 一等方言（可作 source 或 target）
+
+| `SqlDialect` | 代表产品 | 分页 | 自增转换 | 说明 |
+|---|---|---|---|---|
+| `MYSQL` | MySQL / MariaDB / TiDB / OceanBase MySQL 模式 / PolarDB-MySQL / GBase 8a / StarRocks / Doris 等 | `LIMIT`/`OFFSET` | `AUTO_INCREMENT` | 默认方言；`TINYINT(1)`↔布尔 |
+| `POSTGRES` | PostgreSQL / GaussDB / openGauss / Greenplum / Kingbase / MogDB / Highgo / Cockroach / Redshift 等 | `LIMIT`/`OFFSET`，亦认 FETCH | `GENERATED … IDENTITY` 或 `SERIAL` | 真库验证过（本机 PG 13、容器 PG 16） |
+| `ORACLE` | Oracle ≤11g / 达梦 / Oscar / OceanBase Oracle 模式 | 仅 `ROWNUM` | **不生成**，`MANUAL_ACTION_REQUIRED` | 真库验证过（本机 Oracle 11g） |
+| `ORACLE12` | Oracle 12c / 18c / 19c / 21c | 裸 SELECT 可用 `OFFSET/FETCH` | `GENERATED … IDENTITY` | 类型写法与 `ORACLE` 相同，只是自增和分页不同 |
+| `SQLSERVER` | SQL Server / Azure SQL / 别名 mssql、tsql、sybase | 第 1 页 `TOP`，其后 `OFFSET FETCH` | `IDENTITY(s,i)` | |
+| `H2` | H2 | `LIMIT`/`OFFSET` | `AUTO_INCREMENT` | 内存库验证过 |
+| `ANSI` | SQL-92 / 别名 sql92、standard；Snowflake 暂归此 | `LIMIT`/`OFFSET` 与 FETCH | `GENERATED … IDENTITY` | |
+| `DB2` | DB2 LUW | 仅 `FETCH FIRST` | `GENERATED … IDENTITY` | |
+| `SQLITE` | SQLite；GBase 8s 归此 | `LIMIT`/`OFFSET`，无 FETCH | `AUTOINCREMENT` | |
+| `HIVE` | Hive / MaxCompute(ODPS) / ArgoDB | 仅 `LIMIT`（无 OFFSET） | 去掉并告警 | 类型多落到 `STRING`/`INT`，有损 |
+| `CLICKHOUSE` | ClickHouse | `LIMIT`（含逗号风格） | 去掉并告警 | 类型如 `Int32`/`String`/`DateTime`，有损较多 |
+| `PRESTO` | Presto / Trino | `LIMIT` | 去掉并告警 | |
+
+任意两个一等方言都可以互为 source/target，例如 `MYSQL→POSTGRES`、`POSTGRES→ORACLE12`、`SQLSERVER→MYSQL`。有损方向（如 `MEDIUMINT`→PG `INTEGER` 再转回变成 `INT`）见第六节。
+
+### 4.2 `fromName` 别名（同一套转换规则）
+
+| 归入 | `fromName(...)` 可识别的名称（大小写不敏感） |
+|---|---|
+| `MYSQL` | mysql、mariadb、tidb、gbase、gbase8a、oceanbase、polardb、starrocks、doris、percona、singlestore、memsql、tdsql、greatsql、goldendb、adb、analyticdb、ads、selectdb、matrixone、stonedb |
+| `POSTGRES` | postgres、postgresql、pgsql、gauss、gaussdb、opengauss、greenplum、kingbase、cockroach、redshift、highgo、uxdb、mogdb、vastbase、antdb、ivorysql、xcloud |
+| `ORACLE` | oracle、oracle11、11g、dm、dameng、oscar、oceanbase_oracle |
+| `ORACLE12` | oracle12、oracle12c、12c、oracle18、oracle19、oracle21、19c、21c |
+| `SQLSERVER` | sqlserver、mssql、tsql、sybase、azure、azuresql、sqlserver2012 |
+| `HIVE` | hive、hive2、hive3、maxcompute、odps、argo、argodb |
+| `PRESTO` | presto、prestodb、trino |
+| `SQLITE` | sqlite、sqlite3、gbase8s |
+| `DB2` | db2、db2luw |
+| `ANSI` | ansi、sql92、standard、snowflake |
+| `H2` | h2 |
+| `CLICKHOUSE` | clickhouse、ck、ch |
+
+别名只表示「按该一等方言的引号/分页/类型表来转」，**不保证** StarRocks、Snowflake 等产品的专有类型（如 `BITMAP`、`VARIANT`）能识别——那些会变成 `UNKNOWN` 并保留原文。
+
+### 4.3 各层覆盖程度
+
+| 能力 | 覆盖 |
+|---|---|
+| 列类型（20 个 canonical × 12 方言） | 全登记，CI `RegistryValidationTest` |
+| `CREATE TABLE` 列约束 / 自增 | 12 方言均有策略；Hive/CH/Presto/Oracle11g 自增只告警不瞎生成 |
+| SELECT/DML 函数 | 见第八节；按目标方言分支，不是 12×12 张函数表 |
+| 分页 | 随 `format(stmt, target)`，与 `SQL.convert` 同一条链路 |
+| 真库建表回归 | MySQL 8、PostgreSQL 13/16、Oracle 11g、H2（`tools-test`） |
+
+```java
+SQL.convert(sql, SqlDialect.fromName("gbase8a"), SqlDialect.fromName("opengauss"));
+// 等价 MYSQL → POSTGRES
+
+SQL.convert(sql, SqlDialect.fromName("dm"), SqlDialect.MYSQL);
+// 达梦按 ORACLE（11g 分页/自增）→ MYSQL
+```
+
+## 五、列模型与解析
 
 `ColumnDefinition`：列名、`SqlDataType`、约束列表、原文、`tableConstraint` 标记。
 
@@ -75,7 +137,7 @@ SQL.convertBatch(sqls, SqlDialect.MYSQL, SqlDialect.POSTGRES);
 
 `SqlColumnDefinitionParser` 用现有 `SqlLexer` 切词，识别多词类型（`DOUBLE PRECISION`、`CHARACTER VARYING`、`TIMESTAMP WITH TIME ZONE`）、`SERIAL`→整数+自增、表级 `PRIMARY KEY` / `FOREIGN KEY` / `KEY` 等。解析失败不抛，返回 `UNKNOWN` + 原文。
 
-## 五、类型注册表
+## 六、类型注册表
 
 `CanonicalType`（另加 `UNKNOWN`）：
 
@@ -100,7 +162,7 @@ SQL.convertBatch(sqls, SqlDialect.MYSQL, SqlDialect.POSTGRES);
 
 常用有损例子：PG 上 `DATETIME`/`TIMESTAMP` 都是 `TIMESTAMP`（主类型 `TIMESTAMP`）；`MEDIUMINT`/`INT` 都是 `INTEGER`（主类型 `INT`）。
 
-## 六、DDL 转换语义
+## 七、DDL 转换语义
 
 ### 自增
 
@@ -123,7 +185,7 @@ SQL.convertBatch(sqls, SqlDialect.MYSQL, SqlDialect.POSTGRES);
 - 表级 MySQL `KEY`/`INDEX`/`FULLTEXT` 从表定义**删除**并告警（否则目标库无法执行）；`UNIQUE KEY` 改成 `UNIQUE (...)`
 - `ALTER TABLE ADD/MODIFY/CHANGE` 会转换列类型；`CHANGE`/`MODIFY` 转到非 MySQL 时告警：需手工改写成 `ALTER COLUMN`
 
-## 七、函数改写
+## 八、函数改写
 
 在 clone 后的 AST 上改节点，不把模板字符串再 parse 一遍。由 `FunctionAstRewriter` 实现：
 
@@ -140,7 +202,7 @@ SQL.convertBatch(sqls, SqlDialect.MYSQL, SqlDialect.POSTGRES);
 | `LENGTH` / `LEN` | SQL Server `LEN`，其余 `LENGTH` |
 | `SUBSTRING` / `SUBSTR` | Oracle `SUBSTR` |
 
-## 八、如何扩展
+## 九、如何扩展
 
 先判断改哪一层，再动手。**不要**再加 pairwise 映射表。
 
@@ -157,7 +219,7 @@ SQL.convertBatch(sqls, SqlDialect.MYSQL, SqlDialect.POSTGRES);
 
 ---
 
-### 8.1 SPI：别名、覆盖写法、有损映射
+### 9.1 SPI：别名、覆盖写法、有损映射
 
 实现 `com.alianga.jkit.sql.schema.spi.SqlSchemaConverterProvider`，在 **自己的 jar** 里放：
 
@@ -211,7 +273,7 @@ mvn -pl jkit-sql -Dtest=RegistryValidationTest,SqlDataTypeRegistryTest test
 
 ---
 
-### 8.2 新增一种 canonical 类型（改本模块）
+### 9.2 新增一种 canonical 类型（改本模块）
 
 例如要支持 `UUID`：
 
@@ -230,7 +292,7 @@ mvn -pl jkit-sql -Dtest=RegistryValidationTest,SqlDataTypeRegistryTest test
 
 ---
 
-### 8.3 新增一种数据库（改本模块）
+### 9.3 新增一种数据库（改本模块）
 
 「GBase 当 MySQL」这种**别名**已经在 `SqlDialect.fromName` 里（`gbase`→`MYSQL`，`dm`→`ORACLE`，`gaussdb`→`POSTGRES`）。只有分页/引号/类型三者都对不齐时才值得加新枚举。
 
@@ -243,7 +305,7 @@ mvn -pl jkit-sql -Dtest=RegistryValidationTest,SqlDataTypeRegistryTest test
 5. **`AutoIncrementStrategy`**：`switch (target)` 增加分支；没有自增就告警 `MANUAL_ACTION_REQUIRED`，禁止静默丢掉。
 6. **`DefaultValueCoercer.nativeBoolean`**：该方言布尔是 `true/false` 还是 `0/1`。
 7. **列解析**：自增关键字（`IDENTITY` / `AUTO_INCREMENT` / `SERIAL`）是否要在 `SqlColumnDefinitionParser` 里认。
-8. **函数**：`FunctionAstRewriter` 里目标方言分支（见 8.4）。
+8. **函数**：`FunctionAstRewriter` 里目标方言分支（见 9.4）。
 9. **表选项**：`supportsMysqlTableOptions` / 列 charset 是否保留。
 10. 测试：该方言 × 全部 canonical 的 roundtrip；至少一条 `CREATE TABLE` 黄金语料；能连真库的话接到 `LocalDatasourceConvertTest` 一类测试。
 
@@ -251,7 +313,7 @@ mvn -pl jkit-sql -Dtest=RegistryValidationTest,SqlDataTypeRegistryTest test
 
 ---
 
-### 8.4 新增函数转换（改 `FunctionAstRewriter`）
+### 9.4 新增函数转换（改 `FunctionAstRewriter`）
 
 函数 **没有** SPI。`FunctionRewriteRule` 接口还在，但运行路径是 `FunctionAstRewriter.rewriteFunction` 里的硬编码。新增规则就改这个方法：参数已经递归改写过，这里只负责换节点。
 
@@ -289,14 +351,14 @@ if ("DATE_FORMAT".equals(name) && args.size() >= 2) {
 
 ---
 
-### 8.5 新增列约束或自增形态
+### 9.5 新增列约束或自增形态
 
 - 新的列修饰符（如 `INVISIBLE`）：给 `ColumnConstraint.Kind` 加枚举值，在 `SqlColumnDefinitionParser.readConstraint` 里消费，在 `ColumnDefinitionConverter.render` 的 `switch (c.kind())` 里**显式处理或显式丢弃+告警**。漏掉 `Kind` 会在 converter 里落到 `default`，等于静默丢失（这是早期 `AUTO_INCREMENT` 被丢掉的原因）。
 - 新方言的自增：只改 `AutoIncrementStrategy.apply` 的 `switch`，不要在 converter 里散落字符串。
 
 ---
 
-### 8.6 扩展时的测试清单
+### 9.6 扩展时的测试清单
 
 | 改动 | 最少要绿的测试 |
 |---|---|
@@ -310,7 +372,7 @@ if ("DATE_FORMAT".equals(name) && args.size() >= 2) {
 mvn -pl jkit-sql test
 ```
 
-## 九、测试
+## 十、测试
 
 模块内（`jkit-sql`，JUnit 4）：
 
@@ -326,7 +388,7 @@ mvn -pl jkit-sql test
 - `LocalDatasourceConvertTest`：读 `src/test/resources/datasource`，在本机 MySQL / PostgreSQL / Oracle 11g 建表（文件不入库；连不上 skip）
 - JMH：`com.alianga.test.sql.jmh.SqlSchemaConvertBenchmark`
 
-## 十、明确不做
+## 十一、明确不做
 
 - 存储过程 / 触发器 / 视图的跨方言转换
 - 自动生成 Oracle ≤11g 的 SEQUENCE+TRIGGER
