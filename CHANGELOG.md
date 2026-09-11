@@ -6,6 +6,7 @@
 
 ### jkit-sql-auto
 - **新增**：启动时按实体自动建表 / 更新表结构（`com.alianga:jkit-sql-auto`）。扫描 `@SqlTable` / JPA / MyBatis-Plus 实体，对照 `DatabaseMetaData` 执行 `CREATE TABLE` / `ALTER TABLE ADD` / `CREATE INDEX`。模式：`none` / `validate` / `update`（默认，只追加）/ `create` / `create-drop`。配置前缀 `jkit.sql.auto.*`，数据源可回落 `spring.datasource.*`。运行时零第三方依赖。
+- **新增**：`SqlAuto.drop` 按外键逆序删托管表；Spring Boot 2 / 3 自动配置模块 `jkit-sql-auto-spring-boot-2`、`jkit-sql-auto-spring-boot-3`。
 
 ### jkit-sql
 - **实体**：公开 `columnSql` / `columnTypeSql` / `createIndex` / `orderByForeignKeys`，`createTable(..., includeIndexes)` 可供自动建表拆开索引。

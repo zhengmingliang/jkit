@@ -23,6 +23,8 @@ This repository is a multi-module build rooted at `jkit-parent`. Pull in only wh
 | `jkit-core` | `com.alianga:jkit` | Runtime core (strings, dates, JSON, YAML, HTTP, configuration, …) |
 | `jkit-sql` | `com.alianga:jkit-sql` | Hand-written zero-dependency SQL parser matching the common entry points of Druid / JSqlParser |
 | `jkit-sql-auto` | `com.alianga:jkit-sql-auto` | Create / update tables from entities at startup (JDBC) |
+| `jkit-sql-auto-spring-boot-2` | `com.alianga:jkit-sql-auto-spring-boot-2` | Spring Boot 2 auto-config |
+| `jkit-sql-auto-spring-boot-3` | `com.alianga:jkit-sql-auto-spring-boot-3` | Spring Boot 3 auto-config (JDK 17+) |
 | `jkit-notify` | `com.alianga:jkit-notify` | Notifications: DingTalk / WeCom / Feishu / ServerChan / Bark / Webhook / SMTP |
 | `jkit-notify-extra` | `com.alianga:jkit-notify-extra` | Optional channels: Slack / Telegram / ntfy / SMS (Alibaba Cloud, Tencent Cloud, Yunpian, Huawei Cloud) |
 | `jkit-curl-codegen` | `com.alianga:jkit-curl-codegen` | Convert curl commands into OkHttp / fetch / requests and other source code |
@@ -55,6 +57,22 @@ Optional modules:
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit-sql-auto</artifactId>
+    <version>2.0.1</version>
+</dependency>
+```
+
+```xml [Boot 2 auto schema]
+<dependency>
+    <groupId>com.alianga</groupId>
+    <artifactId>jkit-sql-auto-spring-boot-2</artifactId>
+    <version>2.0.1</version>
+</dependency>
+```
+
+```xml [Boot 3 auto schema]
+<dependency>
+    <groupId>com.alianga</groupId>
+    <artifactId>jkit-sql-auto-spring-boot-3</artifactId>
     <version>2.0.1</version>
 </dependency>
 ```

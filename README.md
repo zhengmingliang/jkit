@@ -81,9 +81,9 @@ Slack / Telegram / ntfy / 短信（阿里云、腾讯云、云片、华为云）
 </dependency>
 ```
 
-扫描 `@SqlTable` / JPA / MyBatis-Plus 实体，对照 `DatabaseMetaData` 执行 `CREATE` / `ALTER`。`jkit-sql` 本身不执行 SQL。用法见 [docs/sql-auto.md](docs/sql-auto.md)。
+扫描 `@SqlTable` / JPA / MyBatis-Plus 实体，对照 `DatabaseMetaData` 执行 `CREATE` / `ALTER`。`jkit-sql` 本身不执行 SQL。用法见 [docs/sql-auto.md](docs/sql-auto.md)。Spring Boot 2 / 3 分别加 `jkit-sql-auto-spring-boot-2` / `jkit-sql-auto-spring-boot-3`。
 
-本仓库是多模块工程：根 POM 为 `jkit-parent`，运行时库在 `jkit-core`（发布坐标仍是 `com.alianga:jkit`），代码生成在 `jkit-curl-codegen`，消息通知在 `jkit-notify`，可选扩展渠道在 `jkit-notify-extra`，SQL 解析在 `jkit-sql`，自动建表在 `jkit-sql-auto`。根目录 `mvn test` 会构建全部模块。
+本仓库是多模块工程：根 POM 为 `jkit-parent`，运行时库在 `jkit-core`（发布坐标仍是 `com.alianga:jkit`），代码生成在 `jkit-curl-codegen`，消息通知在 `jkit-notify`，可选扩展渠道在 `jkit-notify-extra`，SQL 解析在 `jkit-sql`，自动建表在 `jkit-sql-auto`，Spring Boot 自动配置在 `jkit-sql-auto-spring-boot-2` / `jkit-sql-auto-spring-boot-3`。根目录 `mvn test` 会构建全部模块。
 
 本库接替 [ZmlTools](https://github.com/wuyongshi/ZmlTools)（`top.wuyongshi:ZmlTools`）。**新项目请只用上面的坐标。** 已经依赖 ZmlTools 的工程有两种迁法：
 

@@ -603,3 +603,5 @@ P0–P2 已完成。余量：
 ### 11.8 `jkit-sql-auto` ✅（2026-09-12）
 
 独立模块 `com.alianga:jkit-sql-auto`：启动时扫描实体、对照 `DatabaseMetaData`、执行 CREATE/ALTER。`jkit-sql` 仍不执行 SQL。模式 `none/validate/update/create/create-drop`；默认 UPDATE 只加不删。文档 `docs/sql-auto.md` + 英文。
+
+Spring Boot 2/3 starter：`jkit-sql-auto-spring-boot-2`（`spring.factories`）与 `jkit-sql-auto-spring-boot-3`（`AutoConfiguration.imports`）。`SqlAuto.drop` 显式删表。真库回归在 `tools-test` 的 `LocalDatasourceSqlAutoTest`。

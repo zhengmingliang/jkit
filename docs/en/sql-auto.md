@@ -16,6 +16,26 @@
 
 It depends on `jkit` and `jkit-sql`. The host supplies the JDBC driver.
 
+Spring Boot apps add a starter and run once when the application is ready (uses the app `DataSource`):
+
+```xml
+<!-- Boot 2.x / JDK 8+ -->
+<dependency>
+    <groupId>com.alianga</groupId>
+    <artifactId>jkit-sql-auto-spring-boot-2</artifactId>
+    <version>2.0.1</version>
+</dependency>
+```
+
+```xml
+<!-- Boot 3.x / JDK 17+ -->
+<dependency>
+    <groupId>com.alianga</groupId>
+    <artifactId>jkit-sql-auto-spring-boot-3</artifactId>
+    <version>2.0.1</version>
+</dependency>
+```
+
 ## Run at startup
 
 Call it once from `main`, a servlet listener, or a Spring `ApplicationRunner`. There is **no** Spring compile dependency:
@@ -101,4 +121,10 @@ java com.alianga.jkit.sql.auto.SqlAuto
 
 The dialect is taken from the option, else the JDBC URL prefix, else `DatabaseMetaData.getDatabaseProductName()`, else MySQL. Column types use the same canonical registry as the parser module.
 
-Default **does not**: migrate data, rename columns, change primary keys, drop unused tables (except `CREATE`), or bundle a JDBC driver. For H2 in-memory `CREATE_DROP`, put `DB_CLOSE_DELAY=-1` on the URL so the database survives the startup connection closing.
+Drop managed tables in reverse FK order:
+
+```java
+SqlAuto.drop(SqlAutoOptions.defaults().url(url).entities(User.class));
+```
+
+Default **does not**: migrate data, rename columns, change primary keys, drop unused tables (except `CREATE` / `SqlAuto.drop`), or bundle a JDBC driver. For H2 in-memory `CREATE_DROP`, put `DB_CLOSE_DELAY=-1` on the URL so the database survives the startup connection closing.

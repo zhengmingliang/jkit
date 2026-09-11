@@ -16,6 +16,26 @@
 
 会传递依赖 `jkit` 与 `jkit-sql`。JDBC 驱动由宿主提供（MySQL / PostgreSQL / Oracle 等）；本模块只调用 `java.sql`。
 
+Spring Boot 应用加对应 starter，就绪后自动跑一次（仍用应用里的 `DataSource`）：
+
+```xml
+<!-- Boot 2.x / JDK 8+ -->
+<dependency>
+    <groupId>com.alianga</groupId>
+    <artifactId>jkit-sql-auto-spring-boot-2</artifactId>
+    <version>2.0.1</version>
+</dependency>
+```
+
+```xml
+<!-- Boot 3.x / JDK 17+ -->
+<dependency>
+    <groupId>com.alianga</groupId>
+    <artifactId>jkit-sql-auto-spring-boot-3</artifactId>
+    <version>2.0.1</version>
+</dependency>
+```
+
 ## 启动时执行
 
 在 `main`、Servlet 监听器或 Spring `ApplicationRunner` 里调一次即可，**没有** Spring 编译依赖：
@@ -147,6 +167,7 @@ java com.alianga.jkit.sql.auto.SqlAuto
 - 索引缺 → `CREATE INDEX`
 - `VALIDATE` 把缺表/缺列/类型不兼容收成异常
 - `CREATE` / `CREATE_DROP` 先删再建模
+- `SqlAuto.drop(...)` 按外键逆序删托管表
 
 默认**不做**：
 
@@ -155,5 +176,11 @@ java com.alianga.jkit.sql.auto.SqlAuto
 - 数据迁移、改列名、改主键
 - 存储过程 / 视图 / 触发器
 - 把 JDBC 驱动打进本模块
+
+显式删托管表（按外键逆序）：
+
+```java
+SqlAuto.drop(SqlAutoOptions.defaults().url(url).entities(User.class));
+```
 
 H2 内存库做 `CREATE_DROP` 关机删表时，URL 需带 `DB_CLOSE_DELAY=-1`，否则连接一关库就没了。
