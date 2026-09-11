@@ -445,6 +445,7 @@ Oracle ≤11g 的自增会给出 `MANUAL_ACTION_REQUIRED`（需手工 SEQUENCE+T
 ```text
 cd ../tools-test
 mvn -Dtest=CrossDialectDdlExecutionTest test   # 需要 Docker；没有则 skip
+mvn -Dtest=LocalDatasourceConvertTest test     # 读 src/test/resources/datasource，连本机 MySQL/PG/Oracle
 java -jar target/benchmarks.jar com.alianga.test.sql.jmh.SqlSchemaConvertBenchmark -f 1 -wi 1 -i 1
 ```
 
