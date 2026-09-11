@@ -1,15 +1,13 @@
 package com.alianga.jkit.sql.schema.rewrite;
 
 import com.alianga.jkit.sql.schema.spi.SqlSchemaConverterProvider;
+import com.alianga.jkit.sql.schema.spi.SqlSchemaConverterProviders;
 
-import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.ServiceLoader;
 
 /**
  * 函数改写注册表。先登记内置规则，再 {@code ServiceLoader} 调用
@@ -108,7 +106,13 @@ public final class SqlFunctionRegistry {
                 "CONCAT", "CONVERT",
                 "LOCATE", "INSTR", "CHARINDEX",
                 "LENGTH", "CHAR_LENGTH", "CHARACTER_LENGTH", "LEN",
-                "SUBSTRING", "SUBSTR"
+                "SUBSTRING", "SUBSTR",
+                "DATE_ADD", "ADDDATE", "DATE_SUB", "SUBDATE",
+                "DATEDIFF", "TIMESTAMPDIFF",
+                "FROM_UNIXTIME", "UNIX_TIMESTAMP",
+                "STR_TO_DATE", "TO_DATE",
+                "DECODE", "NVL2",
+                "SUBSTRING_INDEX", "FIND_IN_SET"
         };
         for (int i = 0; i < names.length; i++) {
             r.register(names[i], builtin);
@@ -121,21 +125,7 @@ public final class SqlFunctionRegistry {
     }
 
     private static void loadProviders(SqlFunctionRegistry registry) {
-        List<SqlSchemaConverterProvider> providers = new ArrayList<SqlSchemaConverterProvider>();
-        for (SqlSchemaConverterProvider p : ServiceLoader.load(SqlSchemaConverterProvider.class)) {
-            if (p != null) {
-                providers.add(p);
-            }
-        }
-        Collections.sort(providers, new Comparator<SqlSchemaConverterProvider>() {
-            /**
-             * {@inheritDoc}
-             */
-            @Override
-            public int compare(SqlSchemaConverterProvider a, SqlSchemaConverterProvider b) {
-                return Integer.compare(a.priority(), b.priority());
-            }
-        });
+        List<SqlSchemaConverterProvider> providers = SqlSchemaConverterProviders.loadSorted();
         for (int i = 0; i < providers.size(); i++) {
             providers.get(i).registerFunctions(registry);
         }

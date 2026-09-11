@@ -15,7 +15,7 @@ import java.util.jar.JarFile;
 
 /**
  * 扫描包下的实体类（不依赖 Spring）。
- * 认 {@link SqlTable} 以及 classpath 上的 {@code javax/jakarta.persistence.Entity}。
+ * 认 {@link SqlTable}、JPA {@code Entity}、MyBatis-Plus {@code TableName}/{@code TableId}。
  *
  * <p>对标 data-set {@code EntityScanner}：给定 basePackage，返回实体 {@code Class} 列表。</p>
  *

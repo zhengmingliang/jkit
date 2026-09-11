@@ -10,6 +10,7 @@ import com.alianga.jkit.sql.schema.model.SqlDataType;
 import com.alianga.jkit.sql.schema.registry.SqlDataTypeRegistry;
 import com.alianga.jkit.sql.schema.rewrite.AutoIncrementStrategy;
 import com.alianga.jkit.sql.schema.rewrite.DefaultValueCoercer;
+import com.alianga.jkit.sql.schema.rewrite.FunctionAstRewriter;
 
 import java.util.List;
 import java.util.Locale;
@@ -88,7 +89,7 @@ public final class ColumnDefinitionConverter {
                 report.extraSql(oracleSequenceSql(tableName, column.columnName()));
             }
         }
-        String rendered = render(column, typeText, afterUnsigned, auto, target, options, report);
+        String rendered = render(column, typeText, afterUnsigned, auto, source, target, options, report);
         report.converted();
         return rendered;
     }
@@ -179,7 +180,7 @@ public final class ColumnDefinitionConverter {
 
     private static String render(ColumnDefinition column, String typeText, CanonicalType canonical,
                                  AutoIncrementStrategy.Result auto,
-                                 SqlDialectSpec target, SqlSchemaConvertOptions options,
+                                 SqlDialectSpec source, SqlDialectSpec target, SqlSchemaConvertOptions options,
                                  ConversionReport.Builder report) {
         StringBuilder sb = new StringBuilder();
         sb.append(ident(column.columnName(), target));
@@ -236,7 +237,8 @@ public final class ColumnDefinitionConverter {
         }
         if (def != null) {
             CanonicalType from = canonical;
-            SqlExpr coerced = DefaultValueCoercer.coerce(def.expr(), from, canonical, target);
+            SqlExpr rewritten = FunctionAstRewriter.rewriteExpr(def.expr(), source, target, report);
+            SqlExpr coerced = DefaultValueCoercer.coerce(rewritten, from, canonical, target);
             String body = DefaultValueCoercer.render(coerced, def.rawText(), target);
             if (!body.isEmpty()) {
                 sb.append(" DEFAULT ").append(body);
@@ -304,8 +306,8 @@ public final class ColumnDefinitionConverter {
                 report.warn(ConversionWarning.Severity.INFO, tableName,
                         "表内 KEY 已改为附录: " + idx);
             } else {
-                report.warn(ConversionWarning.Severity.SEMANTIC_RISK, "",
-                        "已去掉 MySQL 表内索引（请手工 CREATE INDEX）: " + raw);
+                report.warn(ConversionWarning.Severity.MANUAL_ACTION_REQUIRED, tableName == null ? "" : tableName,
+                        "FULLTEXT/SPATIAL 无法自动转为目标方言索引，已去掉: " + raw);
             }
             report.unchanged();
             return "";

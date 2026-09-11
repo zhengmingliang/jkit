@@ -2,6 +2,10 @@ package com.alianga.jkit.sql.entity;
 
 import com.alianga.jkit.sql.SQL;
 import com.alianga.jkit.sql.SqlDialect;
+import com.alianga.jkit.sql.entity.fixture.JpaOrg;
+import com.alianga.jkit.sql.entity.fixture.JpaUser;
+import com.alianga.jkit.sql.entity.fixture.MbAliasUser;
+import com.alianga.jkit.sql.entity.fixture.MpUser;
 import com.alianga.jkit.sql.entity.sample.DemoUser;
 import com.alianga.jkit.sql.schema.model.CanonicalType;
 
@@ -144,5 +148,70 @@ public class SqlEntitiesTest {
         SqlEntityModel m = SqlEntities.inspect(OrderItem.class);
         assertEquals("order_item", m.tableName());
         assertEquals("sku_code", m.columns().get(1).columnName());
+    }
+
+    @Test
+    public void mybatisPlusAnnotations() {
+        SqlEntityModel m = SqlEntities.inspect(MpUser.class);
+        assertEquals("mp_user", m.tableName());
+        assertEquals("uid", m.idColumn().columnName());
+        assertTrue(m.idColumn().autoIncrement());
+        assertEquals("user_name", m.columns().get(1).columnName());
+        assertEquals(2, m.columns().size());
+        String ddl = SqlEntities.createTable(MpUser.class, SqlDialect.MYSQL);
+        assertTrue(ddl, ddl.contains("uid"));
+        assertFalse(ddl, ddl.contains("cache"));
+        SQL.parse(ddl, SqlDialect.MYSQL);
+    }
+
+    @Test
+    public void mybatisAliasTableNameFallback() {
+        SqlEntityModel m = SqlEntities.inspect(MbAliasUser.class);
+        assertEquals("mb_alias_user", m.tableName());
+        assertTrue(m.idColumn().primaryKey());
+    }
+
+    @Test
+    public void jpaIndexEnumEmbeddedSkipCollectionAndFkOrder() {
+        SqlEntityModel user = SqlEntities.inspect(JpaUser.class);
+        boolean sawStatus = false;
+        boolean sawCity = false;
+        boolean sawTags = false;
+        boolean sawChildren = false;
+        boolean sawOrgFk = false;
+        for (int i = 0; i < user.columns().size(); i++) {
+            SqlEntityColumn c = user.columns().get(i);
+            if ("status".equals(c.columnName())) {
+                sawStatus = true;
+                assertEquals(CanonicalType.INT, c.canonical());
+            }
+            if ("city".equals(c.columnName()) || "street".equals(c.columnName())) {
+                sawCity = true;
+            }
+            if ("tags".equals(c.columnName())) {
+                sawTags = true;
+            }
+            if ("children".equals(c.columnName())) {
+                sawChildren = true;
+            }
+            if ("jpa_org".equals(c.referencesTable()) || "org_id".equals(c.columnName())) {
+                sawOrgFk = true;
+            }
+        }
+        assertTrue("ordinal enum", sawStatus);
+        assertTrue("embedded city/street", sawCity);
+        assertFalse("skip List tags", sawTags);
+        assertFalse("skip OneToMany", sawChildren);
+        assertTrue("org fk", sawOrgFk);
+        SqlEntityModel org = SqlEntities.inspect(JpaOrg.class);
+        assertEquals(1, org.indexes().size());
+        assertTrue(org.indexes().get(0), org.indexes().get(0).contains("code"));
+
+        String ddl = SqlEntities.createTables(
+                java.util.Arrays.<Class<?>>asList(JpaUser.class, JpaOrg.class), SqlDialect.MYSQL);
+        int orgAt = ddl.indexOf("jpa_org");
+        int userAt = ddl.indexOf("jpa_user");
+        assertTrue(ddl, orgAt >= 0 && userAt >= 0 && orgAt < userAt);
+        SQL.parse(ddl, SqlDialect.MYSQL);
     }
 }

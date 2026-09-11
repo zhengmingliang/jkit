@@ -4,15 +4,19 @@ import com.alianga.jkit.sql.SQL;
 import com.alianga.jkit.sql.SqlDialect;
 import com.alianga.jkit.sql.SqlDialectSpec;
 import com.alianga.jkit.sql.ast.SqlDdlStatement;
+import com.alianga.jkit.sql.ast.SqlExpr;
 import com.alianga.jkit.sql.ast.SqlStatement;
 import com.alianga.jkit.sql.ast.SqlStatementType;
+import com.alianga.jkit.sql.schema.model.ColumnConstraint;
 import com.alianga.jkit.sql.schema.model.ColumnDefinition;
 import com.alianga.jkit.sql.schema.parse.SqlColumnDefinitionParser;
 import com.alianga.jkit.sql.schema.registry.SqlDataTypeRegistry;
+import com.alianga.jkit.sql.schema.rewrite.DefaultValueCoercer;
 import com.alianga.jkit.sql.schema.rewrite.FunctionAstRewriter;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Pattern;
 
 /**
  * 表结构跨方言转换门面。Phase 3：CREATE TABLE 列类型/约束 + 表级选项；
@@ -175,6 +179,10 @@ public final class SqlSchemaConverter {
     private static void convertDdl(SqlDdlStatement ddl, SqlDialectSpec source, SqlDialectSpec target,
                                    SqlSchemaConvertOptions options, ConversionReport.Builder report) {
         String objectType = ddl.objectType();
+        if (objectType != null && "INDEX".equalsIgnoreCase(objectType)) {
+            convertCreateIndex(ddl, target, report);
+            return;
+        }
         if (objectType == null || !"TABLE".equalsIgnoreCase(objectType)) {
             return;
         }
@@ -233,10 +241,13 @@ public final class SqlSchemaConverter {
                 report.extraSql("ALTER TABLE " + table + " RENAME COLUMN " + oldName + " TO " + newName);
             }
             ddl.setAlterAction("ALTER COLUMN " + newName + " TYPE");
+            String justType = typeOnly;
             int space = typeOnly.indexOf(' ');
             if (space > 0) {
-                ddl.setColumnDefinition(typeOnly.substring(0, space));
+                justType = typeOnly.substring(0, space);
+                ddl.setColumnDefinition(justType);
             }
+            addAlterConstraintExtras(parsed, table, newName, source, target, report);
             report.warn(ConversionWarning.Severity.INFO, newName,
                     "MySQL " + action + " 已改写为 ALTER COLUMN TYPE");
         } else if (target.typeFamily() != SqlDialect.MYSQL
@@ -279,5 +290,47 @@ public final class SqlSchemaConverter {
             return "";
         }
         return n.get(n.size() - 1);
+    }
+
+    private static void addAlterConstraintExtras(ColumnDefinition parsed, String table, String col,
+                                                 SqlDialectSpec source, SqlDialectSpec target,
+                                                 ConversionReport.Builder report) {
+        if (parsed == null) {
+            return;
+        }
+        List<ColumnConstraint> cs = parsed.constraints();
+        for (int i = 0; i < cs.size(); i++) {
+            ColumnConstraint c = cs.get(i);
+            if (c.kind() == ColumnConstraint.Kind.NOT_NULL) {
+                report.extraSql("ALTER TABLE " + table + " ALTER COLUMN " + col + " SET NOT NULL");
+            } else if (c.kind() == ColumnConstraint.Kind.NULLABLE) {
+                report.extraSql("ALTER TABLE " + table + " ALTER COLUMN " + col + " DROP NOT NULL");
+            } else if (c.kind() == ColumnConstraint.Kind.DEFAULT_VALUE) {
+                ColumnConstraint.DefaultValue def = (ColumnConstraint.DefaultValue) c;
+                SqlExpr rewritten = FunctionAstRewriter.rewriteExpr(def.expr(), source, target, report);
+                String body = DefaultValueCoercer.render(rewritten, def.rawText(), target);
+                if (body != null && !body.isEmpty()) {
+                    report.extraSql("ALTER TABLE " + table + " ALTER COLUMN " + col + " SET DEFAULT " + body);
+                }
+            }
+        }
+    }
+
+    private static void convertCreateIndex(SqlDdlStatement ddl, SqlDialectSpec target,
+                                           ConversionReport.Builder report) {
+        if (target.typeFamily() == SqlDialect.MYSQL) {
+            return;
+        }
+        String tail = ddl.tail();
+        if (tail == null || tail.isEmpty()) {
+            return;
+        }
+        String stripped = Pattern.compile("(?i)\\s*USING\\s+(BTREE|HASH)\\b")
+                .matcher(tail).replaceAll("").trim();
+        if (!stripped.equals(tail)) {
+            ddl.setTail(stripped.isEmpty() ? null : stripped);
+            report.warn(ConversionWarning.Severity.INFO, tableName(ddl),
+                    "已去掉 CREATE INDEX 的 USING BTREE/HASH");
+        }
     }
 }

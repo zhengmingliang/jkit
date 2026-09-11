@@ -390,6 +390,93 @@ public class SqlSchemaConverterTest {
     }
 
     @Test
+    public void joinOnIfBecomesCase() {
+        String pg = SQL.convert("SELECT * FROM t JOIN u ON IF(a,1,0)=1",
+                SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        String u = pg.toUpperCase();
+        assertTrue(pg, u.contains("CASE"));
+        assertFalse(pg, u.contains("IF("));
+        SQL.parse(pg, SqlDialect.POSTGRES);
+    }
+
+    @Test
+    public void defaultNowBecomesCurrentTimestamp() {
+        String pg = SQL.convert("CREATE TABLE t (ts DATETIME DEFAULT NOW())",
+                SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        String u = pg.toUpperCase();
+        assertTrue(pg, u.contains("CURRENT_TIMESTAMP"));
+        assertFalse(pg, u.contains("NOW(") || u.contains("NOW()"));
+        SQL.parse(pg, SqlDialect.POSTGRES);
+    }
+
+    @Test
+    public void dateAddBecomesPlusInterval() {
+        String pg = SQL.convert("SELECT DATE_ADD(d, INTERVAL 1 DAY) FROM t",
+                SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        assertTrue(pg, pg.contains("+"));
+        assertFalse(pg, pg.toUpperCase().contains("DATE_ADD"));
+        SQL.parse(pg, SqlDialect.POSTGRES);
+    }
+
+    @Test
+    public void decodeBecomesCase() {
+        String pg = SQL.convert("SELECT DECODE(x, 1, 'a', 2, 'b', 'z') FROM t",
+                SqlDialect.ORACLE, SqlDialect.POSTGRES);
+        String u = pg.toUpperCase();
+        assertTrue(pg, u.contains("CASE"));
+        assertFalse(pg, u.contains("DECODE"));
+        SQL.parse(pg, SqlDialect.POSTGRES);
+    }
+
+    @Test
+    public void fromUnixTimeBecomesToTimestamp() {
+        String pg = SQL.convert("SELECT FROM_UNIXTIME(ts) FROM t",
+                SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        assertTrue(pg, pg.toUpperCase().contains("TO_TIMESTAMP"));
+        SQL.parse(pg, SqlDialect.POSTGRES);
+    }
+
+    @Test
+    public void findInSetWarnsAndKeeps() {
+        ConversionResult r = SqlSchemaConverter.convert(
+                "SELECT FIND_IN_SET('a', list) FROM t", SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        assertTrue(r.sql(), r.sql().toUpperCase().contains("FIND_IN_SET"));
+        assertTrue(r.report().warnings().toString(),
+                r.report().hasSeverityAtLeast(ConversionWarning.Severity.SEMANTIC_RISK));
+    }
+
+    @Test
+    public void alterModifyAddsNotNullExtra() {
+        ConversionResult r = SqlSchemaConverter.convert(
+                "ALTER TABLE t MODIFY amt DECIMAL(10,2) NOT NULL DEFAULT 0",
+                SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        String extras = r.report().extraSql().toString().toUpperCase();
+        assertTrue(extras, extras.contains("SET NOT NULL"));
+        assertTrue(extras, extras.contains("SET DEFAULT"));
+        SQL.parse(r.sql(), SqlDialect.POSTGRES);
+    }
+
+    @Test
+    public void createIndexStripsUsingBtree() {
+        String pg = SQL.convert("CREATE INDEX idx_a ON t (a) USING BTREE",
+                SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        String u = pg.toUpperCase();
+        assertTrue(pg, u.contains("CREATE INDEX"));
+        assertFalse(pg, u.contains("USING BTREE") || u.contains("USING HASH"));
+        SQL.parse(pg, SqlDialect.POSTGRES);
+    }
+
+    @Test
+    public void fulltextIndexManualAction() {
+        ConversionResult r = SqlSchemaConverter.convert(
+                "CREATE TABLE t (title VARCHAR(32), FULLTEXT KEY ft_title (title))",
+                SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        assertTrue(r.report().warnings().toString(),
+                r.report().hasSeverityAtLeast(ConversionWarning.Severity.MANUAL_ACTION_REQUIRED));
+        assertFalse(r.sql(), r.sql().toUpperCase().contains("FULLTEXT"));
+    }
+
+    @Test
     public void columnCharsetStripped() {
         ConversionResult r = SqlSchemaConverter.convert(
                 "CREATE TABLE t (name VARCHAR(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin)",

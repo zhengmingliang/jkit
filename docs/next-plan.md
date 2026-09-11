@@ -517,9 +517,9 @@ cd ../tools-test && mvn -Dtest='SqlParserCompareTest,SqlRoundTripFidelityCorpusT
 - 实体扫描 `@SqlTable` / JPA `@Entity` 生成 DDL/DML
 - Wall / 语句解析 / 改写链：代码注册，不是 ServiceLoader
 
-### 11.2 P0 — 转换正确性（先做）
+### 11.2 P0 — 转换正确性 ✅（2026-09-12）
 
-#### P0.1 函数 walker 漏节点
+#### P0.1 函数 walker 漏节点 ✅
 
 `FunctionAstRewriter` 只在 SELECT 列表 / WHERE / HAVING / ORDER / INSERT·UPDATE 上调用 `rewriteExpr`。`visitFunctionExpr` 没有覆写。结果：
 
@@ -531,13 +531,13 @@ cd ../tools-test && mvn -Dtest='SqlParserCompareTest,SqlRoundTripFidelityCorpusT
 
 实现建议：`visitJoin` / `visitMerge` / `visitOverExpr` / `visitWithItem` / `visitFunctionTable` 里对子表达式走同一套 `rewriteExpr`；列 DEFAULT 若是函数调用，解析成 `SqlFunctionExpr` 再进注册表。
 
-#### P0.2 `ServiceLoader` 加载两次
+#### P0.2 `ServiceLoader` 加载两次 ✅
 
 `SqlDataTypeRegistryBuiltins` 与 `SqlFunctionRegistry` 各自 `ServiceLoader.load`，provider **不是同一实例**。`registerTypes` 里设的字段，`registerFunctions` 看不见。文档已警告，但接口把两个方法放在同一类型上，使用者会踩。
 
 验收：抽 `SqlSchemaConverterProviders.loadSorted()` 一次，缓存不可变列表，两张表共用；单测用带字段的 provider 证明 `registerTypes` 之后 `registerFunctions` 能读到。注意 provider 构造器不得碰 `builtins()`（类初始化死锁）。
 
-### 11.3 P1 — 转换能力（迁移常见痛点）
+### 11.3 P1 — 转换能力 ✅（2026-09-12）
 
 都走 `SqlFunctionRegistry.register` / 附录 SQL，**不要**改 `FunctionAstRewriter` 的分派结构（P0.1 的漏节点除外）。
 
@@ -551,19 +551,23 @@ cd ../tools-test && mvn -Dtest='SqlParserCompareTest,SqlRoundTripFidelityCorpusT
 | 独立 `CREATE INDEX` | 现只转表内 KEY。`CREATE INDEX … USING BTREE` / `CONCURRENTLY` / `INCLUDE` 原样 format | MYSQL→PG 去掉 `USING BTREE` 或改成 PG 写法 |
 | FULLTEXT/SPATIAL | 表内已删除且不生成附录 | 保持；补一句明确 `MANUAL_ACTION_REQUIRED` |
 
-`generateOracleSequence(true)` **已经**生成 SEQUENCE+TRIGGER（见 `ColumnDefinitionConverter.oracleSequenceSql`）。设计文档第十二节仍写「明确不做」——**改文档承认 opt-in**，不要再实现一遍。
+`generateOracleSequence(true)` 已是 opt-in，设计文档第十二节已对齐。
 
-### 11.4 P2 — 实体扫描
+### 11.4 P2 — 实体扫描 ✅（2026-09-12，含 MyBatis / MyBatis-Plus）
 
-| 项 | 现状 | 建议 |
-|---|---|---|
-| JPA `@Table.indexes` / `@Index` | 只读 `@SqlTable.indexes` | 反射读 JPA 索引，生成附录 `CREATE INDEX` |
-| `@Enumerated` | 枚举一律 VARCHAR | ORDINAL→INT，STRING→VARCHAR |
-| `List`/`Set`/`Map` 字段 | `javaType` 落到 VARCHAR | 无 `@SqlColumn` 时 skip（避免把集合建成字符串列） |
-| `@Embedded` / 继承策略 | 只扫父类字段（`@MappedSuperclass` 碰巧能用） | 明确支持 `@MappedSuperclass`；`@Embedded` 展开或跳过并文档化 |
-| `createTables` 顺序 | 未按 FK 拓扑 | 有 `refTable` 时被引用表在前 |
+已落地（仍零 JPA/MyBatis 编译依赖，反射认 FQCN）：
 
-不要引入 Hibernate / Spring。继续零 JPA 编译依赖。
+| 项 | 状态 |
+|---|---|
+| JPA `@Table.indexes` / `@Index` | ✅ 进 `model.indexes()` → `CREATE INDEX` |
+| `@Enumerated` | ✅ ORDINAL→INT，STRING/缺省名→VARCHAR |
+| `List`/`Set`/`Map`、`@OneToMany` | ✅ 无 `@SqlColumn`/`@TableField`/`@Column` 时 skip |
+| `@Embedded` / `@Embeddable` | ✅ 展开嵌套字段；父类字段本来就扫 |
+| `createTables` FK 顺序 | ✅ 被引用表在前 |
+| MyBatis-Plus `@TableName`/`@TableId`/`@TableField` | ✅ `exist=false` skip；`IdType.AUTO` 自增 |
+| MyBatis `@Alias` | ✅ 仅表名回退（需同时有 `@TableId`/`@SqlId`/`@Id` 才当实体） |
+
+不要引入 Hibernate / Spring / mybatis 包。继续零编译依赖。
 
 ### 11.5 P3 — 文档与工程
 
@@ -580,12 +584,10 @@ cd ../tools-test && mvn -Dtest='SqlParserCompareTest,SqlRoundTripFidelityCorpusT
 
 ### 11.6 建议开工顺序
 
-1. P0.1 函数 walker 漏节点（正确性，用户一写 JOIN 就踩）
-2. P0.2 ServiceLoader 单次加载
-3. P1 日期函数 + ALTER NOT NULL 附录（迁移最常见）
-4. P2 实体集合字段 skip + JPA `@Index`（小、边界清晰）
-5. 中英文档对齐；设计 §12 承认 SEQUENCE opt-in
-6. 其余按用户拿来的真实 SQL 再开
+P0–P2 已完成。余量：
+
+1. 中英 `sql.md` 转换/SPI 章节仍不完全对称（英文偏短）
+2. 其余按用户拿来的真实 SQL 再开（P3 工程项、第 4 节其它模块）
 
 验收命令不变：`mvn -pl jkit-sql test` 必须绿。改解析器时再 `install` 后跑 tools-test。
 

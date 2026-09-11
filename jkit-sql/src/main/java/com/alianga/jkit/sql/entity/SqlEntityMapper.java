@@ -3,18 +3,22 @@ package com.alianga.jkit.sql.entity;
 import com.alianga.jkit.sql.schema.model.CanonicalType;
 
 import java.lang.annotation.Annotation;
+import java.lang.reflect.Array;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.Collection;
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
 
 /**
- * 把实体类解析成 {@link SqlEntityModel}。认 jkit 注解，并用反射认 JPA
- * {@code javax/jakarta.persistence}（无编译依赖）。
+ * 把实体类解析成 {@link SqlEntityModel}。认 jkit 注解，并用反射认（无编译依赖）：
+ * JPA {@code javax/jakarta.persistence}、MyBatis-Plus {@code com.baomidou.mybatisplus.annotation}、
+ * MyBatis {@code org.apache.ibatis.type.Alias}（仅作表名回退）。
  *
  * @author 郑明亮
  * @since 2.0.1
@@ -39,6 +43,10 @@ public final class SqlEntityMapper {
             if (skip(f)) {
                 continue;
             }
+            if (isEmbedded(f)) {
+                columns.addAll(expandEmbedded(f));
+                continue;
+            }
             columns.add(column(f));
         }
         return new SqlEntityModel(type, table, columns, tableIndexes(type));
@@ -46,7 +54,7 @@ public final class SqlEntityMapper {
 
     /**
      * @param type 类
-     * @return 是否带 {@link SqlTable} 或 JPA {@code @Entity}
+     * @return 是否带 {@link SqlTable}、JPA {@code @Entity}、MyBatis-Plus {@code @TableName}/{@code @TableId}
      */
     public static boolean isEntity(Class<?> type) {
         if (type == null || type.isInterface() || type.isAnnotation() || type.isEnum()
@@ -56,8 +64,18 @@ public final class SqlEntityMapper {
         if (type.getAnnotation(SqlTable.class) != null) {
             return true;
         }
-        return namedAnnotation(type, "javax.persistence.Entity") != null
-                || namedAnnotation(type, "jakarta.persistence.Entity") != null;
+        if (namedAnnotation(type, "javax.persistence.Entity") != null
+                || namedAnnotation(type, "jakarta.persistence.Entity") != null
+                || namedAnnotation(type, "com.baomidou.mybatisplus.annotation.TableName") != null) {
+            return true;
+        }
+        Field[] fs = type.getDeclaredFields();
+        for (int i = 0; i < fs.length; i++) {
+            if (namedAnnotation(fs[i], "com.baomidou.mybatisplus.annotation.TableId") != null) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static String tableName(Class<?> type) {
@@ -75,21 +93,39 @@ public final class SqlEntityMapper {
                 return n;
             }
         }
+        Object mp = namedAnnotation(type, "com.baomidou.mybatisplus.annotation.TableName");
+        if (mp != null) {
+            String n = stringAttr(mp, "value");
+            if (n != null && n.length() > 0) {
+                return n;
+            }
+        }
+        Object alias = namedAnnotation(type, "org.apache.ibatis.type.Alias");
+        if (alias != null) {
+            String n = stringAttr(alias, "value");
+            if (n != null && n.length() > 0) {
+                return n;
+            }
+        }
         return snake(simpleName(type.getSimpleName()));
     }
 
     private static SqlEntityColumn column(Field field) {
+        Object tableId = namedAnnotation(field, "com.baomidou.mybatisplus.annotation.TableId");
         boolean id = field.getAnnotation(SqlId.class) != null
                 || namedAnnotation(field, "javax.persistence.Id") != null
-                || namedAnnotation(field, "jakarta.persistence.Id") != null;
+                || namedAnnotation(field, "jakarta.persistence.Id") != null
+                || tableId != null;
         boolean generated = field.getAnnotation(SqlGenerated.class) != null
                 || namedAnnotation(field, "javax.persistence.GeneratedValue") != null
-                || namedAnnotation(field, "jakarta.persistence.GeneratedValue") != null;
+                || namedAnnotation(field, "jakarta.persistence.GeneratedValue") != null
+                || isMpAutoId(tableId);
         SqlColumn col = field.getAnnotation(SqlColumn.class);
         Object jpaCol = namedAnnotation(field, "javax.persistence.Column");
         if (jpaCol == null) {
             jpaCol = namedAnnotation(field, "jakarta.persistence.Column");
         }
+        Object tableField = namedAnnotation(field, "com.baomidou.mybatisplus.annotation.TableField");
         String name = field.getName();
         int length = 255;
         int precision = 0;
@@ -130,6 +166,10 @@ public final class SqlEntityMapper {
             if (uq != null) {
                 unique = uq.booleanValue();
             }
+        } else if (tableField != null && notEmpty(stringAttr(tableField, "value"))) {
+            name = stringAttr(tableField, "value");
+        } else if (tableId != null && notEmpty(stringAttr(tableId, "value"))) {
+            name = stringAttr(tableId, "value");
         } else {
             name = snake(field.getName());
         }
@@ -144,7 +184,7 @@ public final class SqlEntityMapper {
         }
         boolean lob = namedAnnotation(field, "javax.persistence.Lob") != null
                 || namedAnnotation(field, "jakarta.persistence.Lob") != null;
-        CanonicalType canonical = javaType(field.getType(), lob);
+        CanonicalType canonical = javaType(field.getType(), lob, field);
         String refTable = null;
         String refCol = null;
         if (rawType == null && SqlEntityMapper.isEntity(field.getType()) && field.getType() != field.getDeclaringClass()) {
@@ -189,10 +229,41 @@ public final class SqlEntityMapper {
                 }
             }
         }
+        addJpaIndexes(type, "javax.persistence.Table", out);
+        addJpaIndexes(type, "jakarta.persistence.Table", out);
         return out;
     }
 
-    private static CanonicalType javaType(Class<?> type, boolean lob) {
+    private static void addJpaIndexes(Class<?> type, String tableAnn, List<String> out) {
+        Object table = namedAnnotation(type, tableAnn);
+        if (table == null) {
+            return;
+        }
+        Object indexes = invoke(table, "indexes");
+        if (indexes == null || !indexes.getClass().isArray()) {
+            return;
+        }
+        int n = Array.getLength(indexes);
+        for (int i = 0; i < n; i++) {
+            Object idx = Array.get(indexes, i);
+            if (idx == null) {
+                continue;
+            }
+            String cols = stringAttr(idx, "columnList");
+            if (cols == null || cols.isEmpty()) {
+                continue;
+            }
+            cols = cols.replace(" ", "");
+            String name = stringAttr(idx, "name");
+            if (name != null && name.length() > 0) {
+                out.add(name + ":" + cols);
+            } else {
+                out.add(cols);
+            }
+        }
+    }
+
+    private static CanonicalType javaType(Class<?> type, boolean lob, Field field) {
         if (type == java.util.UUID.class) {
             return CanonicalType.UUID;
         }
@@ -242,9 +313,27 @@ public final class SqlEntityMapper {
             return CanonicalType.TIME;
         }
         if (type.isEnum()) {
+            if (isEnumeratedOrdinal(field)) {
+                return CanonicalType.INT;
+            }
             return CanonicalType.VARCHAR;
         }
         return CanonicalType.VARCHAR;
+    }
+
+    private static boolean isEnumeratedOrdinal(Field field) {
+        if (field == null) {
+            return false;
+        }
+        Object en = namedAnnotation(field, "javax.persistence.Enumerated");
+        if (en == null) {
+            en = namedAnnotation(field, "jakarta.persistence.Enumerated");
+        }
+        if (en == null) {
+            return false;
+        }
+        Object v = invoke(en, "value");
+        return v != null && "ORDINAL".equals(enumName(v));
     }
 
     private static boolean skip(Field field) {
@@ -255,8 +344,77 @@ public final class SqlEntityMapper {
         if (field.getAnnotation(SqlTransient.class) != null) {
             return true;
         }
-        return namedAnnotation(field, "javax.persistence.Transient") != null
-                || namedAnnotation(field, "jakarta.persistence.Transient") != null;
+        if (namedAnnotation(field, "javax.persistence.Transient") != null
+                || namedAnnotation(field, "jakarta.persistence.Transient") != null) {
+            return true;
+        }
+        Object tf = namedAnnotation(field, "com.baomidou.mybatisplus.annotation.TableField");
+        if (tf != null) {
+            Boolean exist = boolAttr(tf, "exist");
+            if (exist != null && !exist.booleanValue()) {
+                return true;
+            }
+        }
+        if (namedAnnotation(field, "javax.persistence.OneToMany") != null
+                || namedAnnotation(field, "jakarta.persistence.OneToMany") != null
+                || namedAnnotation(field, "javax.persistence.ManyToMany") != null
+                || namedAnnotation(field, "jakarta.persistence.ManyToMany") != null
+                || namedAnnotation(field, "javax.persistence.ElementCollection") != null
+                || namedAnnotation(field, "jakarta.persistence.ElementCollection") != null) {
+            return true;
+        }
+        if (field.getAnnotation(SqlColumn.class) != null || tf != null
+                || namedAnnotation(field, "javax.persistence.Column") != null
+                || namedAnnotation(field, "jakarta.persistence.Column") != null) {
+            return false;
+        }
+        Class<?> t = field.getType();
+        if (t.isArray() && t != byte[].class) {
+            return true;
+        }
+        return Collection.class.isAssignableFrom(t) || Map.class.isAssignableFrom(t);
+    }
+
+    private static boolean isEmbedded(Field field) {
+        return namedAnnotation(field, "javax.persistence.Embedded") != null
+                || namedAnnotation(field, "jakarta.persistence.Embedded") != null
+                || namedAnnotation(field.getType(), "javax.persistence.Embeddable") != null
+                || namedAnnotation(field.getType(), "jakarta.persistence.Embeddable") != null;
+    }
+
+    private static List<SqlEntityColumn> expandEmbedded(Field field) {
+        List<Field> nested = declaredFields(field.getType());
+        List<SqlEntityColumn> out = new ArrayList<SqlEntityColumn>(nested.size());
+        for (int i = 0; i < nested.size(); i++) {
+            Field n = nested.get(i);
+            if (skip(n) || isEmbedded(n)) {
+                continue;
+            }
+            out.add(column(n));
+        }
+        return out;
+    }
+
+    private static boolean isMpAutoId(Object tableId) {
+        if (tableId == null) {
+            return false;
+        }
+        Object type = invoke(tableId, "type");
+        return type != null && "AUTO".equals(enumName(type));
+    }
+
+    private static boolean notEmpty(String s) {
+        return s != null && s.length() > 0;
+    }
+
+    private static String enumName(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Enum<?>) {
+            return ((Enum<?>) value).name();
+        }
+        return String.valueOf(value);
     }
 
     private static List<Field> declaredFields(Class<?> type) {

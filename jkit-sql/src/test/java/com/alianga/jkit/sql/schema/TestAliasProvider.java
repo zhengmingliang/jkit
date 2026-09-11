@@ -19,11 +19,14 @@ import com.alianga.jkit.sql.schema.spi.SqlSchemaConverterProvider;
  * @author 郑明亮
  */
 public final class TestAliasProvider implements SqlSchemaConverterProvider {
+    static TestAliasProvider typesInstance;
+    static TestAliasProvider functionsInstance;
     /**
      * {@inheritDoc}
      */
     @Override
     public void registerTypes(SqlDataTypeRegistry registry) {
+        typesInstance = this;
         registry.registerAlias(SqlDialect.MYSQL, "MIDINT", CanonicalType.MEDIUMINT);
     }
 
@@ -32,6 +35,7 @@ public final class TestAliasProvider implements SqlSchemaConverterProvider {
      */
     @Override
     public void registerFunctions(SqlFunctionRegistry registry) {
+        functionsInstance = this;
         registry.register("JKIT_SPI_FN", new FunctionRewriteRule() {
             /**
              * {@inheritDoc}

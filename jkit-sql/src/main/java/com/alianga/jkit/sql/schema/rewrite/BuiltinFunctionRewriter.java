@@ -93,6 +93,38 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
         if ("SUBSTRING".equals(name) || "SUBSTR".equals(name)) {
             return rewriteSubstr(fn, name, family);
         }
+        if ("DATE_ADD".equals(name) || "ADDDATE".equals(name)
+                || "DATE_SUB".equals(name) || "SUBDATE".equals(name)) {
+            return rewriteDateAddSub(fn, name, family);
+        }
+        if ("DATEDIFF".equals(name)) {
+            return rewriteDateDiff(fn, family, report);
+        }
+        if ("TIMESTAMPDIFF".equals(name)) {
+            return rewriteTimestampDiff(fn, family, report);
+        }
+        if ("FROM_UNIXTIME".equals(name)) {
+            return rewriteFromUnixTime(fn, family, report);
+        }
+        if ("UNIX_TIMESTAMP".equals(name)) {
+            return rewriteUnixTimestamp(fn, family, report);
+        }
+        if ("STR_TO_DATE".equals(name) || "TO_DATE".equals(name)) {
+            return rewriteToDate(fn, name, family, report);
+        }
+        if ("DECODE".equals(name) && args.size() >= 3) {
+            return rewriteDecode(fn, family);
+        }
+        if ("NVL2".equals(name) && args.size() >= 3) {
+            return rewriteNvl2(fn, family);
+        }
+        if ("SUBSTRING_INDEX".equals(name) || "FIND_IN_SET".equals(name)) {
+            if (family != SqlDialect.MYSQL && family != SqlDialect.H2 && family != SqlDialect.HIVE) {
+                report.warn(ConversionWarning.Severity.SEMANTIC_RISK, name,
+                        name + " 在 " + target.dialectId() + " 无干净等价物，已保留原文");
+            }
+            return fn;
+        }
         return fn;
     }
 
@@ -319,6 +351,180 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
         args.clear();
         args.add(col);
         args.add(sep);
+    }
+
+    private static SqlExpr rewriteDateAddSub(SqlFunctionExpr fn, String name, SqlDialect family) {
+        if (family == SqlDialect.MYSQL || family == SqlDialect.H2 || family == SqlDialect.HIVE) {
+            return fn;
+        }
+        List<SqlExpr> args = fn.arguments();
+        if (args.size() < 2) {
+            return fn;
+        }
+        boolean sub = "DATE_SUB".equals(name) || "SUBDATE".equals(name);
+        SqlExpr interval = toTargetInterval(args.get(1), family);
+        SqlBinaryExpr bin = new SqlBinaryExpr();
+        bin.setOperator(sub ? SqlBinaryOp.MINUS : SqlBinaryOp.PLUS);
+        bin.setLeft(args.get(0));
+        bin.setRight(interval);
+        return bin;
+    }
+
+    private static SqlExpr toTargetInterval(SqlExpr expr, SqlDialect family) {
+        if (!(expr instanceof SqlFunctionExpr)) {
+            return expr;
+        }
+        SqlFunctionExpr iv = (SqlFunctionExpr) expr;
+        if (!"INTERVAL".equals(functionName(iv))) {
+            return expr;
+        }
+        if (family != SqlDialect.POSTGRES && family != SqlDialect.ANSI
+                && family != SqlDialect.PRESTO && family != SqlDialect.H2) {
+            return expr;
+        }
+        List<SqlExpr> a = iv.arguments();
+        if (a.size() >= 2 && a.get(0) instanceof SqlLiteral && a.get(1) instanceof SqlIdentifier) {
+            String num = ((SqlLiteral) a.get(0)).value();
+            String unit = ((SqlIdentifier) a.get(1)).simpleName();
+            if (num != null && unit != null) {
+                SqlFunctionExpr out = new SqlFunctionExpr();
+                out.setName(SqlIdentifier.of("INTERVAL"));
+                out.addArgument(SqlLiteral.of(SqlLiteral.Kind.STRING,
+                        num + " " + unit.toLowerCase(Locale.ROOT)));
+                return out;
+            }
+        }
+        return expr;
+    }
+
+    private static SqlExpr rewriteDateDiff(SqlFunctionExpr fn, SqlDialect family,
+                                           ConversionReport.Builder report) {
+        List<SqlExpr> args = fn.arguments();
+        if (family == SqlDialect.MYSQL || family == SqlDialect.H2) {
+            return fn;
+        }
+        if (family == SqlDialect.SQLSERVER && args.size() >= 3) {
+            return fn;
+        }
+        if (args.size() < 2) {
+            return fn;
+        }
+        if (family == SqlDialect.POSTGRES || family == SqlDialect.ANSI || family == SqlDialect.PRESTO) {
+            SqlBinaryExpr bin = new SqlBinaryExpr();
+            bin.setOperator(SqlBinaryOp.MINUS);
+            bin.setLeft(args.get(0));
+            bin.setRight(args.get(1));
+            return bin;
+        }
+        if (family == SqlDialect.ORACLE || family == SqlDialect.ORACLE12) {
+            SqlBinaryExpr bin = new SqlBinaryExpr();
+            bin.setOperator(SqlBinaryOp.MINUS);
+            bin.setLeft(args.get(0));
+            bin.setRight(args.get(1));
+            return bin;
+        }
+        report.warn(ConversionWarning.Severity.SEMANTIC_RISK, "DATEDIFF",
+                "DATEDIFF 在 " + family + " 无通用映射，已保留原文");
+        return fn;
+    }
+
+    private static SqlExpr rewriteTimestampDiff(SqlFunctionExpr fn, SqlDialect family,
+                                                ConversionReport.Builder report) {
+        if (family == SqlDialect.MYSQL || family == SqlDialect.H2) {
+            return fn;
+        }
+        report.warn(ConversionWarning.Severity.SEMANTIC_RISK, "TIMESTAMPDIFF",
+                "TIMESTAMPDIFF 单位与目标方言不完全等价，已保留原文");
+        return fn;
+    }
+
+    private static SqlExpr rewriteFromUnixTime(SqlFunctionExpr fn, SqlDialect family,
+                                               ConversionReport.Builder report) {
+        if (family == SqlDialect.MYSQL || family == SqlDialect.H2) {
+            return fn;
+        }
+        if (family == SqlDialect.POSTGRES || family == SqlDialect.ANSI || family == SqlDialect.PRESTO) {
+            fn.setName(SqlIdentifier.of("TO_TIMESTAMP"));
+            return fn;
+        }
+        report.warn(ConversionWarning.Severity.SEMANTIC_RISK, "FROM_UNIXTIME",
+                "FROM_UNIXTIME 在 " + family + " 无通用映射，已保留原文");
+        return fn;
+    }
+
+    private static SqlExpr rewriteUnixTimestamp(SqlFunctionExpr fn, SqlDialect family,
+                                                ConversionReport.Builder report) {
+        if (family == SqlDialect.MYSQL || family == SqlDialect.H2) {
+            return fn;
+        }
+        report.warn(ConversionWarning.Severity.SEMANTIC_RISK, "UNIX_TIMESTAMP",
+                "UNIX_TIMESTAMP 在 " + family + " 无通用映射，已保留原文");
+        return fn;
+    }
+
+    private static SqlExpr rewriteToDate(SqlFunctionExpr fn, String name, SqlDialect family,
+                                         ConversionReport.Builder report) {
+        if ("STR_TO_DATE".equals(name)) {
+            if (family == SqlDialect.MYSQL || family == SqlDialect.H2) {
+                return fn;
+            }
+            if (family == SqlDialect.POSTGRES || family == SqlDialect.ORACLE
+                    || family == SqlDialect.ORACLE12 || family == SqlDialect.ANSI) {
+                report.warn(ConversionWarning.Severity.SEMANTIC_RISK, name,
+                        "STR_TO_DATE 格式符与 TO_DATE/TO_TIMESTAMP 不完全等价");
+                fn.setName(SqlIdentifier.of(family == SqlDialect.POSTGRES ? "TO_TIMESTAMP" : "TO_DATE"));
+                return fn;
+            }
+            report.warn(ConversionWarning.Severity.SEMANTIC_RISK, name,
+                    "STR_TO_DATE 无映射，已保留原文");
+            return fn;
+        }
+        if (family == SqlDialect.ORACLE || family == SqlDialect.ORACLE12) {
+            return fn;
+        }
+        if (family == SqlDialect.MYSQL || family == SqlDialect.H2) {
+            report.warn(ConversionWarning.Severity.SEMANTIC_RISK, name,
+                    "TO_DATE 格式符与 STR_TO_DATE 不完全等价");
+            fn.setName(SqlIdentifier.of("STR_TO_DATE"));
+            return fn;
+        }
+        if (family == SqlDialect.POSTGRES || family == SqlDialect.ANSI) {
+            fn.setName(SqlIdentifier.of("TO_TIMESTAMP"));
+            report.warn(ConversionWarning.Severity.SEMANTIC_RISK, name,
+                    "TO_DATE 在 PG 改为 TO_TIMESTAMP，格式符可能有损");
+            return fn;
+        }
+        return fn;
+    }
+
+    private static SqlExpr rewriteDecode(SqlFunctionExpr fn, SqlDialect family) {
+        if (family == SqlDialect.ORACLE || family == SqlDialect.ORACLE12) {
+            return fn;
+        }
+        List<SqlExpr> args = fn.arguments();
+        SqlCaseExpr cse = new SqlCaseExpr();
+        cse.setValue(args.get(0));
+        int i = 1;
+        while (i + 1 < args.size()) {
+            cse.addWhenThen(args.get(i), args.get(i + 1));
+            i += 2;
+        }
+        if (i < args.size()) {
+            cse.setElseExpr(args.get(i));
+        }
+        return cse;
+    }
+
+    private static SqlExpr rewriteNvl2(SqlFunctionExpr fn, SqlDialect family) {
+        if (family == SqlDialect.ORACLE || family == SqlDialect.ORACLE12) {
+            return fn;
+        }
+        List<SqlExpr> args = fn.arguments();
+        SqlCaseExpr cse = new SqlCaseExpr();
+        cse.addWhenThen(SqlBinaryExpr.of(args.get(0), SqlBinaryOp.IS_NOT, SqlIdentifier.of("NULL")),
+                args.get(1));
+        cse.setElseExpr(args.get(2));
+        return cse;
     }
 
     private static String typeText(SqlExpr expr) {

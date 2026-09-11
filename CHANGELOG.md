@@ -4,6 +4,11 @@
 
 ## 2.0.1 / unreleased
 
+### jkit-sql
+- **转换**：函数改写覆盖 JOIN ON / MERGE / OVER / 列 `DEFAULT NOW()`；`DATE_ADD`/`DATEDIFF`/`FROM_UNIXTIME`/`DECODE`/`NVL2` 等内置规则；PG `ALTER COLUMN` 附录 `SET NOT NULL`/`DEFAULT`；独立 `CREATE INDEX` 去掉 `USING BTREE`；FULLTEXT 升为 `MANUAL_ACTION_REQUIRED`。
+- **SPI**：`SqlSchemaConverterProviders.loadSorted()` 一次加载，类型表与函数表共用实例。
+- **实体**：JPA `@Index`/`@Enumerated`/`@Embedded`、集合字段默认跳过、`createTables` 按外键排序；反射认 MyBatis-Plus `@TableName`/`@TableId`/`@TableField` 与 MyBatis `@Alias`（无编译依赖）。
+
 ### 文档
 - README / `docs/sql.md` / `docs/en/sql.md` / `jkit-sql/README` 去掉内部开发计划入口（该文件不进文档站）。
 

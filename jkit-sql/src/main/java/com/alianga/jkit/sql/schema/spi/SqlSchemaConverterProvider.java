@@ -9,7 +9,8 @@ import com.alianga.jkit.sql.schema.rewrite.SqlFunctionRegistry;
  * <p>通过 {@code META-INF/services/com.alianga.jkit.sql.schema.spi.SqlSchemaConverterProvider}
  * 注册。类型表在 freeze 前调用 {@link #registerTypes}；函数表在登记内置规则并
  * {@link SqlFunctionRegistry#snapshotBuiltins()} 之后调用 {@link #registerFunctions}。
- * 两次 {@code ServiceLoader.load} 会 new 出不同实例，不要靠实例字段在两个方法之间传状态。
+ * 类型表与函数表共用 {@link SqlSchemaConverterProviders#loadSorted()} 的同一批实例，
+ * {@link #registerTypes} 写的字段 {@link #registerFunctions} 能看见（先类型后函数）。
  * {@link #priority()} 越大越晚，可覆盖先前声明（含内置）。内置优先级为 0。</p>
  *
  * @author 郑明亮

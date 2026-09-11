@@ -8,10 +8,15 @@ import com.alianga.jkit.sql.ast.SqlCastExpr;
 import com.alianga.jkit.sql.ast.SqlDelete;
 import com.alianga.jkit.sql.ast.SqlExpr;
 import com.alianga.jkit.sql.ast.SqlFunctionExpr;
+import com.alianga.jkit.sql.ast.SqlFunctionTable;
 import com.alianga.jkit.sql.ast.SqlInExpr;
 import com.alianga.jkit.sql.ast.SqlInsert;
+import com.alianga.jkit.sql.ast.SqlJoin;
 import com.alianga.jkit.sql.ast.SqlListExpr;
+import com.alianga.jkit.sql.ast.SqlMerge;
+import com.alianga.jkit.sql.ast.SqlMergeWhen;
 import com.alianga.jkit.sql.ast.SqlOrderByItem;
+import com.alianga.jkit.sql.ast.SqlOverExpr;
 import com.alianga.jkit.sql.ast.SqlQueryExpr;
 import com.alianga.jkit.sql.ast.SqlSelect;
 import com.alianga.jkit.sql.ast.SqlSelectItem;
@@ -53,6 +58,23 @@ public final class FunctionAstRewriter {
             return;
         }
         stmt.accept(new Visitor(source, target, report));
+    }
+
+    /**
+     * 改写单个表达式（列 DEFAULT 等不在语句树上的节点）。
+     *
+     * @param expr 表达式
+     * @param source 源方言
+     * @param target 目标方言
+     * @param report 报告
+     * @return 改写后的节点
+     */
+    public static SqlExpr rewriteExpr(SqlExpr expr, SqlDialectSpec source, SqlDialectSpec target,
+                                      ConversionReport.Builder report) {
+        if (expr == null || source == null || target == null) {
+            return expr;
+        }
+        return new Visitor(source, target, report).rewriteExpr(expr);
     }
 
     private static final class Visitor extends SqlAstVisitor {
@@ -131,6 +153,60 @@ public final class FunctionAstRewriter {
             return true;
         }
 
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected boolean visitJoin(SqlJoin node) {
+            node.setCondition(rewriteExpr(node.condition()));
+            return true;
+        }
+
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected boolean visitMerge(SqlMerge node) {
+            node.setOn(rewriteExpr(node.on()));
+            rewriteExprList(node.output());
+            return true;
+        }
+
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected boolean visitMergeWhen(SqlMergeWhen node) {
+            node.setAndPredicate(rewriteExpr(node.andPredicate()));
+            node.setDeleteWhere(rewriteExpr(node.deleteWhere()));
+            node.setInsertWhere(rewriteExpr(node.insertWhere()));
+            return true;
+        }
+
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected boolean visitOverExpr(SqlOverExpr node) {
+            rewriteExprList(node.partitionBy());
+            if (node.orderBy() != null) {
+                List<SqlOrderByItem> items = node.orderBy();
+                for (int i = 0; i < items.size(); i++) {
+                    items.get(i).setExpr(rewriteExpr(items.get(i).expr()));
+                }
+            }
+            return true;
+        }
+
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected boolean visitFunctionTable(SqlFunctionTable node) {
+            node.setFunction(rewriteExpr(node.function()));
+            return true;
+        }
+
         private SqlExpr rewriteExpr(SqlExpr expr) {
             if (expr == null) {
                 return null;
@@ -189,6 +265,10 @@ public final class FunctionAstRewriter {
                 }
                 return expr;
             }
+            if (expr instanceof SqlOverExpr) {
+                visitOverExpr((SqlOverExpr) expr);
+                return expr;
+            }
             return expr;
         }
 
@@ -197,8 +277,20 @@ public final class FunctionAstRewriter {
             for (int i = 0; i < args.size(); i++) {
                 args.set(i, rewriteExpr(args.get(i)));
             }
+            if (fn.hasParameters()) {
+                rewriteExprList(fn.parameters());
+            }
             if (fn.separator() != null) {
                 fn.setSeparator(rewriteExpr(fn.separator()));
+            }
+            if (fn.filter() != null) {
+                fn.setFilter(rewriteExpr(fn.filter()));
+            }
+            if (fn.against() != null) {
+                fn.setAgainst(rewriteExpr(fn.against()));
+            }
+            if (fn.over() != null) {
+                fn.setOver(rewriteExpr(fn.over()));
             }
             rewriteOrderExprs(fn);
             String name = functionName(fn);

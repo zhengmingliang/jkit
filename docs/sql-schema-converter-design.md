@@ -206,6 +206,11 @@ SQL.convert(sql, SqlDialect.fromName("dm"), SqlDialect.MYSQL);
 | `LOCATE` / `INSTR` / `CHARINDEX` | PG `POSITION`；Oracle `INSTR`（参数对调）；SQL Server `CHARINDEX` |
 | `LENGTH` / `LEN` | SQL Server `LEN`，其余 `LENGTH` |
 | `SUBSTRING` / `SUBSTR` | Oracle `SUBSTR` |
+| `DATE_ADD` / `DATE_SUB` | 非 MySQL → 加减 `INTERVAL`（PG 写成 `INTERVAL '1 day'`） |
+| `DATEDIFF` | PG/Oracle 改为日期相减 |
+| `FROM_UNIXTIME` | PG `TO_TIMESTAMP` |
+| `DECODE` / `NVL2` | 非 Oracle → `CASE` |
+| `FIND_IN_SET` / `SUBSTRING_INDEX` | 无干净等价：告警并保留 |
 
 ## 九、如何扩展
 
@@ -479,7 +484,7 @@ Java → canonical：`String`→VARCHAR、`int/Integer`→INT、`long`→BIGINT�
 ## 十二、明确不做
 
 - 存储过程 / 触发器 / 视图的跨方言转换
-- 自动生成 Oracle ≤11g 的 SEQUENCE+TRIGGER
+- 默认自动生成 Oracle ≤11g 的 SEQUENCE+TRIGGER（`generateOracleSequence(true)` 为 **opt-in**，会附录 SEQUENCE+TRIGGER）
 - 字符集/排序规则转换后排序结果一致（只做保留/删除/警告）
 - 跨库数据搬迁
-- 把 MySQL `MODIFY`/`CHANGE` 自动改写成 PostgreSQL `ALTER COLUMN` 全套语法（只转类型并告警）
+- 把 MySQL `MODIFY`/`CHANGE` 自动改写成 PostgreSQL `ALTER COLUMN` 全套语法（类型 + SET/DROP NOT NULL/DEFAULT 附录；不做 USING 表达式推断）

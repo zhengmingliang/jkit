@@ -14,6 +14,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNotSame;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 /**
@@ -68,5 +69,14 @@ public class SqlSchemaConverterProviderTest extends SqlSchemaConverterProviderTe
                 SqlDialect.MYSQL, SqlDialect.POSTGRES);
         assertTrue(sql, sql.toUpperCase().contains("TO_CHAR"));
         assertFalse(sql, sql.toUpperCase().contains("DATE_FORMAT"));
+    }
+
+    @Test
+    public void registerTypesAndFunctionsShareProviderInstance() {
+        SqlDataTypeRegistry.builtins();
+        SqlFunctionRegistry.builtins();
+        assertNotNull(TestAliasProvider.typesInstance);
+        assertNotNull(TestAliasProvider.functionsInstance);
+        assertSame(TestAliasProvider.typesInstance, TestAliasProvider.functionsInstance);
     }
 }

@@ -3,6 +3,8 @@ package com.alianga.jkit.sql.schema.rewrite;
 import com.alianga.jkit.sql.SqlDialect;
 import com.alianga.jkit.sql.SqlDialectSpec;
 import com.alianga.jkit.sql.ast.SqlExpr;
+import com.alianga.jkit.sql.ast.SqlFunctionExpr;
+import com.alianga.jkit.sql.ast.SqlIdentifier;
 import com.alianga.jkit.sql.ast.SqlLiteral;
 import com.alianga.jkit.sql.schema.model.CanonicalType;
 
@@ -106,6 +108,17 @@ public final class DefaultValueCoercer {
                 String v = lit.value() == null ? "" : lit.value();
                 return "'" + v.replace("'", "''") + "'";
             }
+        }
+        if (expr instanceof SqlFunctionExpr) {
+            SqlFunctionExpr f = (SqlFunctionExpr) expr;
+            String n = BuiltinFunctionRewriter.functionName(f);
+            if (f.arguments() == null || f.arguments().isEmpty()) {
+                return n;
+            }
+            return expr.toString();
+        }
+        if (expr instanceof SqlIdentifier) {
+            return ((SqlIdentifier) expr).qualifiedName();
         }
         return rawText == null ? "" : rawText.trim();
     }

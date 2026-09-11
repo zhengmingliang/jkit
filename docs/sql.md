@@ -422,21 +422,23 @@ ConversionResult r = SQL.convert(sql, SqlDialect.MYSQL, SqlDialect.ORACLE,
                 .failOnSeverity(ConversionWarning.Severity.MANUAL_ACTION_REQUIRED));
 ```
 
-Oracle ≤11g 的自增会给出 `MANUAL_ACTION_REQUIRED`（需手工 SEQUENCE+TRIGGER），不会静默生成不完整 DDL。
+Oracle ≤11g 的自增默认给出 `MANUAL_ACTION_REQUIRED`；`generateOracleSequence(true)` 会附录 SEQUENCE+TRIGGER。
 
 查询函数已改写：
 
-- `IF(a,b,c)` → `CASE WHEN`（非 MySQL）
+- `IF(a,b,c)` → `CASE WHEN`（非 MySQL）；`JOIN ON` / `DEFAULT NOW()` 同样走函数表
 - `NOW()` / `CURDATE()` / `CURTIME()`
 - `GROUP_CONCAT` ↔ `STRING_AGG` / `LISTAGG`
 - `IFNULL` / `NVL` / `ISNULL`（二元）按目标方言改名；`COALESCE` 为 PG/ANSI
 - `CONCAT(a,b,c)` 在 Oracle 下改为 `||`（Oracle `CONCAT` 只接受两参数）
 - `CAST` / `CONVERT(expr, type)` 的类型走 canonical 表
 - MySQL `CONVERT(expr USING charset)` **不会**误映射成 CAST，只告警并保留原文
+- `DATE_ADD`/`DATE_SUB` → 加减 `INTERVAL`；`DATEDIFF` → 日期相减；`FROM_UNIXTIME` → `TO_TIMESTAMP`
+- `DECODE`/`NVL2` → `CASE`；`FIND_IN_SET`/`SUBSTRING_INDEX` 无干净等价则告警并保留
 
-目标方言不支持的 MySQL 表内 `KEY`/`INDEX`/`FULLTEXT` 会从 `CREATE TABLE` 中去掉并告警（避免生成无法执行的 DDL）；`UNIQUE KEY` 改写为可移植的 `UNIQUE (...)`。
+目标方言不支持的 MySQL 表内 `KEY`/`INDEX` 会改成附录 `CREATE INDEX`；`FULLTEXT`/`SPATIAL` 去掉并 `MANUAL_ACTION_REQUIRED`。`UNIQUE KEY` 改写为可移植的 `UNIQUE (...)`。独立 `CREATE INDEX … USING BTREE` 转到非 MySQL 时去掉 `USING`。
 
-`SQL.convertBatch` 批量转换。`ALTER TABLE ADD/MODIFY/CHANGE` 会转换列类型（`CHANGE`/`MODIFY` 在非 MySQL 下告警：需手工改写成 `ALTER COLUMN`）。
+`SQL.convertBatch` 批量转换。`ALTER TABLE ADD/MODIFY/CHANGE` 会转换列类型；转到 PG/H2 时改成 `ALTER COLUMN … TYPE`，`NOT NULL`/`DEFAULT` 进附录。
 
 转换结果会按目标方言再 parse 一遍作为语料回归。真实建表验证在上级目录 `tools-test`：
 
@@ -455,7 +457,7 @@ java -jar target/benchmarks.jar com.alianga.test.sql.jmh.SqlSchemaConvertBenchma
 
 ## 实体扫描生成 DDL / DML
 
-对标 data-set `EntityScanner`：扫描包下带 `@SqlTable` 或 JPA `@Entity` 的类（不依赖 Spring / JPA 编译），再按方言生成建表与增删改查。Java 类型走 canonical 类型表。
+对标 data-set `EntityScanner`：扫描包下带 `@SqlTable`、JPA `@Entity`、MyBatis-Plus `@TableName`/`@TableId` 的类（不依赖 Spring / JPA / MyBatis 编译），再按方言生成建表与增删改查。也认 `@TableField`（`exist=false` 跳过）、JPA `@Index`/`@Enumerated`/`@Embedded`；`List`/`Set`/`@OneToMany` 默认不建列。`createTables` 按外键把被引用表排在前面。Java 类型走 canonical 类型表。
 
 ```java
 import com.alianga.jkit.sql.entity.SqlEntities;

@@ -162,15 +162,108 @@ public final class SqlEntities {
      * @return DDL 批
      */
     public static String createTables(String basePackage, SqlDialect dialect) {
-        List<Class<?>> types = scan(basePackage);
+        return createTables(scan(basePackage), dialect);
+    }
+
+    /**
+     * 按外键依赖排序后拼接 {@code CREATE TABLE}（被引用表在前）。
+     *
+     * @param types 实体类
+     * @param dialect 方言
+     * @return DDL 批
+     */
+    public static String createTables(List<Class<?>> types, SqlDialect dialect) {
+        List<Class<?>> ordered = orderByForeignKeys(types);
         StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < types.size(); i++) {
+        for (int i = 0; i < ordered.size(); i++) {
             if (i > 0) {
                 sb.append("; ");
             }
-            sb.append(createTable(types.get(i), dialect));
+            sb.append(createTable(ordered.get(i), dialect));
         }
         return sb.toString();
+    }
+
+    static List<Class<?>> orderByForeignKeys(List<Class<?>> types) {
+        if (types == null || types.size() <= 1) {
+            return types == null ? new ArrayList<Class<?>>(0) : new ArrayList<Class<?>>(types);
+        }
+        List<SqlEntityModel> models = new ArrayList<SqlEntityModel>(types.size());
+        for (int i = 0; i < types.size(); i++) {
+            models.add(inspect(types.get(i)));
+        }
+        List<Class<?>> remaining = new ArrayList<Class<?>>(types);
+        List<Class<?>> out = new ArrayList<Class<?>>(types.size());
+        while (!remaining.isEmpty()) {
+            int before = remaining.size();
+            for (int i = 0; i < remaining.size(); ) {
+                Class<?> c = remaining.get(i);
+                if (fkSatisfied(c, models, out, remaining)) {
+                    out.add(c);
+                    remaining.remove(i);
+                } else {
+                    i++;
+                }
+            }
+            if (remaining.size() == before) {
+                out.addAll(remaining);
+                break;
+            }
+        }
+        return out;
+    }
+
+    private static boolean fkSatisfied(Class<?> type, List<SqlEntityModel> models,
+                                       List<Class<?>> done, List<Class<?>> remaining) {
+        SqlEntityModel me = modelOf(type, models);
+        if (me == null) {
+            return true;
+        }
+        List<SqlEntityColumn> cols = me.columns();
+        for (int i = 0; i < cols.size(); i++) {
+            String ref = cols.get(i).referencesTable();
+            if (ref == null || ref.isEmpty() || ref.equalsIgnoreCase(me.tableName())) {
+                continue;
+            }
+            Class<?> dep = typeOfTable(ref, models);
+            if (dep == null || dep == type) {
+                continue;
+            }
+            if (containsClass(done, dep)) {
+                continue;
+            }
+            if (containsClass(remaining, dep)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static SqlEntityModel modelOf(Class<?> type, List<SqlEntityModel> models) {
+        for (int i = 0; i < models.size(); i++) {
+            if (models.get(i).type() == type) {
+                return models.get(i);
+            }
+        }
+        return null;
+    }
+
+    private static Class<?> typeOfTable(String table, List<SqlEntityModel> models) {
+        for (int i = 0; i < models.size(); i++) {
+            if (table.equalsIgnoreCase(models.get(i).tableName())) {
+                return models.get(i).type();
+            }
+        }
+        return null;
+    }
+
+    private static boolean containsClass(List<Class<?>> list, Class<?> type) {
+        for (int i = 0; i < list.size(); i++) {
+            if (list.get(i) == type) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
