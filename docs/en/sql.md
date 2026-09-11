@@ -322,6 +322,8 @@ Undeclared reverse collisions fail `RegistryValidator` at builtin-table build ti
 
 Phase 2–8 add `SQL.convert` / `SQL.convertBatch` for CREATE TABLE and `ALTER TABLE ADD/MODIFY/CHANGE` column types, plus query functions (`IF`→`CASE`, `GROUP_CONCAT`↔`STRING_AGG`/`LISTAGG`, `IFNULL`/`NVL`, `CAST`, `LOCATE`/`INSTR`). MySQL table-level `KEY`/`INDEX` is stripped (with a warning) so the DDL can parse on the target. Real MySQL→PG CREATE TABLE execution lives in `tools-test` (`CrossDialectDdlExecutionTest`, Docker). JMH: `SqlSchemaConvertBenchmark`.
 
+How to add type aliases, override a dialect form, add a canonical type, add a database, or add a function rewrite: [design doc §8](../sql-schema-converter-design.md). Aliases/overrides use `SqlSchemaConverterProvider`; new semantic types and function rewrites require in-module changes.
+
 ```java
 String pg = SQL.convert(
         "CREATE TABLE t (id INT AUTO_INCREMENT PRIMARY KEY, flag TINYINT(1) DEFAULT 0)",

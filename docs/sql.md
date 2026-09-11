@@ -449,7 +449,7 @@ mvn -Dtest=LocalDatasourceConvertTest test     # 读 src/test/resources/datasour
 java -jar target/benchmarks.jar com.alianga.test.sql.jmh.SqlSchemaConvertBenchmark -f 1 -wi 1 -i 1
 ```
 
-类型表可通过 SPI 扩展：实现 `SqlSchemaConverterProvider`，在 `META-INF/services/` 注册，`priority()` 越大越晚、可覆盖内置声明。
+如何加类型别名、覆盖某方言写法、加 canonical 类型、加数据库、加函数改写，见 [sql-schema-converter-design.md 第八节](./sql-schema-converter-design.md)。类型别名/覆盖走 SPI（`SqlSchemaConverterProvider`）；新语义类型和新函数要改本模块（枚举 / `FunctionAstRewriter`）。
 
 ## 性能
 
