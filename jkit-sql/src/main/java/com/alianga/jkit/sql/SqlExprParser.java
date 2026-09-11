@@ -1291,6 +1291,14 @@ final class SqlExprParser {
                 p.expect(SqlTokenType.RPAREN);
                 return list;
             }
+            // (RAND() * 12 MONTH) / (1 DAY) 已在加减路径处理；此处兜底括号内尾部单位
+            if (isIntervalUnitToken()) {
+                SqlFunctionExpr iv = new SqlFunctionExpr();
+                iv.setName(SqlIdentifier.of("INTERVAL"));
+                iv.addArgument(first);
+                iv.addArgument(SqlIdentifier.of(consumeIntervalUnitRaw()));
+                first = iv;
+            }
             p.expect(SqlTokenType.RPAREN);
             return first;
         }

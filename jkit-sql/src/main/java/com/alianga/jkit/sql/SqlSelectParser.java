@@ -90,12 +90,14 @@ final class SqlSelectParser {
                 } else {
                     type = SqlJoin.Type.COMMA;
                 }
-            } else if (p.isIdent("GLOBAL") && p.lexer.peek() != null
+            } else if ((p.is(SqlTokenType.GLOBAL) || p.token.textEqualsIgnoreCase("GLOBAL")) && p.lexer.peek() != null
                     && (p.lexer.peek().type() == SqlTokenType.LEFT
                     || p.lexer.peek().type() == SqlTokenType.RIGHT
                     || p.lexer.peek().type() == SqlTokenType.FULL
                     || p.lexer.peek().type() == SqlTokenType.INNER
-                    || p.lexer.peek().type() == SqlTokenType.JOIN)) {
+                    || p.lexer.peek().type() == SqlTokenType.JOIN
+                    || p.lexer.peek().textEqualsIgnoreCase("LEFT")
+                    || p.lexer.peek().textEqualsIgnoreCase("RIGHT"))) {
                 // MaxCompute：global left join
                 p.next();
                 continue; // 重新识别 JOIN 类型
@@ -520,8 +522,10 @@ final class SqlSelectParser {
                 select.setForUpdateTail(p.consumeRawUntilClause());
             } else if ((p.is(SqlTokenType.KEY) || p.isIdent("KEY")) && p.lexer.peek() != null
                     && p.lexer.peek().textEqualsIgnoreCase("SHARE")) {
-                // PG：FOR KEY SHARE（KEY 为关键字）
-                select.setForUpdateTail(p.consumeRawUntilClause());
+                // PG：FOR KEY SHARE（KEY 为关键字；SHARE 是 alias-stop，勿用 consumeRawUntilClause）
+                p.next();
+                p.next();
+                select.setForUpdateTail("KEY SHARE");
                 select.setLockInShare(true);
             } else if (p.match(SqlTokenType.SHARE) || p.isIdent("SHARE")) {
                 if (p.isIdent("SHARE")) {
