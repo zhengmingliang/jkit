@@ -8,7 +8,8 @@ import com.alianga.jkit.sql.schema.convert.ConversionReport;
 /**
  * 函数改写：直接构造目标 AST，禁止运行时字符串拼接再解析。
  *
- * <p>参数已在 {@code fn.arguments()} 上递归改写完毕。返回 {@code null} 表示交给内置规则。</p>
+ * <p>参数已在 {@code fn.arguments()} 上递归改写完毕。返回 {@code null} 表示不处理，
+ * walker 回落到 {@link SqlFunctionRegistry#findBuiltin}（没有内置则保留原节点）。</p>
  *
  * @author 郑明亮
  * @since 2.0.1

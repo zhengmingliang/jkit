@@ -17,7 +17,13 @@ package com.alianga.jkit.sql;
  * SqlStatement stmt = SQL.parse("SELECT 'a\\'b'", noBackslash);
  * }</pre>
  *
- * <p>所有公开方法仅做单次委托，无状态；覆写时注意保持能力之间的自洽
+ * <p>原语能力（引号开闭以外的开关、分页形态、{@link #dialectId()} / {@link #typeFamily()}）
+ * 单次委托给基方言。派生方法不要在本类覆写：{@link #identQuoteClose()}、
+ * {@link #quoteIdent(String)}、{@link #pipesAreConcat()}、{@link #preferredLimitStyle()}
+ * 走接口默认实现，会读到子类已覆写的原语（例如只改 {@link #identQuoteOpen()} 为 {@code '['}
+ * 时，闭引号自动变成 {@code ']'}）。</p>
+ *
+ * <p>覆写时注意保持能力之间的自洽
  * （如 {@link #supportsLimitOffset()} 关闭时不宜打开 {@link #supportsCommaLimitOffset()}）。</p>
  *
  * @author 郑明亮
@@ -46,23 +52,8 @@ public class SqlDialectWrapper implements SqlDialectSpec {
     }
 
     @Override
-    public char identQuoteClose() {
-        return base.identQuoteClose();
-    }
-
-    @Override
-    public String quoteIdent(String name) {
-        return base.quoteIdent(name);
-    }
-
-    @Override
     public boolean pipesAsOr() {
         return base.pipesAsOr();
-    }
-
-    @Override
-    public boolean pipesAreConcat() {
-        return base.pipesAreConcat();
     }
 
     @Override
@@ -113,11 +104,6 @@ public class SqlDialectWrapper implements SqlDialectSpec {
     @Override
     public boolean supportsCommaLimitOffset() {
         return base.supportsCommaLimitOffset();
-    }
-
-    @Override
-    public String preferredLimitStyle() {
-        return base.preferredLimitStyle();
     }
 
     @Override

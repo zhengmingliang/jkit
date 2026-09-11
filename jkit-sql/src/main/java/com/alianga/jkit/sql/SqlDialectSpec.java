@@ -156,8 +156,11 @@ public interface SqlDialectSpec {
     }
 
     /**
-     * 「只补行数」的首选形态：SQL Server → {@code TOP}；经典 Oracle → {@code ROWNUM}；其余 → {@code LIMIT}。
-     * 带 offset 的分页见 {@link #supportsFetchFirst()} / {@link #supportsLimitOffset()}。
+     * 「只补行数」的首选形态（查询用，不驱动改写）：SQL Server → {@code TOP}；
+     * 经典 Oracle → {@code ROWNUM}；其余 → {@code LIMIT}。
+     * 分页改写读 {@link #supportsTop()} / {@link #supportsRownum()} /
+     * {@link #supportsFetchFirst()} / {@link #supportsLimitOffset()} /
+     * {@link #supportsCommaLimitOffset()}，覆写本方法不会改变 {@code setPage} 输出。
      *
      * @return {@code "TOP"}、{@code "ROWNUM"} 或 {@code "LIMIT"}
      */

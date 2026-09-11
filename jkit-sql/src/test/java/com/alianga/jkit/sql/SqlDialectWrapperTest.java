@@ -119,4 +119,40 @@ public class SqlDialectWrapperTest {
         String offset = SQL.toSqlString(SQL.setPage(SQL.parse(base), 2, 10, noComma));
         assertTrue(offset, offset.toUpperCase().contains("LIMIT 10 OFFSET 10"));
     }
+
+    /**
+     * 只覆写原语时，派生方法走接口默认实现，不能再委托给基方言的旧值。
+     */
+    @Test
+    public void derivedMethodsFollowOverriddenPrimitives() {
+        SqlDialectSpec brackets = new SqlDialectWrapper(SqlDialect.MYSQL) {
+            @Override
+            public char identQuoteOpen() {
+                return '[';
+            }
+        };
+        assertEquals(']', brackets.identQuoteClose());
+        assertEquals("[user]", brackets.quoteIdent("user"));
+
+        SqlDialectSpec concatPipes = new SqlDialectWrapper(SqlDialect.MYSQL) {
+            @Override
+            public boolean pipesAsOr() {
+                return false;
+            }
+        };
+        assertTrue(concatPipes.pipesAreConcat());
+
+        SqlDialectSpec top = new SqlDialectWrapper(SqlDialect.MYSQL) {
+            @Override
+            public boolean supportsTop() {
+                return true;
+            }
+
+            @Override
+            public boolean supportsLimitOffset() {
+                return false;
+            }
+        };
+        assertEquals("TOP", top.preferredLimitStyle());
+    }
 }

@@ -5,6 +5,10 @@
 ## 2.0.1 / unreleased
 
 ### jkit-sql
+- **扩展**：函数改写真正走 `SqlSchemaConverterProvider.registerFunctions`（内置挂 `SqlFunctionRegistry`，SPI 后覆盖；`rewrite` 返回 `null` 回落内置）。`FunctionAstRewriter` 只遍历，第三方不必改它。
+- **修复**：`SqlDialectWrapper` 不再委托派生方法（`identQuoteClose` / `quoteIdent` / `pipesAreConcat` / `preferredLimitStyle`），子类只覆写原语时派生能力跟着变。
+
+### jkit-sql
 - **性能**：继续压 MySQL→ORACLE 分页 format 热路径——offset=0 单层 ROWNUM **免 clone** 包装回写、线程本地 `SqlFormatter` 复用、`wrapOracleRownum`/`adaptPagination` LIMIT→经典 ORACLE 快路径、冻结 ROWNUM/RN/XX、小整数数字字面量缓存至 10000、`detachSelectBody` 跳过空列表。
 
 ### jkit-sql

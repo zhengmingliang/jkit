@@ -12,7 +12,9 @@ import java.util.Map;
 import java.util.ServiceLoader;
 
 /**
- * 函数改写注册表。内置规则之后加载 SPI，后注册覆盖先注册。
+ * 函数改写注册表。先登记内置规则，再 {@code ServiceLoader} 调用
+ * {@link SqlSchemaConverterProvider#registerFunctions}；后注册覆盖先注册。
+ * SPI 的 {@link FunctionRewriteRule#rewrite} 返回 {@code null} 时回落到内置快照。
  *
  * @author 郑明亮
  * @since 2.0.1
@@ -21,10 +23,17 @@ public final class SqlFunctionRegistry {
     private static final SqlFunctionRegistry BUILTINS = create();
 
     private final Map<String, FunctionRewriteRule> rules = new HashMap<String, FunctionRewriteRule>(16);
+    private Map<String, FunctionRewriteRule> builtinSnapshot;
     private boolean frozen;
 
     /**
-     * @return 内置 + SPI
+     * 空表。转换入口用 {@link #builtins()}。
+     */
+    public SqlFunctionRegistry() {
+    }
+
+    /**
+     * @return 内置 + SPI（已 freeze）
      */
     public static SqlFunctionRegistry builtins() {
         return BUILTINS;
@@ -45,6 +54,8 @@ public final class SqlFunctionRegistry {
     }
 
     /**
+     * 当前生效规则（含 SPI 覆盖）。
+     *
      * @param functionName 函数名
      * @return 规则，没有则 null
      */
@@ -56,6 +67,31 @@ public final class SqlFunctionRegistry {
     }
 
     /**
+     * 内置快照（不含 SPI）。SPI 返回 null 时 walker 回落到这里。
+     *
+     * @param functionName 函数名
+     * @return 内置规则，没有则 null
+     */
+    public FunctionRewriteRule findBuiltin(String functionName) {
+        if (functionName == null || builtinSnapshot == null) {
+            return null;
+        }
+        return builtinSnapshot.get(functionName.toUpperCase(Locale.ROOT));
+    }
+
+    /**
+     * 把当前已登记规则记为内置快照，之后的 {@link #register} 视为 SPI 覆盖。
+     * {@link #builtins()} 在加载 SPI 之前调用。
+     */
+    public void snapshotBuiltins() {
+        if (frozen) {
+            throw new IllegalStateException("SqlFunctionRegistry is frozen");
+        }
+        builtinSnapshot = Collections.unmodifiableMap(
+                new HashMap<String, FunctionRewriteRule>(rules));
+    }
+
+    /**
      * 冻结。
      */
     public void freeze() {
@@ -64,7 +100,21 @@ public final class SqlFunctionRegistry {
 
     private static SqlFunctionRegistry create() {
         SqlFunctionRegistry r = new SqlFunctionRegistry();
+        BuiltinFunctionRewriter builtin = BuiltinFunctionRewriter.INSTANCE;
+        String[] names = {
+                "IF", "NOW", "CURDATE", "CURTIME",
+                "IFNULL", "NVL", "ISNULL",
+                "GROUP_CONCAT", "STRING_AGG", "LISTAGG",
+                "CONCAT", "CONVERT",
+                "LOCATE", "INSTR", "CHARINDEX",
+                "LENGTH", "CHAR_LENGTH", "CHARACTER_LENGTH", "LEN",
+                "SUBSTRING", "SUBSTR"
+        };
+        for (int i = 0; i < names.length; i++) {
+            r.register(names[i], builtin);
+        }
         r.register("DATE_FORMAT", new DateFormatRewriteRule());
+        r.snapshotBuiltins();
         loadProviders(r);
         r.freeze();
         return r;

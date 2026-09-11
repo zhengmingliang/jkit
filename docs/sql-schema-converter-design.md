@@ -2,7 +2,7 @@
 
 `jkit-sql` 的 `com.alianga.jkit.sql.schema` 包：把 `CREATE TABLE` / 部分 `ALTER` 和查询语句从一种 `SqlDialect` 转到另一种。JDK 8，零新增运行时依赖。入口是 `SQL.convert`。
 
-本文是**当前实现**的说明（由 v2 Normal Form 思路 + v3 结构化列/有损映射整改合并而来）。未实现的旧稿（`record`/`sealed`、字符串模板函数表、`SqlFunctionRegistry`、pairwise 映射）一律不收录。
+本文是**当前实现**的说明（由 v2 Normal Form 思路 + v3 结构化列/有损映射整改合并而来）。未实现的旧稿（`record`/`sealed`、字符串模板函数表、pairwise 映射）一律不收录。
 
 ## 一、要解决的问题
 
@@ -29,9 +29,11 @@ jkit-sql/src/main/java/com/alianga/jkit/sql/schema/
 ├── parse/          SqlColumnDefinitionParser（复用 SqlLexer）
 ├── registry/       SqlDataTypeRegistry + Builtins + DialectTypeForm
 │                   LossyMapping + RegistryValidator
-├── rewrite/        AutoIncrementStrategy, DefaultValueCoercer, FunctionAstRewriter
+├── rewrite/        AutoIncrementStrategy, DefaultValueCoercer,
+│                   FunctionAstRewriter（只遍历）, SqlFunctionRegistry,
+│                   BuiltinFunctionRewriter, DateFormatRewriteRule, FunctionRewriteRule
 ├── convert/        SqlSchemaConverter, Options, Report, Result
-└── spi/            SqlSchemaConverterProvider
+└── spi/            SqlSchemaConverterProvider（registerTypes + registerFunctions）
 ```
 
 `SqlDdlStatement.columnDefinitions()` 仍是 `List<String>`，不改公开签名。结构化列由 `SqlColumnDefinitionParser.fromDdl(ddl, dialect)` 另开通路。
@@ -190,7 +192,7 @@ SQL.convert(sql, SqlDialect.fromName("dm"), SqlDialect.MYSQL);
 
 ## 八、函数改写
 
-在 clone 后的 AST 上改节点，不把模板字符串再 parse 一遍。由 `FunctionAstRewriter` 实现：
+在 clone 后的 AST 上改节点，不把模板字符串再 parse 一遍。`FunctionAstRewriter` **只遍历**；规则来自 `SqlFunctionRegistry`：先登记内置（`BuiltinFunctionRewriter`、`DateFormatRewriteRule`），再 `ServiceLoader` 调 `SqlSchemaConverterProvider.registerFunctions`，后注册覆盖先注册。SPI 返回 `null` 则回落内置。
 
 | 源 | 行为 |
 |---|---|
@@ -216,7 +218,7 @@ SQL.convert(sql, SqlDialect.fromName("dm"), SqlDialect.MYSQL);
 | 两个 canonical 在目标方言写成同一个字面量 | 必须 `registerLossyMapping` | 能 |
 | 新增一种**语义类型**（如 UUID、INTERVAL） | `CanonicalType` 枚举 + **全部 12 个方言**的写法 | 不能，要改本模块 |
 | 新增一种**数据库** | 实现 {@code SqlDialectSpec}（或包 {@code SqlDialectWrapper}），不必改 {@code SqlDialect} 枚举 | 类型复用 {@code typeFamily()}；个别写法按 {@code dialectId()} SPI 覆盖 |
-| 新增/改函数转换（`DATE_FORMAT`、`IF`…） | `FunctionAstRewriter` | **不能**（SPI 目前只接类型表） |
+| 新增/改函数转换（`DATE_FORMAT`、`IF`、自有函数…） | `SqlSchemaConverterProvider.registerFunctions` | **能**（同名覆盖内置；返回 `null` 回落内置） |
 
 插件不能发明新的 `CanonicalType`。`UNKNOWN` 表示「识别不了，保留原文」。
 
@@ -230,7 +232,7 @@ SQL.convert(sql, SqlDialect.fromName("dm"), SqlDialect.MYSQL);
 META-INF/services/com.alianga.jkit.sql.schema.spi.SqlSchemaConverterProvider
 ```
 
-文件内容是实现类全名，一行一个。`ServiceLoader` 在内置表 `freeze()` **之前**调用 `registerTypes`。`priority()` 越大越晚，**后注册覆盖先注册**（内置为 0，默认插件 100）。
+文件内容是实现类全名，一行一个。`ServiceLoader` 会被加载两次：类型表 `freeze()` **之前**调 `registerTypes`；函数表在内置规则 `snapshotBuiltins()` 之后、`freeze()` 之前调 `registerFunctions`。两次 load 是不同实例，不要靠字段在两个方法之间传状态。`priority()` 越大越晚，**后注册覆盖先注册**（内置为 0，默认插件 100）。
 
 ```java
 public final class MyPgJsonProvider implements SqlSchemaConverterProvider {
@@ -343,9 +345,9 @@ public void registerTypes(SqlDataTypeRegistry registry) {
 
 ---
 
-### 9.4 新增函数转换（改 `FunctionAstRewriter`）
+### 9.4 新增 / 覆盖函数转换（`registerFunctions`，不要改 `FunctionAstRewriter`）
 
-函数 **没有** SPI。`FunctionRewriteRule` 接口还在，但运行路径是 `FunctionAstRewriter.rewriteFunction` 里的硬编码。新增规则就改这个方法：参数已经递归改写过，这里只负责换节点。
+函数改写的扩展点就是 `SqlSchemaConverterProvider.registerFunctions`。`FunctionAstRewriter` 只遍历 AST 并 `SqlFunctionRegistry.find(name)`；内置规则已经挂在注册表里（`BuiltinFunctionRewriter`、`DateFormatRewriteRule`），SPI 后注册同名即可覆盖。
 
 原则：
 
@@ -354,30 +356,48 @@ public void registerTypes(SqlDataTypeRegistry registry) {
 - 参数顺序不同（`LOCATE(sub, str)` vs `INSTR(str, sub)`）要交换 `arguments()`。
 - 语义对不上的（`CONVERT … USING`）**保留原节点 + `SEMANTIC_RISK`**，不要假装等价。
 - 目标方言就是该函数的原生写法时直接 `return fn`。
+- 只想拦一部分方言、其余仍走内置：`return null`，walker 会 `findBuiltin`。
+- 想包装内置：在 `register` 之前 `final FunctionRewriteRule current = registry.find("IF")`，再包一层。
+- `CAST` 是 `SqlCastExpr` 节点，由 walker 直接改类型，不走函数表；`CONVERT(expr, type)` 的类型名走 `SqlDataTypeRegistry.convert`。
 
-示例：把 MySQL `DATE_FORMAT(ts, '%Y-%m-%d')` 转到 PG `TO_CHAR`（格式串仍可能有损，要告警）：
+本仓库测试 SPI `TestAliasProvider` 已示范：`JKIT_SPI_FN` → `SPI_OK`；`DATE_FORMAT` 返回 `null` 仍落到内置 `TO_CHAR`。
 
 ```java
-if ("DATE_FORMAT".equals(name) && args.size() >= 2) {
-    if (target == SqlDialect.MYSQL) {
-        return fn;
+public final class MyFnProvider implements SqlSchemaConverterProvider {
+    @Override
+    public int priority() {
+        return 200;
     }
-    if (target == SqlDialect.POSTGRES || target == SqlDialect.ORACLE
-            || target == SqlDialect.ORACLE12) {
-        report.warn(ConversionWarning.Severity.SEMANTIC_RISK, name,
-                "DATE_FORMAT 格式符与 TO_CHAR 不完全等价");
-        fn.setName(SqlIdentifier.of("TO_CHAR"));
-        return fn;
+
+    @Override
+    public void registerFunctions(SqlFunctionRegistry registry) {
+        // 1) 新函数
+        registry.register("JKIT_SPI_FN", new FunctionRewriteRule() {
+            @Override
+            public SqlExpr rewrite(SqlFunctionExpr fn, SqlDialectSpec source,
+                                   SqlDialectSpec target, ConversionReport.Builder report) {
+                fn.setName(SqlIdentifier.of("SPI_OK"));
+                return fn;
+            }
+        });
+
+        // 2) 覆盖内置 DATE_FORMAT：只对自有方言动手，其余 return null 回落
+        registry.register("DATE_FORMAT", new FunctionRewriteRule() {
+            @Override
+            public SqlExpr rewrite(SqlFunctionExpr fn, SqlDialectSpec source,
+                                   SqlDialectSpec target, ConversionReport.Builder report) {
+                if ("mydb".equals(target.dialectId())) {
+                    fn.setName(SqlIdentifier.of("FORMAT_DATE"));
+                    return fn;
+                }
+                return null;
+            }
+        });
     }
-    report.warn(ConversionWarning.Severity.SEMANTIC_RISK, name,
-            target + " 无 DATE_FORMAT/TO_CHAR 映射，已保留原文");
-    return fn;
 }
 ```
 
-`CAST` / `CONVERT(expr, type)` 的**类型名**不要手写对照表，走 `SqlDataTypeRegistry.convert(typeText, source, target)`。
-
-单测写在 `SqlSchemaConverterTest`：源 SQL → `SQL.convert` → 断言目标文本含/不含关键字，并 `SQL.parse(out, targetDialect)` 保证能解析。
+单测：源 SQL → `SQL.convert` → 断言目标文本含/不含关键字，并 `SQL.parse(out, targetDialect)`。模块内已有 `SqlSchemaConverterProviderTest.registerFunctionsSpiRewritesUnknownFunction`。
 
 ---
 
@@ -394,13 +414,34 @@ if ("DATE_FORMAT".equals(name) && args.size() >= 2) {
 |---|---|
 | 别名 / 覆盖类型 | `RegistryValidationTest` + 一条 `fromDialect`/`convert` 断言 |
 | 新 canonical | 上一项 + `roundtripEveryCanonicalOnEveryDialect` |
-| 新函数 | `SqlSchemaConverterTest` 含/不含关键字 + 目标方言 `parse` |
+| 新函数 | `SqlSchemaConverterProviderTest` + `SqlSchemaConverterTest` 含/不含关键字 + 目标方言 `parse` |
 | 新方言 | 类型 roundtrip + 一条 CREATE TABLE 语料 + 自增策略用例 |
 | 真库 | `tools-test` 的 `LocalDatasourceConvertTest` 或容器测试 |
 
 ```text
 mvn -pl jkit-sql test
 ```
+
+---
+
+### 9.7 扩展点一览（声明的方法都要能用）
+
+`jkit-sql` 里带「SPI」语义的接口，注册方式不一样，不要混：
+
+| 接口 / 方法 | 怎么挂上 | 是否真正进管线 |
+|---|---|---|
+| `SqlSchemaConverterProvider.registerTypes` | `META-INF/services/…SqlSchemaConverterProvider` | 是，类型表 freeze 前 |
+| `SqlSchemaConverterProvider.registerFunctions` | 同上（另一次 `ServiceLoader.load`） | 是，函数表 snapshot 之后、freeze 前 |
+| `SqlSchemaConverterProvider.priority` | 同上 | 是，升序，后覆盖先 |
+| `FunctionRewriteRule.rewrite` | `registry.register(name, rule)` | 是；返回 `null` 回落内置 |
+| `SqlDialectSpec` 原语能力（引号 / `pipesAsOr` / 反斜杠 / `[]` / `~` / `#` / 分页开关 / `dialectId` / `typeFamily`） | 实现接口或 `SqlDialectWrapper` 覆写，传给 `SQL.parse` / `convert` / `setPage` | 是 |
+| `SqlDialectSpec.quoteIdent` / `pipesAreConcat` / `preferredLimitStyle` / `identQuoteClose` | **派生查询**：不要只覆写它们指望改写跟着变。`SqlDialectWrapper` 不再委托这四个，子类只改原语时派生会跟上 | `preferredLimitStyle` **不**驱动 `setPage`（分页读 `supports*`） |
+| `SqlWallRule.check` | `SqlWallConfig.rules(...)`（**不是** ServiceLoader） | 是，全部内置检查之后按注册顺序 |
+| `SqlStatementParser.parse` | `SqlParseOptions.statementParsers()` 按前导关键字（**不是** ServiceLoader） | 是，仅兜内建未覆盖的关键字 |
+| `SqlParseContext` 全部方法（`token` / `dialect` / `is` / `isIdent` / `match` / `matchIdent` / `next` / `name` / `atStmtBreak` / `consumeRest` / `error`） | 自定义 `SqlStatementParser` 入参 | 是，透传到 `SqlParser` |
+| `SqlRewriteHook.apply` | `SqlRewrites.add` + `SQL.rewrite`（**不是** ServiceLoader） | 是；返回 `null` 抛错 |
+
+插件不能发明新的 `CanonicalType`。函数名大小写不敏感。内置函数清单见第八节。
 
 ## 十、测试
 
@@ -410,7 +451,7 @@ mvn -pl jkit-sql test
 - `SqlDataTypeRegistryTest`（含全部 canonical × 方言 roundtrip）
 - `RegistryValidationTest`
 - `SqlSchemaConverterTest`、`SqlSchemaConvertCorpusTest`
-- `SqlSchemaConverterProviderTest`
+- `SqlSchemaConverterProviderTest`、`SqlFunctionRegistryTest`
 
 `tools-test`（不进 `jkit-sql` 依赖）：
 

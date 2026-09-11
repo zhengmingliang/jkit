@@ -107,7 +107,7 @@ SqlDialectSpec ansiQuotes = new SqlDialectWrapper(SqlDialect.MYSQL) {
 SQL.parse("SELECT \"id\" FROM t", ansiQuotes);  // "id" 按标识符解析
 ```
 
-可覆写的能力覆盖解析到改写全链路：引号（`identQuoteOpen/Close`）、`||` 语义（`pipesAsOr`）、反斜杠转义（`backslashEscapes`）、方括号标识符（`bracketIdentifiers`）、`~` 正则（`supportsTildeRegex`）、`#` 注释（`hashLineComment`）、分页形态（`supportsLimitOffset/Top/FetchFirst/Rownum/CommaLimitOffset`）。直接实现 `SqlDialectSpec` 时未覆写的方法按 ANSI 基线取默认值。
+可覆写的能力覆盖解析到改写全链路：引号（`identQuoteOpen`；`identQuoteClose` / `quoteIdent` 是派生，只改开引号为 `[` 时闭引号自动变 `]`）、`||` 语义（`pipesAsOr`；`pipesAreConcat` 派生）、反斜杠转义（`backslashEscapes`）、方括号标识符（`bracketIdentifiers`）、`~` 正则（`supportsTildeRegex`）、`#` 注释（`hashLineComment`）、分页形态（`supportsLimitOffset/Top/FetchFirst/Rownum/CommaLimitOffset`）。`preferredLimitStyle()` 是查询用派生值，**不**驱动 `setPage`。直接实现 `SqlDialectSpec` 时未覆写的方法按 ANSI 基线取默认值。
 
 非法 SQL 抛 `SqlParseException`，带行号、列号和附近原文，不返回半棵树。
 
@@ -451,7 +451,7 @@ java -jar target/benchmarks.jar com.alianga.test.sql.jmh.SqlSchemaConvertBenchma
 
 当前 12 个一等方言见 [设计文档第四节](./sql-schema-converter-design.md)。**新产品不必改 `SqlDialect` 枚举**：实现 `SqlDialectSpec`（或 `SqlDialectWrapper`），用 `typeFamily()` 复用内置类型表，用 `dialectId()` + SPI 覆盖个别写法。`SQL.convert` / `SQL.parse` 都吃 `SqlDialectSpec`。
 
-`ConversionResult.sqlWithExtras()` 含附录 `CREATE INDEX` / Oracle SEQUENCE。`DATE_FORMAT` 经函数 SPI 改为 `TO_CHAR`。函数也可 `SqlSchemaConverterProvider.registerFunctions`。`VARCHAR` 超长默认提升为 TEXT/CLOB。
+`ConversionResult.sqlWithExtras()` 含附录 `CREATE INDEX` / Oracle SEQUENCE。内置 `DATE_FORMAT` → `TO_CHAR` 走 `SqlFunctionRegistry`；第三方用 `SqlSchemaConverterProvider.registerFunctions` 追加或覆盖（返回 `null` 回落内置），**不必改** `FunctionAstRewriter`。`VARCHAR` 超长默认提升为 TEXT/CLOB。
 
 如何加类型别名、覆盖某方言写法、加 canonical 类型、加数据库、加函数改写，见 [第九节](./sql-schema-converter-design.md)。
 
