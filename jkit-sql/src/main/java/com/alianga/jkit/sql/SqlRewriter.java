@@ -376,8 +376,25 @@ public final class SqlRewriter {
         return statement instanceof SqlSelect ? (SqlSelect) statement : null;
     }
 
+    /** 小整数十进制串缓存（字面量本身仍新建，避免可变 SqlLiteral 共享）。 */
+    private static final String[] SMALL_NUMBER_STRINGS = buildSmallNumberStrings(128);
+
+    private static String[] buildSmallNumberStrings(int n) {
+        String[] arr = new String[n];
+        for (int i = 0; i < n; i++) {
+            arr[i] = Integer.toString(i);
+        }
+        return arr;
+    }
+
     private static SqlLiteral number(long value) {
-        return SqlLiteral.of(SqlLiteral.Kind.NUMBER, Long.toString(value));
+        String text;
+        if (value >= 0L && value < (long) SMALL_NUMBER_STRINGS.length) {
+            text = SMALL_NUMBER_STRINGS[(int) value];
+        } else {
+            text = Long.toString(value);
+        }
+        return SqlLiteral.of(SqlLiteral.Kind.NUMBER, text);
     }
 
     private static Long asLong(SqlExpr expr) {
@@ -759,7 +776,22 @@ public final class SqlRewriter {
             return statement;
         }
         SqlDialectSpec d = dialect == null ? SqlDialect.MYSQL : dialect;
-        Long lim = getLimit(statement);
+        // 一次探测 ROWNUM/row_number，避免 getLimit/getOffset/strip 重复扫描
+        RowNumPage page = detectRowNumPage(select);
+        Long lim;
+        Long offObj;
+        if (page != null) {
+            lim = Long.valueOf(page.end - page.offset);
+            offObj = page.offset > 0L ? Long.valueOf(page.offset) : null;
+        } else {
+            SqlSelect owner = paginationOwner(select);
+            lim = explicitLimit(owner);
+            if (owner.limit() != null && owner.limit().offset() != null) {
+                offObj = asLong(owner.limit().offset());
+            } else {
+                offObj = null;
+            }
+        }
         if (lim == null) {
             return statement;
         }
@@ -767,10 +799,13 @@ public final class SqlRewriter {
         if (isPaginationFormCompatible(select, d) && !needsCommaLimitNormalize(select, d)) {
             return statement;
         }
-        Long offObj = getOffset(statement);
         long off = offObj == null ? 0L : offObj.longValue();
         boolean withOffset = offObj != null || off > 0L;
-        stripPaginationForm(select);
+        if (page != null) {
+            unwrapRowNumPage(select, page);
+        } else {
+            clearPagination(paginationOwner(select));
+        }
         applyPagination(select, off, lim.longValue(), d, withOffset);
         return statement;
     }

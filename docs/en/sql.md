@@ -159,7 +159,7 @@ SQL.setOffset(stmt, 10, SqlDialect.POSTGRES);
 SqlStatement w = SQL.andWhere(stmt, "tenant_id = ?"); // internally parseExpr + clone, then AND WHERE
 SqlStatement t2 = SQL.replaceTable(w, "users", "users_archive"); // clone
 SqlStatement c2 = SQL.replaceColumn(t2, "name", "user_name");   // clone; skips table names/aliases
-SqlStatement copy = SQL.clone(stmt);
+SqlStatement copy = SQL.clone(stmt); // AST deep copy (SqlAstCloner), no format→parse
 ```
 
 `addLimit`: does not overwrite an existing LIMIT/TOP; writes `TOP` for SQL Server, `LIMIT` for everything else.

@@ -5,6 +5,10 @@
 ## 2.0.1 / unreleased
 
 ### jkit-sql
+- **性能**：`SQL.clone` 改为真正的 AST 树拷贝（`SqlAstCloner` / `SqlNode.copy`），热路径不再 format→parse；跨方言 `format`/`adaptPagination`/`setPage` 等「先 clone 再改」显著加速。
+- **性能**：`adaptPagination` 一次探测 ROWNUM/row_number，避免 getLimit/getOffset/strip 重复扫描；分页数字字面量复用小整数串缓存。
+
+### jkit-sql
 - **修复**：跨方言分页适配——`paginationNeedsAdapt`/`adaptPagination` 接入 `isPaginationFormCompatible`（ROWNUM↔LIMIT/FETCH、逗号 LIMIT→PG/ANSI）；`format` 仅在需要时 `clone`+adapt，避免按目标方言 raw format 再 parse。
 
 ### jkit-sql

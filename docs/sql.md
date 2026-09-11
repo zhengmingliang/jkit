@@ -204,7 +204,7 @@ SqlStatement c2 = SQL.replaceColumn(t2, "name", "user_name");   // clone；跳�
 SqlStatement c3 = SQL.addSelectItem(c2, "status");              // clone；追加 SELECT 列
 SqlStatement c4 = SQL.removeSelectItem(c3, "name");             // clone；按简单列名移除（不可删光）
 SqlStatement c5 = SQL.adaptPagination(c4, SqlDialect.ORACLE);   // clone；按方言适配分页
-SqlStatement copy = SQL.clone(stmt);
+SqlStatement copy = SQL.clone(stmt); // AST 树拷贝（SqlAstCloner），不再 format→parse
 ```
 
 `addLimit`：已有 LIMIT/TOP 时不覆盖；SQL Server 写 `TOP`，其余写 `LIMIT`。

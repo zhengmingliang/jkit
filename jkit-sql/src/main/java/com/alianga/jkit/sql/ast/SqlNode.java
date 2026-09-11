@@ -1,5 +1,6 @@
 package com.alianga.jkit.sql.ast;
 
+import com.alianga.jkit.sql.SqlAstCloner;
 import com.alianga.jkit.sql.SqlDialect;
 import com.alianga.jkit.sql.SqlFormatter;
 import com.alianga.jkit.sql.visitor.SqlVisitor;
@@ -33,6 +34,16 @@ public abstract class SqlNode {
      * @param visitor 访问者
      */
     protected void acceptChildren(SqlVisitor visitor) {
+    }
+
+    /**
+     * 深拷贝本节点及子树（委托 {@link SqlAstCloner}）。
+     *
+     * @return 新节点
+     * @since 2.0.1
+     */
+    public SqlNode copy() {
+        return SqlAstCloner.copy(this);
     }
 
     /**

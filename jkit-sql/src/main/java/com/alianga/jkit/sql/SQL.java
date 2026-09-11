@@ -734,7 +734,7 @@ public final class SQL {
     }
 
     /**
-     * 深拷贝语句（format → parse 往返；方言默认 MySQL）。
+     * 深拷贝语句（AST 树拷贝；方言参数保留兼容，忽略）。
      *
      * @param statement 语句
      * @return 新 AST，null 入参返回 null
@@ -745,10 +745,11 @@ public final class SQL {
     }
 
     /**
-     * 深拷贝语句（format → parse 往返）。
+     * 深拷贝语句（{@link SqlAstCloner} 树拷贝，不再 format→parse）。
+     * {@code dialect} 仅保留 API 兼容，树拷贝与方言无关。
      *
      * @param statement 语句
-     * @param dialect 方言
+     * @param dialect 方言（忽略）
      * @return 新 AST，null 入参返回 null
      * @since 2.0.1
      */
@@ -756,9 +757,7 @@ public final class SQL {
         if (statement == null) {
             return null;
         }
-        SqlDialectSpec d = dialect == null ? SqlDialect.MYSQL : dialect;
-        // raw 回写（不走 format 的分页适配），保证 setPage/setLimit 等先拷贝再改时保留原 LIMIT 形态
-        return parse(new SqlFormatter(false, d, null).format(statement), d);
+        return SqlAstCloner.copyStatement(statement);
     }
 
     /**
