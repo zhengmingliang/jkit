@@ -181,6 +181,22 @@ public class SqlRoundTripFidelityTest {
                 {"mysql", "alter TABLE t ADD KEY idx ((cast(site_id_list as char(10) array)))"},
                 {"oracle", "SELECT XMLSERIALIZE(CONTENT x AS VARCHAR(100)) FROM t"},
                 {"hive", "select row_number() over(distribute by num_id sort by id) from t"},
+
+                // SELECT 修饰符链 / 多表删除别名形式 / 字符集前缀字面量 / NOT REGEXP
+                {"mysql", "SELECT HIGH_PRIORITY STRAIGHT_JOIN SQL_SMALL_RESULT SQL_BIG_RESULT SQL_BUFFER_RESULT FID FROM T1"},
+                {"mysql", "SELECT SQL_NO_CACHE * FROM t"},
+                {"mysql", "SELECT DISTINCTROW a FROM t"},
+                {"mysql", "DELETE FROM a1, a2 USING t1 AS a1 INNER JOIN t2 AS a2 WHERE a1.id = a2.id"},
+                {"mysql", "SELECT _latin1'string' COLLATE latin1_danish_ci"},
+                {"mysql", "SELECT 'Monty!' NOT REGEXP '.*'"},
+
+                // UNPIVOT NULLS / GROUP BY DISTINCT+GROUPING SETS / CTAS 尾缀 / DB Link
+                {"oracle", "SELECT * FROM pivot_table UNPIVOT INCLUDE NULLS (total FOR mode IN (store AS 'direct'))"},
+                {"oracle", "SELECT * FROM pivot_table UNPIVOT EXCLUDE NULLS (total FOR mode IN (store AS 'direct'))"},
+                {"postgres", "SELECT a FROM t GROUP BY DISTINCT a GROUPING SETS ((a))"},
+                {"mysql", "CREATE TABLE foo AS SELECT * FROM t WITH NO DATA"},
+                {"oracle", "SELECT AVG(FUN_CAL@LINK_OMSS(d)) FROM t"},
+                {"oracle", "SELECT * FROM t@remote_link WHERE id = 1"},
         });
     }
 

@@ -15,6 +15,8 @@ public final class SqlDelete extends SqlStatement {
     private SqlTableSource table;
     private SqlTableSource from;
     private boolean usingKeyword;
+    /** MySQL 多表删除第二形式的目标名列表（{@code DELETE FROM a1, a2 USING …}），非空时优先于 {@link #table}。 */
+    private final List<SqlIdentifier> targets = new ArrayList<SqlIdentifier>(2);
     private boolean ignore;
     private boolean lowPriority;
     private boolean quick;
@@ -67,6 +69,16 @@ public final class SqlDelete extends SqlStatement {
      */
     public void setFrom(SqlTableSource from) {
         this.from = from;
+    }
+
+    /**
+     * MySQL 多表删除第二形式的目标名列表（{@code DELETE FROM a1, a2 USING t1 a1 JOIN t2 a2}）。
+     *
+     * @return 目标名列表，非多表形式为空
+     * @since 2.0.1
+     */
+    public List<SqlIdentifier> targets() {
+        return targets;
     }
 
     /**

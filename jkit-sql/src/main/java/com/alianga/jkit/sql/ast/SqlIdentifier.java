@@ -13,6 +13,8 @@ import java.util.List;
 public final class SqlIdentifier extends SqlExpr {
     private List<String> names;
     private boolean quoted;
+    /** Oracle DB Link 后缀（{@code fn@dblink} / {@code t@dblink}），无则 null。 */
+    private String dblink;
 
     /**
      * @param name 单段名
@@ -50,6 +52,24 @@ public final class SqlIdentifier extends SqlExpr {
             names = new ArrayList<String>(2);
         }
         names.add(name);
+    }
+
+    /**
+     * Oracle DB Link 后缀（{@code @dblink} 去掉 {@code @} 的部分）。
+     *
+     * @return dblink 名，无则 null
+     * @since 2.0.1
+     */
+    public String dblink() {
+        return dblink;
+    }
+
+    /**
+     * @param dblink dblink 名
+     * @since 2.0.1
+     */
+    public void setDblink(String dblink) {
+        this.dblink = dblink;
     }
 
     /**

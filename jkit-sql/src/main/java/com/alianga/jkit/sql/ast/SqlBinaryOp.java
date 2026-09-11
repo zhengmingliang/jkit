@@ -21,6 +21,7 @@ public enum SqlBinaryOp {
     NOT_LIKE("NOT LIKE"),
     ILIKE("ILIKE"),
     REGEXP("REGEXP"),
+    NOT_REGEXP("NOT REGEXP"),
     AND("AND"),
     OR("OR"),
     XOR("XOR"),

@@ -9,6 +9,8 @@ import com.alianga.jkit.sql.ast.SqlLoadDataStatement;
 import com.alianga.jkit.sql.ast.SqlLockTablesStatement;
 import com.alianga.jkit.sql.ast.SqlMaintenanceStatement;
 import com.alianga.jkit.sql.ast.SqlPrepareStatement;
+import com.alianga.jkit.sql.ast.SqlSelect;
+import com.alianga.jkit.sql.ast.SqlSelectItem;
 import com.alianga.jkit.sql.ast.SqlSetStatement;
 import com.alianga.jkit.sql.ast.SqlShowStatement;
 import com.alianga.jkit.sql.ast.SqlSimpleStatement;
@@ -203,6 +205,14 @@ public final class SqlParser {
             case INSERT:
                 return dmlParser.parseInsert(false);
             case REPLACE:
+                if (lexer.peek().type() == SqlTokenType.LPAREN) {
+                    // replace(...) 是 MySQL 字符串函数调用的表达式语句，不是 REPLACE INTO
+                    SqlSelect exprSelect = new SqlSelect();
+                    SqlSelectItem exprItem = new SqlSelectItem();
+                    exprItem.setExpr(exprParser.parseExpr());
+                    exprSelect.selectItems().add(exprItem);
+                    return exprSelect;
+                }
                 return dmlParser.parseInsert(true);
             case UPDATE:
                 return dmlParser.parseUpdate();
@@ -231,6 +241,29 @@ public final class SqlParser {
                 return parseShow();
             case CALL:
                 return parseCall();
+            case LBRACE:
+                // JDBC/ODBC 转义：{call sp(...)} 解包为 CALL 语句（内联解析，兼容 CALL 关键字/ident 两种词法）
+                if (lexer.peek().type() == SqlTokenType.CALL
+                        || (lexer.peek().type() == SqlTokenType.IDENT
+                                && lexer.peek().textEqualsIgnoreCase("call"))) {
+                    next();
+                    next();
+                    SqlSimpleStatement call = new SqlSimpleStatement();
+                    call.setStatementType(SqlStatementType.CALL);
+                    call.setName(parseName());
+                    if (match(SqlTokenType.LPAREN)) {
+                        call.setWithArguments(true);
+                        if (!is(SqlTokenType.RPAREN)) {
+                            do {
+                                call.arguments().add(exprParser.parseExpr());
+                            } while (match(SqlTokenType.COMMA));
+                        }
+                        expect(SqlTokenType.RPAREN);
+                    }
+                    expect(SqlTokenType.RBRACE);
+                    return call;
+                }
+                throw error("unsupported statement starting with " + t);
             case GRANT:
             case REVOKE:
                 return ddlParser.parseGrant();
@@ -1945,6 +1978,11 @@ public final class SqlParser {
                 id.setQuoted(true);
             }
             id.addName(unquote(part));
+        }
+        if (is(SqlTokenType.VARIABLE) && token.text() != null && token.text().startsWith("@")) {
+            // Oracle DB Link：fn@dblink / t@dblink
+            id.setDblink(token.text().substring(1));
+            next();
         }
         return id;
     }

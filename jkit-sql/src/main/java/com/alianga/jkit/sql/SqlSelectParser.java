@@ -61,7 +61,16 @@ final class SqlSelectParser {
     }
 
     SqlTableSource parseJoinedTable() {
-        SqlTableSource left = parseTableSource();
+        return parseJoinChain(parseTableSource());
+    }
+
+    /**
+     * 从已解析的左表续接 PIVOT 链与 JOIN 链（MySQL 多表删除等场景的首表重入）。
+     *
+     * @param left 已解析的左表
+     * @return 完整表源
+     */
+    SqlTableSource parseJoinChain(SqlTableSource left) {
         left = parsePivotUnpivotChain(left);
         while (true) {
             // Hive: t LATERAL VIEW explode(a) x AS c1, c2
@@ -241,8 +250,13 @@ final class SqlSelectParser {
         p.expect(SqlTokenType.SELECT);
         SqlSelect select = new SqlSelect();
         consumeSelectHints(select);
-        if (p.match(SqlTokenType.DISTINCT) || p.match(SqlTokenType.DISTINCTROW)) {
+        if (p.match(SqlTokenType.DISTINCTROW)) {
             select.setDistinct(true);
+            select.setDistinctRow(true);
+        } else if (p.match(SqlTokenType.DISTINCT)) {
+            select.setDistinct(true);
+        }
+        if (select.distinct()) {
             if (p.match(SqlTokenType.ON)) {
                 p.expect(SqlTokenType.LPAREN);
                 do {
@@ -254,6 +268,31 @@ final class SqlSelectParser {
             p.match(SqlTokenType.ALL);
         }
         select.setHighPriority(p.match(SqlTokenType.HIGH_PRIORITY));
+        // MySQL SELECT 修饰符链：STRAIGHT_JOIN / SQL_SMALL_RESULT / SQL_BIG_RESULT /
+        // SQL_BUFFER_RESULT / SQL_CACHE / SQL_NO_CACHE（非关键字，按 ident 识别）
+        if (p.match(SqlTokenType.STRAIGHT_JOIN)) {
+            select.setStraightJoin(true);
+        }
+        while (true) {
+            if (p.isIdent("SQL_SMALL_RESULT")) {
+                p.next();
+                select.setSmallResult(true);
+            } else if (p.isIdent("SQL_BIG_RESULT")) {
+                p.next();
+                select.setBigResult(true);
+            } else if (p.isIdent("SQL_BUFFER_RESULT")) {
+                p.next();
+                select.setBufferResult(true);
+            } else if (p.isIdent("SQL_CACHE")) {
+                p.next();
+                select.setCache(true);
+            } else if (p.isIdent("SQL_NO_CACHE")) {
+                p.next();
+                select.setNoCache(true);
+            } else {
+                break;
+            }
+        }
         select.setCalcFoundRows(p.match(SqlTokenType.SQL_CALC_FOUND_ROWS));
         if (p.match(SqlTokenType.TOP)) {
             select.setTop(p.exprParser.parsePrimary());
@@ -293,6 +332,9 @@ final class SqlSelectParser {
         }
         if (p.match(SqlTokenType.GROUP)) {
             p.expect(SqlTokenType.BY);
+            if (p.match(SqlTokenType.DISTINCT)) {
+                select.setGroupByDistinct(true);
+            }
             if (p.is(SqlTokenType.GROUPING) || p.is(SqlTokenType.CUBE) || p.is(SqlTokenType.ROLLUP)) {
                 StringBuilder sb = new StringBuilder();
                 sb.append(p.token.text().toUpperCase());
@@ -308,7 +350,20 @@ final class SqlSelectParser {
                 do {
                     select.groupBy().add(p.exprParser.parseExpr());
                 } while (p.match(SqlTokenType.COMMA));
-                if (p.match(SqlTokenType.WITH)) {
+                // GROUP BY a GROUPING SETS (…)：列表后再跟集合运算（PG / 标准）
+                if (p.is(SqlTokenType.GROUPING) || p.is(SqlTokenType.CUBE) || p.is(SqlTokenType.ROLLUP)) {
+                    StringBuilder sb2 = new StringBuilder();
+                    sb2.append(p.token.text().toUpperCase());
+                    p.next();
+                    if (p.is(SqlTokenType.SETS)) {
+                        sb2.append(' ').append(p.token.text().toUpperCase());
+                        p.next();
+                    }
+                    if (p.match(SqlTokenType.LPAREN)) {
+                        sb2.append('(').append(p.skipBalancedParensContent()).append(')');
+                        select.setGroupByExtension(sb2.toString());
+                    }
+                } else if (p.match(SqlTokenType.WITH)) {
                     if (p.match(SqlTokenType.ROLLUP)) {
                         select.setGroupByRollup(true);
                     } else if (p.match(SqlTokenType.CUBE)) {
@@ -628,6 +683,16 @@ final class SqlSelectParser {
     }
 
     SqlTableSource parseTableSource() {
+        // JDBC/ODBC 转义：{oj <join>} 解包为普通 JOIN 表源
+        if (p.is(SqlTokenType.LBRACE) && p.lexer.peek() != null
+                && p.lexer.peek().type() == SqlTokenType.IDENT
+                && p.lexer.peek().textEqualsIgnoreCase("oj")) {
+            p.next();
+            p.next();
+            SqlTableSource inner = parseJoinedTable();
+            p.expect(SqlTokenType.RBRACE);
+            return inner;
+        }
         boolean lateral = p.match(SqlTokenType.LATERAL);
         // Oracle / SQL 标准：TABLE(fn(...))
         if (p.is(SqlTokenType.TABLE) && p.lexer.peek().type() == SqlTokenType.LPAREN) {
@@ -710,11 +775,22 @@ final class SqlSelectParser {
         while (p.is(SqlTokenType.PIVOT) || p.is(SqlTokenType.UNPIVOT)) {
             boolean unpivot = p.is(SqlTokenType.UNPIVOT);
             p.next();
+            String nulls = null;
+            if ((p.identLike() || (p.token.type() != null && p.token.type().keyword()))
+                    && (p.token.textEqualsIgnoreCase("INCLUDE") || p.token.textEqualsIgnoreCase("EXCLUDE"))) {
+                String mode = p.token.text().toUpperCase();
+                p.next();
+                if (p.is(SqlTokenType.NULL) || p.isIdent("NULLS")) {
+                    p.next();
+                    nulls = mode + " NULLS";
+                }
+            }
             p.expect(SqlTokenType.LPAREN);
             String body = p.skipBalancedParensContent();
             SqlPivotTable pivot = new SqlPivotTable();
             pivot.setInput(source);
             pivot.setUnpivot(unpivot);
+            pivot.setNullsClause(nulls);
             pivot.setDefinition(body);
             parseTableAlias(pivot);
             source = pivot;
@@ -1353,7 +1429,17 @@ final class SqlSelectParser {
     private void parseModelExprList(List<SqlExpr> target) {
         boolean paren = p.match(SqlTokenType.LPAREN);
         do {
-            target.add(p.exprParser.parseExpr());
+            SqlExpr expr = p.exprParser.parseExpr();
+            // MODEL MEASURES 允许裸别名（sale s）：仅当后续紧跟 COMMA/RPAREN 时才吸收，避免吃掉小节关键字
+            if (p.identLike() && expr instanceof SqlIdentifier) {
+                SqlToken peeked = p.lexer.peek();
+                if (peeked != null && (peeked.type() == SqlTokenType.COMMA
+                        || peeked.type() == SqlTokenType.RPAREN)) {
+                    expr = SqlIdentifier.of(((SqlIdentifier) expr).qualifiedName()
+                            + " " + p.consumeIdentRaw());
+                }
+            }
+            target.add(expr);
         } while (p.match(SqlTokenType.COMMA));
         if (paren) {
             p.expect(SqlTokenType.RPAREN);

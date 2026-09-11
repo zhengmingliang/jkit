@@ -273,6 +273,10 @@ final class SqlExprParser {
                 } else if (peeked.type() == SqlTokenType.BETWEEN) {
                     p.next();
                     left = parseBetween(left, true);
+                } else if (peeked.type() == SqlTokenType.REGEXP || peeked.type() == SqlTokenType.RLIKE) {
+                    p.next();
+                    p.next();
+                    left = SqlBinaryExpr.of(left, SqlBinaryOp.NOT_REGEXP, parseBit());
                 } else {
                     break;
                 }
@@ -769,6 +773,9 @@ final class SqlExprParser {
     }
 
     private SqlExpr parsePrimaryInner() {
+        if (p.is(SqlTokenType.LBRACE)) {
+            return parseJdbcEscape();
+        }
         if (p.is(SqlTokenType.NULL)) {
             p.next();
             return SqlLiteral.of(SqlLiteral.Kind.NULL, "NULL");
@@ -782,6 +789,17 @@ final class SqlExprParser {
             SqlLiteral.Kind kind = p.is(SqlTokenType.NUMBER) ? SqlLiteral.Kind.NUMBER
                     : (p.is(SqlTokenType.HEX) ? SqlLiteral.Kind.HEX : SqlLiteral.Kind.BIT);
             SqlLiteral lit = SqlLiteral.of(kind, p.token.text());
+            p.next();
+            return lit;
+        }
+        if (p.identLike() && p.token.text() != null && p.token.text().length() > 1
+                && p.token.text().charAt(0) == '_'
+                && p.lexer.peek().type() == SqlTokenType.STRING) {
+            // MySQL 字符集前缀字面量：_latin1'string' / _utf8mb4'中文' / _binary'x'
+            String prefix = p.token.text();
+            p.next();
+            SqlLiteral lit = SqlLiteral.of(SqlLiteral.Kind.STRING, p.token.text());
+            lit.setName(prefix);
             p.next();
             return lit;
         }
@@ -950,6 +968,41 @@ final class SqlExprParser {
         p.expect(SqlTokenType.RPAREN);
         parseFunctionTail(fn);
         return fn;
+    }
+
+    /**
+     * JDBC/ODBC 转义（JDBC 标准转义语法）：{@code {fn f(...)}} 解包为函数调用，
+     * {@code {d '…'}} / {@code {t '…'}} / {@code {ts '…'}} 转 DATE/TIME/TIMESTAMP 类型字面量，
+     * {@code {escape '…'}} 与未知花括号形式按透明分组解包。
+     * 回写输出解包后的标准形式（转义包装不保留）。
+     */
+    private SqlExpr parseJdbcEscape() {
+        p.expect(SqlTokenType.LBRACE);
+        if (p.isIdent("fn")) {
+            p.next();
+            SqlExpr inner = parseExpr();
+            p.expect(SqlTokenType.RBRACE);
+            return inner;
+        }
+        if (p.isIdent("d") || p.isIdent("t") || p.isIdent("ts")) {
+            String kw = p.token.text().toUpperCase();
+            p.next();
+            SqlFunctionExpr typed = new SqlFunctionExpr();
+            typed.setName(SqlIdentifier.of("TS".equals(kw) ? "TIMESTAMP" : kw));
+            typed.addArgument(parsePrimaryInner());
+            p.expect(SqlTokenType.RBRACE);
+            return typed;
+        }
+        if (p.isIdent("escape")) {
+            p.next();
+            SqlExpr inner = parseExpr();
+            p.expect(SqlTokenType.RBRACE);
+            return inner;
+        }
+        // 兜底：透明分组
+        SqlExpr inner = parseExpr();
+        p.expect(SqlTokenType.RBRACE);
+        return inner;
     }
 
     /**

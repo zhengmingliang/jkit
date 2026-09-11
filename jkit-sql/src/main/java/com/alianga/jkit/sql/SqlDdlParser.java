@@ -445,6 +445,18 @@ final class SqlDdlParser {
         if ((asQueryObject && p.match(SqlTokenType.AS)) || p.is(SqlTokenType.SELECT) || p.is(SqlTokenType.WITH)) {
             p.match(SqlTokenType.AS);
             ddl.setQuery(p.parseStatement());
+            if (p.is(SqlTokenType.WITH)) {
+                // CTAS 尾缀：WITH [NO] DATA
+                int wStart = p.token.start();
+                p.next();
+                if (p.isIdent("NO") || p.is(SqlTokenType.NOT)) {
+                    p.next();
+                }
+                if (p.isIdent("DATA")) {
+                    p.next();
+                    ddl.setTail(p.lexer.rawSlice(wStart, p.token.start()).trim());
+                }
+            }
         } else if (!p.atStmtBreak()) {
             if ("TABLE".equalsIgnoreCase(ddl.objectType())) {
                 parseCreateTableOptions(ddl);

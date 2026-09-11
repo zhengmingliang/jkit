@@ -11,6 +11,7 @@ import com.alianga.jkit.sql.ast.SqlListExpr;
 import com.alianga.jkit.sql.ast.SqlMerge;
 import com.alianga.jkit.sql.ast.SqlMergeWhen;
 import com.alianga.jkit.sql.ast.SqlTable;
+import com.alianga.jkit.sql.ast.SqlTableSource;
 import com.alianga.jkit.sql.ast.SqlUpdate;
 
 import java.util.ArrayList;
@@ -51,11 +52,23 @@ final class SqlDmlParser {
             delete.setIgnore(true);
         }
         if (p.match(SqlTokenType.FROM)) {
-            delete.setTable(p.selectParser.parseJoinedTable());
-            // PG: DELETE FROM t USING s WHERE …
-            if (p.match(SqlTokenType.USING)) {
+            SqlTableSource first = p.selectParser.parseTableSource();
+            if (p.is(SqlTokenType.COMMA) && first instanceof SqlTable) {
+                // MySQL 多表删除第二形式：DELETE FROM a1, a2 USING t1 a1 JOIN t2 a2
+                delete.targets().add(((SqlTable) first).name());
+                while (p.match(SqlTokenType.COMMA)) {
+                    delete.targets().add(p.parseName());
+                }
+                p.expect(SqlTokenType.USING);
                 delete.setFrom(p.selectParser.parseJoinedTable());
                 delete.setUsingKeyword(true);
+            } else {
+                delete.setTable(p.selectParser.parseJoinChain(first));
+                // PG: DELETE FROM t USING s WHERE …
+                if (p.match(SqlTokenType.USING)) {
+                    delete.setFrom(p.selectParser.parseJoinedTable());
+                    delete.setUsingKeyword(true);
+                }
             }
         } else if (p.identLike()) {
             delete.setTable(p.selectParser.parseJoinedTable());

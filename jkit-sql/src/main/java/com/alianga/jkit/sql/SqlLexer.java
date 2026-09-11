@@ -665,6 +665,20 @@ public final class SqlLexer {
                 if (keepComments) {
                     return;
                 }
+                // #{…} 一类模板占位优先于 # 行注释（tryMatch 不推进位置，命中交给 scanInto 发占位记号）
+                SqlPlaceholderPattern[] pats = this.placeholderPatterns;
+                if (pats != null) {
+                    boolean hit = false;
+                    for (int i = 0; i < pats.length; i++) {
+                        if (pats[i].tryMatch(src, pos, limit) > pos) {
+                            hit = true;
+                            break;
+                        }
+                    }
+                    if (hit) {
+                        return;
+                    }
+                }
                 pos++;
                 skipToEol();
                 continue;

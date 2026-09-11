@@ -13,6 +13,8 @@ public final class SqlPivotTable extends SqlTableSource {
     private boolean unpivot;
     /** 括号内定义原文（不含外层括号） */
     private String definition;
+    /** Oracle UNPIVOT 的 {@code INCLUDE NULLS} / {@code EXCLUDE NULLS} 原文。 */
+    private String nullsClause;
 
     /**
      * @return 输入表源
@@ -54,6 +56,24 @@ public final class SqlPivotTable extends SqlTableSource {
      */
     public void setDefinition(String definition) {
         this.definition = definition;
+    }
+
+    /**
+     * Oracle {@code UNPIVOT INCLUDE|EXCLUDE NULLS} 修饰原文。
+     *
+     * @return NULLS 修饰（如 {@code "INCLUDE NULLS"}），无则 null
+     * @since 2.0.1
+     */
+    public String nullsClause() {
+        return nullsClause;
+    }
+
+    /**
+     * @param nullsClause NULLS 修饰原文
+     * @since 2.0.1
+     */
+    public void setNullsClause(String nullsClause) {
+        this.nullsClause = nullsClause;
     }
 
     /**

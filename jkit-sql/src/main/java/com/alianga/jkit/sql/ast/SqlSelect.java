@@ -14,7 +14,14 @@ import java.util.List;
  */
 public final class SqlSelect extends SqlStatement {
     private boolean distinct;
+    private boolean distinctRow;
     private boolean highPriority;
+    private boolean straightJoin;
+    private boolean smallResult;
+    private boolean bigResult;
+    private boolean bufferResult;
+    private boolean cache;
+    private boolean noCache;
     private boolean calcFoundRows;
     private final List<SqlExpr> distinctOn = new ArrayList<SqlExpr>(2);
     private SqlExpr top;
@@ -25,6 +32,7 @@ public final class SqlSelect extends SqlStatement {
     private final List<SqlExpr> groupBy = new ArrayList<SqlExpr>(2);
     private boolean groupByRollup;
     private boolean groupByCube;
+    private boolean groupByDistinct;
     /** GROUP BY 扩展：GROUPING SETS/CUBE/ROLLUP(...) 原文（含关键字） */
     private String groupByExtension;
     private boolean orderSiblings;
@@ -192,6 +200,118 @@ public final class SqlSelect extends SqlStatement {
     }
 
     /**
+     * @return MySQL {@code DISTINCTROW}（等同 DISTINCT，保留原文关键字）
+     * @since 2.0.1
+     */
+    public boolean distinctRow() {
+        return distinctRow;
+    }
+
+    /**
+     * @param distinctRow {@code DISTINCTROW}
+     * @since 2.0.1
+     */
+    public void setDistinctRow(boolean distinctRow) {
+        this.distinctRow = distinctRow;
+    }
+
+    /**
+     * @return MySQL 修饰符 {@code STRAIGHT_JOIN}（SELECT 级）
+     * @since 2.0.1
+     */
+    public boolean straightJoin() {
+        return straightJoin;
+    }
+
+    /**
+     * @param straightJoin {@code STRAIGHT_JOIN}
+     * @since 2.0.1
+     */
+    public void setStraightJoin(boolean straightJoin) {
+        this.straightJoin = straightJoin;
+    }
+
+    /**
+     * @return MySQL {@code SQL_SMALL_RESULT}
+     * @since 2.0.1
+     */
+    public boolean smallResult() {
+        return smallResult;
+    }
+
+    /**
+     * @param smallResult {@code SQL_SMALL_RESULT}
+     * @since 2.0.1
+     */
+    public void setSmallResult(boolean smallResult) {
+        this.smallResult = smallResult;
+    }
+
+    /**
+     * @return MySQL {@code SQL_BIG_RESULT}
+     * @since 2.0.1
+     */
+    public boolean bigResult() {
+        return bigResult;
+    }
+
+    /**
+     * @param bigResult {@code SQL_BIG_RESULT}
+     * @since 2.0.1
+     */
+    public void setBigResult(boolean bigResult) {
+        this.bigResult = bigResult;
+    }
+
+    /**
+     * @return MySQL {@code SQL_BUFFER_RESULT}
+     * @since 2.0.1
+     */
+    public boolean bufferResult() {
+        return bufferResult;
+    }
+
+    /**
+     * @param bufferResult {@code SQL_BUFFER_RESULT}
+     * @since 2.0.1
+     */
+    public void setBufferResult(boolean bufferResult) {
+        this.bufferResult = bufferResult;
+    }
+
+    /**
+     * @return MySQL {@code SQL_CACHE}
+     * @since 2.0.1
+     */
+    public boolean cache() {
+        return cache;
+    }
+
+    /**
+     * @param cache {@code SQL_CACHE}
+     * @since 2.0.1
+     */
+    public void setCache(boolean cache) {
+        this.cache = cache;
+    }
+
+    /**
+     * @return MySQL {@code SQL_NO_CACHE}
+     * @since 2.0.1
+     */
+    public boolean noCache() {
+        return noCache;
+    }
+
+    /**
+     * @param noCache {@code SQL_NO_CACHE}
+     * @since 2.0.1
+     */
+    public void setNoCache(boolean noCache) {
+        this.noCache = noCache;
+    }
+
+    /**
      * @return PostgreSQL {@code DISTINCT ON (...)}
      */
     public List<SqlExpr> distinctOn() {
@@ -305,6 +425,22 @@ public final class SqlSelect extends SqlStatement {
      */
     public void setGroupByCube(boolean groupByCube) {
         this.groupByCube = groupByCube;
+    }
+
+    /**
+     * @return GROUP BY DISTINCT（PG）
+     * @since 2.0.1
+     */
+    public boolean groupByDistinct() {
+        return groupByDistinct;
+    }
+
+    /**
+     * @param groupByDistinct GROUP BY DISTINCT
+     * @since 2.0.1
+     */
+    public void setGroupByDistinct(boolean groupByDistinct) {
+        this.groupByDistinct = groupByDistinct;
     }
 
     /**

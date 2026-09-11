@@ -271,7 +271,7 @@ public final class SqlFormatter {
         }
         if (select.distinct()) {
             sp();
-            kw("DISTINCT");
+            kw(select.distinctRow() ? "DISTINCTROW" : "DISTINCT");
             if (!select.distinctOn().isEmpty()) {
                 sp();
                 kw("ON");
@@ -284,6 +284,30 @@ public final class SqlFormatter {
         if (select.highPriority()) {
             sp();
             kw("HIGH_PRIORITY");
+        }
+        if (select.straightJoin()) {
+            sp();
+            kw("STRAIGHT_JOIN");
+        }
+        if (select.smallResult()) {
+            sp();
+            kw("SQL_SMALL_RESULT");
+        }
+        if (select.bigResult()) {
+            sp();
+            kw("SQL_BIG_RESULT");
+        }
+        if (select.bufferResult()) {
+            sp();
+            kw("SQL_BUFFER_RESULT");
+        }
+        if (select.cache()) {
+            sp();
+            kw("SQL_CACHE");
+        }
+        if (select.noCache()) {
+            sp();
+            kw("SQL_NO_CACHE");
         }
         if (select.calcFoundRows()) {
             sp();
@@ -352,13 +376,25 @@ public final class SqlFormatter {
             kw("GROUP");
             sp();
             kw("BY");
+            if (select.groupByDistinct()) {
+                sp();
+                kw("DISTINCT");
+            }
             sp();
+            if (!select.groupBy().isEmpty()) {
+                commaExprs(select.groupBy());
+                sp();
+            }
             out.append(select.groupByExtension());
         } else if (!select.groupBy().isEmpty()) {
             nl();
             kw("GROUP");
             sp();
             kw("BY");
+            if (select.groupByDistinct()) {
+                sp();
+                kw("DISTINCT");
+            }
             sp();
             commaExprs(select.groupBy());
             if (select.groupByRollup()) {
@@ -754,7 +790,17 @@ public final class SqlFormatter {
             sp();
             kw("IGNORE");
         }
-        if (delete.table() != null) {
+        if (!delete.targets().isEmpty()) {
+            // MySQL 多表删除：DELETE FROM a1, a2 USING t1 a1 JOIN t2 a2
+            sp();
+            kw("FROM");
+            sp();
+            commaIdents(delete.targets());
+            sp();
+            kw("USING");
+            sp();
+            writeFrom(delete.from());
+        } else if (delete.table() != null) {
             // PG DELETE FROM t USING …；MySQL DELETE t FROM …
             if (delete.from() == null || delete.usingKeyword()) {
                 sp();
@@ -765,7 +811,7 @@ public final class SqlFormatter {
             }
             writeFrom(delete.table());
         }
-        if (delete.from() != null) {
+        if (delete.from() != null && delete.targets().isEmpty()) {
             sp();
             kw(delete.usingKeyword() ? "USING" : "FROM");
             sp();
@@ -967,6 +1013,11 @@ public final class SqlFormatter {
             kw("AS");
             sp();
             writeNode(ddl.query());
+            if (ddl.tail() != null) {
+                // CTAS 尾缀（WITH [NO] DATA 等）
+                sp();
+                out.append(ddl.tail());
+            }
         } else if (ddl.triggerTiming() != null || ddl.triggerEvent() != null
                 || ddl.triggerTable() != null || ddl.eventScheduleKind() != null
                 || ddl.triggerForEach() != null || ddl.triggerOrder() != null
@@ -1627,6 +1678,10 @@ public final class SqlFormatter {
             writeFrom(pivot.input());
             sp();
             kw(pivot.unpivot() ? "UNPIVOT" : "PIVOT");
+            if (pivot.nullsClause() != null) {
+                sp();
+                out.append(pivot.nullsClause());
+            }
             sp();
             out.append('(');
             if (pivot.definition() != null) {
@@ -3062,6 +3117,11 @@ public final class SqlFormatter {
             }
             writeIdentPart(names.get(i), force || id.quoted());
         }
+        if (id.dblink() != null) {
+            // Oracle DB Link：fn@dblink
+            out.append('@');
+            out.append(id.dblink());
+        }
     }
 
     private void writeIdentPart(String part, boolean quoted) {
@@ -3387,6 +3447,12 @@ public final class SqlFormatter {
                 out.append(lit.value());
                 break;
             case STRING:
+                if (lit.name() != null) {
+                    // 字符集前缀字面量：_latin1'string'
+                    out.append(lit.name());
+                }
+                out.append(lit.value());
+                break;
             case NUMBER:
             case HEX:
             case BIT:
