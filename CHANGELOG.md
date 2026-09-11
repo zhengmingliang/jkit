@@ -5,6 +5,12 @@
 ## 2.0.1 / unreleased
 
 ### jkit-sql
+- **修复**：`toSqlString`/`format` 按目标方言适配分页（MySQL `LIMIT` → 经典 ORACLE ROWNUM / ORACLE12 OFFSET·FETCH / SQLSERVER TOP|OFFSET FETCH）；`setLimit`/`setPage` 转经典 ORACLE 时清掉子查询内残留 LIMIT/TOP（`wrapOracleRownum` + `clearPagination`）。
+- **新增**：`SQL.adaptPagination` / `addSelectItem` / `removeSelectItem`；`SqlRewrites` 对应链 hook；`SqlRewriter.adaptPagination`。
+
+## 2.0.1 / unreleased
+
+### jkit-sql
 - 覆盖率第十三轮：PG `DO $$…$$` / `DO $tag$…$tag$`；块内 `ELSIF`/`EXCEPTION WHEN`；
   标签化 `lab: BEGIN…END lab`；MySQL `CREATE ALGORITHM/DEFINER/SQL SECURITY VIEW|PROCEDURE`（含 `user@%`）；
   `INSERT/REPLACE` 可叠加 `LOW_PRIORITY|DELAYED|HIGH_PRIORITY`；`AS` 关键字别名（修 match 误消费）；

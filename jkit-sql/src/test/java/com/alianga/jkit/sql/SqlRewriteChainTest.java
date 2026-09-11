@@ -193,4 +193,23 @@ public class SqlRewriteChainTest {
         }
         return sb.toString();
     }
+
+    @Test
+    public void adaptPaginationAndSelectItemHooks() {
+        SqlStatement stmt = SQL.parse("SELECT id, name FROM t_user WHERE age > 18 limit 0,10000");
+        SqlStatement out = SQL.rewrite(stmt, SqlRewrites.create()
+                .add(SqlRewrites.removeSelectItem("name"))
+                .add(SqlRewrites.addSelectItem("status"))
+                .add(SqlRewrites.adaptPagination(SqlDialect.ORACLE)));
+        String sql = SQL.toSqlString(out, SqlDialect.ORACLE).toUpperCase();
+        assertTrue(sql, sql.contains("ROWNUM"));
+        assertFalse(sql, sql.contains("LIMIT"));
+        assertFalse(sql, sql.contains("NAME"));
+        assertTrue(sql, sql.contains("STATUS"));
+        assertTrue(sql, sql.contains("ID"));
+        // 原树不变
+        assertTrue(SQL.toSqlString(stmt).toUpperCase().contains("LIMIT"));
+        assertTrue(SQL.toSqlString(stmt).toUpperCase().contains("NAME"));
+    }
+
 }

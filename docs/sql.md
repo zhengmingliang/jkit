@@ -201,11 +201,14 @@ SQL.setOffset(stmt, 10, SqlDialect.POSTGRES);
 SqlStatement w = SQL.andWhere(stmt, "tenant_id = ?"); // 内部 parseExpr + clone 后再 AND WHERE
 SqlStatement t2 = SQL.replaceTable(w, "users", "users_archive"); // clone
 SqlStatement c2 = SQL.replaceColumn(t2, "name", "user_name");   // clone；跳过表名/表别名
+SqlStatement c3 = SQL.addSelectItem(c2, "status");              // clone；追加 SELECT 列
+SqlStatement c4 = SQL.removeSelectItem(c3, "name");             // clone；按简单列名移除（不可删光）
+SqlStatement c5 = SQL.adaptPagination(c4, SqlDialect.ORACLE);   // clone；按方言适配分页
 SqlStatement copy = SQL.clone(stmt);
 ```
 
 `addLimit`：已有 LIMIT/TOP 时不覆盖；SQL Server 写 `TOP`，其余写 `LIMIT`。
-`andWhere` / `replaceTable` / `replaceColumn`：现与 `addLimit`/`setPage` 一样 **clone 后再改**（破坏性：旧代码若依赖就地修改需改用返回值）。
+`andWhere` / `replaceTable` / `replaceColumn` / `addSelectItem` / `removeSelectItem` / `adaptPagination`：现与 `addLimit`/`setPage` 一样 **clone 后再改**（破坏性：旧代码若依赖就地修改需改用返回值）。
 `setLimit` / `setOffset` / `setPage`：**替换**分页；`setPage(pageNo, pageSize)` 中 pageNo 从 1 起。
 
 ### 改写规则链（可选）
@@ -222,9 +225,11 @@ SqlStatement out = SQL.rewrite(stmt, SqlRewrites.create()
 ```
 
 规则是 `SqlRewriteHook` 函数式接口：收当前语句、返回继续传递的语句（就地修改返回原对象、或整体替换均可；返回 `null` 抛 `IllegalArgumentException`）。
-内建适配器与 `SqlRewriter` 对应静态方法等价（`addLimit`/`setLimit`/`setOffset`/`setPage`/`andWhere`/`replaceTable`/`replaceColumn`），就地作用于链上语句；
+内建适配器与 `SqlRewriter` 对应静态方法等价（`addLimit`/`setLimit`/`setOffset`/`setPage`/`andWhere`/`replaceTable`/`replaceColumn`/`addSelectItem`/`removeSelectItem`/`adaptPagination`），就地作用于链上语句；
 只改一条且要"clone 后再改"语义时直接用 `SQL` 的对应门面方法即可，不必进链。
 方言：MySQL/PG/H2/ANSI → `LIMIT`/`OFFSET`；SQL Server 第 1 页 `TOP`，其后 `OFFSET FETCH`；**`SqlDialect.ORACLE`（12c 以下）** 裸 SELECT → **ROWNUM 包装**（单层 `WHERE ROWNUM<=n`，有 offset 时双层）；**`ORACLE12`（12c+）** → `OFFSET … FETCH FIRST … ROWS ONLY`。已存在的 Oracle `ROWNUM` 双层/`WHERE ROWNUM<=n` 与 SQL Server `row_number` 包装：`getLimit` 返回页大小，`setPage`/`setLimit` 只改数值边界（不叠 OFFSET/FETCH）。UNION 的 LIMIT 挂在集合运算链末端。`SqlBuilder.limit`/`offset`/`toSql(dialect)` 走同一套改写（`toSql` 的方言参数覆盖 builder 方言）。
+
+**`format` / `toSqlString(..., dialect)` 按目标方言适配分页**：若 AST 上已有分页（MySQL `LIMIT` / TOP / ROWNUM / row_number）与目标方言不兼容，回写前先 clone 再 `adaptPagination`（不改入参 AST）。例如 MySQL `LIMIT 0,10000` → 经典 ORACLE 单层 ROWNUM；`LIMIT 10,20` → 双层 RN；→ ORACLE12 用 OFFSET/FETCH；→ SQLSERVER offset=0 用 TOP、有 offset 用 OFFSET FETCH。默认 MySQL 回写保真（逗号 LIMIT 等）不回退。`setPage`/`setLimit` 转经典 ORACLE 时也会清掉子查询内残留的旧 LIMIT/TOP。
 
 ## 参数化 / Wall / 求值（P2）
 
@@ -264,7 +269,7 @@ stmt.accept(new SqlAstVisitor() {
 
 ## 格式化
 
-`format` / `toSqlString` 是 AST 回写（不保留空白与注释）。**语义往返**（`parse → format → parse`）保证 `type()`、`tables()`（忽略大小写）、`isReadOnly()` 与原文一致；黄金集 `SqlGoldenCorpusTest` 全覆盖。**词级保真**由 `SqlRoundTripFidelityTest` 额外保证：回写文本与原文**归一化后逐字等价**（去注释 / 去全部空白 / 去独立 `AS` / 统一大小写，只容忍纯排版差异），覆盖 JOIN 修饰符、DDL 关键字、`RENAME` 多组、引号形态、DML 修饰符、JDBC 转义等 118 条坑位语料——回写**丢词**（如 `NATURAL LEFT JOIN` 丢 `LEFT`、`STRAIGHT_JOIN` 丢 `STRAIGHT`）会直接抓出，不会静默通过。同一方法在 `tools-test` 由 `SqlRoundTripFidelityCorpusTest` 批量应用到全部 379 条文件语料（另加语义等价写法归一与 5 条有据白名单，硬断言）。
+`format` / `toSqlString` 是 AST 回写（不保留空白与注释）；指定目标方言时若分页形态不兼容会先适配再回写（见上「统计与改写」）。**语义往返**（`parse → format → parse`）保证 `type()`、`tables()`（忽略大小写）、`isReadOnly()` 与原文一致；黄金集 `SqlGoldenCorpusTest` 全覆盖。**词级保真**由 `SqlRoundTripFidelityTest` 额外保证：回写文本与原文**归一化后逐字等价**（去注释 / 去全部空白 / 去独立 `AS` / 统一大小写，只容忍纯排版差异），覆盖 JOIN 修饰符、DDL 关键字、`RENAME` 多组、引号形态、DML 修饰符、JDBC 转义等 118 条坑位语料——回写**丢词**（如 `NATURAL LEFT JOIN` 丢 `LEFT`、`STRAIGHT_JOIN` 丢 `STRAIGHT`）会直接抓出，不会静默通过。同一方法在 `tools-test` 由 `SqlRoundTripFidelityCorpusTest` 批量应用到全部 379 条文件语料（另加语义等价写法归一与 5 条有据白名单，硬断言）。
 
 ```java
 SQL.format(stmt);                           // 换行缩进

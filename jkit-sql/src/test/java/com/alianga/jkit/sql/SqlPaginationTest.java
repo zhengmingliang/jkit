@@ -146,4 +146,128 @@ public class SqlPaginationTest {
         assertNull(SQL.getOffset(del));
         assertNotNull(SQL.setPage(del, 1, 10));
     }
+
+    @Test
+    public void toSqlStringMysqlLimitToOracleRownum() {
+        SqlStatement stmt = SQL.parse("SELECT id, name FROM t_user WHERE age > 18 limit 0,10000");
+        String sql = SQL.toSqlString(stmt, SqlDialect.ORACLE).toUpperCase();
+        assertFalse("must not keep MySQL LIMIT", sql.contains("LIMIT"));
+        assertTrue(sql, sql.contains("ROWNUM"));
+        assertTrue(sql, sql.contains("ROWNUM <= 10000") || sql.contains("ROWNUM<= 10000")
+                || sql.contains("ROWNUM <=10000"));
+        // 单层：无 RN / XXX
+        assertFalse("offset=0 should be single-layer", sql.contains(" RN ") || sql.contains("AS RN"));
+        // 原 AST 不被改写
+        assertTrue(SQL.toSqlString(stmt, SqlDialect.MYSQL).toUpperCase().contains("LIMIT"));
+    }
+
+    @Test
+    public void toSqlStringMysqlLimitOffsetToOracleNested() {
+        SqlStatement stmt = SQL.parse("SELECT id, name FROM t_user WHERE age > 18 LIMIT 10,20");
+        String sql = SQL.toSqlString(stmt, SqlDialect.ORACLE).toUpperCase();
+        assertFalse(sql, sql.contains("LIMIT"));
+        assertTrue(sql, sql.contains("ROWNUM"));
+        assertTrue(sql, sql.contains("AS RN") || sql.contains(" RN"));
+        assertTrue(sql, sql.contains("RN > 10") || sql.contains("RN> 10"));
+        assertTrue(sql, sql.contains("ROWNUM <= 30") || sql.contains("ROWNUM<= 30"));
+    }
+
+    @Test
+    public void toSqlStringMysqlLimitToOracle12Fetch() {
+        SqlStatement stmt = SQL.parse("SELECT id, name FROM t_user WHERE age > 18 limit 0,10000");
+        String sql = SQL.toSqlString(stmt, SqlDialect.ORACLE12).toUpperCase();
+        assertFalse(sql, sql.contains("LIMIT"));
+        assertTrue(sql, sql.contains("FETCH"));
+        assertFalse("offset=0 need not emit OFFSET", sql.contains("OFFSET"));
+        assertTrue(sql, sql.contains("10000"));
+    }
+
+    @Test
+    public void toSqlStringMysqlLimitToSqlServerTop() {
+        SqlStatement stmt = SQL.parse("SELECT id, name FROM t_user WHERE age > 18 limit 0,10000");
+        String sql = SQL.toSqlString(stmt, SqlDialect.SQLSERVER).toUpperCase();
+        assertFalse(sql, sql.contains("LIMIT"));
+        assertTrue(sql, sql.contains("TOP"));
+        assertTrue(sql, sql.contains("10000"));
+    }
+
+    @Test
+    public void toSqlStringMysqlLimitOffsetToSqlServerFetch() {
+        SqlStatement stmt = SQL.parse("SELECT id FROM t LIMIT 10,20");
+        String sql = SQL.toSqlString(stmt, SqlDialect.SQLSERVER).toUpperCase();
+        assertFalse(sql, sql.contains("LIMIT"));
+        assertFalse(sql, sql.contains("TOP"));
+        assertTrue(sql, sql.contains("OFFSET"));
+        assertTrue(sql, sql.contains("FETCH"));
+    }
+
+    @Test
+    public void setPageWithPriorMysqlLimitClearsInnerLimitOnOracle() {
+        String src = "SELECT id, name FROM t_user WHERE age > 18 limit 0,10000";
+        SqlStatement page = SQL.setPage(SQL.parse(src), 2, 30, SqlDialect.ORACLE);
+        String sql = SQL.toSqlString(page, SqlDialect.ORACLE).toUpperCase();
+        assertFalse("inner query must not retain LIMIT", sql.contains("LIMIT"));
+        assertTrue(sql, sql.contains("ROWNUM <= 60") || sql.contains("ROWNUM<= 60"));
+        assertTrue(sql, sql.contains("RN > 30") || sql.contains("RN> 30"));
+        String bare = SQL.toSqlString(
+                SQL.setPage(SQL.parse("SELECT id, name FROM t_user WHERE age > 18"), 2, 30,
+                        SqlDialect.ORACLE),
+                SqlDialect.ORACLE).toUpperCase();
+        // 结构应与无先验 LIMIT 的 setPage 一致（忽略空白）
+        assertEquals(bare.replace(" ", ""), sql.replace(" ", ""));
+    }
+
+    @Test
+    public void setLimitWithPriorMysqlLimitNoEmbeddedLimitOnOracle() {
+        SqlStatement limited = SQL.setLimit(
+                SQL.parse("SELECT id, name FROM t_user WHERE age > 18 limit 0,10000"),
+                100, SqlDialect.ORACLE);
+        String sql = SQL.toSqlString(limited, SqlDialect.ORACLE).toUpperCase();
+        assertFalse(sql, sql.contains("LIMIT"));
+        assertTrue(sql, sql.contains("ROWNUM <= 100") || sql.contains("ROWNUM<= 100"));
+    }
+
+    @Test
+    public void adaptPaginationNoOpWithoutPaging() {
+        SqlStatement stmt = SQL.parse("SELECT id FROM t_user WHERE age > 18");
+        String before = SQL.toSqlString(stmt);
+        String after = SQL.toSqlString(SQL.adaptPagination(stmt, SqlDialect.ORACLE));
+        assertEquals(before.toUpperCase().replace(" ", ""),
+                after.toUpperCase().replace(" ", ""));
+    }
+
+    @Test
+    public void mysqlToSqlStringFidelityKeepsCommaLimit() {
+        SqlStatement stmt = SQL.parse("SELECT id, name FROM t_user WHERE age > 18 limit 0,10000");
+        String sql = SQL.toSqlString(stmt, SqlDialect.MYSQL).toUpperCase();
+        assertTrue(sql, sql.contains("LIMIT"));
+        // 默认 MySQL 回写不因 adapt 丢掉逗号风格
+        assertTrue(sql, sql.contains("0") && sql.contains("10000"));
+    }
+
+    @Test
+    public void addAndRemoveSelectItem() {
+        SqlStatement stmt = SQL.parse("SELECT id, name FROM t_user");
+        SqlStatement added = SQL.addSelectItem(stmt, "age");
+        String a = SQL.toSqlString(added).toUpperCase();
+        assertTrue(a, a.contains("AGE"));
+        assertTrue("must clone", SQL.toSqlString(stmt).toUpperCase().indexOf("AGE") < 0
+                || !SQL.toSqlString(stmt).toUpperCase().contains(", AGE"));
+        assertFalse(SQL.toSqlString(stmt).toUpperCase().contains("AGE"));
+
+        SqlStatement removed = SQL.removeSelectItem(added, "name");
+        String r = SQL.toSqlString(removed).toUpperCase();
+        assertFalse(r, r.contains("NAME"));
+        assertTrue(r, r.contains("ID") && r.contains("AGE"));
+
+        SqlStatement removedQualified = SQL.removeSelectItem(
+                SQL.parse("SELECT t.id, t.name FROM t_user t"), "name");
+        assertFalse(SQL.toSqlString(removedQualified).toUpperCase().contains("NAME"));
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void removeSelectItemRejectsEmptyList() {
+        SQL.removeSelectItem(SQL.parse("SELECT id FROM t"), "id");
+    }
+
 }

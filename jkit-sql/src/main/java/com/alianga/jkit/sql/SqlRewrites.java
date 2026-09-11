@@ -200,4 +200,81 @@ public final class SqlRewrites {
             }
         };
     }
+
+    /**
+     * 内建适配器：追加 SELECT 列，等价 {@link SqlRewriter#addSelectItem}。
+     *
+     * @param exprSql 表达式 SQL
+     * @return 规则
+     * @since 2.0.1
+     */
+    public static SqlRewriteHook addSelectItem(final String exprSql) {
+        return new SqlRewriteHook() {
+            /**
+             * {@inheritDoc}
+             */
+            @Override
+            public SqlStatement apply(SqlStatement statement) {
+                return SqlRewriter.addSelectItem(statement, SQL.parseExpr(exprSql), null);
+            }
+        };
+    }
+
+    /**
+     * 内建适配器：追加 SELECT 列（带别名）。
+     *
+     * @param expr 表达式
+     * @param alias 别名，可空
+     * @return 规则
+     * @since 2.0.1
+     */
+    public static SqlRewriteHook addSelectItem(final SqlExpr expr, final String alias) {
+        return new SqlRewriteHook() {
+            /**
+             * {@inheritDoc}
+             */
+            @Override
+            public SqlStatement apply(SqlStatement statement) {
+                return SqlRewriter.addSelectItem(statement, expr, alias);
+            }
+        };
+    }
+
+    /**
+     * 内建适配器：按简单列名移除 SELECT 项，等价 {@link SqlRewriter#removeSelectItem}。
+     *
+     * @param columnSimpleName 列简单名
+     * @return 规则
+     * @since 2.0.1
+     */
+    public static SqlRewriteHook removeSelectItem(final String columnSimpleName) {
+        return new SqlRewriteHook() {
+            /**
+             * {@inheritDoc}
+             */
+            @Override
+            public SqlStatement apply(SqlStatement statement) {
+                return SqlRewriter.removeSelectItem(statement, columnSimpleName);
+            }
+        };
+    }
+
+    /**
+     * 内建适配器：按目标方言适配分页，等价 {@link SqlRewriter#adaptPagination}。
+     *
+     * @param dialect 目标方言
+     * @return 规则
+     * @since 2.0.1
+     */
+    public static SqlRewriteHook adaptPagination(final SqlDialectSpec dialect) {
+        return new SqlRewriteHook() {
+            /**
+             * {@inheritDoc}
+             */
+            @Override
+            public SqlStatement apply(SqlStatement statement) {
+                return SqlRewriter.adaptPagination(statement, dialect);
+            }
+        };
+    }
 }

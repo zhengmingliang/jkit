@@ -203,6 +203,8 @@ public final class SqlRewriter {
         }
         // 经典 Oracle（≤11g）：裸 SELECT 一律 ROWNUM 包装，禁止 OFFSET/FETCH
         if (dialect.supportsRownum() && !dialect.supportsFetchFirst()) {
+            // 先清掉旧 LIMIT/TOP，避免 detachSelectBody 把它们拷进子查询
+            clearPagination(paginationOwner(root));
             wrapOracleRownum(root, offset, rowCount);
             return;
         }
@@ -239,6 +241,8 @@ public final class SqlRewriter {
             end = 1L;
         }
         SqlSelect core = detachSelectBody(root);
+        // 先验 LIMIT/TOP 不得残留在 ROWNUM 子查询内（如 MySQL LIMIT 再转 ORACLE）
+        clearPagination(paginationOwner(core));
         if (off == 0L) {
             SqlSubqueryTable from = new SqlSubqueryTable();
             from.setQuery(core);
@@ -737,6 +741,262 @@ public final class SqlRewriter {
             }
         });
         return statement;
+    }
+
+    /**
+     * 按目标方言适配分页形态（就地）：读取当前 limit/offset（含 LIMIT/TOP/ROWNUM/row_number），
+     * 清掉旧分页形态，再 {@link #applyPagination}。无分页时 no-op。
+     * 公开门面 {@link SQL#adaptPagination} / {@link SQL#format} 会先 clone 再调用。
+     *
+     * @param statement 语句
+     * @param dialect 目标方言
+     * @return 原对象
+     * @since 2.0.1
+     */
+    public static SqlStatement adaptPagination(SqlStatement statement, SqlDialectSpec dialect) {
+        SqlSelect select = asSelect(statement);
+        if (select == null) {
+            return statement;
+        }
+        SqlDialectSpec d = dialect == null ? SqlDialect.MYSQL : dialect;
+        Long lim = getLimit(statement);
+        if (lim == null) {
+            return statement;
+        }
+        if (!paginationNeedsAdapt(statement, d)) {
+            return statement;
+        }
+        Long offObj = getOffset(statement);
+        long off = offObj == null ? 0L : offObj.longValue();
+        boolean withOffset = offObj != null || off > 0L;
+        stripPaginationForm(select);
+        applyPagination(select, off, lim.longValue(), d, withOffset);
+        return statement;
+    }
+
+    /**
+     * 回写路径是否需要按目标方言改写分页（供 {@link SQL#format} 决定是否 clone+adapt）。
+     * 仅当 AST 上是普通 {@code LIMIT}（非 FETCH/TOP/ROWNUM 包装）且目标方言不支持 LIMIT 时为 true，
+     * 避免把 TOP/FETCH/ROWNUM 在默认 MySQL 回写时改编而破坏保真往返。
+     * 显式 {@link #adaptPagination} 仍可做完整跨形态转换。
+     *
+     * @param statement 语句
+     * @param dialect 目标方言
+     * @return 需要适配时 true
+     * @since 2.0.1
+     */
+    public static boolean paginationNeedsAdapt(SqlStatement statement, SqlDialectSpec dialect) {
+        SqlSelect select = asSelect(statement);
+        if (select == null || getLimit(statement) == null) {
+            return false;
+        }
+        SqlDialectSpec d = dialect == null ? SqlDialect.MYSQL : dialect;
+        if (detectRowNumPage(select) != null) {
+            return false;
+        }
+        SqlSelect owner = paginationOwner(select);
+        if (owner.top() != null) {
+            return false;
+        }
+        if (owner.limit() == null || owner.limit().fetchStyle()) {
+            return false;
+        }
+        // 普通 LIMIT → 目标不支持 LIMIT 时（ORACLE / ORACLE12 / SQLSERVER / DB2 …）才自动适配
+        return !d.supportsLimitOffset();
+    }
+
+    /**
+     * 追加 SELECT 列表项（就地；公开门面 {@link SQL#addSelectItem} 会先 clone）。
+     *
+     * @param statement 语句
+     * @param expr 表达式
+     * @param alias 别名，可空
+     * @return 原对象
+     * @since 2.0.1
+     */
+    public static SqlStatement addSelectItem(SqlStatement statement, SqlExpr expr, String alias) {
+        SqlSelect select = asSelect(statement);
+        if (select == null || expr == null) {
+            return statement;
+        }
+        SqlSelectItem item = new SqlSelectItem();
+        item.setExpr(expr);
+        if (alias != null && !alias.isEmpty()) {
+            item.setAlias(alias);
+        }
+        select.addSelectItem(item);
+        return statement;
+    }
+
+    /**
+     * 按简单列名（忽略大小写）从 SELECT 列表移除；可匹配 {@code t.col} 的最后一段或显式别名。
+     * 不允许删光（至少保留一项），否则抛 {@link IllegalArgumentException}。
+     *
+     * @param statement 语句
+     * @param columnSimpleName 列简单名
+     * @return 原对象
+     * @since 2.0.1
+     */
+    public static SqlStatement removeSelectItem(SqlStatement statement, String columnSimpleName) {
+        SqlSelect select = asSelect(statement);
+        if (select == null || columnSimpleName == null || columnSimpleName.isEmpty()) {
+            return statement;
+        }
+        java.util.List<SqlSelectItem> items = select.selectItems();
+        java.util.List<SqlSelectItem> kept = new java.util.ArrayList<SqlSelectItem>(items.size());
+        boolean removed = false;
+        for (SqlSelectItem item : items) {
+            if (!removed && selectItemMatchesSimpleName(item, columnSimpleName)) {
+                removed = true;
+                continue;
+            }
+            kept.add(item);
+        }
+        if (!removed) {
+            return statement;
+        }
+        if (kept.isEmpty()) {
+            throw new IllegalArgumentException("cannot remove last select item: " + columnSimpleName);
+        }
+        items.clear();
+        items.addAll(kept);
+        return statement;
+    }
+
+    private static boolean selectItemMatchesSimpleName(SqlSelectItem item, String simpleName) {
+        if (item.alias() != null && simpleName.equalsIgnoreCase(item.alias())) {
+            return true;
+        }
+        if (item.expr() instanceof SqlIdentifier) {
+            return simpleName.equalsIgnoreCase(((SqlIdentifier) item.expr()).simpleName());
+        }
+        return false;
+    }
+
+    private static boolean isPaginationFormCompatible(SqlSelect select, SqlDialectSpec d) {
+        RowNumPage page = detectRowNumPage(select);
+        if (page != null) {
+            if (page.kind == RowNumPage.Kind.SS_ROW_NUMBER) {
+                return d.supportsTop();
+            }
+            // Oracle ROWNUM 包装：经典 ORACLE 原生；ORACLE12 仍识别，format 时保留以免无谓拆装
+            return d.supportsRownum();
+        }
+        SqlSelect owner = paginationOwner(select);
+        if (owner.top() != null) {
+            return d.supportsTop();
+        }
+        if (owner.limit() != null) {
+            if (owner.limit().fetchStyle()) {
+                // OFFSET/FETCH：经典 ORACLE 必须改成 ROWNUM；其余支持 FETCH/TOP 的可保留
+                if (d.supportsRownum() && !d.supportsFetchFirst()) {
+                    return false;
+                }
+                return d.supportsFetchFirst() || d.supportsTop();
+            }
+            // 普通 LIMIT：仅 LIMIT 族方言兼容；ORACLE/ORACLE12/SQLSERVER 等需改写
+            if (d.supportsRownum() && !d.supportsFetchFirst()) {
+                return false;
+            }
+            if (d.supportsFetchFirst() && !d.supportsLimitOffset()) {
+                return false;
+            }
+            if (d.supportsTop() && !d.supportsLimitOffset()) {
+                return false;
+            }
+            return d.supportsLimitOffset();
+        }
+        return true;
+    }
+
+    private static void stripPaginationForm(SqlSelect select) {
+        RowNumPage page = detectRowNumPage(select);
+        if (page != null) {
+            unwrapRowNumPage(select, page);
+            return;
+        }
+        clearPagination(paginationOwner(select));
+    }
+
+    private static void unwrapRowNumPage(SqlSelect outer, RowNumPage page) {
+        SqlSelect core = null;
+        if (page.kind == RowNumPage.Kind.ORACLE_NESTED) {
+            SqlSelect middle = subquerySelect(outer);
+            core = middle == null ? null : subquerySelect(middle);
+        } else if (page.kind == RowNumPage.Kind.ORACLE_SIMPLE) {
+            core = subquerySelect(outer);
+        } else if (page.kind == RowNumPage.Kind.SS_ROW_NUMBER) {
+            // SELECT * FROM (SELECT ..., row_number() AS RN FROM <src>) XX WHERE ...
+            SqlSelect middle = subquerySelect(outer);
+            if (middle != null && middle.from() instanceof SqlSubqueryTable) {
+                SqlStatement q = ((SqlSubqueryTable) middle.from()).query();
+                if (q instanceof SqlSelect) {
+                    core = (SqlSelect) q;
+                }
+            }
+            if (core == null && middle != null) {
+                // from 是普通表：去掉 row_number 列后把 middle 当核心
+                java.util.List<SqlSelectItem> cleaned =
+                        new java.util.ArrayList<SqlSelectItem>(middle.selectItems().size());
+                for (SqlSelectItem item : middle.selectItems()) {
+                    if (item.expr() instanceof SqlFunctionExpr) {
+                        SqlFunctionExpr fn = (SqlFunctionExpr) item.expr();
+                        if (fn.name() != null
+                                && "ROW_NUMBER".equalsIgnoreCase(fn.name().simpleName())) {
+                            continue;
+                        }
+                    }
+                    cleaned.add(item);
+                }
+                middle.selectItems().clear();
+                middle.selectItems().addAll(cleaned);
+                clearPagination(middle);
+                middle.setWhere(null);
+                adoptSelectBody(outer, middle);
+                return;
+            }
+        }
+        if (core == null) {
+            clearPagination(paginationOwner(outer));
+            return;
+        }
+        adoptSelectBody(outer, core);
+    }
+
+    /**
+     * 把 core 的 SELECT 体装回 root（WITH/hint 留在 root），并清掉分页。
+     */
+    private static void adoptSelectBody(SqlSelect root, SqlSelect core) {
+        root.setDistinct(core.distinct());
+        root.distinctOn().clear();
+        root.distinctOn().addAll(core.distinctOn());
+        root.setTop(core.top());
+        root.setTopWithTies(core.topWithTies());
+        root.selectItems().clear();
+        root.selectItems().addAll(core.selectItems());
+        root.setFrom(core.from());
+        root.setWhere(core.where());
+        root.groupBy().clear();
+        root.groupBy().addAll(core.groupBy());
+        root.setGroupByRollup(core.groupByRollup());
+        root.setHaving(core.having());
+        root.orderBy().clear();
+        root.orderBy().addAll(core.orderBy());
+        root.setLimit(core.limit());
+        root.setForUpdate(core.forUpdate());
+        root.setLockInShare(core.lockInShare());
+        root.setForUpdateTail(core.forUpdateTail());
+        root.forUpdateOf().clear();
+        root.forUpdateOf().addAll(core.forUpdateOf());
+        root.setForUpdateWait(core.forUpdateWait());
+        root.setUnion(core.union());
+        root.setUnionOp(core.unionOp());
+        root.setConnectBy(core.connectBy());
+        root.setStartWith(core.startWith());
+        root.windows().clear();
+        root.windows().addAll(core.windows());
+        root.setValuesClause(core.valuesClause());
+        clearPagination(paginationOwner(root));
     }
 
     /**

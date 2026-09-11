@@ -297,6 +297,8 @@ public final class SQL {
 
     /**
      * 格式化语句（可指定是否强制标识符引号等）。
+     * 若当前分页形态与目标方言不兼容（如 MySQL {@code LIMIT} → 经典 {@code ORACLE} ROWNUM），
+     * 先 clone 再 {@link SqlRewriter#adaptPagination} 后回写，不修改入参 AST。
      *
      * @param statement 语句
      * @param dialect 方言
@@ -307,7 +309,14 @@ public final class SQL {
      */
     public static String format(SqlStatement statement, SqlDialectSpec dialect, boolean pretty,
                                 SqlFormatOptions options) {
-        return new SqlFormatter(pretty, dialect, options).format(statement);
+        SqlDialectSpec d = dialect == null ? SqlDialect.MYSQL : dialect;
+        SqlStatement toWrite = statement;
+        // 跨方言回写时按目标方言适配分页（先 raw clone 再 adapt，不改调用方 AST）
+        if (statement != null && SqlRewriter.paginationNeedsAdapt(statement, d)) {
+            toWrite = parse(new SqlFormatter(false, d, options).format(statement), d);
+            SqlRewriter.adaptPagination(toWrite, d);
+        }
+        return new SqlFormatter(pretty, d, options).format(toWrite);
     }
 
     /**
@@ -589,6 +598,65 @@ public final class SQL {
     }
 
     /**
+     * 追加 SELECT 列（先深拷贝再改）。{@code exprSql} 为裸表达式，如 {@code age} / {@code u.id}。
+     *
+     * @param statement 语句
+     * @param exprSql 表达式 SQL
+     * @return 新语句
+     * @since 2.0.1
+     */
+    public static SqlStatement addSelectItem(SqlStatement statement, String exprSql) {
+        if (exprSql == null || exprSql.trim().isEmpty()) {
+            return statement;
+        }
+        SqlExpr expr = parseExpr(exprSql);
+        SqlStatement copy = clone(statement);
+        return SqlRewriter.addSelectItem(copy, expr, null);
+    }
+
+    /**
+     * 追加 SELECT 列（先深拷贝再改）。
+     *
+     * @param statement 语句
+     * @param expr 表达式
+     * @param alias 别名，可空
+     * @return 新语句
+     * @since 2.0.1
+     */
+    public static SqlStatement addSelectItem(SqlStatement statement, SqlExpr expr, String alias) {
+        SqlStatement copy = clone(statement);
+        return SqlRewriter.addSelectItem(copy, expr, alias);
+    }
+
+    /**
+     * 按简单列名移除 SELECT 项（先深拷贝再改；忽略大小写，可匹配 {@code t.col} 最后一段）。
+     * 不允许删光列表。
+     *
+     * @param statement 语句
+     * @param columnSimpleName 列简单名
+     * @return 新语句
+     * @since 2.0.1
+     */
+    public static SqlStatement removeSelectItem(SqlStatement statement, String columnSimpleName) {
+        SqlStatement copy = clone(statement);
+        return SqlRewriter.removeSelectItem(copy, columnSimpleName);
+    }
+
+    /**
+     * 按目标方言适配分页形态（先深拷贝再改）。无分页时返回拷贝或原语义等价结果。
+     *
+     * @param statement 语句
+     * @param dialect 目标方言
+     * @return 新语句
+     * @since 2.0.1
+     */
+    public static SqlStatement adaptPagination(SqlStatement statement, SqlDialectSpec dialect) {
+        SqlDialectSpec d = dialect == null ? SqlDialect.MYSQL : dialect;
+        SqlStatement copy = clone(statement, d);
+        return SqlRewriter.adaptPagination(copy, d);
+    }
+
+    /**
      * 按链执行改写规则（先 {@link #clone(SqlStatement) 深拷贝} 再改，不污染原树）。
      * 规则按 {@link SqlRewrites#add} 顺序执行，某条返回 null 抛 {@link IllegalArgumentException}。
      *
@@ -688,7 +756,8 @@ public final class SQL {
             return null;
         }
         SqlDialectSpec d = dialect == null ? SqlDialect.MYSQL : dialect;
-        return parse(toSqlString(statement, d), d);
+        // raw 回写（不走 format 的分页适配），保证 setPage/setLimit 等先拷贝再改时保留原 LIMIT 形态
+        return parse(new SqlFormatter(false, d, null).format(statement), d);
     }
 
     /**
