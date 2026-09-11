@@ -332,6 +332,20 @@ final class SqlSelectParser {
                 select.setTopWithTies(true);
             }
         }
+        // Informix：SELECT SKIP n FIRST m …
+        if (p.isIdent("SKIP")) {
+            p.next();
+            SqlLimit lim = select.limit();
+            if (lim == null) {
+                lim = new SqlLimit();
+                select.setLimit(lim);
+            }
+            lim.setOffset(p.exprParser.parsePrimary());
+        }
+        if (p.isIdent("FIRST") || p.is(SqlTokenType.FIRST)) {
+            p.next();
+            select.setTop(p.exprParser.parsePrimary());
+        }
         consumeSelectHints(select);
         do {
             select.addSelectItem(parseSelectItem());
@@ -436,6 +450,20 @@ final class SqlSelectParser {
             if (p.isIdent("SYSTEM_TIME")) {
                 // 时态表查询更常见于表级；此处兜底吞掉残留 FOR SYSTEM_TIME …
                 select.setForUpdateTail("SYSTEM_TIME " + consumeSystemTimeBody());
+            } else if (p.isIdent("XML")) {
+                // SQL Server：FOR XML PATH('') [, TYPE] …
+                p.next();
+                select.setForUpdateTail("XML " + p.consumeRawUntilClause());
+            } else if (p.match(SqlTokenType.SHARE) || p.isIdent("SHARE")) {
+                if (p.isIdent("SHARE")) {
+                    p.next();
+                }
+                select.setLockInShare(true);
+                if (p.match(SqlTokenType.OF)) {
+                    do {
+                        select.forUpdateOf().add(p.parseName());
+                    } while (p.match(SqlTokenType.COMMA));
+                }
             } else {
                 p.expect(SqlTokenType.UPDATE);
                 select.setForUpdate(true);
@@ -673,6 +701,20 @@ final class SqlSelectParser {
      * 可出现在表名之后或别名之后。
      */
     private void parseWithTableHint(SqlTable table) {
+        // DB2：WITH UR|CS|RS|RR 隔离级别
+        if (p.is(SqlTokenType.WITH) && p.lexer.peek() != null
+                && (p.lexer.peek().textEqualsIgnoreCase("UR")
+                || p.lexer.peek().textEqualsIgnoreCase("CS")
+                || p.lexer.peek().textEqualsIgnoreCase("RS")
+                || p.lexer.peek().textEqualsIgnoreCase("RR"))) {
+            p.next();
+            String iso = p.token.text();
+            p.next();
+            String prev = table.withHint();
+            String clause = "WITH " + iso;
+            table.setWithHint(prev == null || prev.isEmpty() ? clause : prev + " " + clause);
+            return;
+        }
         if (!p.is(SqlTokenType.WITH) || p.lexer.peek().type() != SqlTokenType.LPAREN) {
             return;
         }
@@ -914,6 +956,11 @@ final class SqlSelectParser {
             boolean unpivot = p.is(SqlTokenType.UNPIVOT);
             p.next();
             String nulls = null;
+            boolean xml = false;
+            if (p.isIdent("XML")) {
+                p.next();
+                xml = true;
+            }
             if ((p.identLike() || (p.token.type() != null && p.token.type().keyword()))
                     && (p.token.textEqualsIgnoreCase("INCLUDE") || p.token.textEqualsIgnoreCase("EXCLUDE"))) {
                 String mode = p.token.text().toUpperCase();
@@ -929,7 +976,7 @@ final class SqlSelectParser {
             pivot.setInput(source);
             pivot.setUnpivot(unpivot);
             pivot.setNullsClause(nulls);
-            pivot.setDefinition(body);
+            pivot.setDefinition(xml ? "XML (" + body + ")" : body);
             parseTableAlias(pivot);
             source = pivot;
         }

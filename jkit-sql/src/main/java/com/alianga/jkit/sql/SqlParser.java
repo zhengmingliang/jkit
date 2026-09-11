@@ -122,9 +122,15 @@ public final class SqlParser {
      */
     public List<SqlStatement> parseAll(boolean tolerant) {
         List<SqlStatement> list = new ArrayList<SqlStatement>(1);
+        boolean afterSeparator = true;
         while (!is(SqlTokenType.EOF)) {
-            while (isStmtSeparator()) {
-                consumeStmtSeparator();
+            while (isStmtSeparator() || isSoftStmtSeparator()) {
+                if (isStmtSeparator()) {
+                    consumeStmtSeparator();
+                } else {
+                    next(); // '|' or '/' 脚本分隔（JSqlParser 语料常见）
+                }
+                afterSeparator = true;
             }
             if (is(SqlTokenType.EOF)) {
                 break;
@@ -133,6 +139,7 @@ public final class SqlParser {
             if (tolerant) {
                 try {
                     list.add(parseStatement());
+                    afterSeparator = false;
                 } catch (SqlParseException ex) {
                     pendingComments = null;
                     skipToStmtEnd();
@@ -142,15 +149,54 @@ public final class SqlParser {
                     String raw = lexer.rawSlice(stmtStart, token.start()).trim();
                     bad.setText(raw.isEmpty() ? ex.snippet() : raw);
                     list.add(bad);
+                    afterSeparator = false;
                 }
             } else {
-                list.add(parseStatement());
+                try {
+                    list.add(parseStatement());
+                    afterSeparator = false;
+                } catch (SqlParseException ex) {
+                    // 分号后的尾部垃圾且其后再无语句：返回已解析部分（select …; WHATEVER!!）
+                    if (!list.isEmpty() && afterSeparator) {
+                        pendingComments = null;
+                        skipToStmtEnd();
+                        while (isStmtSeparator() || isSoftStmtSeparator()) {
+                            if (isStmtSeparator()) {
+                                consumeStmtSeparator();
+                            } else {
+                                next();
+                            }
+                        }
+                        if (is(SqlTokenType.EOF)) {
+                            break;
+                        }
+                    }
+                    throw ex;
+                }
             }
             if (isStmtSeparator()) {
                 consumeStmtSeparator();
+                afterSeparator = true;
+            } else if (isSoftStmtSeparator()) {
+                next();
+                afterSeparator = true;
             }
         }
         return list;
+    }
+
+    /** 脚本级软分隔：单字符 {@code |} / {@code /}（非 {@code ||}）。 */
+    private boolean isSoftStmtSeparator() {
+        if (token == null || token.type() == null) {
+            return false;
+        }
+        if (token.type() == SqlTokenType.BIT_OR && token.length() == 1) {
+            return true;
+        }
+        if (token.type() == SqlTokenType.SLASH && token.length() == 1) {
+            return true;
+        }
+        return false;
     }
 
     private void skipToStmtEnd() {
@@ -1948,6 +1994,18 @@ public final class SqlParser {
             case WITH:
             case PIVOT:
             case UNPIVOT:
+            case SELECT:
+            case INSERT:
+            case UPDATE:
+            case DELETE:
+            case MERGE:
+            case CREATE:
+            case DROP:
+            case ALTER:
+            case REPLACE:
+            case CALL:
+            case GRANT:
+            case REVOKE:
                 return true;
             default:
                 return false;

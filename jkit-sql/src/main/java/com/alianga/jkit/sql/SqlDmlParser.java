@@ -32,8 +32,24 @@ final class SqlDmlParser {
 
     private void parseAssignList(List<SqlBinaryExpr> target) {
         do {
-            SqlExpr left = p.parseName();
-            p.expect(SqlTokenType.EQ);
+            SqlExpr left;
+            if (p.match(SqlTokenType.LPAREN)) {
+                // UPDATE t SET (a, b, c) = (1, 2, 3) / (VALUES …)
+                SqlListExpr cols = new SqlListExpr();
+                do {
+                    cols.add(p.parseName());
+                } while (p.match(SqlTokenType.COMMA));
+                p.expect(SqlTokenType.RPAREN);
+                left = cols;
+            } else {
+                left = p.parseName();
+            }
+            // MySQL := 与 =
+            if (p.match(SqlTokenType.ASSIGN)) {
+                // keep as EQ in AST
+            } else {
+                p.expect(SqlTokenType.EQ);
+            }
             SqlExpr right = p.exprParser.parseExpr();
             target.add(SqlBinaryExpr.of(left, SqlBinaryOp.EQ, right));
         } while (p.match(SqlTokenType.COMMA));
@@ -190,6 +206,9 @@ final class SqlDmlParser {
 
     SqlMerge parseMerge() {
         p.expect(SqlTokenType.MERGE);
+        while (p.is(SqlTokenType.HINT)) {
+            p.next();
+        }
         p.expect(SqlTokenType.INTO);
         SqlMerge merge = new SqlMerge();
         merge.setInto(p.selectParser.parseTableSource());
@@ -376,15 +395,24 @@ final class SqlDmlParser {
      */
     private SqlExpr parseReturningExpr() {
         SqlExpr first = p.exprParser.parseExpr();
+        SqlExpr result;
         if (!p.match(SqlTokenType.COMMA)) {
-            return first;
+            result = first;
+        } else {
+            SqlListExpr list = new SqlListExpr();
+            list.add(first);
+            do {
+                list.add(p.exprParser.parseExpr());
+            } while (p.match(SqlTokenType.COMMA));
+            result = list;
         }
-        SqlListExpr list = new SqlListExpr();
-        list.add(first);
-        do {
-            list.add(p.exprParser.parseExpr());
-        } while (p.match(SqlTokenType.COMMA));
-        return list;
+        // Oracle：RETURNING … INTO var[, var2]
+        if (p.match(SqlTokenType.INTO)) {
+            do {
+                p.exprParser.parsePrimary();
+            } while (p.match(SqlTokenType.COMMA));
+        }
+        return result;
     }
 
     SqlUpdate parseUpdate() {

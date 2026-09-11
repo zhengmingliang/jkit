@@ -36,6 +36,11 @@
 
 ## 2.0.1 - 2026-09-09
 
+### 新增（jkit-sql 覆盖率提升第五轮）
+- 语句关键字不再作表别名（`FROM dual SELECT …` 多语句）；脚本软分隔 `|`/`/`；分号后尾部垃圾软停止
+- `UPDATE SET (a,b)=(…)`、`:=`；`FOR SHARE` / `FOR XML`；DB2 `WITH UR`；`PIVOT XML`
+- Informix `SKIP n FIRST m`；`IN` 单值无括号；`CURRENT TIMESTAMP`；`RETURNING INTO`；`INCLUDES`/`EXCLUDES`；MERGE 前置 hint
+
 ### 新增（jkit-sql 覆盖率提升第四轮）
 - ODPS/MaxCompute `FORCE PARTITION` / `FORCE ALL PARTITIONS`（SELECT / UPDATE / DELETE）
 - Hive UDTF 多列别名 `SELECT fn(...) AS (c0, c1, c2)`

@@ -368,10 +368,10 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 
 - 模块测试 **890 全绿**；保真回归 `SqlRoundTripFidelityTest` 118 条；379 语料 100%；保真批量 0 mismatch。
 - 竞品语料（tools-test `CompetitorSuiteCorpusTest`，三方各用方言回退链、2s 超时护栏）：
-  - druid-bvt-inline（6483）：**jkit 92.4%（已超 Druid 92.3%）** / druid 92.3% / jsql 68.1%
-  - jsqlparser-inline（3078）：**jkit 79.6%（第一）** / druid 71.1% / jsql 70.1%（目标 ≥90%，仍差约 10pp）
-  - jsqlparser-files（460）：**jkit 75.4%** / druid 81.5% / jsql 74.8%（目标 ≥90%，仍差约 15pp）
-  - jkitGaps 合计 956 → **761**（356+339+66；明细 `target/sql-corpus-reports/competitor-*-jkit-gaps.tsv`）
+  - druid-bvt-inline（6483）：**jkit 93.0%（已超 Druid 92.3%）** / druid 92.3% / jsql 68.1%
+  - jsqlparser-inline（3078）：**jkit 81.9%（第一）** / druid 71.1% / jsql 70.1%（目标 ≥90%，仍差约 8pp）
+  - jsqlparser-files（460）：**jkit 77.6%** / druid 81.5% / jsql 74.8%（目标 ≥90%，仍差约 12pp）
+  - jkitGaps 合计 956 → **669**（326+287+56；R4 761 → R5 669）
   - jkit 全程 0 超时；druid 1.2.23 仍有 2 条 PG `ANALYZE` 死循环（jstack 实锤，勿追）
 - 方言：一等枚举 6+1 → 11（新增 `DB2`/`SQLITE`/`HIVE`/`CLICKHOUSE`/`PRESTO`），行为全部走
   `SqlDialectSpec` 能力方法，无散落 `== SqlDialect.X`；`fromName` 国产/主流别名已全
@@ -389,7 +389,10 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
   表达式层暂存、语句层挂到 SELECT）；Hive `INSERT OVERWRITE [TABLE] t [PARTITION(…)]`；
   `CONNECT BY NOCYCLE`；`GROUP BY … WITH CUBE`；Teradata/Snowflake `QUALIFY`（已入别名停用词）；
   MySQL 8 函数索引 `ADD KEY idx ((expr))`；XML 系 7 函数原文；Spark `OVER (DISTRIBUTE BY … SORT BY …)`。
-- **R4**（本轮）：ODPS `FORCE PARTITION`/`FORCE ALL PARTITIONS`；Hive UDTF `AS (c0,c1)`；
+- **R5**：别名停用词补语句关键字；`|`/`/` 软分隔；分号后尾垃圾软停；`SET (a,b)=`/`:=`；
+  `FOR SHARE`/`FOR XML`；`WITH UR`；`PIVOT XML`；`SKIP/FIRST`；`IN` 无括号；`CURRENT TIMESTAMP`；
+  `RETURNING INTO`；`INCLUDES/EXCLUDES`；MERGE hint。gaps 761→669。
+- **R4**：ODPS `FORCE PARTITION`/`FORCE ALL PARTITIONS`；Hive UDTF `AS (c0,c1)`；
   Oracle `VERSIONS BETWEEN` / `CONNECT_BY_ROOT` / `TRY_CAST` / `INTERVAL … TO …`；
   相邻字符串拼接、`:0` 数字绑定、`_utf32 X'…'`；`LEFT|RIGHT ANTI|SEMI JOIN`；
   括号集合运算子查询；`INSERT … (WITH … SELECT …)`；`DELETE t1.*`；`SQL%FOUND`；

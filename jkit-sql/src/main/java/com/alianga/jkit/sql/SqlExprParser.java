@@ -212,7 +212,7 @@ final class SqlExprParser {
         SqlExpr left = parseBit();
         while (true) {
             skipFloatingHints();
-            if (p.is(SqlTokenType.EQ)) {
+            if (p.is(SqlTokenType.EQ) || p.is(SqlTokenType.ASSIGN)) {
                 p.next();
                 left = SqlBinaryExpr.of(left, SqlBinaryOp.EQ, parseBit());
             } else if (p.is(SqlTokenType.NE)) {
@@ -266,6 +266,23 @@ final class SqlExprParser {
                 left = parseBetween(left, false);
             } else if (p.is(SqlTokenType.IN)) {
                 left = parseIn(left, false);
+            } else if (p.isIdent("INCLUDES") || p.isIdent("EXCLUDES")) {
+                String op = p.token.text().toUpperCase();
+                p.next();
+                SqlFunctionExpr fn = new SqlFunctionExpr();
+                fn.setName(SqlIdentifier.of(op));
+                fn.addArgument(left);
+                if (p.match(SqlTokenType.LPAREN)) {
+                    if (!p.is(SqlTokenType.RPAREN)) {
+                        do {
+                            fn.addArgument(parseExpr());
+                        } while (p.match(SqlTokenType.COMMA));
+                    }
+                    p.expect(SqlTokenType.RPAREN);
+                } else {
+                    fn.addArgument(parsePrimary());
+                }
+                left = fn;
             } else if (p.is(SqlTokenType.NOT)) {
                 SqlToken peeked = p.lexer.peek();
                 if (peeked.type() == SqlTokenType.LIKE) {
@@ -591,6 +608,13 @@ final class SqlExprParser {
         in.setNot(not);
         // MyBatis 等：IN :types / IN ? 可不写括号（单一绑定即整个列表）
         if (p.is(SqlTokenType.NAMED_BIND) || p.is(SqlTokenType.BIND)) {
+            List<SqlExpr> values = new ArrayList<SqlExpr>(1);
+            values.add(parsePrimary());
+            in.setValues(values);
+            return in;
+        }
+        // 单值无括号：col IN 1 / col IN 'x'
+        if (!p.is(SqlTokenType.LPAREN)) {
             List<SqlExpr> values = new ArrayList<SqlExpr>(1);
             values.add(parsePrimary());
             in.setValues(values);
@@ -928,6 +952,18 @@ final class SqlExprParser {
             p.next();
             typed.addArgument(parsePrimaryInner());
             return typed;
+        }
+        // DB2 / 标准：CURRENT TIMESTAMP / CURRENT DATE / CURRENT TIME / CURRENT TIMEZONE
+        if (p.is(SqlTokenType.CURRENT) || p.isIdent("CURRENT")) {
+            SqlToken peeked = p.lexer.peek();
+            if (peeked != null && (peeked.type() == SqlTokenType.TIMESTAMP || peeked.type() == SqlTokenType.DATE
+                    || peeked.type() == SqlTokenType.TIME || peeked.textEqualsIgnoreCase("TIMEZONE")
+                    || peeked.textEqualsIgnoreCase("USER") || peeked.textEqualsIgnoreCase("SCHEMA"))) {
+                p.next();
+                String second = p.token.text().toUpperCase();
+                p.next();
+                return SqlIdentifier.of("CURRENT " + second);
+            }
         }
         if (p.is(SqlTokenType.INTERVAL)) {
             p.next();
