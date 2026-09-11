@@ -147,6 +147,7 @@ stat.getConditions();       // compact fragments from WHERE / JOIN ON / HAVING
 stat.getOrderByColumns();
 stat.getGroupByColumns();
 stat.getTables();           // Map<String, SqlTableAccess>; the same table can be INSERT+SELECT
+SQL.isReadOnly(stmt);       // true for SELECT / SHOW / EXPLAIN — handy for read/write splitting
 
 SqlStatement limited = SQL.addLimit(stmt, 100); // clones first, then appends LIMIT; the original tree is untouched
 SQL.getLimit(stmt);                              // Long, from LIMIT/TOP
@@ -157,13 +158,30 @@ SQL.setOffset(stmt, 10, SqlDialect.POSTGRES);
 SqlStatement w = SQL.andWhere(stmt, "tenant_id = ?"); // internally parseExpr + clone, then AND WHERE
 SqlStatement t2 = SQL.replaceTable(w, "users", "users_archive"); // clone
 SqlStatement c2 = SQL.replaceColumn(t2, "name", "user_name");   // clone; skips table names/aliases
+SqlStatement c3 = SQL.addSelectItem(c2, "status");              // clone; appends a select item
+SqlStatement c4 = SQL.removeSelectItem(c3, "name");             // clone; removes by simple column name (cannot empty the list)
+SqlStatement c5 = SQL.adaptPagination(c4, SqlDialect.ORACLE);   // clone; adapts pagination to the dialect
 SqlStatement copy = SQL.clone(stmt); // AST deep copy (SqlAstCloner), no format→parse
 ```
 
 `addLimit`: does not overwrite an existing LIMIT/TOP; writes `TOP` for SQL Server, `LIMIT` for everything else.
-`andWhere` / `replaceTable` / `replaceColumn`: like `addLimit`/`setPage`, they now **clone before modifying** (breaking change: old code relying on in-place mutation must switch to using the return value).
+`andWhere` / `replaceTable` / `replaceColumn` / `addSelectItem` / `removeSelectItem` / `adaptPagination`: like `addLimit`/`setPage`, they now **clone before modifying** (breaking change: old code relying on in-place mutation must switch to using the return value).
 `setLimit` / `setOffset` / `setPage`: **replace** pagination; in `setPage(pageNo, pageSize)`, pageNo starts at 1.
 Dialects: MySQL/PG/H2/ANSI → `LIMIT`/`OFFSET`; SQL Server uses `TOP` on page 1 and `OFFSET FETCH` afterwards; **`SqlDialect.ORACLE` (pre-12c)** bare SELECT → **ROWNUM wrapping** (single-level `WHERE ROWNUM<=n`, double-level when offset > 0); **`ORACLE12` (12c+)** → `OFFSET … FETCH FIRST … ROWS ONLY`. For pre-existing Oracle `ROWNUM` double-nesting / `WHERE ROWNUM<=n` and SQL Server `row_number` wrappers: `getLimit` returns the page size, and `setPage`/`setLimit` only adjust the numeric bounds (without stacking OFFSET/FETCH). A UNION's LIMIT hangs at the end of the set-operation chain. `SqlBuilder.limit`/`offset`/`toSql(dialect)` share the same rewrite path (`toSql`'s dialect argument overrides the builder dialect).
+
+### Rewrite chains (optional)
+
+When several rewrites (custom + built-in) must run in order, compose them with `SqlRewrites` and execute with `SQL.rewrite`. A custom rule placed before the built-in adapters acts as a "pre hook"; after them, a "post hook". `SQL.rewrite` deep-copies first, so the original AST is untouched:
+
+```java
+SqlStatement out = SQL.rewrite(stmt, SqlRewrites.create()
+        .add(new TenantRule())                                   // pre hook: custom rule
+        .add(SqlRewrites.replaceTable("users", "users_2026"))    // built-in adapter
+        .add(SqlRewrites.andWhere(SQL.parseExpr("tenant_id = ?")))// built-in adapter
+        .add(SqlRewrites.addLimit(100, SqlDialect.MYSQL)));      // post hook position is free
+```
+
+A rule is the `SqlRewriteHook` functional interface: it receives the current statement and returns the statement to pass on (mutate in place and return it, or substitute another; returning `null` throws `IllegalArgumentException`). The built-in adapters mirror the static `SqlRewriter` methods (`addLimit`/`setLimit`/`setOffset`/`setPage`/`andWhere`/`replaceTable`/`replaceColumn`/`addSelectItem`/`removeSelectItem`/`adaptPagination`) and act in place on the statement travelling down the chain.
 
 ## Parameterization / Wall / Evaluation (P2)
 
@@ -257,6 +275,7 @@ SqlBuilder.deleteFrom("t").where("id = 1").toSql();
 
 // AST-level composition (no string hacking)
 SQL.and(SqlBuilder.parsePredicate("a=1"), SqlBuilder.parsePredicate("b=2"));
+SQL.or(SqlBuilder.parsePredicate("a=1"), SqlBuilder.parsePredicate("b=2"));
 SQL.concat(Arrays.asList(SQL.parse("SELECT 1"), SQL.parse("SELECT 2")));
 SQL.builder().from("t").where("id = ?").limit(5).toSql();
 ```
@@ -322,7 +341,85 @@ Phase 2–8 add `SQL.convert` / `SQL.convertBatch` for CREATE TABLE and `ALTER T
 
 Supported first-class dialects (MySQL, PostgreSQL, Oracle 11g/12c, SQL Server, H2, ANSI, DB2, SQLite, Hive, ClickHouse, Presto) and `fromName` product aliases: [design doc §4](../sql-schema-converter-design.md). How to extend types/functions: [§9](../sql-schema-converter-design.md).
 
-Entity scan (like data-set `EntityScanner`, no Spring): `SqlEntities.scan("com.example.entity")` then `createTable` / `insert` / `updateById` using the type registry and `SqlBuilder`. Annotate with `@SqlTable` or JPA `@Entity` (detected by name). To run that DDL against a live database at startup, use [jkit-sql-auto](./sql-auto.md).
+## Entity scan → DDL / DML
+
+Like data-set `EntityScanner`, without Spring: scan classes annotated with `@SqlTable`, JPA `@Entity`, or MyBatis-Plus `@TableName`/`@TableId` (resolved by FQCN via reflection — no compile dependency on Spring / JPA / MyBatis), then generate DDL and CRUD per dialect. Also honours `@TableField` (`exist=false` skips the column), JPA `@Index`/`@Enumerated`/`@Embedded`; `List`/`Set`/`@OneToMany` fields are skipped unless annotated. `createTables` orders referenced tables first. Java types go through the canonical type registry.
+
+```java
+import com.alianga.jkit.sql.entity.SqlEntities;
+import com.alianga.jkit.sql.entity.SqlTable;
+import com.alianga.jkit.sql.entity.SqlId;
+import com.alianga.jkit.sql.entity.SqlGenerated;
+import com.alianga.jkit.sql.entity.SqlColumn;
+
+@SqlTable(name = "demo_user")
+public class DemoUser {
+    @SqlId @SqlGenerated Long id;
+    @SqlColumn(name = "user_name", length = 32, nullable = false) String name;
+    Integer age;
+}
+
+List<Class<?>> entities = SqlEntities.scan("com.example.entity");
+String ddl = SqlEntities.createTable(DemoUser.class, SqlDialect.POSTGRES);
+// CREATE TABLE demo_user (id BIGINT NOT NULL GENERATED ALWAYS AS IDENTITY PRIMARY KEY, ...)
+String ins = SqlEntities.insert(user, SqlDialect.MYSQL);
+String upd = SqlEntities.updateById(user, SqlDialect.MYSQL);
+String del = SqlEntities.deleteById(DemoUser.class, 1L, SqlDialect.MYSQL);
+String sel = SqlEntities.selectById(DemoUser.class, 1L, SqlDialect.MYSQL);
+```
+
+`javax.persistence` / `jakarta.persistence` annotations (`@Entity` `@Table` `@Column` `@Id` `@GeneratedValue` `@Transient` `@Lob`) are recognised the same way.
+
+### API
+
+| Method | Purpose |
+| --- | --- |
+| `scan(String)` / `scan(List<String>)` | Scan a package for entity classes |
+| `inspect(Class<?>)` | Parse into a `SqlEntityModel` (table, columns, id, indexes) |
+| `createTable(Class<?>, SqlDialect)` | DDL for one table, with `CREATE INDEX` appended in the same batch |
+| `createTable(SqlEntityModel, SqlDialect, boolean includeIndexes)` | `includeIndexes=false` emits `CREATE TABLE` only |
+| `createTables(String basePackage, SqlDialect)` / `createTables(List<Class<?>>, SqlDialect)` | Many tables; referenced tables first |
+| `orderByForeignKeys(List<Class<?>>)` | Ordering only; cycles and external refs keep their relative order |
+| `dropTable(Class<?>, SqlDialect)` | `DROP TABLE` |
+| `insert(Object, SqlDialect)` / `insertBatch(List<?>, SqlDialect)` | Single-row / multi-row `INSERT` |
+| `insertPlaceholders(Class<?>, SqlDialect)` | `INSERT` with `?` placeholders, for `PreparedStatement` |
+| `updateById(Object, SqlDialect)` / `deleteById(Class<?>, Object, SqlDialect)` | Update / delete by id |
+| `selectById(Class<?>, Object, SqlDialect)` / `selectAll(Class<?>, SqlDialect)` | Select by id / select all |
+| `columnSql(SqlEntityColumn, SqlDialect, boolean inlinePk)` | One column definition; pass `inlinePk=false` for `ALTER TABLE … ADD` |
+| `columnTypeSql(SqlEntityColumn, SqlDialect)` | Type text only, for schema comparison |
+| `createIndex(String tableName, String spec)` | A standalone `CREATE INDEX`; `spec` is `name:col1,col2` or `col1,col2` |
+
+The last four exist for schema diffing and incremental `ALTER TABLE … ADD` — that is exactly what the auto-DDL module builds on:
+
+```java
+SqlEntityModel model = SqlEntities.inspect(DemoUser.class);
+
+// Emit DDL and indexes separately
+String ddlOnly = SqlEntities.createTable(model, SqlDialect.POSTGRES, false);
+// CREATE TABLE demo_user (id BIGINT NOT NULL GENERATED ALWAYS AS IDENTITY PRIMARY KEY, ...)
+String idx = SqlEntities.createIndex("demo_user", "idx_user_name:user_name");
+// CREATE INDEX idx_user_name ON demo_user (user_name)
+
+// Compare types, build an ADD COLUMN
+SqlEntities.columnTypeSql(model.idColumn(), SqlDialect.POSTGRES);            // BIGINT
+String col = SqlEntities.columnSql(model.columns().get(1), SqlDialect.MYSQL, false);
+// user_name VARCHAR(32) NOT NULL
+String add = "ALTER TABLE demo_user ADD " + col;
+
+// Batch insert and placeholders
+SqlEntities.insertBatch(users, SqlDialect.MYSQL);
+SqlEntities.insertPlaceholders(DemoUser.class, SqlDialect.MYSQL);
+// INSERT INTO demo_user(user_name, email, age, amount) VALUES (?, ?, ?, ?)
+SqlEntities.selectAll(DemoUser.class, SqlDialect.MYSQL);
+// SELECT id, user_name, email, age, amount FROM demo_user
+
+// Many tables: order by foreign keys, then create in one go
+List<Class<?>> ordered = SqlEntities.orderByForeignKeys(entities);
+String all = SqlEntities.createTables(ordered, SqlDialect.POSTGRES);
+SqlEntities.dropTable(DemoUser.class, SqlDialect.MYSQL);   // DROP TABLE demo_user
+```
+
+`jkit-sql` only generates SQL. To execute that DDL against a live database at startup, use [jkit-sql-auto](./sql-auto.md).
 
 ```java
 String pg = SQL.convert(

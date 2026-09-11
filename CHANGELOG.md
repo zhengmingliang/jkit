@@ -24,6 +24,7 @@
 
 ### 文档
 - README / `docs/sql.md` / `docs/en/sql.md` / `jkit-sql/README` 去掉内部开发计划入口（该文件不进文档站）。
+- `docs/sql.md` / `docs/en/sql.md` 补齐 `SqlEntities` 全部公开方法（含新增的 `columnSql` / `columnTypeSql` / `createIndex` / `orderByForeignKeys` 与 `createTable(..., includeIndexes)`）及「拆开索引 / 增量加列」示例；英文版补 `SQL.isReadOnly` / `or` / `addSelectItem` / `removeSelectItem` / `adaptPagination` / `rewrite` 改写链，两侧 API 覆盖已对齐。
 
 ### jkit-sql（竞品覆盖率）
 - 覆盖率第十三轮：PG `DO $$…$$` / `DO $tag$…$tag$`；块内 `ELSIF`/`EXCEPTION WHEN`；

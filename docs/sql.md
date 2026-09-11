@@ -185,6 +185,7 @@ List<SqlStatement> batch = SQL.parseAll(
 SqlSchemaStat stat = SQL.stat(sql);
 stat.tableNames();
 stat.getColumns();
+SQL.isReadOnly(stmt);       // 是否只读语句（SELECT / SHOW / EXPLAIN…，用于读写分离判断）
 stat.getConditions();       // WHERE / JOIN ON / HAVING 紧凑片段
 stat.getOrderByColumns();
 stat.getGroupByColumns();
@@ -334,6 +335,7 @@ SqlBuilder.deleteFrom("t").where("id = 1").toSql();
 
 // AST 级拼接（无字符串黑客）
 SQL.and(SqlBuilder.parsePredicate("a=1"), SqlBuilder.parsePredicate("b=2"));
+SQL.or(SqlBuilder.parsePredicate("a=1"), SqlBuilder.parsePredicate("b=2"));
 SQL.concat(Arrays.asList(SQL.parse("SELECT 1"), SQL.parse("SELECT 2")));
 SQL.builder().from("t").where("id = ?").limit(5).toSql();
 ```
@@ -480,6 +482,55 @@ String ins = SqlEntities.insert(user, SqlDialect.MYSQL);
 String upd = SqlEntities.updateById(user, SqlDialect.MYSQL);
 String del = SqlEntities.deleteById(DemoUser.class, 1L, SqlDialect.MYSQL);
 String sel = SqlEntities.selectById(DemoUser.class, 1L, SqlDialect.MYSQL);
+```
+
+### API 一览
+
+| 方法 | 说明 |
+| --- | --- |
+| `scan(String)` / `scan(List<String>)` | 扫描包下的实体类 |
+| `inspect(Class<?>)` | 解析成 `SqlEntityModel`（表名、列、主键、索引） |
+| `createTable(Class<?>, SqlDialect)` | 单表 DDL，末尾同批拼 `CREATE INDEX` |
+| `createTable(SqlEntityModel, SqlDialect, boolean includeIndexes)` | `includeIndexes=false` 时只出 `CREATE TABLE` |
+| `createTables(String basePackage, SqlDialect)` / `createTables(List<Class<?>>, SqlDialect)` | 多表；按外键把被引用表排在前面 |
+| `orderByForeignKeys(List<Class<?>>)` | 只排序不生成 SQL；成环或引用外部表时保持原相对顺序 |
+| `dropTable(Class<?>, SqlDialect)` | `DROP TABLE` |
+| `insert(Object, SqlDialect)` / `insertBatch(List<?>, SqlDialect)` | 单行 / 多行 `INSERT` |
+| `insertPlaceholders(Class<?>, SqlDialect)` | 带 `?` 的 `INSERT`，交给 `PreparedStatement` |
+| `updateById(Object, SqlDialect)` / `deleteById(Class<?>, Object, SqlDialect)` | 按主键改 / 删 |
+| `selectById(Class<?>, Object, SqlDialect)` / `selectAll(Class<?>, SqlDialect)` | 按主键查 / 全表查 |
+| `columnSql(SqlEntityColumn, SqlDialect, boolean inlinePk)` | 单列定义文本；`ALTER TABLE … ADD` 传 `inlinePk=false` |
+| `columnTypeSql(SqlEntityColumn, SqlDialect)` | 只取类型文本，供结构对比 |
+| `createIndex(String tableName, String spec)` | 单独一条 `CREATE INDEX`；`spec` 为 `name:col1,col2` 或 `col1,col2` |
+
+后四个是给「按实体做结构对比 / 增量加列」用的——例如自动建表模块就靠它们拼 `ALTER TABLE … ADD`：
+
+```java
+SqlEntityModel model = SqlEntities.inspect(DemoUser.class);
+
+// 建表与索引分开控制
+String ddl = SqlEntities.createTable(model, SqlDialect.POSTGRES, false);
+// CREATE TABLE demo_user (id BIGINT NOT NULL GENERATED ALWAYS AS IDENTITY PRIMARY KEY, ...)
+String idx = SqlEntities.createIndex("demo_user", "idx_user_name:user_name");
+// CREATE INDEX idx_user_name ON demo_user (user_name)
+
+// 对比类型、拼增量加列
+SqlEntities.columnTypeSql(model.idColumn(), SqlDialect.POSTGRES);            // BIGINT
+String col = SqlEntities.columnSql(model.columns().get(1), SqlDialect.MYSQL, false);
+// user_name VARCHAR(32) NOT NULL
+String add = "ALTER TABLE demo_user ADD " + col;
+
+// 批量与占位符
+SqlEntities.insertBatch(users, SqlDialect.MYSQL);
+SqlEntities.insertPlaceholders(DemoUser.class, SqlDialect.MYSQL);
+// INSERT INTO demo_user(user_name, email, age, amount) VALUES (?, ?, ?, ?)
+SqlEntities.selectAll(DemoUser.class, SqlDialect.MYSQL);
+// SELECT id, user_name, email, age, amount FROM demo_user
+
+// 多表：按外键排序后一次建完
+List<Class<?>> ordered = SqlEntities.orderByForeignKeys(entities);
+String all = SqlEntities.createTables(ordered, SqlDialect.POSTGRES);
+SqlEntities.dropTable(DemoUser.class, SqlDialect.MYSQL);   // DROP TABLE demo_user
 ```
 
 有 `javax.persistence` / `jakarta.persistence` 时同样识别 `@Entity` `@Table` `@Column` `@Id` `@GeneratedValue` `@Transient` `@Lob`（反射按类名，无编译依赖）。
