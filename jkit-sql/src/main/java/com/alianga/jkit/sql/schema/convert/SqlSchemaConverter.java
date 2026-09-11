@@ -5,6 +5,7 @@ import com.alianga.jkit.sql.SqlDialect;
 import com.alianga.jkit.sql.SqlDialectSpec;
 import com.alianga.jkit.sql.ast.SqlDdlStatement;
 import com.alianga.jkit.sql.ast.SqlExpr;
+import com.alianga.jkit.sql.ast.SqlIdentifier;
 import com.alianga.jkit.sql.ast.SqlStatement;
 import com.alianga.jkit.sql.ast.SqlStatementType;
 import com.alianga.jkit.sql.schema.model.ColumnConstraint;
@@ -240,13 +241,15 @@ public final class SqlSchemaConverter {
             if (action.startsWith("CHANGE") && !oldName.equalsIgnoreCase(newName)) {
                 report.extraSql("ALTER TABLE " + table + " RENAME COLUMN " + oldName + " TO " + newName);
             }
-            ddl.setAlterAction("ALTER COLUMN " + newName + " TYPE");
-            String justType = typeOnly;
-            int space = typeOnly.indexOf(' ');
-            if (space > 0) {
-                justType = typeOnly.substring(0, space);
-                ddl.setColumnDefinition(justType);
-            }
+            String justType = firstTypeToken(typeOnly);
+            // 列名由 formatter 输出 ddl.columns()，不能同时拼进 action，
+            // 否则会渲染成 "ALTER COLUMN c TYPE c INTEGER" 这种重复列名的非法语句。
+            // CHANGE old new 的旧列名已转成 RENAME 附录，列清单只留新列。
+            SqlIdentifier newIdent = ddl.columns().get(ddl.columns().size() - 1);
+            ddl.columns().clear();
+            ddl.columns().add(newIdent);
+            ddl.setAlterAction("ALTER COLUMN");
+            ddl.setColumnDefinition("TYPE " + justType);
             addAlterConstraintExtras(parsed, table, newName, source, target, report);
             report.warn(ConversionWarning.Severity.INFO, newName,
                     "MySQL " + action + " 已改写为 ALTER COLUMN TYPE");
@@ -272,6 +275,29 @@ public final class SqlSchemaConverter {
             char next = t.length() > colName.length() ? t.charAt(colName.length()) : ' ';
             if (next == ' ' || next == '\t') {
                 return t.substring(colName.length()).trim();
+            }
+        }
+        return t;
+    }
+
+    /**
+     * 取列定义文本里的类型部分（截断第一个**括号外**的空白之后的内容）。
+     * {@code NUMERIC(10, 2) NOT NULL} → {@code NUMERIC(10, 2)}，避免按首个空格切时分错。
+     *
+     * @param typeText 已剥掉列名的列定义
+     * @return 类型片段
+     */
+    private static String firstTypeToken(String typeText) {
+        String t = typeText == null ? "" : typeText.trim();
+        int depth = 0;
+        for (int i = 0; i < t.length(); i++) {
+            char c = t.charAt(i);
+            if (c == '(') {
+                depth++;
+            } else if (c == ')') {
+                depth--;
+            } else if (depth == 0 && (c == ' ' || c == '\t')) {
+                return t.substring(0, i);
             }
         }
         return t;

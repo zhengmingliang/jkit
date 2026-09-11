@@ -248,7 +248,9 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
             sep = fn.arguments().get(1);
         }
         if (sep == null) {
-            sep = SqlLiteral.of(SqlLiteral.Kind.STRING, ",");
+            // 字面量 value 存的是源码原文（含引号），formatter 原样输出不再补引号，
+            // 所以默认分隔符必须自带引号，否则会渲染成 STRING_AGG(a, ,)
+            sep = SqlLiteral.of(SqlLiteral.Kind.STRING, "','");
         }
         switch (family) {
             case MYSQL:
