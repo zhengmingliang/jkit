@@ -1,0 +1,2 @@
+org.springframework.boot.autoconfigure.EnableAutoConfiguration=\
+com.alianga.jkit.sql.auto.boot2.SqlAutoAutoConfiguration

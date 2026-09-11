@@ -1,0 +1,30 @@
+{
+  "groups": [
+    {
+      "name": "jkit.sql.auto",
+      "type": "com.alianga.jkit.sql.auto.boot3.SqlAutoProperties",
+      "sourceType": "com.alianga.jkit.sql.auto.boot3.SqlAutoProperties"
+    }
+  ],
+  "properties": [
+    {
+      "name": "jkit.sql.auto.enabled",
+      "type": "java.lang.Boolean",
+      "defaultValue": true,
+      "description": "Whether to sync schema on startup."
+    },
+    {
+      "name": "jkit.sql.auto.mode",
+      "type": "java.lang.String",
+      "defaultValue": "update"
+    },
+    {
+      "name": "jkit.sql.auto.packages",
+      "type": "java.util.List<java.lang.String>"
+    },
+    {
+      "name": "jkit.sql.auto.entities",
+      "type": "java.util.List<java.lang.String>"
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "groups": [
+    {
+      "name": "jkit.sql.auto",
+      "type": "com.alianga.jkit.sql.auto.boot2.SqlAutoProperties",
+      "sourceType": "com.alianga.jkit.sql.auto.boot2.SqlAutoProperties"
+    }
+  ],
+  "properties": [
+    {
+      "name": "jkit.sql.auto.enabled",
+      "type": "java.lang.Boolean",
+      "defaultValue": true,
+      "description": "是否在启动时同步表结构。"
+    },
+    {
+      "name": "jkit.sql.auto.mode",
+      "type": "java.lang.String",
+      "defaultValue": "update",
+      "description": "none / validate / update / create / create-drop。"
+    },
+    {
+      "name": "jkit.sql.auto.packages",
+      "type": "java.util.List<java.lang.String>",
+      "description": "实体扫描包。"
+    },
+    {
+      "name": "jkit.sql.auto.entities",
+      "type": "java.util.List<java.lang.String>",
+      "description": "实体类全限定名。"
+    },
+    {
+      "name": "jkit.sql.auto.dialect",
+      "type": "java.lang.String",
+      "description": "SqlDialect 名称；空则从 JDBC URL 推断。"
+    },
+    {
+      "name": "jkit.sql.auto.alter-column",
+      "type": "java.lang.Boolean",
+      "defaultValue": false
+    },
+    {
+      "name": "jkit.sql.auto.drop-extra-columns",
+      "type": "java.lang.Boolean",
+      "defaultValue": false
+    }
+  ]
+}

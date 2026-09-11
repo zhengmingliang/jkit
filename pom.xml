@@ -42,6 +42,8 @@
         <module>jkit-notify-extra</module>
         <module>jkit-sql</module>
         <module>jkit-sql-auto</module>
+        <module>jkit-sql-auto-spring-boot-2</module>
+        <module>jkit-sql-auto-spring-boot-3</module>
     </modules>
 
     <properties>
