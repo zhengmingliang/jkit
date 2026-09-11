@@ -378,6 +378,12 @@ final class SqlSelectParser {
             select.setDistinctRow(true);
         } else if (p.match(SqlTokenType.DISTINCT)) {
             select.setDistinct(true);
+        } else if (p.match(SqlTokenType.UNIQUE) || p.isIdent("UNIQUE")) {
+            // Informix / Oracle：SELECT UNIQUE ≡ DISTINCT
+            if (p.isIdent("UNIQUE")) {
+                p.next();
+            }
+            select.setDistinct(true);
         }
         if (select.distinct()) {
             if (p.match(SqlTokenType.ON)) {
@@ -417,12 +423,21 @@ final class SqlSelectParser {
             }
         }
         select.setCalcFoundRows(p.match(SqlTokenType.SQL_CALC_FOUND_ROWS));
-        if (p.match(SqlTokenType.TOP)) {
-            select.setTop(p.exprParser.parsePrimary());
-            p.match(SqlTokenType.PERCENT);
-            if (p.match(SqlTokenType.WITH)) {
-                p.expect(SqlTokenType.TIES);
-                select.setTopWithTies(true);
+        // SQL Server TOP n：仅当后随数字/绑定/( 时吞掉；top.col / 别名 top 留给表达式
+        if (p.is(SqlTokenType.TOP)) {
+            SqlToken peek = p.lexer.peek();
+            if (peek != null && (peek.type() == SqlTokenType.NUMBER
+                    || peek.type() == SqlTokenType.BIND
+                    || peek.type() == SqlTokenType.NAMED_BIND
+                    || peek.type() == SqlTokenType.LPAREN
+                    || peek.type() == SqlTokenType.VARIABLE)) {
+                p.next();
+                select.setTop(p.exprParser.parsePrimary());
+                p.match(SqlTokenType.PERCENT);
+                if (p.match(SqlTokenType.WITH)) {
+                    p.expect(SqlTokenType.TIES);
+                    select.setTopWithTies(true);
+                }
             }
         }
         // Informix：SELECT SKIP n FIRST m …（n 可为 ? / ?1）
@@ -557,6 +572,14 @@ final class SqlSelectParser {
             }
             p.expect(SqlTokenType.BY);
             parseOrderBy(select.orderBy());
+            // MySQL：ORDER BY … WITH ROLLUP
+            if (p.match(SqlTokenType.WITH)) {
+                if (p.match(SqlTokenType.ROLLUP)) {
+                    select.setGroupByRollup(true);
+                } else if (p.match(SqlTokenType.CUBE)) {
+                    select.setGroupByCube(true);
+                }
+            }
         }
         parseHiveDistributeSort(select);
         // EMIT CHANGES 常在 LIMIT 之前
@@ -754,24 +777,32 @@ final class SqlSelectParser {
             return item;
         }
         SqlExpr expr = p.exprParser.parseExpr();
+        if (expr instanceof SqlAllColumns) {
+            // parseExpr 已吃掉 t.*
+            item.setExpr(expr);
+            consumeExceptReplace(item);
+            return item;
+        }
         if (expr instanceof SqlIdentifier && p.match(SqlTokenType.DOT) && p.match(SqlTokenType.STAR)) {
             SqlAllColumns all = new SqlAllColumns();
             all.setOwner((SqlIdentifier) expr);
             item.setExpr(all);
             consumeExceptReplace(item);
-        } else {
-            item.setExpr(expr);
-            // Hive UDTF：fn(...) AS (c0, c1, c2)
-            if (p.match(SqlTokenType.AS) && p.is(SqlTokenType.LPAREN)) {
-                p.next();
-                do {
-                    item.columnAliases().add(p.parseName());
-                } while (p.match(SqlTokenType.COMMA));
-                p.expect(SqlTokenType.RPAREN);
-            } else {
-                item.setAlias(p.parseAlias());
-            }
+            return item;
         }
+        item.setExpr(expr);
+        // Hive UDTF：fn(...) AS (c0, c1, c2)
+        if (p.match(SqlTokenType.AS) && p.is(SqlTokenType.LPAREN)) {
+            p.next();
+            do {
+                item.columnAliases().add(p.parseName());
+            } while (p.match(SqlTokenType.COMMA));
+            p.expect(SqlTokenType.RPAREN);
+        } else {
+            item.setAlias(p.parseAlias());
+        }
+        // BigQuery：col EXCEPT(…) 少见；* / t.* 已在上方处理
+        consumeExceptReplace(item);
         return item;
     }
 
@@ -1174,6 +1205,28 @@ final class SqlSelectParser {
     /**
      * 当前在 {@code (} 上时，窥视嵌套括号内首个非括号记号是否为查询起头。
      */
+
+    /** 当前是否处于 JOIN / 逗号连接起头（用于括号内 subquery 后继续 JOIN）。 */
+    private boolean isJoinStart() {
+        if (p.is(SqlTokenType.COMMA) || p.is(SqlTokenType.JOIN) || p.is(SqlTokenType.INNER)
+                || p.is(SqlTokenType.LEFT) || p.is(SqlTokenType.RIGHT) || p.is(SqlTokenType.FULL)
+                || p.is(SqlTokenType.CROSS) || p.is(SqlTokenType.OUTER) || p.is(SqlTokenType.NATURAL)
+                || p.is(SqlTokenType.STRAIGHT_JOIN) || p.is(SqlTokenType.LATERAL)) {
+            return true;
+        }
+        if (p.isIdent("HASH") || p.isIdent("MERGE") || p.isIdent("LOOP")) {
+            SqlToken peek = p.lexer.peek();
+            return peek != null && peek.type() == SqlTokenType.JOIN;
+        }
+        if ((p.is(SqlTokenType.GLOBAL) || p.token.textEqualsIgnoreCase("GLOBAL")) && p.lexer.peek() != null) {
+            SqlToken peek = p.lexer.peek();
+            return peek.type() == SqlTokenType.LEFT || peek.type() == SqlTokenType.RIGHT
+                    || peek.type() == SqlTokenType.FULL || peek.type() == SqlTokenType.INNER
+                    || peek.type() == SqlTokenType.JOIN;
+        }
+        return false;
+    }
+
     private boolean lookingAtNestedParenQuery() {
         if (!p.is(SqlTokenType.LPAREN)) {
             return false;
@@ -1233,34 +1286,21 @@ final class SqlSelectParser {
                 source = parseValuesTable();
             } else if (p.isQueryStart() || p.is(SqlTokenType.WITH)
                     || (p.is(SqlTokenType.LPAREN) && lookingAtNestedParenQuery())) {
-                // (SELECT…) / ((SELECT…) UNION …) / (WITH … SELECT…)
+                // (SELECT…) / ((SELECT…) UNION …) / ((SELECT…) JOIN (SELECT…) ON …)
                 SqlSubqueryTable sub = new SqlSubqueryTable();
                 sub.setQuery(parseSelect());
                 sub.setLateral(lateral);
                 source = sub;
+                if (isJoinStart()) {
+                    source = parseJoinChain(source);
+                }
             } else {
-                // ((((t)))) 多层括号表：先剥掉纯括号层再解析表/JOIN
-                if (lateral && !p.is(SqlTokenType.LPAREN) && !p.isQueryStart()) {
+                // (t) / ((t1 JOIN t2) JOIN t3) — 递归 JOIN，勿剥多层括号
+                if (lateral && !p.is(SqlTokenType.LPAREN) && !p.isQueryStart() && !p.is(SqlTokenType.WITH)
+                        && !p.is(SqlTokenType.VALUES)) {
                     throw p.error("LATERAL requires a subquery or table function");
                 }
-                int wraps = 0;
-                while (p.is(SqlTokenType.LPAREN) && !lookingAtNestedParenQuery()
-                        && !p.isQueryStart() && !p.is(SqlTokenType.WITH) && !p.is(SqlTokenType.VALUES)) {
-                    p.next();
-                    wraps++;
-                }
-                if (p.isQueryStart() || p.is(SqlTokenType.WITH)
-                        || (p.is(SqlTokenType.LPAREN) && lookingAtNestedParenQuery())) {
-                    SqlSubqueryTable sub = new SqlSubqueryTable();
-                    sub.setQuery(parseSelect());
-                    sub.setLateral(lateral);
-                    source = sub;
-                } else {
-                    source = parseJoinedTable();
-                }
-                for (int i = 0; i < wraps; i++) {
-                    p.expect(SqlTokenType.RPAREN);
-                }
+                source = parseJoinedTable();
             }
             p.expect(SqlTokenType.RPAREN);
             parseTableAlias(source);

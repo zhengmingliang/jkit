@@ -213,6 +213,9 @@ final class SqlDmlParser {
     SqlInsert parseInsert(boolean replace) {
         p.next();
         SqlInsert insert = new SqlInsert();
+        while (p.is(SqlTokenType.HINT)) {
+            p.next(); // INSERT /*+ hint */ INTO …
+        }
         if (!replace && p.isIdent("OVERWRITE")) {
             // Hive：INSERT OVERWRITE [TABLE] t [PARTITION (...)] SELECT …
             p.next();
@@ -259,14 +262,15 @@ final class SqlDmlParser {
             p.expect(SqlTokenType.RPAREN);
         }
         insert.setOutputInto(parseOutputClause(insert.output()));
-        // PG：OVERRIDING SYSTEM|USER VALUE
+        // PG：OVERRIDING SYSTEM|USER VALUE（VALUE 属本子句，勿留给 VALUES 解析）
         if (p.isIdent("OVERRIDING")) {
             p.next();
             while (!p.is(SqlTokenType.SELECT) && !p.is(SqlTokenType.WITH)
-                    && !p.is(SqlTokenType.VALUES) && !p.is(SqlTokenType.VALUE)
                     && !p.is(SqlTokenType.DEFAULT) && !p.is(SqlTokenType.SET)
                     && !p.is(SqlTokenType.LPAREN) && !p.atStmtBreak()
-                    && !p.is(SqlTokenType.EOF)) {
+                    && !p.is(SqlTokenType.EOF)
+                    && !(p.is(SqlTokenType.VALUES) && p.lexer.peek() != null
+                    && p.lexer.peek().type() == SqlTokenType.LPAREN)) {
                 p.next();
             }
         }

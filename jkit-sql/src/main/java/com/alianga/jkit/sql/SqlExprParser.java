@@ -330,6 +330,7 @@ final class SqlExprParser {
 
     private SqlCastExpr parseCast() {
         // CAST / TRY_CAST / TRY_CONVERT
+        boolean tryConvert = p.isIdent("TRY_CONVERT");
         if (p.is(SqlTokenType.CAST)) {
             p.next();
         } else {
@@ -337,6 +338,18 @@ final class SqlExprParser {
         }
         p.expect(SqlTokenType.LPAREN);
         SqlCastExpr cast = new SqlCastExpr();
+        if (tryConvert) {
+            // SQL Server：TRY_CONVERT(type, expr [, style])
+            cast.setDataType(parseDataType());
+            p.expect(SqlTokenType.COMMA);
+            cast.setExpr(parseExpr());
+            if (p.match(SqlTokenType.COMMA)) {
+                cast.setDataType(cast.dataType() + ", style");
+                parseExpr(); // consume style expr
+            }
+            p.expect(SqlTokenType.RPAREN);
+            return cast;
+        }
         cast.setExpr(parseExpr());
         p.expect(SqlTokenType.AS);
         cast.setDataType(parseDataType());
@@ -383,6 +396,9 @@ final class SqlExprParser {
             } else if (p.is(SqlTokenType.NULL_SAFE_EQ)) {
                 p.next();
                 left = SqlBinaryExpr.of(left, SqlBinaryOp.NULL_SAFE_EQ, parseBitOrScalarQuery());
+            } else if (p.isIdent("OVERLAPS") || (p.token != null && p.token.textEqualsIgnoreCase("OVERLAPS"))) {
+                p.next();
+                left = SqlBinaryExpr.of(left, SqlBinaryOp.OVERLAPS, parseBit());
             } else if (p.is(SqlTokenType.AT_OP)) {
                 String opText = p.token.text();
                 p.next();
@@ -581,7 +597,13 @@ final class SqlExprParser {
         }
         while (p.is(SqlTokenType.UNSIGNED) || p.is(SqlTokenType.ZEROFILL) || p.is(SqlTokenType.VARYING)
                 || p.is(SqlTokenType.PRECISION) || p.is(SqlTokenType.ZONE) || p.is(SqlTokenType.WITHOUT)
-                || p.isIdent("TIME") || p.isIdent("SIGNED")) {
+                || p.is(SqlTokenType.WITH) || p.is(SqlTokenType.TIME) || p.is(SqlTokenType.LOCAL)
+                || p.isIdent("TIME") || p.isIdent("SIGNED") || p.isIdent("LOCAL")
+                || p.isIdent("ZONE") || p.isIdent("WITH") || p.isIdent("WITHOUT")
+                || (p.token != null && p.token.text() != null
+                    && ("LOCAL".equalsIgnoreCase(p.token.text())
+                        || "ZONE".equalsIgnoreCase(p.token.text())
+                        || "TIME".equalsIgnoreCase(p.token.text())))) {
             sb.append(' ').append(p.token.text());
             p.next();
         }
@@ -748,7 +770,8 @@ final class SqlExprParser {
                 if (p.is(SqlTokenType.STAR)) {
                     fn.addArgument(parsePrimary());
                 } else if (p.isQueryStart()) {
-                    fn.addArgument(SqlQueryExpr.of(p.parseStatement()));
+                    // COALESCE(SELECT …, 0)：无额外括号的标量子查询，勿用 parseStatement 以免吞掉后续参数
+                    fn.addArgument(SqlQueryExpr.of(p.selectParser.parseSelect()));
                 } else {
                     fn.addArgument(parseNamedOrExpr());
                 }
@@ -774,6 +797,11 @@ final class SqlExprParser {
             fn.setAggOption(p.token.text().toUpperCase() + " NULLS");
             p.next();
             p.next();
+        }
+        // MySQL 扩展：agg(DISTINCT col SEPARATOR ',') / agg(col ORDER BY x SEPARATOR ',')
+        if (p.isIdent("SEPARATOR")) {
+            p.next();
+            fn.setSeparator(parseExpr());
         }
         p.expect(SqlTokenType.RPAREN);
         // ClickHouse 参数化聚合：windowFunnel(n)(ts, cond…) / quantile(0.9)(x)
@@ -1049,6 +1077,23 @@ final class SqlExprParser {
                 over.setFrameStart(parseFrameBound());
             }
         }
+        // PG：EXCLUDE CURRENT ROW / GROUP / TIES / NO OTHERS
+        if (p.isIdent("EXCLUDE")) {
+            p.next();
+            StringBuilder ex = new StringBuilder("EXCLUDE");
+            if (p.isIdent("NO") || p.isIdent("CURRENT") || p.isIdent("GROUP") || p.isIdent("TIES")
+                    || p.is(SqlTokenType.CURRENT) || p.isIdent("OTHERS")) {
+                ex.append(' ').append(p.token.text().toUpperCase());
+                p.next();
+                if (p.isIdent("ROW") || p.isIdent("ROWS") || p.isIdent("OTHERS")
+                        || p.is(SqlTokenType.ROW) || p.is(SqlTokenType.ROWS)) {
+                    ex.append(' ').append(p.token.text().toUpperCase());
+                    p.next();
+                }
+            }
+            String prev = over.frameEnd();
+            over.setFrameEnd(prev == null || prev.isEmpty() ? ex.toString() : prev + " " + ex.toString());
+        }
         p.expect(SqlTokenType.RPAREN);
         return over;
     }
@@ -1320,14 +1365,45 @@ final class SqlExprParser {
         if (p.is(SqlTokenType.CAST) || p.isIdent("TRY_CAST") || p.isIdent("TRY_CONVERT")) {
             return parseCast();
         }
+        // PG：TIMESTAMPTZ '…' / JSON 'true' / DATE '…'
         if ((p.is(SqlTokenType.DATE) || p.is(SqlTokenType.TIME) || p.is(SqlTokenType.TIMESTAMP)
-                || p.is(SqlTokenType.DATETIME))
-                && p.lexer.peek().type() == SqlTokenType.STRING) {
+                || p.is(SqlTokenType.DATETIME) || p.isIdent("TIMESTAMPTZ")
+                || p.isIdent("JSON") || p.isIdent("JSONB"))
+                && p.lexer.peek() != null && p.lexer.peek().type() == SqlTokenType.STRING) {
             SqlFunctionExpr typed = new SqlFunctionExpr();
             typed.setName(SqlIdentifier.of(p.token.text().toUpperCase()));
             p.next();
             typed.addArgument(parsePrimaryInner());
             return typed;
+        }
+        // PG：TIMESTAMP WITH TIME ZONE '…' / TIME WITHOUT TIME ZONE '…'
+        if ((p.is(SqlTokenType.TIMESTAMP) || p.is(SqlTokenType.TIME) || p.is(SqlTokenType.DATETIME))
+                && p.lexer.peek() != null
+                && (p.lexer.peek().type() == SqlTokenType.WITH || p.lexer.peek().type() == SqlTokenType.WITHOUT
+                    || p.lexer.peek().textEqualsIgnoreCase("WITH")
+                    || p.lexer.peek().textEqualsIgnoreCase("WITHOUT"))) {
+            StringBuilder tn = new StringBuilder(p.token.text().toUpperCase());
+            p.next();
+            while (p.is(SqlTokenType.WITH) || p.is(SqlTokenType.WITHOUT) || p.is(SqlTokenType.TIME)
+                    || p.is(SqlTokenType.ZONE) || p.is(SqlTokenType.LOCAL)
+                    || p.isIdent("LOCAL") || p.isIdent("TIME")
+                    || p.isIdent("ZONE") || p.isIdent("WITH") || p.isIdent("WITHOUT")
+                    || (p.token != null && p.token.text() != null
+                        && ("LOCAL".equalsIgnoreCase(p.token.text())
+                            || "ZONE".equalsIgnoreCase(p.token.text())))) {
+                tn.append(' ').append(p.token.text().toUpperCase());
+                p.next();
+                if (p.is(SqlTokenType.STRING)) {
+                    break;
+                }
+            }
+            if (p.is(SqlTokenType.STRING)) {
+                SqlFunctionExpr typed = new SqlFunctionExpr();
+                typed.setName(SqlIdentifier.of(tn.toString()));
+                typed.addArgument(parsePrimaryInner());
+                return typed;
+            }
+            return SqlIdentifier.of(tn.toString());
         }
         // DB2 / 标准：CURRENT TIMESTAMP / CURRENT DATE / CURRENT TIME / CURRENT TIMEZONE
         if (p.is(SqlTokenType.CURRENT) || p.isIdent("CURRENT")) {

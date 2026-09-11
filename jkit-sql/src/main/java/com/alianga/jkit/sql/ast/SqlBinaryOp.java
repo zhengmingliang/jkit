@@ -20,6 +20,8 @@ public enum SqlBinaryOp {
     LIKE("LIKE"),
     NOT_LIKE("NOT LIKE"),
     ILIKE("ILIKE"),
+    /** SQL {@code OVERLAPS}。 @since 2.0.1 */
+    OVERLAPS("OVERLAPS"),
     /** PostgreSQL {@code NOT ILIKE} */
     NOT_ILIKE("NOT ILIKE"),
     REGEXP("REGEXP"),

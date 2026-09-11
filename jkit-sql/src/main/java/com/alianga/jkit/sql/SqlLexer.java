@@ -581,6 +581,9 @@ public final class SqlLexer {
                     } else {
                         type = SqlTokenType.JSON_OP;
                     }
+                } else if (match('#')) {
+                    // PG jsonb：-# path
+                    type = SqlTokenType.JSON_OP;
                 } else {
                     type = SqlTokenType.MINUS;
                 }
@@ -638,6 +641,12 @@ public final class SqlLexer {
                     }
                 } else if (match('>')) {
                     type = SqlTokenType.NE;
+                } else if (pos + 1 < limit && src[pos] == '-' && src[pos + 1] == '>') {
+                    pos += 2;
+                    type = SqlTokenType.AT_OP;
+                } else if (pos + 1 < limit && src[pos] == '#' && src[pos + 1] == '>') {
+                    pos += 2;
+                    type = SqlTokenType.AT_OP;
                 } else if (match('<')) {
                     type = SqlTokenType.SHIFT_LEFT;
                 } else if (match('@')) {
@@ -676,6 +685,10 @@ public final class SqlLexer {
             case '&':
                 if (match('&')) {
                     type = SqlTokenType.AND_OP;
+                } else if (match('>')) {
+                    type = SqlTokenType.AT_OP;
+                } else if (match('<')) {
+                    type = SqlTokenType.AT_OP;
                 } else {
                     type = SqlTokenType.BIT_AND;
                 }
