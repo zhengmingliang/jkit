@@ -11,7 +11,13 @@ public final class SqlFormatOptions {
     private SqlKeywordCase keywordCase = SqlKeywordCase.AS_IS;
 
     /**
-     * @return 默认选项（不强制给标识符加方言引号；仅 {@link com.alianga.jkit.sql.ast.SqlIdentifier#quoted()} 为 true 时加引号）
+     * 热路径只读默认实例（{@code options == null} 时 Formatter 复用）。
+     * 勿调用 {@link #keywordCase}/{@link #quoteIdentifiers} 改它；需要定制请用 {@link #defaults()}。
+     */
+    static final SqlFormatOptions DEFAULTS = new SqlFormatOptions();
+
+    /**
+     * @return 新的默认选项（可再链式改；不强制给标识符加方言引号；仅 {@link com.alianga.jkit.sql.ast.SqlIdentifier#quoted()} 为 true 时加引号）
      */
     public static SqlFormatOptions defaults() {
         return new SqlFormatOptions();

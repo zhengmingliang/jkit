@@ -1,8 +1,10 @@
 package com.alianga.jkit.sql;
 
 import com.alianga.jkit.sql.ast.SqlExpr;
+import com.alianga.jkit.sql.ast.SqlLimit;
 import com.alianga.jkit.sql.ast.SqlLiteral;
 import com.alianga.jkit.sql.ast.SqlNode;
+import com.alianga.jkit.sql.ast.SqlSelect;
 import com.alianga.jkit.sql.ast.SqlSimpleStatement;
 import com.alianga.jkit.sql.ast.SqlStatement;
 import com.alianga.jkit.sql.ast.SqlStatementType;
@@ -37,6 +39,17 @@ public final class SQL {
         @Override
         protected SqlParser initialValue() {
             return new SqlParser();
+        }
+    };
+
+    /** format/toSqlString 热路径复用 Formatter（含 StringBuilder）。 */
+    private static final ThreadLocal<SqlFormatter> FORMATTER = new ThreadLocal<SqlFormatter>() {
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected SqlFormatter initialValue() {
+            return new SqlFormatter(false, SqlDialect.MYSQL, SqlFormatOptions.DEFAULTS);
         }
     };
 
@@ -310,6 +323,13 @@ public final class SQL {
     public static String format(SqlStatement statement, SqlDialectSpec dialect, boolean pretty,
                                 SqlFormatOptions options) {
         SqlDialectSpec d = dialect == null ? SqlDialect.MYSQL : dialect;
+        // offset=0 单层 ROWNUM：跳过 clone+adapt，临时去 LIMIT 后直接包装输出（不永久改入参）
+        if (statement instanceof SqlSelect) {
+            long end = SqlRewriter.simpleOracleRownumWrapEnd(statement, d);
+            if (end > 0L) {
+                return formatOracleRownumOffset0((SqlSelect) statement, end, pretty, d, options);
+            }
+        }
         SqlStatement toWrite = statement;
         // 仅当分页形态与目标方言不兼容时才 clone+adapt（同形态零额外开销；
         // 用 SQL.clone 保源形态，避免按目标方言 raw format 后再 parse 的双重扭曲）
@@ -317,7 +337,28 @@ public final class SQL {
             toWrite = clone(statement);
             SqlRewriter.adaptPagination(toWrite, d);
         }
-        return new SqlFormatter(pretty, d, options).format(toWrite);
+        return FORMATTER.get().format(toWrite, pretty, d, options);
+    }
+
+    /**
+     * 临时清 LIMIT/TOP，按正确 ROWNUM 子查询包装回写，再恢复入参（无 clone）。
+     */
+    private static String formatOracleRownumOffset0(SqlSelect select, long end, boolean pretty,
+            SqlDialectSpec d, SqlFormatOptions options) {
+        SqlSelect owner = SqlRewriter.paginationOwner(select);
+        SqlLimit savedLimit = owner.limit();
+        SqlExpr savedTop = owner.top();
+        boolean savedTopWithTies = owner.topWithTies();
+        owner.setLimit(null);
+        owner.setTop(null);
+        owner.setTopWithTies(false);
+        try {
+            return FORMATTER.get().formatOracleRownumOffset0Wrap(select, end, pretty, d, options);
+        } finally {
+            owner.setLimit(savedLimit);
+            owner.setTop(savedTop);
+            owner.setTopWithTies(savedTopWithTies);
+        }
     }
 
     /**

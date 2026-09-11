@@ -28,6 +28,17 @@ public final class SqlIdentifier extends SqlExpr {
     }
 
     /**
+     * 保证 names 可写（replaceColumn 等会 names.set；若曾被设为不可变列表则 COW）。
+     */
+    public void ensureMutableNames() {
+        if (names == null) {
+            names = new ArrayList<String>(2);
+        } else if (!(names instanceof ArrayList)) {
+            names = new ArrayList<String>(names);
+        }
+    }
+
+    /**
      * @return 各段名字，从左到右
      */
     public List<String> names() {
@@ -50,6 +61,10 @@ public final class SqlIdentifier extends SqlExpr {
     public void addName(String name) {
         if (names == null) {
             names = new ArrayList<String>(2);
+        } else if (!(names instanceof ArrayList)) {
+            List<String> next = new ArrayList<String>(names.size() + 1);
+            next.addAll(names);
+            names = next;
         }
         names.add(name);
     }

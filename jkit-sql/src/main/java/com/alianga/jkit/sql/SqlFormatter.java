@@ -77,11 +77,11 @@ import java.util.Locale;
  * @since 2.0.1
  */
 public final class SqlFormatter {
-    private final StringBuilder out = new StringBuilder(128);
-    private final boolean pretty;
-    private final SqlDialectSpec dialect;
-    private final SqlFormatOptions options;
-    private final SqlKeywordCase keywordCase;
+    private final StringBuilder out = new StringBuilder(256);
+    private boolean pretty;
+    private SqlDialectSpec dialect;
+    private SqlFormatOptions options;
+    private SqlKeywordCase keywordCase;
     private int indent;
 
     /**
@@ -99,9 +99,16 @@ public final class SqlFormatter {
      * @since 2.0.1
      */
     public SqlFormatter(boolean pretty, SqlDialectSpec dialect, SqlFormatOptions options) {
+        configure(pretty, dialect, options);
+    }
+
+    /**
+     * 复用实例时重配 pretty/方言/选项（配合 {@link SQL} 线程本地 Formatter）。
+     */
+    void configure(boolean pretty, SqlDialectSpec dialect, SqlFormatOptions options) {
         this.pretty = pretty;
         this.dialect = dialect == null ? SqlDialect.MYSQL : dialect;
-        this.options = options == null ? SqlFormatOptions.defaults() : options;
+        this.options = options == null ? SqlFormatOptions.DEFAULTS : options;
         this.keywordCase = this.options.keywordCase();
     }
 
@@ -113,6 +120,45 @@ public final class SqlFormatter {
         out.setLength(0);
         indent = 0;
         writeNode(node);
+        return out.toString();
+    }
+
+    /**
+     * 重配后格式化（热路径：避免每次 new Formatter + StringBuilder）。
+     */
+    String format(SqlNode node, boolean pretty, SqlDialectSpec dialect, SqlFormatOptions options) {
+        configure(pretty, dialect, options);
+        return format(node);
+    }
+
+    /**
+     * offset=0 经典 ORACLE ROWNUM 包装：{@code SELECT * FROM (}{@code node}{@code ) XX WHERE ROWNUM <= end}。
+     * 调用方须已临时清掉 node 上的 LIMIT/TOP；不改 AST 结构。
+     */
+    String formatOracleRownumOffset0Wrap(SqlNode node, long end, boolean pretty,
+            SqlDialectSpec dialect, SqlFormatOptions options) {
+        configure(pretty, dialect, options);
+        out.setLength(0);
+        indent = 0;
+        kw("SELECT");
+        sp();
+        out.append('*');
+        nl();
+        kw("FROM");
+        sp();
+        out.append('(');
+        writeNode(node);
+        out.append(')');
+        sp();
+        out.append("XX");
+        nl();
+        kw("WHERE");
+        sp();
+        out.append("ROWNUM");
+        sp();
+        out.append("<=");
+        sp();
+        out.append(Long.toString(end));
         return out.toString();
     }
 
@@ -3626,12 +3672,13 @@ public final class SqlFormatter {
     }
 
     private void kw(String word) {
-        if (keywordCase == SqlKeywordCase.UPPER) {
-            out.append(word.toUpperCase(Locale.ROOT));
-        } else if (keywordCase == SqlKeywordCase.LOWER) {
-            out.append(word.toLowerCase(Locale.ROOT));
-        } else {
+        // 默认 AS_IS：直接 append，避免无谓分支与大小写转换
+        if (keywordCase == SqlKeywordCase.AS_IS || keywordCase == null) {
             out.append(word);
+        } else if (keywordCase == SqlKeywordCase.UPPER) {
+            out.append(word.toUpperCase(Locale.ROOT));
+        } else {
+            out.append(word.toLowerCase(Locale.ROOT));
         }
     }
 

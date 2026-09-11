@@ -5,6 +5,9 @@
 ## 2.0.1 / unreleased
 
 ### jkit-sql
+- **性能**：继续压 MySQL→ORACLE 分页 format 热路径——offset=0 单层 ROWNUM **免 clone** 包装回写、线程本地 `SqlFormatter` 复用、`wrapOracleRownum`/`adaptPagination` LIMIT→经典 ORACLE 快路径、冻结 ROWNUM/RN/XX、小整数数字字面量缓存至 10000、`detachSelectBody` 跳过空列表。
+
+### jkit-sql
 - **性能**：`SQL.clone` 改为真正的 AST 树拷贝（`SqlAstCloner` / `SqlNode.copy`），热路径不再 format→parse；跨方言 `format`/`adaptPagination`/`setPage` 等「先 clone 再改」显著加速。
 - **性能**：`adaptPagination` 一次探测 ROWNUM/row_number，避免 getLimit/getOffset/strip 重复扫描；分页数字字面量复用小整数串缓存。
 

@@ -241,34 +241,30 @@ public final class SqlRewriter {
             end = 1L;
         }
         SqlSelect core = detachSelectBody(root);
-        // 先验 LIMIT/TOP 不得残留在 ROWNUM 子查询内（如 MySQL LIMIT 再转 ORACLE）
-        clearPagination(paginationOwner(core));
+        // 调用方已 clearPagination；此处仅兜底 UNION 末端残留
+        SqlSelect coreOwner = paginationOwner(core);
+        if (coreOwner.limit() != null || coreOwner.top() != null) {
+            clearPagination(coreOwner);
+        }
         if (off == 0L) {
-            SqlSubqueryTable from = new SqlSubqueryTable();
-            from.setQuery(core);
-            from.setAlias("XX");
-            SqlSelectItem star = new SqlSelectItem();
-            star.setExpr(new SqlAllColumns());
-            root.addSelectItem(star);
-            root.setFrom(from);
-            root.setWhere(SqlBinaryExpr.of(SqlIdentifier.of("ROWNUM"), SqlBinaryOp.LE, number(end)));
+            wrapOracleRownumOffset0(root, core, end);
             return;
         }
         SqlSelect middle = new SqlSelect();
         SqlSelectItem midStar = new SqlSelectItem();
         SqlAllColumns all = new SqlAllColumns();
-        all.setOwner(SqlIdentifier.of("XX"));
+        all.setOwner(ID_XX);
         midStar.setExpr(all);
         middle.addSelectItem(midStar);
         SqlSelectItem rnItem = new SqlSelectItem();
-        rnItem.setExpr(SqlIdentifier.of("ROWNUM"));
+        rnItem.setExpr(ID_ROWNUM);
         rnItem.setAlias("RN");
         middle.addSelectItem(rnItem);
         SqlSubqueryTable midFrom = new SqlSubqueryTable();
         midFrom.setQuery(core);
         midFrom.setAlias("XX");
         middle.setFrom(midFrom);
-        middle.setWhere(SqlBinaryExpr.of(SqlIdentifier.of("ROWNUM"), SqlBinaryOp.LE, number(end)));
+        middle.setWhere(SqlBinaryExpr.of(ID_ROWNUM, SqlBinaryOp.LE, number(end)));
 
         SqlSubqueryTable outerFrom = new SqlSubqueryTable();
         outerFrom.setQuery(middle);
@@ -277,7 +273,19 @@ public final class SqlRewriter {
         outerStar.setExpr(new SqlAllColumns());
         root.addSelectItem(outerStar);
         root.setFrom(outerFrom);
-        root.setWhere(SqlBinaryExpr.of(SqlIdentifier.of("RN"), SqlBinaryOp.GT, number(off)));
+        root.setWhere(SqlBinaryExpr.of(ID_RN, SqlBinaryOp.GT, number(off)));
+    }
+
+    /** offset=0：单层 {@code SELECT * FROM (core) XX WHERE ROWNUM <= end}。 */
+    private static void wrapOracleRownumOffset0(SqlSelect root, SqlSelect core, long end) {
+        SqlSubqueryTable from = new SqlSubqueryTable();
+        from.setQuery(core);
+        from.setAlias("XX");
+        SqlSelectItem star = new SqlSelectItem();
+        star.setExpr(new SqlAllColumns());
+        root.addSelectItem(star);
+        root.setFrom(from);
+        root.setWhere(SqlBinaryExpr.of(ID_ROWNUM, SqlBinaryOp.LE, number(end)));
     }
 
     /**
@@ -287,26 +295,22 @@ public final class SqlRewriter {
         SqlSelect core = new SqlSelect();
         core.setDistinct(root.distinct());
         root.setDistinct(false);
-        core.distinctOn().addAll(root.distinctOn());
-        root.distinctOn().clear();
+        moveList(root.distinctOn(), core.distinctOn());
         core.setTop(root.top());
         root.setTop(null);
         core.setTopWithTies(root.topWithTies());
         root.setTopWithTies(false);
-        core.selectItems().addAll(root.selectItems());
-        root.selectItems().clear();
+        moveList(root.selectItems(), core.selectItems());
         core.setFrom(root.from());
         root.setFrom(null);
         core.setWhere(root.where());
         root.setWhere(null);
-        core.groupBy().addAll(root.groupBy());
-        root.groupBy().clear();
+        moveList(root.groupBy(), core.groupBy());
         core.setGroupByRollup(root.groupByRollup());
         root.setGroupByRollup(false);
         core.setHaving(root.having());
         root.setHaving(null);
-        core.orderBy().addAll(root.orderBy());
-        root.orderBy().clear();
+        moveList(root.orderBy(), core.orderBy());
         core.setLimit(root.limit());
         root.setLimit(null);
         core.setForUpdate(root.forUpdate());
@@ -315,8 +319,7 @@ public final class SqlRewriter {
         root.setLockInShare(false);
         core.setForUpdateTail(root.forUpdateTail());
         root.setForUpdateTail(null);
-        core.forUpdateOf().addAll(root.forUpdateOf());
-        root.forUpdateOf().clear();
+        moveList(root.forUpdateOf(), core.forUpdateOf());
         core.setForUpdateWait(root.forUpdateWait());
         root.setForUpdateWait(null);
         core.setUnion(root.union());
@@ -327,12 +330,20 @@ public final class SqlRewriter {
         root.setConnectBy(null);
         core.setStartWith(root.startWith());
         root.setStartWith(null);
-        core.windows().addAll(root.windows());
-        root.windows().clear();
+        moveList(root.windows(), core.windows());
         core.setValuesClause(root.valuesClause());
         root.setValuesClause(false);
         // 优化器 hint / WITH 留在外层 root
         return core;
+    }
+
+    /** 非空才 addAll+clear，减少空列表抖动。 */
+    private static <T> void moveList(java.util.List<T> from, java.util.List<T> to) {
+        if (from.isEmpty()) {
+            return;
+        }
+        to.addAll(from);
+        from.clear();
     }
 
     private static void ensureLimitNode(SqlSelect select, SqlDialectSpec dialect, boolean fetchIfNeeded) {
@@ -376,25 +387,31 @@ public final class SqlRewriter {
         return statement instanceof SqlSelect ? (SqlSelect) statement : null;
     }
 
-    /** 小整数十进制串缓存（字面量本身仍新建，避免可变 SqlLiteral 共享）。 */
-    private static final String[] SMALL_NUMBER_STRINGS = buildSmallNumberStrings(128);
+    /**
+     * 小整数数字字面量缓存（含常见 pageSize 上界 10000）。
+     * wrap/applyBounds 只替换引用、不 mutate value；克隆器会深拷贝，故可安全共享。
+     */
+    private static final int SMALL_NUMBER_CACHE = 10001;
+    private static final SqlLiteral[] SMALL_NUMBER_LITERALS = buildSmallNumberLiterals(SMALL_NUMBER_CACHE);
 
-    private static String[] buildSmallNumberStrings(int n) {
-        String[] arr = new String[n];
+    /** ROWNUM 包装热路径冻结标识符（只读，勿 setNames/addName）。 */
+    private static final SqlIdentifier ID_ROWNUM = SqlIdentifier.of("ROWNUM");
+    private static final SqlIdentifier ID_RN = SqlIdentifier.of("RN");
+    private static final SqlIdentifier ID_XX = SqlIdentifier.of("XX");
+
+    private static SqlLiteral[] buildSmallNumberLiterals(int n) {
+        SqlLiteral[] arr = new SqlLiteral[n];
         for (int i = 0; i < n; i++) {
-            arr[i] = Integer.toString(i);
+            arr[i] = SqlLiteral.of(SqlLiteral.Kind.NUMBER, Integer.toString(i));
         }
         return arr;
     }
 
     private static SqlLiteral number(long value) {
-        String text;
-        if (value >= 0L && value < (long) SMALL_NUMBER_STRINGS.length) {
-            text = SMALL_NUMBER_STRINGS[(int) value];
-        } else {
-            text = Long.toString(value);
+        if (value >= 0L && value < (long) SMALL_NUMBER_LITERALS.length) {
+            return SMALL_NUMBER_LITERALS[(int) value];
         }
-        return SqlLiteral.of(SqlLiteral.Kind.NUMBER, text);
+        return SqlLiteral.of(SqlLiteral.Kind.NUMBER, Long.toString(value));
     }
 
     private static Long asLong(SqlExpr expr) {
@@ -680,18 +697,18 @@ public final class SqlRewriter {
         SqlSelect middle = new SqlSelect();
         SqlSelectItem star = new SqlSelectItem();
         SqlAllColumns all = new SqlAllColumns();
-        all.setOwner(SqlIdentifier.of("XX"));
+        all.setOwner(ID_XX);
         star.setExpr(all);
         middle.addSelectItem(star);
         SqlSelectItem rnItem = new SqlSelectItem();
-        rnItem.setExpr(SqlIdentifier.of("ROWNUM"));
+        rnItem.setExpr(ID_ROWNUM);
         rnItem.setAlias("RN");
         middle.addSelectItem(rnItem);
         SqlSubqueryTable midFrom = new SqlSubqueryTable();
         midFrom.setQuery(core);
         midFrom.setAlias("XX");
         middle.setFrom(midFrom);
-        middle.setWhere(SqlBinaryExpr.of(SqlIdentifier.of("ROWNUM"), SqlBinaryOp.LE, number(end)));
+        middle.setWhere(SqlBinaryExpr.of(ID_ROWNUM, SqlBinaryOp.LE, number(end)));
 
         SqlSubqueryTable outerFrom = new SqlSubqueryTable();
         outerFrom.setQuery(middle);
@@ -701,7 +718,7 @@ public final class SqlRewriter {
         SqlSelectItem outerStar = new SqlSelectItem();
         outerStar.setExpr(new SqlAllColumns());
         outer.addSelectItem(outerStar);
-        outer.setWhere(SqlBinaryExpr.of(SqlIdentifier.of("RN"), SqlBinaryOp.GT, number(off)));
+        outer.setWhere(SqlBinaryExpr.of(ID_RN, SqlBinaryOp.GT, number(off)));
         outer.setTop(null);
         outer.setLimit(null);
     }
@@ -751,6 +768,7 @@ public final class SqlRewriter {
                 if (node instanceof SqlTable) {
                     SqlIdentifier name = ((SqlTable) node).name();
                     if (name != null && from.equalsIgnoreCase(name.simpleName())) {
+                        name.ensureMutableNames();
                         name.names().set(name.names().size() - 1, to);
                     }
                 }
@@ -778,35 +796,46 @@ public final class SqlRewriter {
         SqlDialectSpec d = dialect == null ? SqlDialect.MYSQL : dialect;
         // 一次探测 ROWNUM/row_number，避免 getLimit/getOffset/strip 重复扫描
         RowNumPage page = detectRowNumPage(select);
-        Long lim;
-        Long offObj;
+        long limVal;
+        long offVal;
+        boolean hasOff;
         if (page != null) {
-            lim = Long.valueOf(page.end - page.offset);
-            offObj = page.offset > 0L ? Long.valueOf(page.offset) : null;
+            limVal = page.end - page.offset;
+            offVal = page.offset;
+            hasOff = page.offset > 0L;
         } else {
             SqlSelect owner = paginationOwner(select);
-            lim = explicitLimit(owner);
-            if (owner.limit() != null && owner.limit().offset() != null) {
-                offObj = asLong(owner.limit().offset());
-            } else {
-                offObj = null;
+            Long lim = explicitLimit(owner);
+            if (lim == null) {
+                return statement;
             }
-        }
-        if (lim == null) {
-            return statement;
+            limVal = lim.longValue();
+            if (owner.limit() != null && owner.limit().offset() != null) {
+                Long o = asLong(owner.limit().offset());
+                offVal = o == null ? 0L : o.longValue();
+                hasOff = o != null;
+            } else {
+                offVal = 0L;
+                hasOff = false;
+            }
+            // 快路径：裸 LIMIT/TOP → 经典 ORACLE ROWNUM（MySQL→ORACLE 热路径）
+            if (d.supportsRownum() && !d.supportsFetchFirst()) {
+                clearPagination(owner);
+                wrapOracleRownum(select, offVal, limVal);
+                return statement;
+            }
         }
         // 形态兼容且无需规范化逗号 LIMIT 时 no-op（含 ROWNUM↔LIMIT 完整转换）
         if (isPaginationFormCompatible(select, d) && !needsCommaLimitNormalize(select, d)) {
             return statement;
         }
-        long off = offObj == null ? 0L : offObj.longValue();
-        boolean withOffset = offObj != null || off > 0L;
+        boolean withOffset = hasOff || offVal > 0L;
         if (page != null) {
             unwrapRowNumPage(select, page);
         } else {
             clearPagination(paginationOwner(select));
         }
-        applyPagination(select, off, lim.longValue(), d, withOffset);
+        applyPagination(select, offVal, limVal, d, withOffset);
         return statement;
     }
 
@@ -821,6 +850,45 @@ public final class SqlRewriter {
      * @return 需要适配时 true
      * @since 2.0.1
      */
+    /**
+     * format 快路径：经典 ORACLE、offset=0、裸 LIMIT/TOP、无 WITH/注释/UNION 时返回 ROWNUM 上界；
+     * 否则 0（走 clone+adapt）。不修改入参。
+     */
+    static long simpleOracleRownumWrapEnd(SqlStatement statement, SqlDialectSpec dialect) {
+        if (!(statement instanceof SqlSelect)) {
+            return 0L;
+        }
+        SqlDialectSpec d = dialect == null ? SqlDialect.MYSQL : dialect;
+        if (!d.supportsRownum() || d.supportsFetchFirst()) {
+            return 0L;
+        }
+        SqlSelect select = (SqlSelect) statement;
+        if (select.withRecursive() || !select.withItems().isEmpty()) {
+            return 0L;
+        }
+        if (!select.comments().isEmpty()) {
+            return 0L;
+        }
+        if (select.union() != null) {
+            return 0L;
+        }
+        if (detectRowNumPage(select) != null) {
+            return 0L;
+        }
+        SqlSelect owner = paginationOwner(select);
+        Long lim = explicitLimit(owner);
+        if (lim == null || lim.longValue() < 1L) {
+            return 0L;
+        }
+        if (owner.limit() != null && owner.limit().offset() != null) {
+            Long off = asLong(owner.limit().offset());
+            if (off != null && off.longValue() > 0L) {
+                return 0L;
+            }
+        }
+        return lim.longValue();
+    }
+
     public static boolean paginationNeedsAdapt(SqlStatement statement, SqlDialectSpec dialect) {
         SqlSelect select = asSelect(statement);
         if (select == null || getLimit(statement) == null) {
@@ -1068,6 +1136,7 @@ public final class SqlRewriter {
                 if (tableDepth == 0 && node instanceof SqlIdentifier) {
                     SqlIdentifier id = (SqlIdentifier) node;
                     if (from.equalsIgnoreCase(id.simpleName()) && !id.names().isEmpty()) {
+                        id.ensureMutableNames();
                         id.names().set(id.names().size() - 1, to);
                     }
                 }
