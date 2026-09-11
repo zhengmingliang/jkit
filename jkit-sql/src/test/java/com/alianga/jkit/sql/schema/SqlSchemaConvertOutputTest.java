@@ -9,6 +9,7 @@ import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 /**
  * 转换输出的**形状**校验：只 {@code contains} 关键字不足以发现输出非法 SQL
@@ -108,6 +109,27 @@ public class SqlSchemaConvertOutputTest {
         String ora = SQL.convert("SELECT DATEDIFF(a, b) FROM t", SqlDialect.MYSQL, SqlDialect.ORACLE);
         assertEquals(ora, "SELECT (TRUNC(a) - TRUNC(b)) FROM t", norm(ora));
         assertReparsable(ora, SqlDialect.ORACLE);
+    }
+
+    @Test
+    public void dateAddExpandsWithParentheses() {
+        // 函数展开成运算符后必须套括号，否则 DATE_ADD(a, INTERVAL 1 DAY) * 2
+        // 会变成 a + INTERVAL ... * 2，乘法优先级更高，语义整个变掉
+        String pg = SQL.convert("SELECT DATE_ADD(a, INTERVAL 1 DAY) * 2 FROM t",
+                SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        String n = norm(pg);
+        assertTrue(pg, n.startsWith("SELECT (a +"));
+        assertTrue(pg, n.contains(") * 2"));
+        assertReparsable(pg, SqlDialect.POSTGRES);
+    }
+
+    @Test
+    public void dateSubExpandsWithParentheses() {
+        String pg = SQL.convert("SELECT DATE_SUB(a, INTERVAL 1 DAY) + 1 FROM t",
+                SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        String n = norm(pg);
+        assertTrue(pg, n.startsWith("SELECT (a -"));
+        assertReparsable(pg, SqlDialect.POSTGRES);
     }
 
     @Test

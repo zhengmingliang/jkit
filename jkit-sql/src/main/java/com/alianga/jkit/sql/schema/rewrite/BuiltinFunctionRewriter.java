@@ -381,6 +381,9 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
         bin.setOperator(sub ? SqlBinaryOp.MINUS : SqlBinaryOp.PLUS);
         bin.setLeft(args.get(0));
         bin.setRight(interval);
+        // 函数调用是最高优先级，展开成运算符后必须整体套括号：
+        // DATE_ADD(a, INTERVAL 1 DAY) * 2 若写成 a + INTERVAL ... * 2 会被乘法抢走优先级
+        bin.setParenthesized(true);
         return bin;
     }
 
