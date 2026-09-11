@@ -368,9 +368,9 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 
 - 模块测试 **890+ 全绿**；保真回归 `SqlRoundTripFidelityTest`；379 语料 100%；保真批量 0 mismatch。
 - 竞品语料（tools-test `CompetitorSuiteCorpusTest`，三方各用方言回退链、2s 超时护栏）：
-  - druid-bvt-inline（6483）：**jkit 95.0%（已超 Druid 92.3%）** / druid 92.3% / jsql 68.1%
-  - jsqlparser-inline（3078）：**jkit 89.5%（第一）** / druid 71.1% / jsql 70.1%（目标 ≥90%，仍差约 4.0pp / ~123 条）
-  - jsqlparser-files（460）：**jkit 79.8%** / druid 81.5% / jsql 74.8%（目标 ≥90%，仍差约 11pp / ~50 条）
+  - druid-bvt-inline（6483）：**jkit 95.6%（已超 Druid 92.3%）** / druid 92.3% / jsql 68.1%
+  - jsqlparser-inline（3078）：**jkit 91.5%（已超 90%）** / druid 71.1% / jsql 70.1%
+  - jsqlparser-files（460）：**jkit 90.0%（已达目标）** / druid 81.5% / jsql 74.8%（jkitGaps=4）
   - jkitGaps 合计 956 → **455**（236+170+49；R7 479 → R8 455）
   - jkit 全程 0 超时；druid 1.2.23 仍有 2 条 PG `ANALYZE` 死循环（jstack 实锤，勿追）
 - 方言：一等枚举 6+1 → 11（新增 `DB2`/`SQLITE`/`HIVE`/`CLICKHOUSE`/`PRESTO`），行为全部走
@@ -397,6 +397,10 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
   MEMBER OF/ISNULL/GLOBAL IN、PREWHERE/SETTINGS/EMIT/PREFERRING、GROUP BY ()、流 WINDOW、
   OPTION、数组 SET、ON CONFLICT WHERE、REPLACE VIEW、TABLE WITH()、READ ONLY。
   gaps 455→378；**95.0 / 88.2 / 79.8**。
+- **R12**：Oracle MODEL（RULES ORDER / MEASURES 字面量别名 / WHERE 后）、MERGE DELETE|INSERT WHERE、
+  括号 PIVOT/UNPIVOT、`PARTITION BY` 外连接、`INSERT WHEN`、多 GROUPING SETS、SEARCH/CYCLE、
+  TABLE(SELECT)、interval qualifier、数值后缀、运算符夹注释、选择列表括号 UNION。
+  files gaps 44→4；**95.6 / 91.5 / 90.0**（三语料目标均达成或维持）。
 - R10：`$$` dollar-quote、GROUP BY (expr)、EMIT/LIMIT 序、数组切片、WITHIN GROUP PARTITION、
   CAST schema.type、ON CONFLICT≠链式ON、EXCLUDE、INSERT alias/OVERRIDING、OUTER JOIN、
   NOT ISNULL、SEPARATOR、FROM VALUES。gaps 378→339；**95.0 / 89.5 / 79.8**。

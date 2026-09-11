@@ -5,6 +5,15 @@
 ## 2.0.1 / unreleased
 
 ### jkit-sql
+- 覆盖率第十二轮：Oracle MODEL（RULES SEQUENTIAL ORDER、MEASURES 字面量别名、WHERE 后 MODEL）、
+  MERGE `UPDATE…DELETE WHERE` / `INSERT…WHERE`、括号内 PIVOT/UNPIVOT、分区外连接 `PARTITION BY`、
+  `INSERT WHEN`（无 ALL/FIRST）、多 `GROUPING SETS`、递归 CTE `SEARCH`/`CYCLE`、
+  `TABLE(SELECT…)`、`(expr) DAY(n) TO SECOND`、Oracle 数值后缀、运算符夹块注释、
+  选择列表括号集合运算。竞品率 **95.6 / 91.5 / 90.0**。
+
+## 2.0.1 / unreleased
+
+### jkit-sql
 - 覆盖率第十轮：修复 PG `$$…$$` dollar-quote（先于 IDENT 扫描）、GROUP BY 括号项、
   EMIT 置于 LIMIT 前、数组切片 `arr[1:3]`、WITHIN GROUP PARTITION、CAST schema.type、
   ON CONFLICT 勿被链式 ON 吞掉、EXCLUDE、INSERT 表别名/OVERRIDING/SET AS、
@@ -54,6 +63,16 @@
 ## 版本记录
 
 ## 2.0.1 - 2026-09-09
+
+### jkit-sql（R12 竞品覆盖）
+- Oracle MODEL：`RULES UPSERT SEQUENTIAL ORDER`、MEASURES `0 AS m` / 裸别名、WHERE 后 MODEL
+- MERGE：`WHEN MATCHED THEN UPDATE … DELETE WHERE`；`INSERT … VALUES … WHERE`
+- 表源：`((SELECT…) PIVOT/UNPIVOT …)`；`t PARTITION BY (expr)` 分区外连接；`TABLE(SELECT…)`
+- DML：`INSERT WHEN … THEN INTO`（无 ALL/FIRST）；递归 CTE `SEARCH DEPTH FIRST` / `CYCLE`
+- GROUP BY：多个 `GROUPING SETS(…), GROUPING SETS(…)`
+- 表达式：`(expr) DAY(9) TO SECOND`；选择列表 `((SELECT…) UNION …)`；`IS [NOT] OF TYPE`；`CURRENT OF`
+- 词法：Oracle `25f`/`0.5d`/`1.DM`；运算符中间夹块注释（caret 与等号之间）
+
 
 ### jkit-sql（R8 竞品覆盖）
 - 旧式 `*=` 外连接（乘法消歧）；`FOR KEY SHARE`/`NO KEY UPDATE`（KEY 为关键字）

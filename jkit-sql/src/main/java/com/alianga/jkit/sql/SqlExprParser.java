@@ -416,6 +416,20 @@ final class SqlExprParser {
                     left = SqlBinaryExpr.of(left,
                             not ? SqlBinaryOp.IS_NOT_DISTINCT_FROM : SqlBinaryOp.IS_DISTINCT_FROM,
                             parseBit());
+                } else if ((p.identLike() || (p.token.type() != null && p.token.type().keyword()))
+                        && p.token.textEqualsIgnoreCase("OF")) {
+                    // Oracle：expr IS [NOT] OF TYPE ( [ONLY] type )
+                    p.next(); // OF
+                    if (p.isIdent("TYPE") || (p.identLike() && p.token.textEqualsIgnoreCase("TYPE"))) {
+                        p.next();
+                    }
+                    SqlFunctionExpr of = new SqlFunctionExpr();
+                    of.setName(SqlIdentifier.of(not ? "IS NOT OF" : "IS OF"));
+                    of.addArgument(left);
+                    if (p.match(SqlTokenType.LPAREN)) {
+                        of.addArgument(SqlIdentifier.of(p.skipBalancedParensContent()));
+                    }
+                    left = of;
                 } else {
                     left = SqlBinaryExpr.of(left, not ? SqlBinaryOp.IS_NOT : SqlBinaryOp.IS, parseBit());
                 }
@@ -662,9 +676,19 @@ final class SqlExprParser {
         p.expect(SqlTokenType.LPAREN);
         SqlFunctionExpr fn = new SqlFunctionExpr();
         fn.setName(name);
-        fn.addArgument(p.parseName());
-        p.expect(SqlTokenType.FROM);
-        fn.addArgument(parseExpr());
+        // 标准：EXTRACT(YEAR FROM ts)；Oracle XML：EXTRACT(value(t), '/path')
+        SqlExpr first = parseExpr();
+        if (p.match(SqlTokenType.FROM)) {
+            fn.addArgument(first);
+            fn.addArgument(parseExpr());
+        } else if (p.match(SqlTokenType.COMMA)) {
+            fn.addArgument(first);
+            do {
+                fn.addArgument(parseExpr());
+            } while (p.match(SqlTokenType.COMMA));
+        } else {
+            fn.addArgument(first);
+        }
         p.expect(SqlTokenType.RPAREN);
         parseFunctionTail(fn);
         return fn;
@@ -934,7 +958,9 @@ final class SqlExprParser {
             return in;
         }
         p.expect(SqlTokenType.LPAREN);
-        if (p.isQueryStart()) {
+        // (SELECT…) / ((SELECT…) UNION …) 子查询；其余按值列表
+        if (p.isQueryStart() || p.is(SqlTokenType.WITH)
+                || (p.is(SqlTokenType.LPAREN) && lookingAtInSubquery())) {
             in.setSubquery(p.parseStatement());
         } else {
             List<SqlExpr> values = new ArrayList<SqlExpr>(4);
@@ -947,6 +973,76 @@ final class SqlExprParser {
         }
         p.expect(SqlTokenType.RPAREN);
         return in;
+    }
+
+    /** 括号内是否为 {@code (SELECT…) [UNION …]} 形集合运算子查询。 */
+    private boolean lookingAtParenSetQuery() {
+        if (!p.is(SqlTokenType.LPAREN)) {
+            return false;
+        }
+        int depth = 1;
+        boolean sawQuery = false;
+        for (int i = 0; i < 96; i++) {
+            SqlToken tok = p.lexer.lookahead(i);
+            if (tok == null || tok.type() == SqlTokenType.EOF) {
+                return false;
+            }
+            if (tok.type() == SqlTokenType.LPAREN) {
+                depth++;
+                continue;
+            }
+            if (tok.type() == SqlTokenType.RPAREN) {
+                depth--;
+                if (depth <= 0) {
+                    SqlToken next = p.lexer.lookahead(i + 1);
+                    return sawQuery && next != null && (next.type() == SqlTokenType.UNION
+                            || next.type() == SqlTokenType.INTERSECT
+                            || next.type() == SqlTokenType.EXCEPT
+                            || next.type() == SqlTokenType.MINUS);
+                }
+                continue;
+            }
+            if (tok.type() == SqlTokenType.SELECT || tok.type() == SqlTokenType.WITH
+                    || tok.type() == SqlTokenType.VALUES) {
+                sawQuery = true;
+            }
+        }
+        return false;
+    }
+
+    /** IN ( 后是否为括号包裹的集合运算/子查询。 */
+    private boolean lookingAtInSubquery() {
+        if (!p.is(SqlTokenType.LPAREN)) {
+            return false;
+        }
+        int depth = 1;
+        for (int i = 0; i < 64; i++) {
+            SqlToken tok = p.lexer.lookahead(i);
+            if (tok == null || tok.type() == SqlTokenType.EOF) {
+                return false;
+            }
+            if (tok.type() == SqlTokenType.LPAREN) {
+                depth++;
+                continue;
+            }
+            if (tok.type() == SqlTokenType.RPAREN) {
+                depth--;
+                if (depth <= 0) {
+                    // 闭合后再跟 UNION/INTERSECT/EXCEPT/MINUS → 集合运算子查询
+                    SqlToken next = p.lexer.lookahead(i + 1);
+                    return next != null && (next.type() == SqlTokenType.UNION
+                            || next.type() == SqlTokenType.INTERSECT
+                            || next.type() == SqlTokenType.EXCEPT
+                            || next.type() == SqlTokenType.MINUS);
+                }
+                continue;
+            }
+            if (depth == 1 && (tok.type() == SqlTokenType.SELECT || tok.type() == SqlTokenType.WITH
+                    || tok.type() == SqlTokenType.VALUES)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void parseMatchAgainst(SqlFunctionExpr fn) {
@@ -1254,7 +1350,32 @@ final class SqlExprParser {
             cast.setDataType(parseDataType());
             expr = cast;
         }
+        // Oracle：(expr) DAY(9) TO SECOND — 括号外 interval qualifier（需精度或 TO，避免吞别名）
+        if (isIntervalUnitToken() && lookingAtIntervalQualifier()) {
+            SqlFunctionExpr iv = new SqlFunctionExpr();
+            iv.setName(SqlIdentifier.of("INTERVAL"));
+            iv.addArgument(expr);
+            iv.addArgument(SqlIdentifier.of(consumeIntervalUnitRaw()));
+            if (p.match(SqlTokenType.TO) && isIntervalUnitToken()) {
+                iv.addArgument(SqlIdentifier.of("TO"));
+                iv.addArgument(SqlIdentifier.of(consumeIntervalUnitRaw()));
+            }
+            expr = iv;
+        }
         return expr;
+    }
+
+    /** 是否为 {@code DAY(n)} / {@code DAY TO SECOND} 形 interval qualifier（非裸别名）。 */
+    private boolean lookingAtIntervalQualifier() {
+        SqlToken peek = p.lexer.peek();
+        if (peek == null) {
+            return false;
+        }
+        if (peek.type() == SqlTokenType.LPAREN) {
+            return true;
+        }
+        return peek.type() == SqlTokenType.TO
+                || (peek.type() == SqlTokenType.IDENT && peek.textEqualsIgnoreCase("TO"));
     }
 
     /**
@@ -1406,8 +1527,17 @@ final class SqlExprParser {
             return SqlIdentifier.of(tn.toString());
         }
         // DB2 / 标准：CURRENT TIMESTAMP / CURRENT DATE / CURRENT TIME / CURRENT TIMEZONE
+        // Oracle 定位更新：CURRENT OF cursor
         if (p.is(SqlTokenType.CURRENT) || p.isIdent("CURRENT")) {
             SqlToken peeked = p.lexer.peek();
+            if (peeked != null && peeked.type() == SqlTokenType.OF) {
+                p.next();
+                p.next(); // OF
+                SqlFunctionExpr cur = new SqlFunctionExpr();
+                cur.setName(SqlIdentifier.of("CURRENT OF"));
+                cur.addArgument(p.parseName());
+                return cur;
+            }
             if (peeked != null && (peeked.type() == SqlTokenType.TIMESTAMP || peeked.type() == SqlTokenType.DATE
                     || peeked.type() == SqlTokenType.TIME || peeked.textEqualsIgnoreCase("TIMEZONE")
                     || peeked.textEqualsIgnoreCase("USER") || peeked.textEqualsIgnoreCase("SCHEMA"))) {
@@ -1438,8 +1568,10 @@ final class SqlExprParser {
             return fn;
         }
         if (p.match(SqlTokenType.LPAREN)) {
-            if (p.isQueryStart()) {
-                SqlQueryExpr q = SqlQueryExpr.of(p.parseStatement());
+            // (SELECT…) / ((SELECT…) UNION (SELECT…)) 作为标量子查询
+            if (p.isQueryStart() || p.is(SqlTokenType.WITH)
+                    || (p.is(SqlTokenType.LPAREN) && lookingAtParenSetQuery())) {
+                SqlQueryExpr q = SqlQueryExpr.of(p.selectParser.parseSelect());
                 p.expect(SqlTokenType.RPAREN);
                 return q;
             }

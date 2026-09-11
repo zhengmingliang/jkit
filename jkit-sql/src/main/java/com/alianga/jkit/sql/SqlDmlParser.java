@@ -234,6 +234,10 @@ final class SqlDmlParser {
         if (!replace && (p.is(SqlTokenType.ALL) || p.is(SqlTokenType.FIRST))) {
             return parseMultiInsert();
         }
+        // Oracle：INSERT WHEN … THEN INTO …（无 ALL/FIRST）
+        if (!replace && p.is(SqlTokenType.WHEN)) {
+            return parseMultiInsertBareWhen();
+        }
         p.match(SqlTokenType.INTO);
         // Hive / 部分引擎：INSERT INTO TABLE t
         if (p.match(SqlTokenType.TABLE)) {
@@ -351,7 +355,17 @@ final class SqlDmlParser {
                 SqlUpdate upd = new SqlUpdate();
                 p.expect(SqlTokenType.SET);
                 parseAssignList(upd.setList());
+                if (p.match(SqlTokenType.WHERE)) {
+                    upd.setWhere(p.exprParser.parseExpr());
+                }
                 when.setUpdate(upd);
+                // Oracle：WHEN MATCHED THEN UPDATE … DELETE WHERE …
+                if (p.match(SqlTokenType.DELETE)) {
+                    when.setDelete(true);
+                    if (p.match(SqlTokenType.WHERE)) {
+                        when.setDeleteWhere(p.exprParser.parseExpr());
+                    }
+                }
             } else if (p.match(SqlTokenType.INSERT)) {
                 SqlInsert ins = new SqlInsert();
                 p.match(SqlTokenType.INTO);
@@ -364,8 +378,15 @@ final class SqlDmlParser {
                 p.expect(SqlTokenType.VALUES);
                 parseValuesRows(ins);
                 when.setInsert(ins);
+                // Oracle：WHEN NOT MATCHED THEN INSERT … VALUES … WHERE …
+                if (p.match(SqlTokenType.WHERE)) {
+                    when.setInsertWhere(p.exprParser.parseExpr());
+                }
             } else if (p.match(SqlTokenType.DELETE)) {
                 when.setDelete(true);
+                if (p.match(SqlTokenType.WHERE)) {
+                    when.setDeleteWhere(p.exprParser.parseExpr());
+                }
             } else {
                 throw p.error("expected UPDATE, INSERT or DELETE after THEN");
             }
@@ -373,6 +394,15 @@ final class SqlDmlParser {
         }
         merge.setOutputInto(parseOutputClause(merge.output()));
         return merge;
+    }
+
+    /**
+     * Oracle {@code INSERT WHEN … THEN INTO …}（无 ALL/FIRST 关键字）。
+     */
+    private SqlInsert parseMultiInsertBareWhen() {
+        SqlInsert insert = new SqlInsert();
+        parseMultiInsertBranches(insert);
+        return insert;
     }
 
     /**
@@ -386,6 +416,11 @@ final class SqlDmlParser {
             p.expect(SqlTokenType.FIRST);
             insert.setInsertFirst(true);
         }
+        parseMultiInsertBranches(insert);
+        return insert;
+    }
+
+    private void parseMultiInsertBranches(SqlInsert insert) {
         while (p.is(SqlTokenType.WHEN) || p.is(SqlTokenType.INTO) || p.is(SqlTokenType.ELSE)) {
             SqlInsertBranch branch = new SqlInsertBranch();
             if (p.match(SqlTokenType.ELSE)) {
@@ -426,7 +461,6 @@ final class SqlDmlParser {
         } else {
             throw p.error("expected SELECT after INSERT ALL/FIRST branches");
         }
-        return insert;
     }
 
     private void parseOnConflictOrDuplicate(SqlInsert insert) {
@@ -589,6 +623,14 @@ final class SqlDmlParser {
     }
 
     private void parseValuesRows(SqlInsert insert) {
+        // Oracle：INSERT … VALUES trec（记录/对象构造，无括号）
+        if (!p.is(SqlTokenType.LPAREN)
+                && (p.identLike() || (p.token.type() != null && p.token.type().keyword()))) {
+            List<SqlExpr> row = new ArrayList<SqlExpr>(1);
+            row.add(p.exprParser.parseExpr());
+            insert.valuesList().add(row);
+            return;
+        }
         do {
             p.expect(SqlTokenType.LPAREN);
             List<SqlExpr> row = new ArrayList<SqlExpr>(4);

@@ -426,12 +426,62 @@ public final class SqlParser {
             expect(SqlTokenType.LPAREN);
             item.setQuery(parseStatement());
             expect(SqlTokenType.RPAREN);
+            // Oracle 递归 CTE：SEARCH DEPTH|BREADTH FIRST BY … SET col [CYCLE …]
+            if ((identLike() || (token.type() != null && token.type().keyword()))
+                    && token.textEqualsIgnoreCase("SEARCH")) {
+                item.setSearchClause(consumeSearchOrCycleClause("SEARCH"));
+            }
+            if ((identLike() || (token.type() != null && token.type().keyword()))
+                    && token.textEqualsIgnoreCase("CYCLE")) {
+                item.setCycleClause(consumeSearchOrCycleClause("CYCLE"));
+            }
             items.add(item);
         } while (match(SqlTokenType.COMMA));
+        // SEARCH/CYCLE 也可写在全部 CTE 之后（挂到最后一项）
+        if (!items.isEmpty()) {
+            SqlWithItem last = items.get(items.size() - 1);
+            if (last.searchClause() == null
+                    && (identLike() || (token.type() != null && token.type().keyword()))
+                    && token.textEqualsIgnoreCase("SEARCH")) {
+                last.setSearchClause(consumeSearchOrCycleClause("SEARCH"));
+            }
+            if (last.cycleClause() == null
+                    && (identLike() || (token.type() != null && token.type().keyword()))
+                    && token.textEqualsIgnoreCase("CYCLE")) {
+                last.setCycleClause(consumeSearchOrCycleClause("CYCLE"));
+            }
+        }
         SqlStatement body = parseStatementNoWith();
         body.setWithItems(items);
         body.setWithRecursive(recursive);
         return body;
+    }
+
+    /**
+     * 消费 Oracle {@code SEARCH …} / {@code CYCLE …} 原文，直到下一 CTE / 主查询关键字。
+     */
+    private String consumeSearchOrCycleClause(String lead) {
+        int start = token.start();
+        next(); // lead
+        while (!is(SqlTokenType.EOF) && !is(SqlTokenType.SEMICOLON)) {
+            if (is(SqlTokenType.SELECT) || is(SqlTokenType.WITH) || is(SqlTokenType.LPAREN)
+                    || is(SqlTokenType.INSERT) || is(SqlTokenType.UPDATE) || is(SqlTokenType.DELETE)
+                    || is(SqlTokenType.MERGE) || is(SqlTokenType.COMMA)) {
+                break;
+            }
+            // SEARCH 子句在 CYCLE 子句前结束（CYCLE 列名只出现在 CYCLE 子句内）
+            if ("SEARCH".equals(lead) && token.text() != null && token.textEqualsIgnoreCase("CYCLE")
+                    && (identLike() || (token.type() != null && token.type().keyword()))) {
+                break;
+            }
+            if (is(SqlTokenType.LPAREN)) {
+                next();
+                skipBalancedParensContent();
+                continue;
+            }
+            next();
+        }
+        return lexer.rawSlice(start, token.start()).trim();
     }
 
     /**

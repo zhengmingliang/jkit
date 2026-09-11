@@ -23,6 +23,8 @@ public final class SqlTable extends SqlTableSource {
     /** Oracle {@code MATCH_RECOGNIZE (...)} 结构化节点。 */
     private SqlMatchRecognize matchRecognize;
     private final List<SqlIdentifier> partitions = new ArrayList<SqlIdentifier>(2);
+    /** Oracle {@code PARTITION BY (expr,…)} 分区外连接原文（含括号）。 */
+    private String partitionBy;
 
     /**
      * @param name 表名
@@ -148,6 +150,24 @@ public final class SqlTable extends SqlTableSource {
      */
     public List<SqlIdentifier> partitions() {
         return partitions;
+    }
+
+    /**
+     * Oracle 分区外连接 {@code PARTITION BY (...)} 原文（含括号）。
+     *
+     * @return 原文，可空
+     * @since 2.0.1
+     */
+    public String partitionBy() {
+        return partitionBy;
+    }
+
+    /**
+     * @param partitionBy {@code PARTITION BY (...)} 原文
+     * @since 2.0.1
+     */
+    public void setPartitionBy(String partitionBy) {
+        this.partitionBy = partitionBy;
     }
 
     /**

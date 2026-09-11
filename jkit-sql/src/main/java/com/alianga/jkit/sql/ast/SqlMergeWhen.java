@@ -28,6 +28,10 @@ public final class SqlMergeWhen extends SqlNode {
     private SqlUpdate update;
     private SqlInsert insert;
     private boolean delete;
+    /** Oracle {@code UPDATE … DELETE WHERE pred}。 */
+    private SqlExpr deleteWhere;
+    /** Oracle {@code INSERT … VALUES … WHERE pred}。 */
+    private SqlExpr insertWhere;
 
     /**
      * @return 匹配种类
@@ -100,6 +104,42 @@ public final class SqlMergeWhen extends SqlNode {
     }
 
     /**
+     * Oracle {@code DELETE WHERE} 谓词（挂在 UPDATE 同 WHEN 内）。
+     *
+     * @return 谓词，可空
+     * @since 2.0.1
+     */
+    public SqlExpr deleteWhere() {
+        return deleteWhere;
+    }
+
+    /**
+     * @param deleteWhere {@code DELETE WHERE} 谓词
+     * @since 2.0.1
+     */
+    public void setDeleteWhere(SqlExpr deleteWhere) {
+        this.deleteWhere = deleteWhere;
+    }
+
+    /**
+     * Oracle {@code INSERT … WHERE} 谓词。
+     *
+     * @return 谓词，可空
+     * @since 2.0.1
+     */
+    public SqlExpr insertWhere() {
+        return insertWhere;
+    }
+
+    /**
+     * @param insertWhere {@code INSERT … WHERE} 谓词
+     * @since 2.0.1
+     */
+    public void setInsertWhere(SqlExpr insertWhere) {
+        this.insertWhere = insertWhere;
+    }
+
+    /**
      * {@inheritDoc}
      */
     @Override
@@ -107,5 +147,7 @@ public final class SqlMergeWhen extends SqlNode {
         child(visitor, andPredicate);
         child(visitor, update);
         child(visitor, insert);
+        child(visitor, deleteWhere);
+        child(visitor, insertWhere);
     }
 }

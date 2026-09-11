@@ -248,6 +248,14 @@ public final class SqlFormatter {
         out.append('(');
         writeNode(item.query());
         out.append(')');
+        if (item.searchClause() != null && item.searchClause().length() > 0) {
+            sp();
+            out.append(item.searchClause());
+        }
+        if (item.cycleClause() != null && item.cycleClause().length() > 0) {
+            sp();
+            out.append(item.cycleClause());
+        }
     }
 
     private void writeSelect(SqlSelect select) {
@@ -906,10 +914,32 @@ public final class SqlFormatter {
         sp();
         if (when.update() != null) {
             writeUpdate(when.update());
+            if (when.delete()) {
+                sp();
+                kw("DELETE");
+                if (when.deleteWhere() != null) {
+                    sp();
+                    kw("WHERE");
+                    sp();
+                    writeExpr(when.deleteWhere());
+                }
+            }
         } else if (when.insert() != null) {
             writeInsert(when.insert());
+            if (when.insertWhere() != null) {
+                sp();
+                kw("WHERE");
+                sp();
+                writeExpr(when.insertWhere());
+            }
         } else if (when.delete()) {
             kw("DELETE");
+            if (when.deleteWhere() != null) {
+                sp();
+                kw("WHERE");
+                sp();
+                writeExpr(when.deleteWhere());
+            }
         }
     }
 
@@ -1623,6 +1653,14 @@ public final class SqlFormatter {
                 out.append('(');
                 commaIdents(table.partitions());
                 out.append(')');
+            }
+            if (table.partitionBy() != null && table.partitionBy().length() > 0) {
+                sp();
+                kw("PARTITION");
+                sp();
+                kw("BY");
+                sp();
+                out.append(table.partitionBy());
             }
             if (table.indexHint() != null) {
                 sp();

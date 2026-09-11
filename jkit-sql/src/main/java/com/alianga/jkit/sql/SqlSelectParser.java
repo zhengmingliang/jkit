@@ -15,6 +15,7 @@ import com.alianga.jkit.sql.ast.SqlModelRule;
 import com.alianga.jkit.sql.ast.SqlNamedExpr;
 import com.alianga.jkit.sql.ast.SqlOrderByItem;
 import com.alianga.jkit.sql.ast.SqlPivotTable;
+import com.alianga.jkit.sql.ast.SqlQueryExpr;
 import com.alianga.jkit.sql.ast.SqlSelect;
 import com.alianga.jkit.sql.ast.SqlSelectItem;
 import com.alianga.jkit.sql.ast.SqlSubqueryTable;
@@ -481,6 +482,10 @@ final class SqlSelectParser {
                 select.setWhere(w);
             }
         }
+        // Oracle：MODEL 也可出现在 WHERE 之后（与层次查询并列位）
+        if (select.modelClause() == null && p.isIdent("MODEL")) {
+            select.setModelClause(parseModelClause());
+        }
         if (p.match(SqlTokenType.START)) {
             p.expect(SqlTokenType.WITH);
             select.setStartWith(p.exprParser.parseExpr());
@@ -505,14 +510,12 @@ final class SqlSelectParser {
             }
             if (p.is(SqlTokenType.GROUPING) || p.is(SqlTokenType.CUBE) || p.is(SqlTokenType.ROLLUP)) {
                 StringBuilder sb = new StringBuilder();
-                sb.append(p.token.text().toUpperCase());
-                p.next();
-                if (p.is(SqlTokenType.SETS)) {
-                    sb.append(' ').append(p.token.text().toUpperCase());
-                    p.next();
+                appendGroupingExtension(sb);
+                while (p.match(SqlTokenType.COMMA)
+                        && (p.is(SqlTokenType.GROUPING) || p.is(SqlTokenType.CUBE) || p.is(SqlTokenType.ROLLUP))) {
+                    sb.append(',');
+                    appendGroupingExtension(sb);
                 }
-                p.expect(SqlTokenType.LPAREN);
-                sb.append('(').append(p.skipBalancedParensContent()).append(')');
                 select.setGroupByExtension(sb.toString());
             } else if (p.is(SqlTokenType.LPAREN) && p.lexer.peek() != null
                     && p.lexer.peek().type() == SqlTokenType.RPAREN) {
@@ -666,6 +669,14 @@ final class SqlSelectParser {
             p.expect(SqlTokenType.SHARE);
             p.expect(SqlTokenType.MODE);
             select.setLockInShare(true);
+        }
+        // Oracle 偶见 FOR UPDATE 后再跟 ORDER BY
+        if (select.orderBy().isEmpty() && p.match(SqlTokenType.ORDER)) {
+            if (p.match(SqlTokenType.SIBLINGS)) {
+                select.setOrderSiblings(true);
+            }
+            p.expect(SqlTokenType.BY);
+            parseOrderBy(select.orderBy());
         }
         // SQL Server：OPTION (MAXRECURSION 100) 等查询提示
         if (p.token.textEqualsIgnoreCase("OPTION")
@@ -945,6 +956,12 @@ final class SqlSelectParser {
         if (!p.match(SqlTokenType.PARTITION)) {
             return;
         }
+        // Oracle 分区外连接：t PARTITION BY (expr, …)
+        if (p.match(SqlTokenType.BY)) {
+            p.expect(SqlTokenType.LPAREN);
+            table.setPartitionBy("(" + p.skipBalancedParensContent() + ")");
+            return;
+        }
         p.expect(SqlTokenType.LPAREN);
         do {
             table.partitions().add(p.parseName());
@@ -1199,6 +1216,10 @@ final class SqlSelectParser {
                 }
             }
             table.setSampleClause(sb.toString());
+            // Oracle：SAMPLE … 之后仍可有表别名
+            if (table.alias() == null) {
+                parseTableAlias(table);
+            }
         }
     }
 
@@ -1267,10 +1288,21 @@ final class SqlSelectParser {
             return inner;
         }
         boolean lateral = p.match(SqlTokenType.LATERAL);
-        // Oracle / SQL 标准：TABLE(fn(...))
+        // Oracle / SQL 标准：TABLE(fn(...)) / TABLE(SELECT …)
         if (p.is(SqlTokenType.TABLE) && p.lexer.peek().type() == SqlTokenType.LPAREN) {
             p.next();
             p.expect(SqlTokenType.LPAREN);
+            if (p.isQueryStart() || p.is(SqlTokenType.WITH)
+                    || (p.is(SqlTokenType.LPAREN) && lookingAtNestedParenQuery())) {
+                SqlFunctionTable ft = new SqlFunctionTable();
+                ft.setTableKeyword(true);
+                ft.setLateral(lateral);
+                ft.setFunction(SqlQueryExpr.of(p.parseStatement()));
+                p.expect(SqlTokenType.RPAREN);
+                parseTableAlias(ft);
+                parseFunctionTableWith(ft);
+                return ft;
+            }
             SqlFunctionTable ft = new SqlFunctionTable();
             ft.setTableKeyword(true);
             ft.setLateral(lateral);
@@ -1293,6 +1325,9 @@ final class SqlSelectParser {
                 source = sub;
                 if (isJoinStart()) {
                     source = parseJoinChain(source);
+                } else {
+                    // ((SELECT…) PIVOT/UNPIVOT …) — 括号内子查询后的透视
+                    source = parsePivotUnpivotChain(source);
                 }
             } else {
                 // (t) / ((t1 JOIN t2) JOIN t3) — 递归 JOIN，勿剥多层括号
@@ -1301,6 +1336,8 @@ final class SqlSelectParser {
                     throw p.error("LATERAL requires a subquery or table function");
                 }
                 source = parseJoinedTable();
+                // (t UNPIVOT …) / ((SELECT…) UNPIVOT …) 已由 join 链处理时再兜底
+                source = parsePivotUnpivotChain(source);
             }
             p.expect(SqlTokenType.RPAREN);
             parseTableAlias(source);
@@ -1709,23 +1746,26 @@ final class SqlSelectParser {
             } else if (p.isIdent("RULES")) {
                 p.next();
                 StringBuilder mods = new StringBuilder();
-                while (p.identLike() && !isModelSectionStart() && !isModelStop()) {
-                    String t = p.token.text().toUpperCase();
-                    if ("UPSERT".equals(t) || "UPDATE".equals(t) || "AUTOMATIC".equals(t)
-                            || "SEQUENTIAL".equals(t) || "ORDERED".equals(t) || "ITERATE".equals(t)
-                            || "UNTIL".equals(t)) {
-                        if (mods.length() > 0) {
-                            mods.append(' ');
-                        }
-                        mods.append(t);
-                        p.next();
-                        if ("ITERATE".equals(t) && p.match(SqlTokenType.LPAREN)) {
-                            mods.append('(').append(p.skipBalancedParensContent()).append(')');
-                        } else if ("UNTIL".equals(t) && p.match(SqlTokenType.LPAREN)) {
-                            mods.append('(').append(p.skipBalancedParensContent()).append(')');
-                        }
-                    } else {
+                // ORDER 是关键字且在 isModelStop 中，需单独放行 RULES … SEQUENTIAL ORDER
+                while (!p.is(SqlTokenType.EOF) && !p.is(SqlTokenType.SEMICOLON)
+                        && !p.is(SqlTokenType.LPAREN) && !isModelSectionStart()) {
+                    String t = p.token.text() == null ? "" : p.token.text().toUpperCase();
+                    boolean orderKw = p.is(SqlTokenType.ORDER) || "ORDER".equals(t) || "ORDERED".equals(t);
+                    boolean mod = "UPSERT".equals(t) || "UPDATE".equals(t) || "AUTOMATIC".equals(t)
+                            || "SEQUENTIAL".equals(t) || orderKw
+                            || "ITERATE".equals(t) || "UNTIL".equals(t);
+                    if (!mod) {
                         break;
+                    }
+                    if (mods.length() > 0) {
+                        mods.append(' ');
+                    }
+                    mods.append(orderKw ? "ORDER" : t);
+                    p.next();
+                    if ("ITERATE".equals(t) && p.match(SqlTokenType.LPAREN)) {
+                        mods.append('(').append(p.skipBalancedParensContent()).append(')');
+                    } else if ("UNTIL".equals(t) && p.match(SqlTokenType.LPAREN)) {
+                        mods.append('(').append(p.skipBalancedParensContent()).append(')');
                     }
                 }
                 if (mods.length() > 0) {
@@ -2025,21 +2065,49 @@ final class SqlSelectParser {
     private void parseModelExprList(List<SqlExpr> target) {
         boolean paren = p.match(SqlTokenType.LPAREN);
         do {
+            int start = p.token.start();
             SqlExpr expr = p.exprParser.parseExpr();
-            // MODEL MEASURES 允许裸别名（sale s）：仅当后续紧跟 COMMA/RPAREN 时才吸收，避免吃掉小节关键字
-            if (p.identLike() && expr instanceof SqlIdentifier) {
+            // MODEL MEASURES：expr [AS] alias（含字面量 0 AS m_1 / 0 csum / sale s）
+            boolean aliased = false;
+            if (p.match(SqlTokenType.AS)) {
+                if (p.identLike() || (p.token.type() != null && p.token.type().keyword())) {
+                    p.consumeIdentRaw();
+                    aliased = true;
+                }
+            } else if ((p.identLike() || (p.token.type() != null && p.token.type().keyword()))
+                    && !isModelSectionStart() && !isModelStop()) {
                 SqlToken peeked = p.lexer.peek();
                 if (peeked != null && (peeked.type() == SqlTokenType.COMMA
                         || peeked.type() == SqlTokenType.RPAREN)) {
-                    expr = SqlIdentifier.of(((SqlIdentifier) expr).qualifiedName()
-                            + " " + p.consumeIdentRaw());
+                    p.consumeIdentRaw();
+                    aliased = true;
                 }
+            }
+            if (aliased) {
+                expr = SqlIdentifier.of(p.lexer.rawSlice(start, p.token.start()).trim());
             }
             target.add(expr);
         } while (p.match(SqlTokenType.COMMA));
         if (paren) {
             p.expect(SqlTokenType.RPAREN);
         }
+    }
+
+    /** 追加一条 GROUPING SETS / CUBE / ROLLUP (…) 到扩展原文。 */
+    private void appendGroupingExtension(StringBuilder sb) {
+        if (sb.length() > 0 && sb.charAt(sb.length() - 1) != ',') {
+            sb.append(' ');
+        } else if (sb.length() > 0 && sb.charAt(sb.length() - 1) == ',') {
+            sb.append(' ');
+        }
+        sb.append(p.token.text().toUpperCase());
+        p.next();
+        if (p.is(SqlTokenType.SETS)) {
+            sb.append(' ').append(p.token.text().toUpperCase());
+            p.next();
+        }
+        p.expect(SqlTokenType.LPAREN);
+        sb.append('(').append(p.skipBalancedParensContent()).append(')');
     }
 
     private boolean isByPeek() {

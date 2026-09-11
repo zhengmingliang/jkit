@@ -544,15 +544,35 @@ public final class SqlLexer {
                 pos = save;
             }
         }
-        // MySQL：裸标识符可以数字开头，但不能整段只是数字。数字后紧跟字母/CJK/_/$ 时整段作 IDENT
-        //（保留 32 / 32.5 / 32e1 / 0xFF；反引号形式原本就可解析）。
+        // Oracle / Java 风格数值后缀：25f / 0.5d / 1.0F / 1D / 1.DM / .5M
+        if (pos < limit) {
+            char s = src[pos];
+            if (s == 'f' || s == 'F' || s == 'd' || s == 'D') {
+                pos++;
+                if (pos < limit && (src[pos] == 'm' || src[pos] == 'M')) {
+                    pos++;
+                }
+            } else if (seenDot && (s == 'm' || s == 'M')) {
+                pos++;
+            }
+        }
+        // MySQL：裸标识符可以数字开头（2nd_col）。单字母 f/d/m 留给后缀或下一记号（Oracle 1m 别名）。
         if (!seenDot && pos < limit && isIdentStart(src[pos])) {
+            int save = pos;
             while (pos < limit && isIdentPart(src[pos])) {
                 pos++;
             }
-            SqlTokenType type = SqlKeywords.lookup(src, tStart, pos - tStart);
-            token.set(type, src, tStart, pos, tLine, tCol);
-            return token;
+            if (pos - save == 1) {
+                char s = src[save];
+                if (s == 'f' || s == 'F' || s == 'd' || s == 'D' || s == 'm' || s == 'M') {
+                    pos = save;
+                }
+            }
+            if (pos > save) {
+                SqlTokenType type = SqlKeywords.lookup(src, tStart, pos - tStart);
+                token.set(type, src, tStart, pos, tLine, tCol);
+                return token;
+            }
         }
         token.set(SqlTokenType.NUMBER, src, tStart, pos, tLine, tCol);
         return token;
@@ -744,7 +764,7 @@ public final class SqlLexer {
         return false;
     }
 
-    /** 允许运算符中间夹空白：{@code > =} / {@code < >} / {@code | |} / {@code ! =} / {@code ^ =}。 */
+    /** 允许运算符中间夹空白与块注释、行注释。 */
     private boolean matchSkippingSpace(char expect) {
         int savePos = pos;
         int saveLine = line;
@@ -759,6 +779,29 @@ public final class SqlLexer {
                 pos++;
                 line++;
                 lineStart = pos;
+                continue;
+            }
+            // 块注释
+            if (ch == '/' && pos + 1 < limit && src[pos + 1] == '*') {
+                pos += 2;
+                while (pos + 1 < limit && !(src[pos] == '*' && src[pos + 1] == '/')) {
+                    if (src[pos] == '\n') {
+                        line++;
+                        lineStart = pos + 1;
+                    }
+                    pos++;
+                }
+                if (pos + 1 < limit) {
+                    pos += 2;
+                }
+                continue;
+            }
+            // 行注释
+            if (ch == '-' && pos + 1 < limit && src[pos + 1] == '-') {
+                pos += 2;
+                while (pos < limit && src[pos] != '\n') {
+                    pos++;
+                }
                 continue;
             }
             break;
@@ -965,7 +1008,31 @@ public final class SqlLexer {
                 return false; // .52e1 / .52E+10 等纯小数
             }
         }
+        // .5M / .5d / .5DM 是 Oracle 数值后缀，不是 t.1_id 形标识符
+        if (p < limit && isIdentStart(src[p]) && isOracleNumericSuffixAt(p)) {
+            return false;
+        }
         return p < limit && isIdentStart(src[p]);
+    }
+
+    /** Oracle 数值字面量后缀起点：f/F/d/D/m/M 及 dm/DM。 */
+    private boolean isOracleNumericSuffixAt(int at) {
+        if (at >= limit) {
+            return false;
+        }
+        char s = src[at];
+        int p = at;
+        if (s == 'f' || s == 'F' || s == 'd' || s == 'D') {
+            p++;
+            if (p < limit && (src[p] == 'm' || src[p] == 'M')) {
+                p++;
+            }
+        } else if (s == 'm' || s == 'M') {
+            p++;
+        } else {
+            return false;
+        }
+        return p >= limit || !isIdentPart(src[p]);
     }
 
     private boolean isIdentStart(char c) {
