@@ -1,6 +1,6 @@
 package com.alianga.jkit.sql.schema.rewrite;
 
-import com.alianga.jkit.sql.SqlDialect;
+import com.alianga.jkit.sql.SqlDialectSpec;
 import com.alianga.jkit.sql.ast.SqlExpr;
 import com.alianga.jkit.sql.ast.SqlFunctionExpr;
 import com.alianga.jkit.sql.schema.convert.ConversionReport;
@@ -21,6 +21,6 @@ public interface FunctionRewriteRule {
      * @param report 报告
      * @return 新节点；null 表示不处理
      */
-    SqlExpr rewrite(SqlFunctionExpr fn, SqlDialect source, SqlDialect target,
+    SqlExpr rewrite(SqlFunctionExpr fn, SqlDialectSpec source, SqlDialectSpec target,
                     ConversionReport.Builder report);
 }

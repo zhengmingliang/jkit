@@ -449,7 +449,7 @@ mvn -Dtest=LocalDatasourceConvertTest test     # 读 src/test/resources/datasour
 java -jar target/benchmarks.jar com.alianga.test.sql.jmh.SqlSchemaConvertBenchmark -f 1 -wi 1 -i 1
 ```
 
-当前 12 个一等方言（MySQL / PostgreSQL / Oracle 11g 与 12c / SQL Server / H2 / ANSI / DB2 / SQLite / Hive / ClickHouse / Presto）及 `fromName` 产品别名（达梦、Gauss、GBase、TiDB…）见 [sql-schema-converter-design.md 第四节](./sql-schema-converter-design.md)。任意两个一等方言可互为转换两端。
+当前 12 个一等方言见 [设计文档第四节](./sql-schema-converter-design.md)。**新产品不必改 `SqlDialect` 枚举**：实现 `SqlDialectSpec`（或 `SqlDialectWrapper`），用 `typeFamily()` 复用内置类型表，用 `dialectId()` + SPI 覆盖个别写法。`SQL.convert` / `SQL.parse` 都吃 `SqlDialectSpec`。
 
 `ConversionResult.sqlWithExtras()` 含附录 `CREATE INDEX` / Oracle SEQUENCE。`DATE_FORMAT` 经函数 SPI 改为 `TO_CHAR`。函数也可 `SqlSchemaConverterProvider.registerFunctions`。`VARCHAR` 超长默认提升为 TEXT/CLOB。
 

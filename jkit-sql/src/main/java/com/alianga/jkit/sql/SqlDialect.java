@@ -157,6 +157,22 @@ public enum SqlDialect implements SqlDialectSpec {
     }
 
     /**
+     * {@inheritDoc}
+     */
+    @Override
+    public String dialectId() {
+        return name();
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public SqlDialect typeFamily() {
+        return this;
+    }
+
+    /**
      * @return 标识符左引号
      */
     public char identQuoteOpen() {

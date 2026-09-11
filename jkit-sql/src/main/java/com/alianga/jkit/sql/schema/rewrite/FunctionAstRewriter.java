@@ -1,6 +1,7 @@
 package com.alianga.jkit.sql.schema.rewrite;
 
 import com.alianga.jkit.sql.SqlDialect;
+import com.alianga.jkit.sql.SqlDialectSpec;
 import com.alianga.jkit.sql.ast.SqlBetweenExpr;
 import com.alianga.jkit.sql.ast.SqlBinaryExpr;
 import com.alianga.jkit.sql.ast.SqlBinaryOp;
@@ -45,24 +46,32 @@ public final class FunctionAstRewriter {
      * @param target 目标方言
      * @param report 报告
      */
-    public static void rewrite(SqlStatement stmt, SqlDialect source, SqlDialect target,
+    public static void rewrite(SqlStatement stmt, SqlDialectSpec source, SqlDialectSpec target,
                                ConversionReport.Builder report) {
-        if (stmt == null || source == target) {
+        if (stmt == null || source == null || target == null) {
+            return;
+        }
+        if (source.dialectId() != null && source.dialectId().equals(target.dialectId())
+                && source.typeFamily() == target.typeFamily()) {
             return;
         }
         stmt.accept(new Visitor(source, target, report));
     }
 
     private static final class Visitor extends SqlAstVisitor {
-        private final SqlDialect source;
-        private final SqlDialect target;
+        private final SqlDialectSpec source;
+        private final SqlDialectSpec target;
         private final ConversionReport.Builder report;
         private final SqlDataTypeRegistry types = SqlDataTypeRegistry.builtins();
 
-        Visitor(SqlDialect source, SqlDialect target, ConversionReport.Builder report) {
+        Visitor(SqlDialectSpec source, SqlDialectSpec target, ConversionReport.Builder report) {
             this.source = source;
             this.target = target;
             this.report = report;
+        }
+
+        private SqlDialect family() {
+            return target.typeFamily();
         }
 
         /**
@@ -208,27 +217,27 @@ public final class FunctionAstRewriter {
                 }
             }
             if (fn.usingCharset()) {
-                if (target != SqlDialect.MYSQL) {
+                if (family() != SqlDialect.MYSQL) {
                     report.warn(ConversionWarning.Severity.SEMANTIC_RISK, name,
                             "CONVERT(expr USING charset) 与 CAST 语义不同，已保留原文");
                 }
                 return fn;
             }
-            if ("IF".equals(name) && args.size() >= 3 && target != SqlDialect.MYSQL) {
+            if ("IF".equals(name) && args.size() >= 3 && family() != SqlDialect.MYSQL) {
                 SqlCaseExpr cse = new SqlCaseExpr();
                 cse.addWhenThen(args.get(0), args.get(1));
                 cse.setElseExpr(args.get(2));
                 return cse;
             }
-            if ("NOW".equals(name) && target != SqlDialect.MYSQL) {
+            if ("NOW".equals(name) && family() != SqlDialect.MYSQL) {
                 fn.setName(SqlIdentifier.of("CURRENT_TIMESTAMP"));
                 return fn;
             }
-            if ("CURDATE".equals(name) && target != SqlDialect.MYSQL) {
+            if ("CURDATE".equals(name) && family() != SqlDialect.MYSQL) {
                 fn.setName(SqlIdentifier.of("CURRENT_DATE"));
                 return fn;
             }
-            if ("CURTIME".equals(name) && target != SqlDialect.MYSQL) {
+            if ("CURTIME".equals(name) && family() != SqlDialect.MYSQL) {
                 fn.setName(SqlIdentifier.of("CURRENT_TIME"));
                 return fn;
             }
@@ -265,7 +274,7 @@ public final class FunctionAstRewriter {
         }
 
         private SqlExpr rewriteLocate(SqlFunctionExpr fn) {
-            switch (target) {
+            switch (family()) {
                 case MYSQL:
                 case H2:
                 case HIVE:
@@ -285,13 +294,13 @@ public final class FunctionAstRewriter {
         }
 
         private SqlExpr rewriteInstr(SqlFunctionExpr fn) {
-            if (target == SqlDialect.ORACLE || target == SqlDialect.ORACLE12) {
+            if (family() == SqlDialect.ORACLE || family() == SqlDialect.ORACLE12) {
                 return fn;
             }
             swapFirstTwo(fn);
-            if (target == SqlDialect.SQLSERVER) {
+            if (family() == SqlDialect.SQLSERVER) {
                 fn.setName(SqlIdentifier.of("CHARINDEX"));
-            } else if (target == SqlDialect.MYSQL || target == SqlDialect.H2) {
+            } else if (family() == SqlDialect.MYSQL || family() == SqlDialect.H2) {
                 fn.setName(SqlIdentifier.of("LOCATE"));
             } else {
                 fn.setName(SqlIdentifier.of("POSITION"));
@@ -300,15 +309,15 @@ public final class FunctionAstRewriter {
         }
 
         private SqlExpr rewriteCharIndex(SqlFunctionExpr fn) {
-            if (target == SqlDialect.SQLSERVER) {
+            if (family() == SqlDialect.SQLSERVER) {
                 return fn;
             }
-            if (target == SqlDialect.ORACLE || target == SqlDialect.ORACLE12) {
+            if (family() == SqlDialect.ORACLE || family() == SqlDialect.ORACLE12) {
                 swapFirstTwo(fn);
                 fn.setName(SqlIdentifier.of("INSTR"));
                 return fn;
             }
-            if (target == SqlDialect.MYSQL || target == SqlDialect.H2) {
+            if (family() == SqlDialect.MYSQL || family() == SqlDialect.H2) {
                 fn.setName(SqlIdentifier.of("LOCATE"));
                 return fn;
             }
@@ -317,7 +326,7 @@ public final class FunctionAstRewriter {
         }
 
         private SqlExpr rewriteLength(SqlFunctionExpr fn) {
-            if (target == SqlDialect.SQLSERVER) {
+            if (family() == SqlDialect.SQLSERVER) {
                 fn.setName(SqlIdentifier.of("LEN"));
             } else {
                 fn.setName(SqlIdentifier.of("LENGTH"));
@@ -326,9 +335,9 @@ public final class FunctionAstRewriter {
         }
 
         private SqlExpr rewriteSubstr(SqlFunctionExpr fn, String name) {
-            if (target == SqlDialect.ORACLE || target == SqlDialect.ORACLE12) {
+            if (family() == SqlDialect.ORACLE || family() == SqlDialect.ORACLE12) {
                 fn.setName(SqlIdentifier.of("SUBSTR"));
-            } else if ("SUBSTR".equals(name) && target == SqlDialect.SQLSERVER) {
+            } else if ("SUBSTR".equals(name) && family() == SqlDialect.SQLSERVER) {
                 fn.setName(SqlIdentifier.of("SUBSTRING"));
             }
             return fn;
@@ -345,7 +354,7 @@ public final class FunctionAstRewriter {
         }
 
         private SqlExpr rewriteNullCoalesce(SqlFunctionExpr fn, String name) {
-            String want = coalesceName(target);
+            String want = coalesceName(family());
             if (want.equals(name)) {
                 return fn;
             }
@@ -377,7 +386,7 @@ public final class FunctionAstRewriter {
             if (sep == null) {
                 sep = SqlLiteral.of(SqlLiteral.Kind.STRING, ",");
             }
-            switch (target) {
+            switch (family()) {
                 case MYSQL:
                 case H2:
                     fn.setName(SqlIdentifier.of("GROUP_CONCAT"));
@@ -427,7 +436,7 @@ public final class FunctionAstRewriter {
 
         private SqlExpr rewriteConcat(SqlFunctionExpr fn) {
             List<SqlExpr> args = fn.arguments();
-            if ((target == SqlDialect.ORACLE || target == SqlDialect.ORACLE12) && args.size() > 2) {
+            if ((family() == SqlDialect.ORACLE || family() == SqlDialect.ORACLE12) && args.size() > 2) {
                 SqlExpr acc = args.get(0);
                 for (int i = 1; i < args.size(); i++) {
                     SqlBinaryExpr bin = new SqlBinaryExpr();
@@ -445,7 +454,7 @@ public final class FunctionAstRewriter {
             List<SqlExpr> args = fn.arguments();
             SqlExpr value;
             String type;
-            if (source == SqlDialect.SQLSERVER) {
+            if (source.typeFamily() == SqlDialect.SQLSERVER) {
                 type = typeText(args.get(0));
                 value = args.get(1);
             } else {

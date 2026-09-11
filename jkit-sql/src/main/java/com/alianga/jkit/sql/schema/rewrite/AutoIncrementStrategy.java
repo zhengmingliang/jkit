@@ -1,6 +1,7 @@
 package com.alianga.jkit.sql.schema.rewrite;
 
 import com.alianga.jkit.sql.SqlDialect;
+import com.alianga.jkit.sql.SqlDialectSpec;
 import com.alianga.jkit.sql.schema.convert.ConversionReport;
 import com.alianga.jkit.sql.schema.convert.ConversionWarning;
 import com.alianga.jkit.sql.schema.convert.SqlSchemaConvertOptions;
@@ -63,13 +64,14 @@ public final class AutoIncrementStrategy {
      * @return 改写结果
      */
     public static Result apply(ColumnConstraint.AutoIncrement auto, CanonicalType type,
-                               String columnName, SqlDialect target,
+                               String columnName, SqlDialectSpec target,
                                SqlSchemaConvertOptions options, ConversionReport.Builder report) {
         if (auto == null) {
             return new Result(null, null, false);
         }
         String loc = columnName == null ? "" : columnName;
-        switch (target) {
+        SqlDialect family = target == null ? SqlDialect.MYSQL : target.typeFamily();
+        switch (family) {
             case MYSQL:
             case H2:
                 return new Result("AUTO_INCREMENT", null, false);

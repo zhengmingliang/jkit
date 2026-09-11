@@ -1,6 +1,7 @@
 package com.alianga.jkit.sql.schema.rewrite;
 
 import com.alianga.jkit.sql.SqlDialect;
+import com.alianga.jkit.sql.SqlDialectSpec;
 import com.alianga.jkit.sql.ast.SqlExpr;
 import com.alianga.jkit.sql.ast.SqlLiteral;
 import com.alianga.jkit.sql.schema.model.CanonicalType;
@@ -24,6 +25,18 @@ public final class DefaultValueCoercer {
      * @param to 目标 canonical
      * @param target 目标方言
      * @return 改写后的表达式；无需改写时返回 original
+     */
+    public static SqlExpr coerce(SqlExpr original, CanonicalType from, CanonicalType to,
+                                 SqlDialectSpec target) {
+        return coerce(original, from, to, target == null ? SqlDialect.MYSQL : target.typeFamily());
+    }
+
+    /**
+     * @param original 原默认值
+     * @param from 源 canonical
+     * @param to 目标 canonical
+     * @param target 目标方言
+     * @return 改写后的表达式
      */
     public static SqlExpr coerce(SqlExpr original, CanonicalType from, CanonicalType to,
                                  SqlDialect target) {
@@ -61,6 +74,16 @@ public final class DefaultValueCoercer {
      * @param rawText 原文兜底
      * @param target 目标方言
      * @return 文本
+     */
+    public static String render(SqlExpr expr, String rawText, SqlDialectSpec target) {
+        return render(expr, rawText, target == null ? SqlDialect.MYSQL : target.typeFamily());
+    }
+
+    /**
+     * @param expr 表达式
+     * @param rawText 原文
+     * @param target 目标方言
+     * @return DDL 片段
      */
     public static String render(SqlExpr expr, String rawText, SqlDialect target) {
         if (expr instanceof SqlLiteral) {

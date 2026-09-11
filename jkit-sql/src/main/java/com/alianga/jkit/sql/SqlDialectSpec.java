@@ -170,4 +170,29 @@ public interface SqlDialectSpec {
         }
         return "LIMIT";
     }
+
+    /**
+     * 方言稳定 id，类型表 / SPI 按此登记。内置枚举为 {@link SqlDialect#name()}。
+     *
+     * <p>自定义方言请返回自己的 id（如 {@code gauss-lite}）；若只想复用某内置类型表、
+     * 不单独登记写法，保持与 {@link #typeFamily()}{@code .name()} 相同即可。</p>
+     *
+     * @return 非空 id
+     */
+    default String dialectId() {
+        return typeFamily().name();
+    }
+
+    /**
+     * 类型 / 自增 / 函数改写所复用的内置方言。
+     *
+     * <p>新增产品不必改 {@link SqlDialect} 枚举：实现本接口（或包一层
+     * {@link SqlDialectWrapper}），这里返回最接近的内置方言（如达梦→{@link SqlDialect#ORACLE}）。
+     * 仅当类型写法和内置都不一样时，再用 SPI 按 {@link #dialectId()} 覆盖个别 canonical。</p>
+     *
+     * @return 内置类型族，默认 {@link SqlDialect#ANSI}
+     */
+    default SqlDialect typeFamily() {
+        return SqlDialect.ANSI;
+    }
 }

@@ -215,7 +215,7 @@ SQL.convert(sql, SqlDialect.fromName("dm"), SqlDialect.MYSQL);
 | 覆盖某方言已有写法（如把 PG 的 `JSON` 改成 `JSON` 而不是 `JSONB`） | `register` + 必要时 `LossyMapping` | 能 |
 | 两个 canonical 在目标方言写成同一个字面量 | 必须 `registerLossyMapping` | 能 |
 | 新增一种**语义类型**（如 UUID、INTERVAL） | `CanonicalType` 枚举 + **全部 12 个方言**的写法 | 不能，要改本模块 |
-| 新增一种**数据库**（如在枚举里加一条） | `SqlDialect` + 类型表 + 自增 + 解析/分页能力 | 不能，要改本模块 |
+| 新增一种**数据库** | 实现 {@code SqlDialectSpec}（或包 {@code SqlDialectWrapper}），不必改 {@code SqlDialect} 枚举 | 类型复用 {@code typeFamily()}；个别写法按 {@code dialectId()} SPI 覆盖 |
 | 新增/改函数转换（`DATE_FORMAT`、`IF`…） | `FunctionAstRewriter` | **不能**（SPI 目前只接类型表） |
 
 插件不能发明新的 `CanonicalType`。`UNKNOWN` 表示「识别不了，保留原文」。
@@ -301,24 +301,45 @@ mvn -pl jkit-sql -Dtest=RegistryValidationTest,SqlDataTypeRegistryTest test
 
 ---
 
-### 9.3 新增一种数据库（改本模块）
+### 9.3 新增一种数据库（实现 `SqlDialectSpec`，不必改枚举）
 
-「GBase 当 MySQL」这种**别名**已经在 `SqlDialect.fromName` 里（`gbase`→`MYSQL`，`dm`→`ORACLE`，`gaussdb`→`POSTGRES`）。只有分页/引号/类型三者都对不齐时才值得加新枚举。
+`SqlDialectSpec` 就是外部扩展点。解析、分页、format、`SQL.convert` 全链路吃规约，**不要为新产品去改 `SqlDialect` 枚举**（除非它会成为全仓库一等公民，并愿意维护 12×canonical 全表）。
 
-清单（漏一项就会在解析、转换或 format 上 silently 错）：
+达梦 / openGauss / GBase 若只是「和某内置方言同一套类型」，用 `fromName` 别名或下面的 `typeFamily()` 即可。
 
-1. **`SqlDialect` 新常量**，并实现/沿用 `SqlDialectSpec`（引号、`||` 语义、LIMIT/TOP/FETCH/ROWNUM）。
-2. **`SqlDialect.fromName`** 加上常见别名。
-3. **`SqlDataTypeRegistryBuiltins`**：每个 `CanonicalType` 一行该方言写法（改 `put(...)` 的参数列表或单独 `register`）。
-4. 多对一写法 → `registerLossy`。
-5. **`AutoIncrementStrategy`**：`switch (target)` 增加分支；没有自增就告警 `MANUAL_ACTION_REQUIRED`，禁止静默丢掉。
-6. **`DefaultValueCoercer.nativeBoolean`**：该方言布尔是 `true/false` 还是 `0/1`。
-7. **列解析**：自增关键字（`IDENTITY` / `AUTO_INCREMENT` / `SERIAL`）是否要在 `SqlColumnDefinitionParser` 里认。
-8. **函数**：`FunctionAstRewriter` 里目标方言分支（见 9.4）。
-9. **表选项**：`supportsMysqlTableOptions` / 列 charset 是否保留。
-10. 测试：该方言 × 全部 canonical 的 roundtrip；至少一条 `CREATE TABLE` 黄金语料；能连真库的话接到 `LocalDatasourceConvertTest` 一类测试。
+```java
+// 1) 接近 PostgreSQL：包装后只改能力，类型表自动复用 POSTGRES
+SqlDialectSpec gaussLite = new SqlDialectWrapper(SqlDialect.POSTGRES) {
+    @Override
+    public String dialectId() { return "gauss-lite"; } // 若要单独登记类型才改 id
+};
 
-达梦走 `ORACLE`、openGauss 走 `POSTGRES`、GBase8a 走 `MYSQL`：优先加 `fromName` 别名，不要复制一整套类型表。
+// 2) 全新实现：引号/分页自己定，类型族复用 MySQL
+SqlDialectSpec myDb = new SqlDialectSpec() {
+    @Override public String dialectId() { return "mydb"; }
+    @Override public SqlDialect typeFamily() { return SqlDialect.MYSQL; }
+    @Override public char identQuoteOpen() { return '`'; }
+};
+
+SQL.parse(sql, myDb);
+SQL.convert(mysqlDdl, SqlDialect.MYSQL, myDb);
+```
+
+| 方法 | 作用 |
+|---|---|
+| `dialectId()` | SPI / 类型表主键。默认等于 `typeFamily().name()` |
+| `typeFamily()` | 自增、函数改写、未单独登记的类型，复用哪个内置方言。默认 `ANSI` |
+
+类型写法和内置不一致时，SPI 按 **id** 覆盖（不必填满全部 canonical，缺的回落 `typeFamily()`）：
+
+```java
+public void registerTypes(SqlDataTypeRegistry registry) {
+    registry.register(CanonicalType.INT, "mydb", DialectTypeForm.of("INT32"));
+    registry.register(CanonicalType.VARCHAR, "mydb", DialectTypeForm.of("TEXT(%d)"));
+}
+```
+
+只有这些情况才考虑改枚举：要进 `SqlDialect.values()` 的 CI 全表校验、或成为 `fromName` 的默认一等方言。
 
 ---
 

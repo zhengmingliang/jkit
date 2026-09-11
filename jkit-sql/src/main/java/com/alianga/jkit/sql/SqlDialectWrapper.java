@@ -119,4 +119,14 @@ public class SqlDialectWrapper implements SqlDialectSpec {
     public String preferredLimitStyle() {
         return base.preferredLimitStyle();
     }
+
+    @Override
+    public String dialectId() {
+        return base.dialectId();
+    }
+
+    @Override
+    public SqlDialect typeFamily() {
+        return base.typeFamily();
+    }
 }

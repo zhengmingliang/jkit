@@ -2,6 +2,7 @@ package com.alianga.jkit.sql.schema.parse;
 
 import com.alianga.jkit.sql.SQL;
 import com.alianga.jkit.sql.SqlDialect;
+import com.alianga.jkit.sql.SqlDialectSpec;
 import com.alianga.jkit.sql.SqlLexer;
 import com.alianga.jkit.sql.SqlParseException;
 import com.alianga.jkit.sql.SqlToken;
@@ -41,8 +42,8 @@ public final class SqlColumnDefinitionParser {
      * @param dialect 方言，null 视为 MySQL
      * @return 结构化结果，永不 null
      */
-    public static ColumnDefinition parse(String rawDefinition, SqlDialect dialect) {
-        SqlDialect d = dialect == null ? SqlDialect.MYSQL : dialect;
+    public static ColumnDefinition parse(String rawDefinition, SqlDialectSpec dialect) {
+        SqlDialectSpec d = dialect == null ? SqlDialect.MYSQL : dialect;
         if (rawDefinition == null) {
             return unknownColumn("", "");
         }
@@ -50,7 +51,7 @@ public final class SqlColumnDefinitionParser {
         if (raw.isEmpty()) {
             return unknownColumn("", raw);
         }
-        String cacheKey = d.name() + '\0' + raw;
+        String cacheKey = d.dialectId() + '\0' + raw;
         ColumnDefinition cached = CACHE.get(cacheKey);
         if (cached != null) {
             return cached;
@@ -74,7 +75,7 @@ public final class SqlColumnDefinitionParser {
      * @param dialect 方言
      * @return 结构化列表
      */
-    public static List<ColumnDefinition> parseAll(List<String> rawDefinitions, SqlDialect dialect) {
+    public static List<ColumnDefinition> parseAll(List<String> rawDefinitions, SqlDialectSpec dialect) {
         if (rawDefinitions == null || rawDefinitions.isEmpty()) {
             return new ArrayList<ColumnDefinition>(0);
         }
@@ -92,7 +93,7 @@ public final class SqlColumnDefinitionParser {
      * @param dialect 方言
      * @return 结构化列表，ddl 为空时为空列表
      */
-    public static List<ColumnDefinition> fromDdl(SqlDdlStatement ddl, SqlDialect dialect) {
+    public static List<ColumnDefinition> fromDdl(SqlDdlStatement ddl, SqlDialectSpec dialect) {
         if (ddl == null) {
             return new ArrayList<ColumnDefinition>(0);
         }
@@ -115,14 +116,14 @@ public final class SqlColumnDefinitionParser {
 
     private static final class Parser {
         private final String raw;
-        private final SqlDialect dialect;
+        private final SqlDialectSpec dialect;
         private final SqlLexer lexer;
         private SqlTokenType type;
         private String text;
         private int start;
         private boolean eof;
 
-        Parser(String raw, SqlDialect dialect) {
+        Parser(String raw, SqlDialectSpec dialect) {
             this.raw = raw;
             this.dialect = dialect;
             this.lexer = new SqlLexer();

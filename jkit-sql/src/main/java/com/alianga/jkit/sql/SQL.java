@@ -122,6 +122,19 @@ public final class SQL {
      * @since 2.0.1
      */
     public static String convert(String sql, SqlDialect source, SqlDialect target) {
+        return convert(sql, (SqlDialectSpec) source, target);
+    }
+
+    /**
+     * 跨方言转换（自定义方言实现 {@link SqlDialectSpec} 即可，不必改枚举）。
+     *
+     * @param sql 源 SQL
+     * @param source 源方言
+     * @param target 目标方言
+     * @return 目标 SQL
+     * @since 2.0.1
+     */
+    public static String convert(String sql, SqlDialectSpec source, SqlDialectSpec target) {
         return SqlSchemaConverter.convert(sql, source, target).sql();
     }
 
@@ -137,6 +150,19 @@ public final class SQL {
      */
     public static ConversionResult convert(String sql, SqlDialect source, SqlDialect target,
                                            SqlSchemaConvertOptions options) {
+        return convert(sql, (SqlDialectSpec) source, target, options);
+    }
+
+    /**
+     * @param sql 源 SQL
+     * @param source 源方言规约
+     * @param target 目标方言规约
+     * @param options 选项
+     * @return 转换结果
+     * @since 2.0.1
+     */
+    public static ConversionResult convert(String sql, SqlDialectSpec source, SqlDialectSpec target,
+                                           SqlSchemaConvertOptions options) {
         return SqlSchemaConverter.convert(sql, source, target, options);
     }
 
@@ -151,6 +177,18 @@ public final class SQL {
      */
     public static List<ConversionResult> convertBatch(List<String> sqls, SqlDialect source,
                                                       SqlDialect target) {
+        return convertBatch(sqls, (SqlDialectSpec) source, target);
+    }
+
+    /**
+     * @param sqls 源 SQL
+     * @param source 源方言规约
+     * @param target 目标方言规约
+     * @return 结果列表
+     * @since 2.0.1
+     */
+    public static List<ConversionResult> convertBatch(List<String> sqls, SqlDialectSpec source,
+                                                      SqlDialectSpec target) {
         return SqlSchemaConverter.convertBatch(sqls, source, target, SqlSchemaConvertOptions.defaults());
     }
 

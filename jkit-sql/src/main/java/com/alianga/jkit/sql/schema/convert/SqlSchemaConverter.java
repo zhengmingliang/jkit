@@ -2,6 +2,7 @@ package com.alianga.jkit.sql.schema.convert;
 
 import com.alianga.jkit.sql.SQL;
 import com.alianga.jkit.sql.SqlDialect;
+import com.alianga.jkit.sql.SqlDialectSpec;
 import com.alianga.jkit.sql.ast.SqlDdlStatement;
 import com.alianga.jkit.sql.ast.SqlStatement;
 import com.alianga.jkit.sql.ast.SqlStatementType;
@@ -41,15 +42,27 @@ public final class SqlSchemaConverter {
      * @param options 选项
      * @return 转换结果
      */
-    public static ConversionResult convert(String sql, SqlDialect source, SqlDialect target,
+    public static ConversionResult convert(String sql, SqlDialectSpec source, SqlDialectSpec target) {
+        return convert(sql, source, target, SqlSchemaConvertOptions.defaults());
+    }
+
+    /**
+     * @param sql 源 SQL
+     * @param source 源方言（枚举或自定义 {@link SqlDialectSpec}）
+     * @param target 目标方言
+     * @param options 选项
+     * @return 转换结果
+     */
+    public static ConversionResult convert(String sql, SqlDialectSpec source, SqlDialectSpec target,
                                            SqlSchemaConvertOptions options) {
-        SqlDialect src = source == null ? SqlDialect.MYSQL : source;
-        SqlDialect dst = target == null ? SqlDialect.MYSQL : target;
+        SqlDialectSpec src = source == null ? SqlDialect.MYSQL : source;
+        SqlDialectSpec dst = target == null ? SqlDialect.MYSQL : target;
         SqlSchemaConvertOptions opt = options == null ? SqlSchemaConvertOptions.defaults() : options;
         if (sql == null || sql.trim().isEmpty()) {
             return new ConversionResult("", ConversionReport.empty());
         }
-        if (src == dst) {
+        if (src.dialectId() != null && src.dialectId().equals(dst.dialectId())
+                && src.typeFamily() == dst.typeFamily()) {
             return new ConversionResult(sql, ConversionReport.empty());
         }
         List<SqlStatement> stmts = SQL.parseAll(sql, src);
@@ -82,8 +95,8 @@ public final class SqlSchemaConverter {
      * @param options 选项，null 视为默认
      * @return 与输入等长的结果列表
      */
-    public static List<ConversionResult> convertBatch(List<String> sqls, SqlDialect source,
-                                                      SqlDialect target,
+    public static List<ConversionResult> convertBatch(List<String> sqls, SqlDialectSpec source,
+                                                      SqlDialectSpec target,
                                                       SqlSchemaConvertOptions options) {
         if (sqls == null || sqls.isEmpty()) {
             return new ArrayList<ConversionResult>(0);
@@ -139,14 +152,14 @@ public final class SqlSchemaConverter {
      * @param options 选项
      * @return 转换后的语句
      */
-    public static SqlStatement convert(SqlStatement stmt, SqlDialect source, SqlDialect target,
+    public static SqlStatement convert(SqlStatement stmt, SqlDialectSpec source, SqlDialectSpec target,
                                        SqlSchemaConvertOptions options) {
         ConversionReport.Builder report = new ConversionReport.Builder();
         return convertStatement(stmt, source, target, options, report);
     }
 
-    private static SqlStatement convertStatement(SqlStatement stmt, SqlDialect source,
-                                                 SqlDialect target, SqlSchemaConvertOptions options,
+    private static SqlStatement convertStatement(SqlStatement stmt, SqlDialectSpec source,
+                                                 SqlDialectSpec target, SqlSchemaConvertOptions options,
                                                  ConversionReport.Builder report) {
         if (stmt == null) {
             return null;
@@ -159,7 +172,7 @@ public final class SqlSchemaConverter {
         return copy;
     }
 
-    private static void convertDdl(SqlDdlStatement ddl, SqlDialect source, SqlDialect target,
+    private static void convertDdl(SqlDdlStatement ddl, SqlDialectSpec source, SqlDialectSpec target,
                                    SqlSchemaConvertOptions options, ConversionReport.Builder report) {
         String objectType = ddl.objectType();
         if (objectType == null || !"TABLE".equalsIgnoreCase(objectType)) {
@@ -180,7 +193,7 @@ public final class SqlSchemaConverter {
             }
         }
         convertAlterColumn(ddl, source, target, options, registry, report, table);
-        if (options.stripDialectOptions() && !supportsMysqlTableOptions(target)) {
+        if (options.stripDialectOptions() && !supportsMysqlTableOptions(target.typeFamily())) {
             if (ddl.engine() != null) {
                 report.warn(ConversionWarning.Severity.INFO, tableName(ddl),
                         "已去掉 ENGINE=" + ddl.engine());
@@ -199,7 +212,7 @@ public final class SqlSchemaConverter {
         }
     }
 
-    private static void convertAlterColumn(SqlDdlStatement ddl, SqlDialect source, SqlDialect target,
+    private static void convertAlterColumn(SqlDdlStatement ddl, SqlDialectSpec source, SqlDialectSpec target,
                                            SqlSchemaConvertOptions options, SqlDataTypeRegistry registry,
                                            ConversionReport.Builder report, String table) {
         if (ddl.type() != SqlStatementType.ALTER
@@ -215,7 +228,7 @@ public final class SqlSchemaConverter {
                 parsed, source, target, options, registry, report, table);
         String typeOnly = stripLeadingColumnName(converted, newName);
         ddl.setColumnDefinition(typeOnly);
-        if (usesAlterColumn(target) && (action.startsWith("CHANGE") || action.startsWith("MODIFY"))) {
+        if (usesAlterColumn(target.typeFamily()) && (action.startsWith("CHANGE") || action.startsWith("MODIFY"))) {
             if (action.startsWith("CHANGE") && !oldName.equalsIgnoreCase(newName)) {
                 report.extraSql("ALTER TABLE " + table + " RENAME COLUMN " + oldName + " TO " + newName);
             }
@@ -226,7 +239,7 @@ public final class SqlSchemaConverter {
             }
             report.warn(ConversionWarning.Severity.INFO, newName,
                     "MySQL " + action + " 已改写为 ALTER COLUMN TYPE");
-        } else if (target != SqlDialect.MYSQL
+        } else if (target.typeFamily() != SqlDialect.MYSQL
                 && (action.startsWith("CHANGE") || action.startsWith("MODIFY"))) {
             report.warn(ConversionWarning.Severity.SEMANTIC_RISK, newName,
                     "MySQL " + action + " 在 " + target + " 无同款语法，已转换类型但仍需手工改写成 ALTER COLUMN");

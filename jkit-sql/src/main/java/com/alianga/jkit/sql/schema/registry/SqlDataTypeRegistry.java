@@ -1,6 +1,7 @@
 package com.alianga.jkit.sql.schema.registry;
 
 import com.alianga.jkit.sql.SqlDialect;
+import com.alianga.jkit.sql.SqlDialectSpec;
 import com.alianga.jkit.sql.schema.model.CanonicalType;
 import com.alianga.jkit.sql.schema.model.SqlDataType;
 
@@ -33,6 +34,14 @@ public final class SqlDataTypeRegistry {
     private final EnumMap<SqlDialect, Map<String, CanonicalType>> aliases =
             new EnumMap<SqlDialect, Map<String, CanonicalType>>(SqlDialect.class);
     private final List<LossyMapping> lossyMappings = new ArrayList<LossyMapping>(16);
+    private final Map<String, EnumMap<CanonicalType, DialectTypeForm>> extraForward =
+            new HashMap<String, EnumMap<CanonicalType, DialectTypeForm>>(4);
+    private final Map<String, Map<String, CanonicalType>> extraReverseExact =
+            new HashMap<String, Map<String, CanonicalType>>(4);
+    private final Map<String, Map<String, CanonicalType>> extraReversePatterned =
+            new HashMap<String, Map<String, CanonicalType>>(4);
+    private final Map<String, Map<String, CanonicalType>> extraAliases =
+            new HashMap<String, Map<String, CanonicalType>>(4);
     private boolean frozen;
 
     /**
@@ -62,31 +71,60 @@ public final class SqlDataTypeRegistry {
      * @param form 写法
      */
     public void register(CanonicalType type, SqlDialect dialect, DialectTypeForm form) {
-        checkMutable();
-        if (type == null || dialect == null || form == null || type == CanonicalType.UNKNOWN) {
+        if (dialect == null) {
             return;
         }
-        EnumMap<SqlDialect, DialectTypeForm> row = forward.get(type);
-        if (row == null) {
-            row = new EnumMap<SqlDialect, DialectTypeForm>(SqlDialect.class);
-            forward.put(type, row);
+        register(type, dialect.dialectId(), form);
+    }
+
+    /**
+     * 按方言 id 登记（自定义 {@link SqlDialectSpec#dialectId()} 用这个，不必改枚举）。
+     *
+     * @param type canonical
+     * @param dialectId 方言 id
+     * @param form 写法
+     */
+    public void register(CanonicalType type, String dialectId, DialectTypeForm form) {
+        checkMutable();
+        if (type == null || dialectId == null || dialectId.isEmpty() || form == null
+                || type == CanonicalType.UNKNOWN) {
+            return;
         }
-        row.put(dialect, form);
-        Map<String, CanonicalType> exactMap = reverseExact.get(dialect);
-        if (form.placeholders() == 0) {
-            String exact = normalize(form.pattern());
-            exactMap.put(exact, type);
-            if (form.pattern().indexOf('(') < 0) {
-                aliases.get(dialect).put(exact, type);
+        SqlDialect builtin = builtinOf(dialectId);
+        if (builtin != null) {
+            EnumMap<SqlDialect, DialectTypeForm> row = forward.get(type);
+            if (row == null) {
+                row = new EnumMap<SqlDialect, DialectTypeForm>(SqlDialect.class);
+                forward.put(type, row);
             }
-        } else {
-            String base = form.baseName();
-            String rest = form.pattern().substring(base.length());
-            int close = rest.indexOf(')');
-            if (close >= 0 && rest.substring(close + 1).trim().isEmpty()) {
-                reversePatterned.get(dialect).put(normalize(base), type);
-            }
+            row.put(builtin, form);
+            putReverse(reverseExact.get(builtin), reversePatterned.get(builtin),
+                    aliases.get(builtin), type, form);
+            return;
         }
+        EnumMap<CanonicalType, DialectTypeForm> extra = extraForward.get(dialectId);
+        if (extra == null) {
+            extra = new EnumMap<CanonicalType, DialectTypeForm>(CanonicalType.class);
+            extraForward.put(dialectId, extra);
+            extraReverseExact.put(dialectId, new HashMap<String, CanonicalType>(16));
+            extraReversePatterned.put(dialectId, new HashMap<String, CanonicalType>(16));
+            extraAliases.put(dialectId, new HashMap<String, CanonicalType>(16));
+        }
+        extra.put(type, form);
+        putReverse(extraReverseExact.get(dialectId), extraReversePatterned.get(dialectId),
+                extraAliases.get(dialectId), type, form);
+    }
+
+    /**
+     * @param type canonical
+     * @param dialect 方言规约
+     * @param form 写法
+     */
+    public void register(CanonicalType type, SqlDialectSpec dialect, DialectTypeForm form) {
+        if (dialect == null) {
+            return;
+        }
+        register(type, dialect.dialectId(), form);
     }
 
     /**
@@ -97,13 +135,41 @@ public final class SqlDataTypeRegistry {
      * @param type canonical
      */
     public void registerAlias(SqlDialect dialect, String typeName, CanonicalType type) {
+        if (dialect == null) {
+            return;
+        }
+        registerAlias(dialect.dialectId(), typeName, type);
+    }
+
+    /**
+     * @param dialectId 方言 id
+     * @param typeName 别名
+     * @param type canonical
+     */
+    public void registerAlias(String dialectId, String typeName, CanonicalType type) {
         checkMutable();
-        if (dialect == null || type == null || typeName == null || typeName.isEmpty()) {
+        if (dialectId == null || type == null || typeName == null || typeName.isEmpty()) {
             return;
         }
         String key = normalize(typeName);
-        aliases.get(dialect).put(key, type);
-        reverseExact.get(dialect).put(key, type);
+        SqlDialect builtin = builtinOf(dialectId);
+        if (builtin != null) {
+            aliases.get(builtin).put(key, type);
+            reverseExact.get(builtin).put(key, type);
+            return;
+        }
+        Map<String, CanonicalType> aliasMap = extraAliases.get(dialectId);
+        Map<String, CanonicalType> exactMap = extraReverseExact.get(dialectId);
+        if (aliasMap == null) {
+            extraForward.put(dialectId, new EnumMap<CanonicalType, DialectTypeForm>(CanonicalType.class));
+            aliasMap = new HashMap<String, CanonicalType>(16);
+            exactMap = new HashMap<String, CanonicalType>(16);
+            extraAliases.put(dialectId, aliasMap);
+            extraReverseExact.put(dialectId, exactMap);
+            extraReversePatterned.put(dialectId, new HashMap<String, CanonicalType>(16));
+        }
+        aliasMap.put(key, type);
+        exactMap.put(key, type);
     }
 
     /**
@@ -148,14 +214,34 @@ public final class SqlDataTypeRegistry {
      * @return 写法，未注册时为 null
      */
     public DialectTypeForm form(CanonicalType type, SqlDialect dialect) {
+        return form(type, (SqlDialectSpec) dialect);
+    }
+
+    /**
+     * @param type canonical
+     * @param dialect 方言规约（自定义方言先查 {@link SqlDialectSpec#dialectId()}，没有再回落 {@link SqlDialectSpec#typeFamily()}）
+     * @return 写法，未注册时为 null
+     */
+    public DialectTypeForm form(CanonicalType type, SqlDialectSpec dialect) {
         if (type == null || dialect == null) {
+            return null;
+        }
+        String id = dialect.dialectId();
+        if (id != null && extraForward.containsKey(id)) {
+            DialectTypeForm extra = extraForward.get(id).get(type);
+            if (extra != null) {
+                return extra;
+            }
+        }
+        SqlDialect family = dialect.typeFamily();
+        if (family == null) {
             return null;
         }
         EnumMap<SqlDialect, DialectTypeForm> row = forward.get(type);
         if (row == null) {
             return null;
         }
-        return row.get(dialect);
+        return row.get(family);
     }
 
     /**
@@ -168,6 +254,18 @@ public final class SqlDataTypeRegistry {
      * @return 写法；未知类型返回空串
      */
     public String toDialect(CanonicalType type, SqlDialect dialect,
+                            Integer precision, Integer scale) {
+        return toDialect(type, (SqlDialectSpec) dialect, precision, scale);
+    }
+
+    /**
+     * @param type canonical
+     * @param dialect 目标方言规约
+     * @param precision 精度
+     * @param scale 标度
+     * @return 写法
+     */
+    public String toDialect(CanonicalType type, SqlDialectSpec dialect,
                             Integer precision, Integer scale) {
         DialectTypeForm form = form(type, dialect);
         if (form == null) {
@@ -184,6 +282,15 @@ public final class SqlDataTypeRegistry {
      * @return canonical，无法识别时为 {@link CanonicalType#UNKNOWN}
      */
     public CanonicalType fromDialect(String dialectForm, SqlDialect dialect) {
+        return fromDialect(dialectForm, (SqlDialectSpec) dialect);
+    }
+
+    /**
+     * @param dialectForm 方言类型文本
+     * @param dialect 源方言规约
+     * @return canonical
+     */
+    public CanonicalType fromDialect(String dialectForm, SqlDialectSpec dialect) {
         if (dialectForm == null || dialect == null) {
             return CanonicalType.UNKNOWN;
         }
@@ -191,7 +298,16 @@ public final class SqlDataTypeRegistry {
         if (norm.isEmpty()) {
             return CanonicalType.UNKNOWN;
         }
-        CanonicalType exact = reverseExact.get(dialect).get(norm);
+        CanonicalType found = lookupReverse(norm, dialect.dialectId(), extraReverseExact,
+                extraReversePatterned, extraAliases);
+        if (found != CanonicalType.UNKNOWN) {
+            return found;
+        }
+        SqlDialect family = dialect.typeFamily();
+        if (family == null) {
+            return CanonicalType.UNKNOWN;
+        }
+        CanonicalType exact = reverseExact.get(family).get(norm);
         if (exact != null) {
             return exact;
         }
@@ -201,16 +317,16 @@ public final class SqlDataTypeRegistry {
         String base = baseName(norm);
         boolean hasParams = norm.indexOf('(') >= 0;
         if (hasParams) {
-            CanonicalType patterned = reversePatterned.get(dialect).get(base);
+            CanonicalType patterned = reversePatterned.get(family).get(base);
             if (patterned != null) {
                 return patterned;
             }
         }
-        CanonicalType alias = aliases.get(dialect).get(base);
+        CanonicalType alias = aliases.get(family).get(base);
         if (alias != null) {
             return alias;
         }
-        CanonicalType exactBase = reverseExact.get(dialect).get(base);
+        CanonicalType exactBase = reverseExact.get(family).get(base);
         if (exactBase != null) {
             return exactBase;
         }
@@ -225,6 +341,15 @@ public final class SqlDataTypeRegistry {
      * @return canonical
      */
     public CanonicalType fromDialect(SqlDataType dataType, SqlDialect dialect) {
+        return fromDialect(dataType, (SqlDialectSpec) dialect);
+    }
+
+    /**
+     * @param dataType 结构化类型
+     * @param dialect 源方言规约
+     * @return canonical
+     */
+    public CanonicalType fromDialect(SqlDataType dataType, SqlDialectSpec dialect) {
         if (dataType == null) {
             return CanonicalType.UNKNOWN;
         }
@@ -245,6 +370,16 @@ public final class SqlDataTypeRegistry {
      * @return 目标写法；无法识别时返回原文
      */
     public String convert(String sourceForm, SqlDialect from, SqlDialect to) {
+        return convert(sourceForm, (SqlDialectSpec) from, to);
+    }
+
+    /**
+     * @param sourceForm 源写法
+     * @param from 源方言规约
+     * @param to 目标方言规约
+     * @return 目标写法
+     */
+    public String convert(String sourceForm, SqlDialectSpec from, SqlDialectSpec to) {
         SqlDataType parsed = parseForm(sourceForm);
         CanonicalType canonical = fromDialect(parsed, from);
         if (canonical == CanonicalType.UNKNOWN) {
@@ -387,5 +522,72 @@ public final class SqlDataTypeRegistry {
         if (frozen) {
             throw new IllegalStateException("SqlDataTypeRegistry is frozen");
         }
+    }
+
+    private static SqlDialect builtinOf(String dialectId) {
+        if (dialectId == null) {
+            return null;
+        }
+        try {
+            return SqlDialect.valueOf(dialectId);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
+    private static void putReverse(Map<String, CanonicalType> exactMap,
+                                   Map<String, CanonicalType> patterned,
+                                   Map<String, CanonicalType> aliasMap,
+                                   CanonicalType type, DialectTypeForm form) {
+        if (form.placeholders() == 0) {
+            String exact = normalize(form.pattern());
+            exactMap.put(exact, type);
+            if (form.pattern().indexOf('(') < 0) {
+                aliasMap.put(exact, type);
+            }
+        } else {
+            String base = form.baseName();
+            String rest = form.pattern().substring(base.length());
+            int close = rest.indexOf(')');
+            if (close >= 0 && rest.substring(close + 1).trim().isEmpty()) {
+                patterned.put(normalize(base), type);
+            }
+        }
+    }
+
+    private CanonicalType lookupReverse(String norm, String dialectId,
+                                        Map<String, Map<String, CanonicalType>> extraExact,
+                                        Map<String, Map<String, CanonicalType>> extraPatterned,
+                                        Map<String, Map<String, CanonicalType>> extraAls) {
+        if (dialectId == null) {
+            return CanonicalType.UNKNOWN;
+        }
+        Map<String, CanonicalType> exactMap = extraExact.get(dialectId);
+        if (exactMap == null) {
+            return CanonicalType.UNKNOWN;
+        }
+        CanonicalType exact = exactMap.get(norm);
+        if (exact != null) {
+            return exact;
+        }
+        String base = baseName(norm);
+        if (norm.indexOf('(') >= 0) {
+            Map<String, CanonicalType> patterned = extraPatterned.get(dialectId);
+            if (patterned != null) {
+                CanonicalType p = patterned.get(base);
+                if (p != null) {
+                    return p;
+                }
+            }
+        }
+        Map<String, CanonicalType> aliasMap = extraAls.get(dialectId);
+        if (aliasMap != null) {
+            CanonicalType alias = aliasMap.get(base);
+            if (alias != null) {
+                return alias;
+            }
+        }
+        CanonicalType exactBase = exactMap.get(base);
+        return exactBase == null ? CanonicalType.UNKNOWN : exactBase;
     }
 }

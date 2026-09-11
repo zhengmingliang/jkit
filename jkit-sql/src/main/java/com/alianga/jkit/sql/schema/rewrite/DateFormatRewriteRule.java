@@ -1,6 +1,7 @@
 package com.alianga.jkit.sql.schema.rewrite;
 
 import com.alianga.jkit.sql.SqlDialect;
+import com.alianga.jkit.sql.SqlDialectSpec;
 import com.alianga.jkit.sql.ast.SqlExpr;
 import com.alianga.jkit.sql.ast.SqlFunctionExpr;
 import com.alianga.jkit.sql.ast.SqlIdentifier;
@@ -18,13 +19,14 @@ public final class DateFormatRewriteRule implements FunctionRewriteRule {
      * {@inheritDoc}
      */
     @Override
-    public SqlExpr rewrite(SqlFunctionExpr fn, SqlDialect source, SqlDialect target,
+    public SqlExpr rewrite(SqlFunctionExpr fn, SqlDialectSpec source, SqlDialectSpec target,
                            ConversionReport.Builder report) {
-        if (target == SqlDialect.MYSQL || target == SqlDialect.H2 || target == SqlDialect.HIVE) {
+        SqlDialect family = target == null ? SqlDialect.MYSQL : target.typeFamily();
+        if (family == SqlDialect.MYSQL || family == SqlDialect.H2 || family == SqlDialect.HIVE) {
             return fn;
         }
-        if (target == SqlDialect.POSTGRES || target == SqlDialect.ORACLE
-                || target == SqlDialect.ORACLE12 || target == SqlDialect.ANSI) {
+        if (family == SqlDialect.POSTGRES || family == SqlDialect.ORACLE
+                || family == SqlDialect.ORACLE12 || family == SqlDialect.ANSI) {
             report.warn(ConversionWarning.Severity.SEMANTIC_RISK, "DATE_FORMAT",
                     "DATE_FORMAT 格式符与 TO_CHAR 不完全等价");
             fn.setName(SqlIdentifier.of("TO_CHAR"));

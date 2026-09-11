@@ -1,6 +1,7 @@
 package com.alianga.jkit.sql.schema.convert;
 
 import com.alianga.jkit.sql.SqlDialect;
+import com.alianga.jkit.sql.SqlDialectSpec;
 import com.alianga.jkit.sql.ast.SqlExpr;
 import com.alianga.jkit.sql.schema.model.CanonicalType;
 import com.alianga.jkit.sql.schema.model.ColumnConstraint;
@@ -32,7 +33,7 @@ public final class ColumnDefinitionConverter {
      * @param report 报告
      * @return 目标列定义文本
      */
-    public static String convert(ColumnDefinition column, SqlDialect source, SqlDialect target,
+    public static String convert(ColumnDefinition column, SqlDialectSpec source, SqlDialectSpec target,
                                  SqlSchemaConvertOptions options, SqlDataTypeRegistry registry,
                                  ConversionReport.Builder report) {
         return convert(column, source, target, options, registry, report, "");
@@ -48,7 +49,7 @@ public final class ColumnDefinitionConverter {
      * @param tableName 表名（附录 CREATE INDEX / SEQUENCE）
      * @return 目标列定义文本
      */
-    public static String convert(ColumnDefinition column, SqlDialect source, SqlDialect target,
+    public static String convert(ColumnDefinition column, SqlDialectSpec source, SqlDialectSpec target,
                                  SqlSchemaConvertOptions options, SqlDataTypeRegistry registry,
                                  ConversionReport.Builder report, String tableName) {
         if (column == null) {
@@ -81,7 +82,8 @@ public final class ColumnDefinitionConverter {
             if (auto.overrideType() != null) {
                 typeText = auto.overrideType();
             }
-            if (auto.dropped() && options.generateOracleSequence() && target == SqlDialect.ORACLE
+            if (auto.dropped() && options.generateOracleSequence()
+                    && target.typeFamily() == SqlDialect.ORACLE
                     && tableName != null && !tableName.isEmpty()) {
                 report.extraSql(oracleSequenceSql(tableName, column.columnName()));
             }
@@ -92,11 +94,11 @@ public final class ColumnDefinitionConverter {
     }
 
     private static CanonicalType promoteVarchar(CanonicalType canonical, Integer precision,
-                                                SqlDialect target, SqlSchemaConvertOptions options) {
+                                                SqlDialectSpec target, SqlSchemaConvertOptions options) {
         if (!options.promoteLongVarchar() || canonical != CanonicalType.VARCHAR) {
             return canonical;
         }
-        int limit = varcharTextLimit(target);
+        int limit = varcharTextLimit(target.typeFamily());
         if (limit <= 0) {
             return canonical;
         }
@@ -177,7 +179,7 @@ public final class ColumnDefinitionConverter {
 
     private static String render(ColumnDefinition column, String typeText, CanonicalType canonical,
                                  AutoIncrementStrategy.Result auto,
-                                 SqlDialect target, SqlSchemaConvertOptions options,
+                                 SqlDialectSpec target, SqlSchemaConvertOptions options,
                                  ConversionReport.Builder report) {
         StringBuilder sb = new StringBuilder();
         sb.append(ident(column.columnName(), target));
@@ -216,7 +218,7 @@ public final class ColumnDefinitionConverter {
                     handleCharset(column.columnName(), c, target, options, report);
                     break;
                 case ON_UPDATE:
-                    if (target != SqlDialect.MYSQL) {
+                    if (target.typeFamily() != SqlDialect.MYSQL) {
                         report.warn(ConversionWarning.Severity.SEMANTIC_RISK, column.columnName(),
                                 "ON UPDATE 在 " + target + " 无列级等价语法，已去掉");
                     }
@@ -249,23 +251,23 @@ public final class ColumnDefinitionConverter {
         if (unique) {
             sb.append(" UNIQUE");
         }
-        if (comment != null && target == SqlDialect.MYSQL) {
+        if (comment != null && target.typeFamily() == SqlDialect.MYSQL) {
             sb.append(" COMMENT '").append(escape(comment.text())).append('\'');
         } else if (comment != null) {
             report.warn(ConversionWarning.Severity.INFO, column.columnName(),
                     "列 COMMENT 在 " + target + " 需改用 COMMENT ON COLUMN，已去掉内联注释");
         }
-        if (target == SqlDialect.MYSQL && column.dataType().has(SqlDataType.TypeAttribute.UNSIGNED)
+        if (target.typeFamily() == SqlDialect.MYSQL && column.dataType().has(SqlDataType.TypeAttribute.UNSIGNED)
                 && options.unsignedHandling() != SqlSchemaConvertOptions.UnsignedHandling.UPSIZE) {
             sb.append(" UNSIGNED");
         }
         return sb.toString();
     }
 
-    private static void handleCharset(String column, ColumnConstraint c, SqlDialect target,
+    private static void handleCharset(String column, ColumnConstraint c, SqlDialectSpec target,
                                       SqlSchemaConvertOptions options,
                                       ConversionReport.Builder report) {
-        if (supportsColumnCharset(target)) {
+        if (supportsColumnCharset(target.typeFamily())) {
             return;
         }
         if (options.stripDialectOptions()) {
@@ -283,18 +285,19 @@ public final class ColumnDefinitionConverter {
                 || dialect == SqlDialect.CLICKHOUSE;
     }
 
-    private static String convertTableConstraint(ColumnDefinition column, SqlDialect target,
+    private static String convertTableConstraint(ColumnDefinition column, SqlDialectSpec target,
                                                  ConversionReport.Builder report, String tableName) {
         String raw = column.rawText() == null ? "" : column.rawText().trim();
         String u = raw.toUpperCase(Locale.ROOT);
-        if ((u.startsWith("UNIQUE KEY") || u.startsWith("UNIQUE INDEX")) && target != SqlDialect.MYSQL) {
+        if ((u.startsWith("UNIQUE KEY") || u.startsWith("UNIQUE INDEX"))
+                && target.typeFamily() != SqlDialect.MYSQL) {
             int paren = raw.indexOf('(');
             if (paren >= 0) {
                 report.converted();
                 return "UNIQUE " + raw.substring(paren);
             }
         }
-        if (mysqlOnlyTableConstraint(raw) && !supportsMysqlIndex(target)) {
+        if (mysqlOnlyTableConstraint(raw) && !supportsMysqlIndex(target.typeFamily())) {
             String idx = toCreateIndex(raw, tableName);
             if (idx != null) {
                 report.extraSql(idx);
@@ -359,7 +362,7 @@ public final class ColumnDefinitionConverter {
                 || u.startsWith("FULLTEXT") || u.startsWith("SPATIAL");
     }
 
-    private static String ident(String name, SqlDialect target) {
+    private static String ident(String name, SqlDialectSpec target) {
         if (name == null || name.isEmpty()) {
             return name;
         }
