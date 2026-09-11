@@ -154,6 +154,15 @@ public class SqlAutoH2Test {
         assertFalse(tableExists("AUTO_USER"));
     }
 
+    @Test
+    public void dropApiRemovesTable() {
+        SqlAuto.run(connection, options().entities(AutoUser.class));
+        assertTrue(tableExists("AUTO_USER"));
+        SqlAutoPlan dropped = SqlAuto.drop(connection, options().entities(AutoUser.class));
+        assertFalse(dropped.ofKind(SqlAutoChange.Kind.DROP_TABLE).isEmpty());
+        assertFalse(tableExists("AUTO_USER"));
+    }
+
     private SqlAutoOptions options() {
         return SqlAutoOptions.defaults()
                 .url(url)

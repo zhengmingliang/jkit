@@ -55,11 +55,13 @@ public final class SqlAutoDialects {
         if (!u.startsWith("jdbc:")) {
             return null;
         }
-        if (u.startsWith("jdbc:mysql:") || u.startsWith("jdbc:mariadb:") || u.startsWith("jdbc:tidb:")) {
+        if (u.startsWith("jdbc:mysql:") || u.startsWith("jdbc:mariadb:") || u.startsWith("jdbc:tidb:")
+                || u.startsWith("jdbc:gbase:") || u.startsWith("jdbc:gbase8a:")) {
             return SqlDialect.MYSQL;
         }
         if (u.startsWith("jdbc:postgresql:") || u.startsWith("jdbc:pgsql:")
-                || u.startsWith("jdbc:gaussdb:") || u.startsWith("jdbc:kingbase:")) {
+                || u.startsWith("jdbc:gaussdb:") || u.startsWith("jdbc:opengauss:")
+                || u.startsWith("jdbc:kingbase:")) {
             return SqlDialect.POSTGRES;
         }
         if (u.startsWith("jdbc:oracle:")) {
@@ -164,6 +166,15 @@ public final class SqlAutoDialects {
         }
         if (u.startsWith("jdbc:dm:")) {
             return "dm.jdbc.driver.DmDriver";
+        }
+        if (u.startsWith("jdbc:gbase:") || u.startsWith("jdbc:gbase8a:")) {
+            return "com.gbase.jdbc.Driver";
+        }
+        if (u.startsWith("jdbc:gaussdb:") || u.startsWith("jdbc:opengauss:")) {
+            return "org.opengauss.Driver";
+        }
+        if (u.startsWith("jdbc:duckdb:")) {
+            return "org.duckdb.DuckDBDriver";
         }
         return null;
     }

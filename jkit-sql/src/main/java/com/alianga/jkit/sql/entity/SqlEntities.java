@@ -522,6 +522,14 @@ public final class SqlEntities {
             }
             StringBuilder sb = new StringBuilder();
             sb.append(col.columnName()).append(' ').append(type);
+            if (dialect == SqlDialect.SQLITE && inlinePk && col.primaryKey()) {
+                // SQLite: INTEGER PRIMARY KEY AUTOINCREMENT，AUTOINCREMENT 必须在 PRIMARY KEY 之后。
+                sb.append(" PRIMARY KEY");
+                if (auto.clause() != null) {
+                    sb.append(' ').append(auto.clause());
+                }
+                return sb.toString();
+            }
             if (!col.nullable()) {
                 sb.append(" NOT NULL");
             }

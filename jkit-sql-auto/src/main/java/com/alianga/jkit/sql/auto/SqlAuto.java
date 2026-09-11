@@ -188,6 +188,49 @@ public final class SqlAuto {
         return plan;
     }
 
+    /**
+     * 按外键逆序删除托管表（存在才删；Oracle 无 {@code IF EXISTS}）。
+     *
+     * @param connection 连接
+     * @param options 选项（用其中的实体 / 包 / 方言）
+     * @return 删除计划
+     */
+    public static SqlAutoPlan drop(Connection connection, SqlAutoOptions options) {
+        SqlAutoOptions opt = options == null ? SqlAutoOptions.defaults() : options;
+        List<Class<?>> types = collectEntities(opt);
+        SqlDialect dialect = SqlAutoDialects.resolve(opt, connection);
+        List<Class<?>> ordered = SqlEntities.orderByForeignKeys(types);
+        List<SqlAutoChange> changes = new ArrayList<SqlAutoChange>(ordered.size());
+        SqlAutoInspector inspector = new SqlAutoInspector(connection, opt, dialect);
+        for (int i = ordered.size() - 1; i >= 0; i--) {
+            String table = SqlEntities.inspect(ordered.get(i)).tableName();
+            if (inspector.inspect(table) == null) {
+                continue;
+            }
+            changes.add(new SqlAutoChange(SqlAutoChange.Kind.DROP_TABLE, table, "",
+                    SqlAutoDdl.dropTableSql(table, dialect, opt)));
+        }
+        SqlAutoPlan plan = new SqlAutoPlan(changes);
+        SqlAutoExecutor.execute(connection, plan, opt);
+        return plan;
+    }
+
+    /**
+     * 打开连接后删除托管表。
+     *
+     * @param options 选项
+     * @return 删除计划
+     */
+    public static SqlAutoPlan drop(SqlAutoOptions options) {
+        SqlAutoOptions opt = options == null ? SqlAutoOptions.defaults() : options;
+        ConnectionHolder holder = open(opt);
+        try {
+            return drop(holder.connection, opt);
+        } finally {
+            holder.close();
+        }
+    }
+
     static List<Class<?>> collectEntities(SqlAutoOptions options) {
         List<Class<?>> out = new ArrayList<Class<?>>(8);
         if (options.entities() != null) {

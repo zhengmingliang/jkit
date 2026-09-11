@@ -73,6 +73,14 @@ public class SqlEntitiesTest {
         assertTrue(pg, pu.contains("INTEGER"));
         assertFalse(pg, pu.contains("AUTO_INCREMENT"));
         SQL.parse(pg, SqlDialect.POSTGRES);
+
+        String sqlite = SqlEntities.createTable(DemoUser.class, SqlDialect.SQLITE);
+        String su = sqlite.toUpperCase();
+        assertTrue(sqlite, su.contains("PRIMARY KEY"));
+        int pk = su.indexOf("PRIMARY KEY");
+        int auto = su.indexOf("AUTOINCREMENT");
+        assertTrue(sqlite, auto > pk);
+        SQL.parse(sqlite, SqlDialect.SQLITE);
     }
 
     @Test

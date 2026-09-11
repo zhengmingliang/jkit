@@ -110,7 +110,12 @@ public final class SqlAutoDdl {
      * @return DDL
      */
     public static String dropTableSql(String tableName, SqlDialect dialect, SqlAutoOptions options) {
-        return "DROP TABLE " + ident(tableName, dialect, options);
+        String name = ident(tableName, dialect, options);
+        SqlDialect d = dialect == null ? SqlDialect.MYSQL : dialect;
+        if (d == SqlDialect.ORACLE || d == SqlDialect.ORACLE12) {
+            return "DROP TABLE " + name;
+        }
+        return "DROP TABLE IF EXISTS " + name;
     }
 
     static boolean compatible(SqlEntityColumn wanted, SqlAutoLiveColumn live, SqlDialect dialect) {
