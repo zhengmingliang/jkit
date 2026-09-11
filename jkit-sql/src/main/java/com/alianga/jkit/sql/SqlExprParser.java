@@ -403,6 +403,10 @@ final class SqlExprParser {
                 String opText = p.token.text();
                 p.next();
                 left = SqlBinaryExpr.of(left, atOp(opText), parseBit());
+            } else if (p.is(SqlTokenType.VARIABLE) && "@@".equals(p.token.text())) {
+                // PG：tsvector @@ tsquery（词法上 @@ 为空宿主变量）
+                p.next();
+                left = SqlBinaryExpr.of(left, SqlBinaryOp.REGEX_MATCH, parseBit());
             } else if (p.is(SqlTokenType.REGEX_OP)
                     || (p.dialect.supportsTildeRegex() && p.is(SqlTokenType.TILDE))) {
                 String opText = p.token.text();
@@ -487,13 +491,18 @@ final class SqlExprParser {
                 if (p.match(SqlTokenType.ESCAPE)) {
                     left = SqlBinaryExpr.of(left, SqlBinaryOp.ESCAPE, parseBit());
                 }
-            } else if (p.isIdent("SIMILAR")) {
+            } else if (p.is(SqlTokenType.SIMILAR) || p.isIdent("SIMILAR")) {
                 p.next();
                 p.expect(SqlTokenType.TO);
                 left = SqlBinaryExpr.of(left, SqlBinaryOp.LIKE, parseBit());
                 if (p.match(SqlTokenType.ESCAPE)) {
                     left = SqlBinaryExpr.of(left, SqlBinaryOp.ESCAPE, parseBit());
                 }
+            } else if (p.isIdent("CONTAINS")
+                    || (p.identLike() && p.token.textEqualsIgnoreCase("CONTAINS"))) {
+                // MaxCompute / 部分引擎：col CONTAINS ('x')
+                p.next();
+                left = SqlBinaryExpr.of(left, SqlBinaryOp.CONTAINS, parseBit());
             } else if (p.is(SqlTokenType.BETWEEN)) {
                 left = parseBetween(left, false);
             } else if (p.is(SqlTokenType.IN)
@@ -543,7 +552,8 @@ final class SqlExprParser {
                     if (p.match(SqlTokenType.ESCAPE)) {
                         left = SqlBinaryExpr.of(left, SqlBinaryOp.ESCAPE, parseBit());
                     }
-                } else if (peeked.textEqualsIgnoreCase("SIMILAR")) {
+                } else if (peeked.type() == SqlTokenType.SIMILAR
+                        || peeked.textEqualsIgnoreCase("SIMILAR")) {
                     p.next();
                     p.next();
                     p.expect(SqlTokenType.TO);
@@ -647,6 +657,17 @@ final class SqlExprParser {
             sb.append(' ').append(p.token.text());
             p.next();
         }
+        // PG：type[] / type[][] 数组类型后缀
+        while (p.is(SqlTokenType.LBRACKET)) {
+            sb.append('[');
+            p.next();
+            if (p.is(SqlTokenType.NUMBER)) {
+                sb.append(p.token.text());
+                p.next();
+            }
+            p.expect(SqlTokenType.RBRACKET);
+            sb.append(']');
+        }
         return sb.toString();
     }
 
@@ -747,7 +768,8 @@ final class SqlExprParser {
         if (SqlParser.equalsIgnoreCase(fnName, "TRIM")) {
             return parseTrim(name);
         }
-        if (SqlParser.equalsIgnoreCase(fnName, "SUBSTRING")) {
+        if (SqlParser.equalsIgnoreCase(fnName, "SUBSTRING")
+                || SqlParser.equalsIgnoreCase(fnName, "SUBSTR")) {
             return parseSubstring(name);
         }
         if (SqlParser.equalsIgnoreCase(fnName, "POSITION")) {
@@ -1016,7 +1038,8 @@ final class SqlExprParser {
             return false;
         }
         int depth = 1;
-        for (int i = 0; i < 64; i++) {
+        boolean sawQuery = false;
+        for (int i = 0; i < 96; i++) {
             SqlToken tok = p.lexer.lookahead(i);
             if (tok == null || tok.type() == SqlTokenType.EOF) {
                 return false;
@@ -1028,18 +1051,24 @@ final class SqlExprParser {
             if (tok.type() == SqlTokenType.RPAREN) {
                 depth--;
                 if (depth <= 0) {
-                    // 闭合后再跟 UNION/INTERSECT/EXCEPT/MINUS → 集合运算子查询
+                    // 闭合后若是逗号，则是 IN ((SELECT), (SELECT)) 值列表，不是单一子查询
                     SqlToken next = p.lexer.lookahead(i + 1);
-                    return next != null && (next.type() == SqlTokenType.UNION
+                    if (next != null && next.type() == SqlTokenType.COMMA) {
+                        return false;
+                    }
+                    if (next != null && (next.type() == SqlTokenType.UNION
                             || next.type() == SqlTokenType.INTERSECT
                             || next.type() == SqlTokenType.EXCEPT
-                            || next.type() == SqlTokenType.MINUS);
+                            || next.type() == SqlTokenType.MINUS)) {
+                        return true;
+                    }
+                    return sawQuery;
                 }
                 continue;
             }
             if (depth == 1 && (tok.type() == SqlTokenType.SELECT || tok.type() == SqlTokenType.WITH
                     || tok.type() == SqlTokenType.VALUES)) {
-                return true;
+                sawQuery = true;
             }
         }
         return false;
@@ -1412,6 +1441,38 @@ final class SqlExprParser {
         return fn;
     }
 
+    /** 类型名 + 字面量/绑定：{@code DECIMAL '1'} / {@code TIME ?} / {@code REAL '1.2'}。 */
+    private boolean isTypedLiteralTypeName() {
+        if (p.is(SqlTokenType.DATE) || p.is(SqlTokenType.TIME) || p.is(SqlTokenType.TIMESTAMP)
+                || p.is(SqlTokenType.DATETIME)) {
+            return true;
+        }
+        if (!(p.identLike() || (p.token.type() != null && p.token.type().keyword()))) {
+            return false;
+        }
+        String t = p.token.text();
+        if (t == null) {
+            return false;
+        }
+        return SqlParser.equalsIgnoreCase(t, "TIMESTAMPTZ")
+                || SqlParser.equalsIgnoreCase(t, "JSON")
+                || SqlParser.equalsIgnoreCase(t, "JSONB")
+                || SqlParser.equalsIgnoreCase(t, "DECIMAL")
+                || SqlParser.equalsIgnoreCase(t, "NUMERIC")
+                || SqlParser.equalsIgnoreCase(t, "REAL")
+                || SqlParser.equalsIgnoreCase(t, "DOUBLE")
+                || SqlParser.equalsIgnoreCase(t, "FLOAT")
+                || SqlParser.equalsIgnoreCase(t, "INTEGER")
+                || SqlParser.equalsIgnoreCase(t, "INT")
+                || SqlParser.equalsIgnoreCase(t, "BIGINT")
+                || SqlParser.equalsIgnoreCase(t, "SMALLINT")
+                || SqlParser.equalsIgnoreCase(t, "BOOLEAN")
+                || SqlParser.equalsIgnoreCase(t, "BOOL")
+                || SqlParser.equalsIgnoreCase(t, "VARCHAR")
+                || SqlParser.equalsIgnoreCase(t, "CHAR")
+                || SqlParser.equalsIgnoreCase(t, "TEXT");
+    }
+
     private SqlExpr parsePrimaryInner() {
         if (p.is(SqlTokenType.LBRACE)) {
             return parseJdbcEscape();
@@ -1483,14 +1544,17 @@ final class SqlExprParser {
         if (p.is(SqlTokenType.CASE)) {
             return parseCase();
         }
-        if (p.is(SqlTokenType.CAST) || p.isIdent("TRY_CAST") || p.isIdent("TRY_CONVERT")) {
+        if ((p.is(SqlTokenType.CAST) || p.isIdent("TRY_CAST") || p.isIdent("TRY_CONVERT"))
+                && p.lexer.peek() != null && p.lexer.peek().type() == SqlTokenType.LPAREN) {
             return parseCast();
         }
-        // PG：TIMESTAMPTZ '…' / JSON 'true' / DATE '…'
-        if ((p.is(SqlTokenType.DATE) || p.is(SqlTokenType.TIME) || p.is(SqlTokenType.TIMESTAMP)
-                || p.is(SqlTokenType.DATETIME) || p.isIdent("TIMESTAMPTZ")
-                || p.isIdent("JSON") || p.isIdent("JSONB"))
-                && p.lexer.peek() != null && p.lexer.peek().type() == SqlTokenType.STRING) {
+        // PG/标准类型字面量：DATE/TIME/TIMESTAMP/DECIMAL/REAL '…' 以及 TIME ?
+        if (isTypedLiteralTypeName()
+                && p.lexer.peek() != null
+                && (p.lexer.peek().type() == SqlTokenType.STRING
+                || p.lexer.peek().type() == SqlTokenType.BIND
+                || p.lexer.peek().type() == SqlTokenType.NAMED_BIND
+                || p.lexer.peek().type() == SqlTokenType.NUMBER)) {
             SqlFunctionExpr typed = new SqlFunctionExpr();
             typed.setName(SqlIdentifier.of(p.token.text().toUpperCase()));
             p.next();

@@ -355,6 +355,8 @@ public final class SqlParser {
                 return parseUnlockTables();
             case DECLARE:
                 return parseDeclare();
+            case DO:
+                return parseDoBlock();
             case ANALYZE:
             case VACUUM:
             case OPTIMIZE:
@@ -816,6 +818,48 @@ public final class SqlParser {
         SqlSimpleStatement stmt = new SqlSimpleStatement();
         stmt.setStatementType(SqlStatementType.OTHER);
         stmt.setText(body);
+        return stmt;
+    }
+
+    /**
+     * PostgreSQL {@code DO [LANGUAGE lang] $tag$…$tag$} / {@code DO $$…$$}。
+     * 体为词法 STRING（dollar-quote）；不强制结构化体内语句，保证语料可解析。
+     */
+    private SqlStatement parseDoBlock() {
+        int start = token.start();
+        expect(SqlTokenType.DO);
+        String language = null;
+        if ((identLike() || (token.type() != null && token.type().keyword()))
+                && token.textEqualsIgnoreCase("LANGUAGE")) {
+            next();
+            if (identLike() || (token.type() != null && token.type().keyword())) {
+                language = token.text();
+                next();
+            }
+        }
+        if (is(SqlTokenType.STRING)) {
+            next(); // body
+            if (language == null && (identLike() || (token.type() != null && token.type().keyword()))
+                    && token.textEqualsIgnoreCase("LANGUAGE")) {
+                next();
+                if (identLike() || (token.type() != null && token.type().keyword())) {
+                    language = token.text();
+                    next();
+                }
+            }
+            SqlSimpleStatement stmt = new SqlSimpleStatement();
+            stmt.setStatementType(SqlStatementType.OTHER);
+            stmt.setText(lexer.rawSlice(start, token.start()).trim());
+            return stmt;
+        }
+        if (is(SqlTokenType.BEGIN)) {
+            // DO BEGIN … END
+            return parseBeginBlock();
+        }
+        String rest = consumeRawUntilSemi();
+        SqlSimpleStatement stmt = new SqlSimpleStatement();
+        stmt.setStatementType(SqlStatementType.OTHER);
+        stmt.setText(("DO " + rest).trim());
         return stmt;
     }
 
@@ -2146,8 +2190,9 @@ public final class SqlParser {
                 break;
             }
         }
-        if (is(SqlTokenType.VARIABLE) && token.text() != null && token.text().startsWith("@")) {
-            // Oracle DB Link：fn@dblink / t@dblink
+        if (is(SqlTokenType.VARIABLE) && token.text() != null && token.text().startsWith("@")
+                && token.text().length() > 1 && !token.text().startsWith("@@")) {
+            // Oracle DB Link：fn@dblink / t@dblink（勿吞 PG 的 @@ tsquery 运算符）
             id.setDblink(token.text().substring(1));
             next();
         }

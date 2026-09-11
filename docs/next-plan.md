@@ -366,12 +366,12 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 
 ### 10.1 现状快照（R7 覆盖后）
 
-- 模块测试 **890+ 全绿**；保真回归 `SqlRoundTripFidelityTest`；379 语料 100%；保真批量 0 mismatch。
+- 模块测试 **930+ 全绿**；保真回归 `SqlRoundTripFidelityTest`；379 语料 100%；保真批量 0 mismatch。
 - 竞品语料（tools-test `CompetitorSuiteCorpusTest`，三方各用方言回退链、2s 超时护栏）：
-  - druid-bvt-inline（6483）：**jkit 95.6%（已超 Druid 92.3%）** / druid 92.3% / jsql 68.1%
-  - jsqlparser-inline（3078）：**jkit 91.5%（已超 90%）** / druid 71.1% / jsql 70.1%
+  - druid-bvt-inline（6483）：**jkit 96.3%（已超 Druid 92.3%）** / druid 92.3% / jsql 68.1%
+  - jsqlparser-inline（3078）：**jkit 92.3%（已超 90%）** / druid 71.1% / jsql 70.1%
   - jsqlparser-files（460）：**jkit 90.0%（已达目标）** / druid 81.5% / jsql 74.8%（jkitGaps=4）
-  - jkitGaps 合计 956 → **455**（236+170+49；R7 479 → R8 455）
+  - jkitGaps 合计 **164**（128+32+4；R12 173+52+4 → R13）
   - jkit 全程 0 超时；druid 1.2.23 仍有 2 条 PG `ANALYZE` 死循环（jstack 实锤，勿追）
 - 方言：一等枚举 6+1 → 11（新增 `DB2`/`SQLITE`/`HIVE`/`CLICKHOUSE`/`PRESTO`），行为全部走
   `SqlDialectSpec` 能力方法，无散落 `== SqlDialect.X`；`fromName` 国产/主流别名已全
@@ -401,6 +401,11 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
   括号 PIVOT/UNPIVOT、`PARTITION BY` 外连接、`INSERT WHEN`、多 GROUPING SETS、SEARCH/CYCLE、
   TABLE(SELECT)、interval qualifier、数值后缀、运算符夹注释、选择列表括号 UNION。
   files gaps 44→4；**95.6 / 91.5 / 90.0**（三语料目标均达成或维持）。
+- **R13**：PG `DO $$…$$`；块内 `ELSIF`/`EXCEPTION WHEN`；标签 `BEGIN…END`；MySQL VIEW/PROCEDURE
+  `ALGORITHM`/`DEFINER`/`SQL SECURITY`（`user@%`）；INSERT/REPLACE 优先级链；`AS` 关键字别名
+  （修 match 误消费）；`SUBSTR FROM FOR`；类型字面量；`SIMILAR TO` 关键字；`type[]`；Informix `SKIP`
+  关键字；`FOR JSON`；`VALUES UNION/ORDER/LIMIT`；`IN ((SELECT),…)`；`LATERAL VIEW OUTER`；
+  `CONTAINS`；`@@` tsquery。gaps 229→164；**96.3 / 92.3 / 90.0**。
 - R10：`$$` dollar-quote、GROUP BY (expr)、EMIT/LIMIT 序、数组切片、WITHIN GROUP PARTITION、
   CAST schema.type、ON CONFLICT≠链式ON、EXCLUDE、INSERT alias/OVERRIDING、OUTER JOIN、
   NOT ISNULL、SEPARATOR、FROM VALUES。gaps 378→339；**95.0 / 89.5 / 79.8**。
@@ -495,6 +500,6 @@ cd ../tools-test && mvn -Dtest='SqlParserCompareTest,SqlRoundTripFidelityCorpusT
 1. **硬目标（用户）**：jsql-inline ≥90%、jsql-files ≥90%；druid-bvt **已达成**（超 Druid）。
 2. 继续按 gap 错误签名聚簇攻坚（Informix SKIP/FIRST、FOR XML PATH、UPDATE SET (a,b)=、RETURNING old/new、
    PIVOT XML、MODEL measures AS、管道 `| |`、多语句无分号、负向样例等）；每批 commit+邮件。
-3. PL/SQL：`EXCEPTION WHEN` / `ELSIF` 结构化仍可做；`SQL%FOUND` 已可解析。
+3. PL/SQL：`EXCEPTION WHEN` / `ELSIF` 已可进块体（EXCEPTION 段为 OTHER 原文节点）；更深结构化与 `DO $$` 体内再解析仍可做。
 4. 若用户要发版：`mvn clean package -Ppublish -Dgpg.skip=true`。
 5. GBK 乱码约 26 条与纯负向样例不要硬追。

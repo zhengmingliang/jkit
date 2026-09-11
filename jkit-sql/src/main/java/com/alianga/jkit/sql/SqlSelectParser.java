@@ -441,8 +441,8 @@ final class SqlSelectParser {
                 }
             }
         }
-        // Informix：SELECT SKIP n FIRST m …（n 可为 ? / ?1）
-        if (p.isIdent("SKIP")) {
+        // Informix：SELECT SKIP n FIRST m …（n 可为 ? / ?1 / 标识符变量）
+        if (p.is(SqlTokenType.SKIP) || p.isIdent("SKIP")) {
             p.next();
             SqlLimit lim = select.limit();
             if (lim == null) {
@@ -525,6 +525,9 @@ final class SqlSelectParser {
             } else {
                 do {
                     select.groupBy().add(p.exprParser.parseExpr());
+                    // MySQL：GROUP BY col ASC|DESC（排序方向挂在分组项后，解析时吞掉）
+                    p.match(SqlTokenType.ASC);
+                    p.match(SqlTokenType.DESC);
                 } while (p.match(SqlTokenType.COMMA));
                 // GROUP BY a GROUPING SETS (…)：列表后再跟集合运算（PG / 标准）
                 if (p.is(SqlTokenType.GROUPING) || p.is(SqlTokenType.CUBE) || p.is(SqlTokenType.ROLLUP)) {
@@ -608,6 +611,10 @@ final class SqlSelectParser {
                 // SQL Server：FOR XML PATH('') [, TYPE] [, ROOT('x')] …
                 p.next();
                 select.setForUpdateTail("XML " + consumeForXmlTail());
+            } else if (p.isIdent("JSON")) {
+                // SQL Server：FOR JSON AUTO|PATH [, ROOT('x')] [, INCLUDE_NULL_VALUES] …
+                p.next();
+                select.setForUpdateTail("JSON " + consumeForXmlTail());
             } else if (p.isIdent("BROWSE")) {
                 // SQL Server：FOR BROWSE
                 p.next();
@@ -803,8 +810,11 @@ final class SqlSelectParser {
         }
         item.setExpr(expr);
         // Hive UDTF：fn(...) AS (c0, c1, c2)
-        if (p.match(SqlTokenType.AS) && p.is(SqlTokenType.LPAREN)) {
-            p.next();
+        // 注意：不可 match(AS) 后再判断 LPAREN——match 会消费 AS，导致 AS full 等关键字别名失败
+        if (p.is(SqlTokenType.AS) && p.lexer.peek() != null
+                && p.lexer.peek().type() == SqlTokenType.LPAREN) {
+            p.next(); // AS
+            p.next(); // LPAREN
             do {
                 item.columnAliases().add(p.parseName());
             } while (p.match(SqlTokenType.COMMA));
@@ -1435,7 +1445,7 @@ final class SqlSelectParser {
         p.expect(SqlTokenType.LATERAL);
         p.expect(SqlTokenType.VIEW);
         boolean outer = false;
-        if (p.isIdent("OUTER")) {
+        if (p.is(SqlTokenType.OUTER) || p.isIdent("OUTER")) {
             outer = true;
             p.next();
         }
@@ -2185,6 +2195,18 @@ final class SqlSelectParser {
         SqlSelectItem item = new SqlSelectItem();
         item.setExpr(values);
         select.addSelectItem(item);
+        // CTE/标准：VALUES … UNION ALL SELECT …
+        parseSelectTail(select);
+        SqlSelect owner = select;
+        while (owner.union() != null) {
+            owner = owner.union();
+        }
+        // PG/标准：VALUES (…)[, …] ORDER BY … LIMIT/OFFSET/FETCH
+        if (owner.orderBy().isEmpty() && p.match(SqlTokenType.ORDER)) {
+            p.expect(SqlTokenType.BY);
+            parseOrderBy(owner.orderBy());
+        }
+        parseLimitFetch(owner);
         return select;
     }
 

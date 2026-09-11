@@ -221,12 +221,17 @@ final class SqlDmlParser {
             p.next();
             insert.setOverwrite(true);
         }
-        if (!replace && !insert.overwrite() && p.match(SqlTokenType.DELAYED)) {
-            insert.setDelayed(true);
-        } else if (p.match(SqlTokenType.LOW_PRIORITY)) {
-            insert.setLowPriority(true);
-        } else {
-            insert.setHighPriority(p.match(SqlTokenType.HIGH_PRIORITY));
+        // MySQL：可叠加 LOW_PRIORITY / DELAYED / HIGH_PRIORITY（REPLACE 亦允许 DELAYED）
+        while (true) {
+            if ((!insert.overwrite()) && p.match(SqlTokenType.DELAYED)) {
+                insert.setDelayed(true);
+            } else if (p.match(SqlTokenType.LOW_PRIORITY)) {
+                insert.setLowPriority(true);
+            } else if (p.match(SqlTokenType.HIGH_PRIORITY)) {
+                insert.setHighPriority(true);
+            } else {
+                break;
+            }
         }
         if (p.match(SqlTokenType.IGNORE)) {
             insert.setIgnore(true);

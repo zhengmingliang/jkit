@@ -5,6 +5,17 @@
 ## 2.0.1 / unreleased
 
 ### jkit-sql
+- 覆盖率第十三轮：PG `DO $$…$$` / `DO $tag$…$tag$`；块内 `ELSIF`/`EXCEPTION WHEN`；
+  标签化 `lab: BEGIN…END lab`；MySQL `CREATE ALGORITHM/DEFINER/SQL SECURITY VIEW|PROCEDURE`（含 `user@%`）；
+  `INSERT/REPLACE` 可叠加 `LOW_PRIORITY|DELAYED|HIGH_PRIORITY`；`AS` 关键字别名（修 match 误消费）；
+  `SUBSTR…FROM…FOR`；类型字面量 `DECIMAL/REAL/TIME ?`；`SIMILAR TO` 关键字记号；`type[]` 数组类型；
+  Informix `SKIP` 关键字；`FOR JSON`；`VALUES…ORDER/LIMIT/UNION`；`IN ((SELECT),(SELECT))`；
+  Hive `LATERAL VIEW OUTER`；`CONTAINS`；PG `@@` tsquery（勿当 DB link）。
+  竞品率 **96.3 / 92.3 / 90.0**（gaps 173+52+4 → 128+32+4）。
+
+## 2.0.1 / unreleased
+
+### jkit-sql
 - 覆盖率第十二轮：Oracle MODEL（RULES SEQUENTIAL ORDER、MEASURES 字面量别名、WHERE 后 MODEL）、
   MERGE `UPDATE…DELETE WHERE` / `INSERT…WHERE`、括号内 PIVOT/UNPIVOT、分区外连接 `PARTITION BY`、
   `INSERT WHEN`（无 ALL/FIRST）、多 `GROUPING SETS`、递归 CTE `SEARCH`/`CYCLE`、
@@ -63,6 +74,12 @@
 ## 版本记录
 
 ## 2.0.1 - 2026-09-09
+
+### jkit-sql（R13 竞品覆盖）
+- PG：`DO $$…$$` / dollar-tag；`BEGIN…EXCEPTION WHEN…END`；`ELSIF`；`@@` tsquery；`type[]`；`VALUES…UNION/ORDER/LIMIT`
+- MySQL：`ALGORITHM`/`DEFINER`/`SQL SECURITY` VIEW·PROCEDURE；`user@%`；INSERT/REPLACE 优先级链；`AS full` 关键字别名
+- 表达式：`SUBSTR FROM FOR`；`DECIMAL/REAL/TIME ?` 类型字面量；`SIMILAR TO`；`CONTAINS`；`IN ((SELECT),…)`
+- 其它：Informix `SKIP` 关键字；`FOR JSON`；Hive `LATERAL VIEW OUTER`；标签 `BEGIN…END`
 
 ### jkit-sql（R12 竞品覆盖）
 - Oracle MODEL：`RULES UPSERT SEQUENTIAL ORDER`、MEASURES `0 AS m` / 裸别名、WHERE 后 MODEL

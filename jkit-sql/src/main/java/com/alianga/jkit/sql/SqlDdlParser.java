@@ -334,27 +334,73 @@ final class SqlDdlParser {
      * {@code user} 形如 {@code `root`@`localhost`} / {@code 'u'@'%'} / {@code CURRENT_USER}。
      */
     private void skipDefinerClause() {
-        if (!p.isIdent("DEFINER")) {
+        if (!p.isIdent("DEFINER")
+                && !(p.identLike() && p.token.textEqualsIgnoreCase("DEFINER"))) {
             return;
         }
         p.next();
         p.match(SqlTokenType.EQ);
-        if (p.isIdent("CURRENT_USER")) {
+        if (p.isIdent("CURRENT_USER")
+                || (p.identLike() && p.token.textEqualsIgnoreCase("CURRENT_USER"))) {
             p.next();
             if (p.match(SqlTokenType.LPAREN)) {
                 p.expect(SqlTokenType.RPAREN);
             }
             return;
         }
-        // user [@ host]；词法上 `@` 常为单独 VARIABLE，host 为下一 IDENT/STRING
-        if (p.identLike() || p.is(SqlTokenType.STRING) || p.is(SqlTokenType.VARIABLE)) {
+        // user [@ host]；`test@%` 可能是单 IDENT，或 IDENT + VARIABLE `@%` / `@` + host
+        if (p.identLike() || p.is(SqlTokenType.STRING) || p.is(SqlTokenType.VARIABLE)
+                || (p.token.type() != null && p.token.type().keyword())) {
+            String u = p.token.text();
             p.next();
+            if (u != null && u.indexOf('@') >= 0) {
+                return;
+            }
         }
         if (p.is(SqlTokenType.VARIABLE)) {
             String v = p.token.text();
             p.next();
-            if ("@".equals(v) && (p.identLike() || p.is(SqlTokenType.STRING))) {
+            if (v != null && v.startsWith("@") && v.length() > 1) {
+                // `@%` / `@localhost` 整段 VARIABLE
+                return;
+            }
+            if ("@".equals(v)) {
+                // host：`localhost` / `'%'` / `%`（PERCENT）/ `*`
+                if (p.identLike() || p.is(SqlTokenType.STRING)
+                        || p.is(SqlTokenType.PERCENT) || p.is(SqlTokenType.STAR)
+                        || (p.token.type() != null && p.token.type().keyword())) {
+                    p.next();
+                }
+            }
+        }
+    }
+
+    /**
+     * MySQL VIEW：{@code ALGORITHM = UNDEFINED|MERGE|TEMPTABLE} /
+     * {@code SQL SECURITY DEFINER|INVOKER}（可与 DEFINER 交错出现）。
+     */
+    private void skipViewAlgorithmAndSecurity() {
+        while (true) {
+            if (p.isIdent("ALGORITHM")
+                    || (p.identLike() && p.token.textEqualsIgnoreCase("ALGORITHM"))) {
                 p.next();
+                p.match(SqlTokenType.EQ);
+                if (p.identLike() || (p.token.type() != null && p.token.type().keyword())) {
+                    p.next();
+                }
+            } else if ((p.identLike() || (p.token.type() != null && p.token.type().keyword()))
+                    && p.token.textEqualsIgnoreCase("SQL")) {
+                SqlToken peek = p.lexer.peek();
+                if (peek == null || !peek.textEqualsIgnoreCase("SECURITY")) {
+                    break;
+                }
+                p.next(); // SQL
+                p.next(); // SECURITY
+                if (p.identLike() || (p.token.type() != null && p.token.type().keyword())) {
+                    p.next(); // DEFINER|INVOKER
+                }
+            } else {
+                break;
             }
         }
     }
@@ -430,6 +476,9 @@ final class SqlDdlParser {
         p.match(SqlTokenType.UNIQUE);
         p.match(SqlTokenType.MATERIALIZED);
         skipDefinerClause();
+        skipViewAlgorithmAndSecurity();
+        skipDefinerClause();
+        skipViewAlgorithmAndSecurity();
         SqlDdlStatement ddl = new SqlDdlStatement();
         ddl.setStatementType(SqlStatementType.CREATE);
         ddl.setOrReplace(orReplace);
@@ -754,6 +803,13 @@ final class SqlDdlParser {
             while (p.is(SqlTokenType.SEMICOLON)) {
                 p.next();
             }
+            // PL/pgSQL / PL/SQL：BEGIN … EXCEPTION WHEN … THEN … END
+            if (endSuffix == null && (p.isIdent("EXCEPTION")
+                    || (p.identLike() && p.token.textEqualsIgnoreCase("EXCEPTION")))) {
+                target.add(parseExceptionHandlers());
+                // handlers 吃到 END 之前；随后循环见到 END 再闭合
+                continue;
+            }
             if (p.is(SqlTokenType.END)) {
                 SqlToken peek = p.lexer.peek();
                 if (endSuffix == null) {
@@ -763,6 +819,13 @@ final class SqlDdlParser {
                         continue;
                     }
                     p.next(); // END
+                    // MySQL/Oracle：END label_name
+                    if (p.identLike() && !isControlStart() && !p.is(SqlTokenType.IF)
+                            && !p.is(SqlTokenType.CASE) && !p.is(SqlTokenType.END)
+                            && !p.isIdent("LOOP") && !p.isIdent("WHILE")
+                            && !p.isIdent("REPEAT")) {
+                        p.next();
+                    }
                     return;
                 }
                 if (peek != null && peek.text() != null && endSuffix.equalsIgnoreCase(peek.text())) {
@@ -798,6 +861,78 @@ final class SqlDdlParser {
         }
     }
 
+    /**
+     * {@code EXCEPTION WHEN cond [OR cond…] THEN body [WHEN …] [ELSE …]}，保留为 OTHER 原文节点。
+     */
+    private SqlStatement parseExceptionHandlers() {
+        int start = p.token.start();
+        p.next(); // EXCEPTION
+        while (!p.is(SqlTokenType.EOF) && !p.is(SqlTokenType.END)) {
+            if (p.is(SqlTokenType.WHEN)
+                    || (p.identLike() && p.token.textEqualsIgnoreCase("WHEN"))) {
+                p.next(); // WHEN
+                // 条件：OTHERS / ident / SQLSTATE … 直至 THEN
+                while (!p.is(SqlTokenType.EOF) && !p.is(SqlTokenType.THEN)
+                        && !p.is(SqlTokenType.END)) {
+                    if (p.is(SqlTokenType.OR) || p.isIdent("OR")) {
+                        p.next();
+                        continue;
+                    }
+                    if (p.is(SqlTokenType.LPAREN)) {
+                        p.next();
+                        p.skipBalancedParensContent();
+                        continue;
+                    }
+                    p.next();
+                }
+                if (p.is(SqlTokenType.THEN)) {
+                    p.next();
+                }
+                // THEN 体：直到下一 WHEN / ELSE / END
+                while (!p.is(SqlTokenType.EOF) && !p.is(SqlTokenType.END)
+                        && !p.is(SqlTokenType.WHEN)
+                        && !(p.is(SqlTokenType.ELSE))
+                        && !(p.identLike() && p.token.textEqualsIgnoreCase("WHEN"))) {
+                    if (p.is(SqlTokenType.SEMICOLON)) {
+                        p.next();
+                        continue;
+                    }
+                    if (isControlStart()) {
+                        parseControlStatement();
+                    } else {
+                        parseBodyStatement();
+                    }
+                    if (p.is(SqlTokenType.SEMICOLON)) {
+                        p.next();
+                    }
+                }
+            } else if (p.is(SqlTokenType.ELSE)) {
+                p.next();
+                while (!p.is(SqlTokenType.EOF) && !p.is(SqlTokenType.END)
+                        && !p.is(SqlTokenType.WHEN)) {
+                    if (p.is(SqlTokenType.SEMICOLON)) {
+                        p.next();
+                        continue;
+                    }
+                    if (isControlStart()) {
+                        parseControlStatement();
+                    } else {
+                        parseBodyStatement();
+                    }
+                    if (p.is(SqlTokenType.SEMICOLON)) {
+                        p.next();
+                    }
+                }
+            } else {
+                break;
+            }
+        }
+        SqlSimpleStatement stmt = new SqlSimpleStatement();
+        stmt.setStatementType(SqlStatementType.OTHER);
+        stmt.setText(p.lexer.rawSlice(start, p.token.start()).trim());
+        return stmt;
+    }
+
     private boolean isControlStart() {
         return p.is(SqlTokenType.IF) || p.is(SqlTokenType.CASE)
                 || p.isIdent("WHILE") || p.isIdent("LOOP") || p.isIdent("REPEAT")
@@ -821,7 +956,7 @@ final class SqlDdlParser {
         if (peek == null || peek.type() != SqlTokenType.COLON) {
             return false;
         }
-        String after = p.lexer.rawSlice(p.lexer.position(), p.lexer.position() + 24).trim();
+        String after = p.lexer.rawSlice(p.lexer.position(), p.lexer.position() + 32).trim();
         if (after.isEmpty()) {
             return false;
         }
@@ -829,8 +964,15 @@ final class SqlDdlParser {
         while (i < after.length() && Character.isWhitespace(after.charAt(i))) {
             i++;
         }
+        if (i < after.length() && after.charAt(i) == ':') {
+            i++;
+            while (i < after.length() && Character.isWhitespace(after.charAt(i))) {
+                i++;
+            }
+        }
         String upper = after.substring(i).toUpperCase();
-        return upper.startsWith("LOOP") || upper.startsWith("WHILE") || upper.startsWith("REPEAT");
+        return upper.startsWith("LOOP") || upper.startsWith("WHILE") || upper.startsWith("REPEAT")
+                || upper.startsWith("BEGIN");
     }
 
     private SqlStatement parseBodyStatement() {
@@ -851,6 +993,15 @@ final class SqlDdlParser {
             if (isLabeledLoopStart()) {
                 label = SqlParser.unquote(p.consumeIdentRaw());
                 p.expect(SqlTokenType.COLON);
+            }
+            if (p.is(SqlTokenType.BEGIN)) {
+                p.next(); // BEGIN
+                SqlBlockStatement block = finishBlockBody(start, false, null, null);
+                // 可选结束标签 END lab
+                if (label != null && p.identLike() && p.token.textEqualsIgnoreCase(label)) {
+                    p.next();
+                }
+                return block;
             }
             if (p.is(SqlTokenType.IF)) {
                 return parseIfStatement(start);
@@ -930,7 +1081,9 @@ final class SqlDdlParser {
     }
 
     private boolean isElseIfStart() {
-        if (p.isIdent("ELSEIF")) {
+        if (p.isIdent("ELSEIF") || p.isIdent("ELSIF")
+                || (p.identLike() && (p.token.textEqualsIgnoreCase("ELSEIF")
+                || p.token.textEqualsIgnoreCase("ELSIF")))) {
             return true;
         }
         if (p.is(SqlTokenType.ELSE)) {
@@ -941,7 +1094,9 @@ final class SqlDdlParser {
     }
 
     private void consumeElseIfKeyword() {
-        if (p.isIdent("ELSEIF")) {
+        if (p.isIdent("ELSEIF") || p.isIdent("ELSIF")
+                || (p.identLike() && (p.token.textEqualsIgnoreCase("ELSEIF")
+                || p.token.textEqualsIgnoreCase("ELSIF")))) {
             p.next();
             return;
         }
