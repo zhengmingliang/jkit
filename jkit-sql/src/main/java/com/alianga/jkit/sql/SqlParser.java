@@ -272,6 +272,10 @@ public final class SqlParser {
             case INSERT:
                 return dmlParser.parseInsert(false);
             case REPLACE:
+                if (lexer.peek() != null && (lexer.peek().type() == SqlTokenType.VIEW
+                        || lexer.peek().textEqualsIgnoreCase("VIEW"))) {
+                    return ddlParser.parseReplaceView();
+                }
                 if (lexer.peek().type() == SqlTokenType.LPAREN) {
                     // replace(...) 是 MySQL 字符串函数调用的表达式语句，不是 REPLACE INTO
                     SqlSelect exprSelect = new SqlSelect();
@@ -1954,6 +1958,9 @@ public final class SqlParser {
                 && !isIdent("OPTION")
                 && !isIdent("MODEL") && !isIdent("MATCH_RECOGNIZE")
                 && !isIdent("QUALIFY") && !isIdent("VERSIONS")
+                && !isIdent("PREFERRING") && !isIdent("SETTINGS")
+                && !isIdent("PREWHERE") && !isIdent("EMIT")
+                && !isIdent("SEED")
                 && !is(SqlTokenType.FORCE) && !is(SqlTokenType.USE)
                 && !is(SqlTokenType.IGNORE) && !is(SqlTokenType.PARTITION)) {
             // 无 AS 时也允许多段限定别名

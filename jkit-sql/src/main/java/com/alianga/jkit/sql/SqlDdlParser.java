@@ -383,6 +383,41 @@ final class SqlDdlParser {
         return p.lexer.rawSlice(start, p.token.start()).trim();
     }
 
+    /**
+     * Informix/DB2：{@code REPLACE VIEW name AS select}（无 CREATE）。
+     *
+     * @return DDL
+     * @since 2.0.1
+     */
+    SqlStatement parseReplaceView() {
+        p.expect(SqlTokenType.REPLACE);
+        p.expect(SqlTokenType.VIEW);
+        SqlDdlStatement ddl = new SqlDdlStatement();
+        ddl.setStatementType(SqlStatementType.CREATE);
+        ddl.setOrReplace(true);
+        ddl.setObjectType("VIEW");
+        ddl.names().add(p.parseName());
+        if (p.match(SqlTokenType.LPAREN)) {
+            parseCreateColumns(ddl);
+            p.expect(SqlTokenType.RPAREN);
+        }
+        p.match(SqlTokenType.AS);
+        ddl.setQuery(p.parseStatement());
+        if (p.is(SqlTokenType.WITH)) {
+            int wStart = p.token.start();
+            p.next();
+            while (!p.atStmtBreak()) {
+                p.next();
+                if (p.isIdent("ONLY") || p.isIdent("OPTION")) {
+                    p.next();
+                    break;
+                }
+            }
+            ddl.setTail(p.lexer.rawSlice(wStart, p.token.start()).trim());
+        }
+        return ddl;
+    }
+
     SqlStatement parseCreate() {
         p.expect(SqlTokenType.CREATE);
         boolean orReplace = false;
@@ -442,18 +477,69 @@ final class SqlDdlParser {
         }
         boolean asQueryObject = "TABLE".equalsIgnoreCase(ddl.objectType())
                 || "VIEW".equalsIgnoreCase(ddl.objectType());
-        if ((asQueryObject && p.match(SqlTokenType.AS)) || p.is(SqlTokenType.SELECT) || p.is(SqlTokenType.WITH)) {
+        // PG：CREATE TABLE t WITH (fillfactor=70) … / WITH (…) ON COMMIT … AS SELECT
+        // 与 CTE WITH 区分：存储参数 WITH 后紧跟 '('
+        if ("TABLE".equalsIgnoreCase(ddl.objectType())) {
+            while (p.is(SqlTokenType.WITH) && p.lexer.peek() != null
+                    && p.lexer.peek().type() == SqlTokenType.LPAREN) {
+                int wStart = p.token.start();
+                p.next();
+                p.expect(SqlTokenType.LPAREN);
+                String body = p.skipBalancedParensContent();
+                String clause = p.lexer.rawSlice(wStart, p.token.start()).trim();
+                if (!clause.contains("(")) {
+                    clause = "WITH (" + body + ")";
+                }
+                String prev = ddl.tail();
+                ddl.setTail(prev == null || prev.isEmpty() ? clause : prev + " " + clause);
+            }
+            // ON COMMIT DROP/PRESERVE ROWS
+            if (p.is(SqlTokenType.ON) && p.lexer.peek() != null
+                    && p.lexer.peek().textEqualsIgnoreCase("COMMIT")) {
+                int oStart = p.token.start();
+                p.next();
+                p.next(); // COMMIT
+                while (!p.atStmtBreak() && !p.is(SqlTokenType.AS) && !p.is(SqlTokenType.SELECT)
+                        && !p.is(SqlTokenType.WITH) && !p.is(SqlTokenType.LPAREN)) {
+                    p.next();
+                }
+                String clause = p.lexer.rawSlice(oStart, p.token.start()).trim();
+                String prev = ddl.tail();
+                ddl.setTail(prev == null || prev.isEmpty() ? clause : prev + " " + clause);
+            }
+        }
+        boolean withCte = p.is(SqlTokenType.WITH) && p.lexer.peek() != null
+                && p.lexer.peek().type() != SqlTokenType.LPAREN;
+        if ((asQueryObject && p.match(SqlTokenType.AS)) || p.is(SqlTokenType.SELECT) || withCte) {
             p.match(SqlTokenType.AS);
             ddl.setQuery(p.parseStatement());
             if (p.is(SqlTokenType.WITH)) {
-                // CTAS 尾缀：WITH [NO] DATA
+                // CTAS/VIEW 尾缀：WITH [NO] DATA / WITH READ ONLY / WITH CHECK OPTION
                 int wStart = p.token.start();
                 p.next();
                 if (p.isIdent("NO") || p.is(SqlTokenType.NOT)) {
                     p.next();
                 }
-                if (p.isIdent("DATA")) {
-                    p.next();
+                if (p.isIdent("DATA") || p.isIdent("READ") || p.isIdent("CHECK")
+                        || p.is(SqlTokenType.CHECK)) {
+                    while (!p.atStmtBreak() && !p.is(SqlTokenType.GO)) {
+                        if (p.is(SqlTokenType.SELECT) || p.is(SqlTokenType.INSERT)
+                                || p.is(SqlTokenType.CREATE) || p.is(SqlTokenType.DROP)
+                                || p.is(SqlTokenType.ALTER) || p.is(SqlTokenType.WITH)
+                                && p.lexer.peek() != null
+                                && p.lexer.peek().type() == SqlTokenType.LPAREN) {
+                            break;
+                        }
+                        // READ ONLY / CHECK OPTION / DATA
+                        p.next();
+                        if (p.isIdent("ONLY") || p.isIdent("OPTION") || p.isIdent("DATA")) {
+                            p.next();
+                            break;
+                        }
+                        if (p.is(SqlTokenType.SEMICOLON) || p.is(SqlTokenType.EOF)) {
+                            break;
+                        }
+                    }
                     ddl.setTail(p.lexer.rawSlice(wStart, p.token.start()).trim());
                 }
             }

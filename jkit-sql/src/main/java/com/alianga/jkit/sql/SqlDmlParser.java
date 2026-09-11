@@ -32,6 +32,39 @@ final class SqlDmlParser {
         this.p = parser;
     }
 
+    /** SQL Server OPTION / Exasol PREFERRING 等 DML 尾。 */
+    private void consumeDmlDialectTails(SqlUpdate update) {
+        consumeOptionOrPreferring();
+    }
+
+    private void consumeOptionOrPreferring() {
+        while (true) {
+            if (p.token != null && p.token.textEqualsIgnoreCase("OPTION")
+                    && (p.is(SqlTokenType.IDENT) || (p.token.type() != null && p.token.type().keyword()))) {
+                p.next();
+                if (p.match(SqlTokenType.LPAREN)) {
+                    p.skipBalancedParensContent();
+                }
+            } else if (p.isIdent("PREFERRING")) {
+                p.next();
+                while (!p.is(SqlTokenType.EOF) && !p.is(SqlTokenType.SEMICOLON)
+                        && !p.is(SqlTokenType.GO)
+                        && !(p.token.textEqualsIgnoreCase("OPTION"))) {
+                    // 停在下一语句或 OPTION
+                    if (p.is(SqlTokenType.INSERT) || p.is(SqlTokenType.UPDATE)
+                            || p.is(SqlTokenType.DELETE) || p.is(SqlTokenType.SELECT)
+                            || p.is(SqlTokenType.CREATE) || p.is(SqlTokenType.DROP)
+                            || p.is(SqlTokenType.MERGE) || p.is(SqlTokenType.WITH)) {
+                        break;
+                    }
+                    p.next();
+                }
+            } else {
+                break;
+            }
+        }
+    }
+
     private void parseAssignList(List<SqlBinaryExpr> target) {
         do {
             SqlExpr left;
@@ -45,6 +78,26 @@ final class SqlDmlParser {
                 left = cols;
             } else {
                 left = p.parseName();
+                // PG：SET listes[0] = 1 / listes[(select …)] = / listes[0:3] =
+                while (p.match(SqlTokenType.LBRACKET)) {
+                    if (p.is(SqlTokenType.RBRACKET)) {
+                        p.next();
+                        continue;
+                    }
+                    SqlExpr from = p.exprParser.parseExpr();
+                    if (p.match(SqlTokenType.COLON)) {
+                        SqlExpr to = p.exprParser.parseExpr();
+                        SqlFunctionExpr slice = new SqlFunctionExpr();
+                        slice.setName(SqlIdentifier.of("[]"));
+                        slice.addArgument(left);
+                        slice.addArgument(from);
+                        slice.addArgument(to);
+                        left = slice;
+                    } else {
+                        left = SqlBinaryExpr.of(left, SqlBinaryOp.SUBSCRIPT, from);
+                    }
+                    p.expect(SqlTokenType.RBRACKET);
+                }
             }
             // MySQL := 与 =
             if (p.match(SqlTokenType.ASSIGN)) {
@@ -143,6 +196,7 @@ final class SqlDmlParser {
         if (delete.output().isEmpty()) {
             delete.setOutputInto(parseOutputClause(delete.output()));
         }
+        consumeOptionOrPreferring();
         return delete;
     }
 
@@ -205,6 +259,7 @@ final class SqlDmlParser {
             parseValuesRows(insert);
         }
         parseOnConflictOrDuplicate(insert);
+        consumeOptionOrPreferring();
         if (p.match(SqlTokenType.RETURNING)) {
             insert.setReturning(parseReturningExpr());
         }
@@ -356,6 +411,10 @@ final class SqlDmlParser {
                 p.expect(SqlTokenType.CONSTRAINT);
                 insert.setConflictConstraint(p.parseName());
             }
+            // PG：ON CONFLICT (…) WHERE predicate DO …
+            if (p.match(SqlTokenType.WHERE)) {
+                p.exprParser.parseExpr();
+            }
             p.expect(SqlTokenType.DO);
             if (p.match(SqlTokenType.NOTHING)) {
                 insert.setConflictDoNothing(true);
@@ -486,6 +545,7 @@ final class SqlDmlParser {
         if (update.output().isEmpty()) {
             update.setOutputInto(parseOutputClause(update.output()));
         }
+        consumeDmlDialectTails(update);
         return update;
     }
 

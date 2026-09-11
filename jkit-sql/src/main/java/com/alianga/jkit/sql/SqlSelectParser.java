@@ -1,6 +1,8 @@
 package com.alianga.jkit.sql;
 
 import com.alianga.jkit.sql.ast.SqlAllColumns;
+import com.alianga.jkit.sql.ast.SqlBinaryExpr;
+import com.alianga.jkit.sql.ast.SqlBinaryOp;
 import com.alianga.jkit.sql.ast.SqlExpr;
 import com.alianga.jkit.sql.ast.SqlFunctionExpr;
 import com.alianga.jkit.sql.ast.SqlFunctionTable;
@@ -119,7 +121,13 @@ final class SqlSelectParser {
             } else if (p.token.type() == SqlTokenType.STRAIGHT_JOIN) {
                 p.next();
                 type = SqlJoin.Type.STRAIGHT;
+            } else if (p.isIdent("HASH") || p.isIdent("MERGE") || p.isIdent("LOOP")) {
+                // SQL Server：HASH|MERGE|LOOP JOIN
+                p.next();
+                p.expect(SqlTokenType.JOIN);
+                type = SqlJoin.Type.INNER;
             } else if (p.match(SqlTokenType.JOIN) || p.match(SqlTokenType.INNER)) {
+                skipJoinMethodHint();
                 p.match(SqlTokenType.JOIN);
                 type = SqlJoin.Type.INNER;
             } else if (p.match(SqlTokenType.LEFT)) {
@@ -133,6 +141,7 @@ final class SqlSelectParser {
                     type = SqlJoin.Type.LEFT_SEMI;
                 } else {
                     p.match(SqlTokenType.OUTER);
+                    skipJoinMethodHint();
                     p.expect(SqlTokenType.JOIN);
                     type = SqlJoin.Type.LEFT;
                 }
@@ -147,11 +156,13 @@ final class SqlSelectParser {
                     type = SqlJoin.Type.RIGHT_SEMI;
                 } else {
                     p.match(SqlTokenType.OUTER);
+                    skipJoinMethodHint();
                     p.expect(SqlTokenType.JOIN);
                     type = SqlJoin.Type.RIGHT;
                 }
             } else if (p.match(SqlTokenType.FULL)) {
                 p.match(SqlTokenType.OUTER);
+                skipJoinMethodHint();
                 p.expect(SqlTokenType.JOIN);
                 type = SqlJoin.Type.FULL;
             } else if (p.match(SqlTokenType.CROSS)) {
@@ -172,6 +183,20 @@ final class SqlSelectParser {
             join.setNatural(natural);
             join.setLeft(left);
             join.setRight(parseTableSource());
+            // KSQL/流：JOIN … WITHIN (5 HOURS) ON …
+            if (p.isIdent("WITHIN") && p.lexer.peek() != null
+                    && p.lexer.peek().type() == SqlTokenType.LPAREN) {
+                p.next();
+                p.expect(SqlTokenType.LPAREN);
+                String within = p.skipBalancedParensContent();
+                String prev = join.right() instanceof SqlTable
+                        ? ((SqlTable) join.right()).sampleClause() : null;
+                if (join.right() instanceof SqlTable) {
+                    SqlTable rt = (SqlTable) join.right();
+                    String w = "WITHIN (" + within + ")";
+                    rt.setSampleClause(prev == null || prev.isEmpty() ? w : prev + " " + w);
+                }
+            }
             if (p.match(SqlTokenType.ON)) {
                 join.setCondition(p.exprParser.parseExpr());
                 // Trino/Presto 风格：JOIN ON 后的 /*+joinMethod=…*/ hint 挂到右表
@@ -181,6 +206,22 @@ final class SqlSelectParser {
                     if (join.right() instanceof SqlTable) {
                         SqlTable t = (SqlTable) join.right();
                         t.setOptimizerHint(t.optimizerHint() == null ? h : t.optimizerHint() + " " + h);
+                    }
+                }
+                // 嵌套 JOIN 链式 ON：t1 JOIN t2 JOIN t3 ON c3 ON c2
+                while (p.match(SqlTokenType.ON)) {
+                    SqlExpr extra = p.exprParser.parseExpr();
+                    SqlJoin target = join;
+                    while (target.left() instanceof SqlJoin
+                            && ((SqlJoin) target.left()).condition() == null
+                            && ((SqlJoin) target.left()).joinType() != SqlJoin.Type.COMMA) {
+                        target = (SqlJoin) target.left();
+                    }
+                    if (target.condition() == null) {
+                        target.setCondition(extra);
+                    } else {
+                        target.setCondition(SqlBinaryExpr.of(target.condition(),
+                                SqlBinaryOp.AND, extra));
                     }
                 }
             } else if (p.match(SqlTokenType.USING)) {
@@ -403,8 +444,18 @@ final class SqlSelectParser {
         if (p.isIdent("MODEL")) {
             select.setModelClause(parseModelClause());
         }
-        if (p.match(SqlTokenType.WHERE)) {
+        // ClickHouse：PREWHERE
+        if (p.isIdent("PREWHERE")) {
+            p.next();
             select.setWhere(p.exprParser.parseExpr());
+        }
+        if (p.match(SqlTokenType.WHERE)) {
+            SqlExpr w = p.exprParser.parseExpr();
+            if (select.where() != null) {
+                select.setWhere(SqlBinaryExpr.of(select.where(), SqlBinaryOp.AND, w));
+            } else {
+                select.setWhere(w);
+            }
         }
         if (p.match(SqlTokenType.START)) {
             p.expect(SqlTokenType.WITH);
@@ -439,6 +490,9 @@ final class SqlSelectParser {
                 p.expect(SqlTokenType.LPAREN);
                 sb.append('(').append(p.skipBalancedParensContent()).append(')');
                 select.setGroupByExtension(sb.toString());
+            } else if (p.match(SqlTokenType.LPAREN) && p.is(SqlTokenType.RPAREN)) {
+                // PG：GROUP BY () 空分组集
+                p.next();
             } else {
                 do {
                     select.groupBy().add(p.exprParser.parseExpr());
@@ -473,7 +527,11 @@ final class SqlSelectParser {
             p.next();
             select.setQualify(p.exprParser.parseExpr());
         }
-        if (p.match(SqlTokenType.WINDOW)) {
+        if (p.is(SqlTokenType.WINDOW) && p.lexer.peek() != null
+                && !p.lexer.peek().textEqualsIgnoreCase("HOPPING")
+                && !p.lexer.peek().textEqualsIgnoreCase("SESSION")
+                && !p.lexer.peek().textEqualsIgnoreCase("TUMBLING")) {
+            p.next();
             do {
                 SqlWindowDefinition window = new SqlWindowDefinition();
                 window.setName(p.parseName());
@@ -518,8 +576,16 @@ final class SqlSelectParser {
             } else if (p.isIdent("NO") && p.lexer.peek() != null
                     && (p.lexer.peek().type() == SqlTokenType.KEY
                     || p.lexer.peek().textEqualsIgnoreCase("KEY"))) {
-                // PG：FOR NO KEY UPDATE
-                select.setForUpdateTail(p.consumeRawUntilClause());
+                // PG：FOR NO KEY UPDATE（UPDATE 是 alias-stop，勿用 consumeRawUntilClause）
+                p.next(); // NO
+                p.next(); // KEY
+                if (p.match(SqlTokenType.UPDATE) || p.isIdent("UPDATE")) {
+                    if (p.isIdent("UPDATE")) {
+                        p.next();
+                    }
+                }
+                select.setForUpdateTail("NO KEY UPDATE");
+                select.setForUpdate(true);
             } else if ((p.is(SqlTokenType.KEY) || p.isIdent("KEY")) && p.lexer.peek() != null
                     && p.lexer.peek().textEqualsIgnoreCase("SHARE")) {
                 // PG：FOR KEY SHARE（KEY 为关键字；SHARE 是 alias-stop，勿用 consumeRawUntilClause）
@@ -573,6 +639,8 @@ final class SqlSelectParser {
             String opt = p.skipBalancedParensContent();
             select.setQueryOption("(" + opt + ")");
         }
+        // ClickHouse SETTINGS / KSQL EMIT CHANGES / Exasol PREFERRING
+        consumeSelectDialectTails(select);
         parseSelectTail(select);
         // 表达式层收集的游离 hint（如 WHERE 中的 TDDL hint）统一挂到 SELECT
         for (String h : p.exprParser.drainFloatingHints()) {
@@ -669,6 +737,7 @@ final class SqlSelectParser {
         if (p.is(SqlTokenType.STAR)) {
             p.next();
             item.setExpr(new SqlAllColumns());
+            consumeExceptReplace(item);
             return item;
         }
         SqlExpr expr = p.exprParser.parseExpr();
@@ -676,6 +745,7 @@ final class SqlSelectParser {
             SqlAllColumns all = new SqlAllColumns();
             all.setOwner((SqlIdentifier) expr);
             item.setExpr(all);
+            consumeExceptReplace(item);
         } else {
             item.setExpr(expr);
             // Hive UDTF：fn(...) AS (c0, c1, c2)
@@ -690,6 +760,31 @@ final class SqlSelectParser {
             }
         }
         return item;
+    }
+
+    /** BigQuery：{@code * EXCEPT(col)} / {@code * REPLACE(expr AS col)}。 */
+    private void consumeExceptReplace(SqlSelectItem item) {
+        StringBuilder sb = new StringBuilder();
+        while (true) {
+            if (p.is(SqlTokenType.EXCEPT) && p.lexer.peek() != null
+                    && p.lexer.peek().type() == SqlTokenType.LPAREN) {
+                p.next();
+                p.expect(SqlTokenType.LPAREN);
+                sb.append(" EXCEPT(").append(p.skipBalancedParensContent()).append(')');
+            } else if ((p.is(SqlTokenType.REPLACE) || p.isIdent("REPLACE")) && p.lexer.peek() != null
+                    && p.lexer.peek().type() == SqlTokenType.LPAREN) {
+                p.next();
+                p.expect(SqlTokenType.LPAREN);
+                sb.append(" REPLACE(").append(p.skipBalancedParensContent()).append(')');
+            } else {
+                break;
+            }
+        }
+        if (sb.length() > 0) {
+            // 挂到别名槽：无独立 AST 字段时用 alias 存后缀原文
+            String prev = item.alias();
+            item.setAlias(prev == null ? sb.toString().trim() : prev + sb.toString());
+        }
     }
 
     private void parseSelectTail(SqlSelect select) {
@@ -916,6 +1011,93 @@ final class SqlSelectParser {
         table.setTemporalClause(prev == null || prev.isEmpty() ? sb.toString() : prev + " " + sb.toString());
     }
 
+    /** SQL Server：LEFT OUTER HASH JOIN 等方法提示。 */
+    private void skipJoinMethodHint() {
+        if (p.isIdent("HASH") || p.isIdent("MERGE") || p.isIdent("LOOP")) {
+            p.next();
+        }
+    }
+
+    /** KSQL/流处理：表级 {@code WINDOW HOPPING|SESSION|TUMBLING (...)}。 */
+    private void parseStreamingWindow(SqlTable table) {
+        if (!p.is(SqlTokenType.WINDOW) || p.lexer.peek() == null) {
+            return;
+        }
+        String kind = p.lexer.peek().text();
+        if (kind == null) {
+            return;
+        }
+        if (!kind.equalsIgnoreCase("HOPPING") && !kind.equalsIgnoreCase("SESSION")
+                && !kind.equalsIgnoreCase("TUMBLING")) {
+            return;
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append(p.token.text());
+        p.next(); // WINDOW
+        sb.append(' ').append(p.token.text());
+        p.next(); // kind
+        if (p.match(SqlTokenType.LPAREN)) {
+            sb.append('(').append(p.skipBalancedParensContent()).append(')');
+        }
+        String prev = table.sampleClause();
+        table.setSampleClause(prev == null || prev.isEmpty() ? sb.toString() : prev + " " + sb);
+    }
+
+    /** SETTINGS / EMIT CHANGES / PREFERRING 等语句尾。 */
+    private void consumeSelectDialectTails(SqlSelect select) {
+        while (true) {
+            if (p.isIdent("SETTINGS")) {
+                p.next();
+                StringBuilder sb = new StringBuilder("SETTINGS");
+                do {
+                    sb.append(' ');
+                    int start = p.token.start();
+                    // name = expr
+                    if (p.identLike() || (p.token.type() != null && p.token.type().keyword())) {
+                        sb.append(p.token.text());
+                        p.next();
+                    }
+                    if (p.match(SqlTokenType.EQ)) {
+                        sb.append('=');
+                        int eStart = p.token.start();
+                        p.exprParser.parseExpr();
+                        sb.append(p.lexer.rawSlice(eStart, p.token.start()).trim());
+                    } else {
+                        sb.append(p.lexer.rawSlice(start, p.token.start()).trim());
+                    }
+                } while (p.match(SqlTokenType.COMMA));
+                String prev = select.queryOption();
+                select.setQueryOption(prev == null ? sb.toString() : prev + " " + sb);
+            } else if (p.isIdent("EMIT")) {
+                p.next();
+                StringBuilder sb = new StringBuilder("EMIT");
+                if (p.isIdent("CHANGES") || p.identLike()) {
+                    sb.append(' ').append(p.token.text());
+                    p.next();
+                }
+                String prev = select.queryOption();
+                select.setQueryOption(prev == null ? sb.toString() : prev + " " + sb);
+            } else if (p.isIdent("PREFERRING")) {
+                // Exasol：PREFERRING HIGH col [PLUS LOW col2]
+                int start = p.token.start();
+                p.next();
+                while (!p.is(SqlTokenType.EOF) && !p.is(SqlTokenType.SEMICOLON)
+                        && !p.is(SqlTokenType.UNION) && !p.is(SqlTokenType.INTERSECT)
+                        && !p.is(SqlTokenType.EXCEPT) && !p.is(SqlTokenType.MINUS)
+                        && !p.is(SqlTokenType.ORDER) && !p.is(SqlTokenType.LIMIT)
+                        && !p.is(SqlTokenType.FOR) && !p.is(SqlTokenType.GO)
+                        && !(p.isIdent("SETTINGS") || p.isIdent("EMIT"))) {
+                    p.next();
+                }
+                String clause = p.lexer.rawSlice(start, p.token.start()).trim();
+                String prev = select.queryOption();
+                select.setQueryOption(prev == null ? clause : prev + " " + clause);
+            } else {
+                break;
+            }
+        }
+    }
+
     private void parseTableSample(SqlTable table) {
         // PG: TABLESAMPLE SYSTEM|BERNOULLI (p) [REPEATABLE (seed)]
         if (p.isIdent("TABLESAMPLE")) {
@@ -959,6 +1141,17 @@ final class SqlSelectParser {
                 sb.append(p.consumeRawUntilType(SqlTokenType.RPAREN));
                 p.expect(SqlTokenType.RPAREN);
                 sb.append(')');
+            }
+            // Snowflake：SAMPLE BLOCK (p) SEED (n)
+            if (p.isIdent("SEED")) {
+                sb.append(' ').append(p.token.text());
+                p.next();
+                if (p.match(SqlTokenType.LPAREN)) {
+                    sb.append('(');
+                    sb.append(p.consumeRawUntilType(SqlTokenType.RPAREN));
+                    p.expect(SqlTokenType.RPAREN);
+                    sb.append(')');
+                }
             }
             table.setSampleClause(sb.toString());
         }
@@ -1099,6 +1292,7 @@ final class SqlSelectParser {
             parseVersionsBetween(table);
             parseWithTableHint(table);
             parseTableSample(table);
+            parseStreamingWindow(table);
             parseMatchRecognize(table);
             return table;
         }

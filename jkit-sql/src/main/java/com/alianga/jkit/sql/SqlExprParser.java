@@ -403,6 +403,29 @@ final class SqlExprParser {
                 } else {
                     left = SqlBinaryExpr.of(left, not ? SqlBinaryOp.IS_NOT : SqlBinaryOp.IS, parseBit());
                 }
+            } else if (p.isIdent("ISNULL") || p.isIdent("NOTNULL")) {
+                // PostgreSQL 后缀：col ISNULL / col NOTNULL
+                boolean notNull = p.isIdent("NOTNULL");
+                p.next();
+                left = SqlBinaryExpr.of(left, notNull ? SqlBinaryOp.IS_NOT : SqlBinaryOp.IS,
+                        SqlIdentifier.of("NULL"));
+            } else if (p.isIdent("MEMBER") && p.lexer.peek() != null
+                    && p.lexer.peek().type() == SqlTokenType.OF) {
+                // MySQL 8：expr MEMBER OF (json)
+                p.next();
+                p.next(); // OF
+                SqlFunctionExpr mem = new SqlFunctionExpr();
+                mem.setName(SqlIdentifier.of("MEMBER OF"));
+                mem.addArgument(left);
+                if (p.match(SqlTokenType.LPAREN)) {
+                    if (!p.is(SqlTokenType.RPAREN)) {
+                        mem.addArgument(parseExpr());
+                    }
+                    p.expect(SqlTokenType.RPAREN);
+                } else {
+                    mem.addArgument(parseBit());
+                }
+                left = mem;
             } else if (p.is(SqlTokenType.BIND) && lookingAtJsonExistsOp()) {
                 // PG jsonb：col ? 'key' / col ?| array / col ?& array（? 与绑定同形）
                 String op = "?";
@@ -437,7 +460,12 @@ final class SqlExprParser {
                 }
             } else if (p.is(SqlTokenType.BETWEEN)) {
                 left = parseBetween(left, false);
-            } else if (p.is(SqlTokenType.IN)) {
+            } else if (p.is(SqlTokenType.IN)
+                    || ((p.is(SqlTokenType.GLOBAL) || p.token.textEqualsIgnoreCase("GLOBAL"))
+                    && p.lexer.peek() != null && p.lexer.peek().type() == SqlTokenType.IN)) {
+                if (p.is(SqlTokenType.GLOBAL) || p.token.textEqualsIgnoreCase("GLOBAL")) {
+                    p.next(); // MaxCompute：GLOBAL IN
+                }
                 left = parseIn(left, false);
             } else if (p.isIdent("INCLUDES") || p.isIdent("EXCLUDES")) {
                 String op = p.token.text().toUpperCase();
@@ -640,6 +668,21 @@ final class SqlExprParser {
         return value;
     }
 
+    /** Oracle/PG 命名实参：{@code name => expr}。 */
+    private SqlExpr parseNamedOrExpr() {
+        if ((p.identLike() || (p.token.type() != null && p.token.type().keyword()))
+                && p.lexer.peek() != null && p.lexer.peek().type() == SqlTokenType.FAT_ARROW) {
+            SqlIdentifier name = p.parseName();
+            p.next(); // =>
+            SqlFunctionExpr named = new SqlFunctionExpr();
+            named.setName(SqlIdentifier.of("=>"));
+            named.addArgument(name);
+            named.addArgument(parseExpr());
+            return named;
+        }
+        return parseExpr();
+    }
+
     SqlExpr parseFunction(SqlIdentifier name) {
         String fnName = name.simpleName();
         if (SqlParser.equalsIgnoreCase(fnName, "EXTRACT")) {
@@ -697,7 +740,7 @@ final class SqlExprParser {
                 } else if (p.isQueryStart()) {
                     fn.addArgument(SqlQueryExpr.of(p.parseStatement()));
                 } else {
-                    fn.addArgument(parseExpr());
+                    fn.addArgument(parseNamedOrExpr());
                 }
             } while (p.match(SqlTokenType.COMMA));
         }
@@ -736,7 +779,7 @@ final class SqlExprParser {
                     } else if (p.isQueryStart()) {
                         fn.addArgument(SqlQueryExpr.of(p.parseStatement()));
                     } else {
-                        fn.addArgument(parseExpr());
+                        fn.addArgument(parseNamedOrExpr());
                     }
                 } while (p.match(SqlTokenType.COMMA));
             }

@@ -2,6 +2,16 @@
 
 本文记录 jkit 各版本的用户可见变更。新版本一律追加到「版本记录」最上方，不要改写已发布小节。
 
+## 2.0.1 / unreleased
+
+### jkit-sql
+- 覆盖率第九轮：空白夹缝运算符（`> =`/`| |`/`^=`）、`=>` 命名实参、`//` 行内备注、
+  SAMPLE SEED、FOR NO KEY UPDATE、HASH JOIN、WITHIN 时窗 JOIN、链式 ON、
+  BigQuery `* EXCEPT/REPLACE`、MEMBER OF、ISNULL、GLOBAL IN、PREWHERE/SETTINGS/EMIT/PREFERRING、
+  GROUP BY ()、WINDOW HOPPING/SESSION/TUMBLING、OPTION(RECOMPILE)、数组下标 SET、
+  ON CONFLICT WHERE、REPLACE VIEW、CREATE TABLE WITH (存储参数)、WITH READ ONLY。
+  竞品率 **95.0 / 88.2 / 79.8**（druid-bvt / jsql-inline / jsql-files）。
+
 ## 如何记录后续版本
 
 发布（或准备发布）新版本时按下面做：

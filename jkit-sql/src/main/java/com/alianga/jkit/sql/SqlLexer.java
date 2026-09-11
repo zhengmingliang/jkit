@@ -603,8 +603,12 @@ public final class SqlLexer {
                 }
                 break;
             case '=':
-                match('=');
-                type = SqlTokenType.EQ;
+                if (match('>')) {
+                    type = SqlTokenType.FAT_ARROW;
+                } else {
+                    match('=');
+                    type = SqlTokenType.EQ;
+                }
                 break;
             case '<':
                 if (match('=')) {
@@ -619,6 +623,10 @@ public final class SqlLexer {
                     type = SqlTokenType.SHIFT_LEFT;
                 } else if (match('@')) {
                     type = SqlTokenType.AT_OP;
+                } else if (matchSkippingSpace('=')) {
+                    type = SqlTokenType.LE;
+                } else if (matchSkippingSpace('>')) {
+                    type = SqlTokenType.NE;
                 } else {
                     type = SqlTokenType.LT;
                 }
@@ -628,12 +636,16 @@ public final class SqlLexer {
                     type = SqlTokenType.GE;
                 } else if (match('>')) {
                     type = SqlTokenType.SHIFT_RIGHT;
+                } else if (matchSkippingSpace('=')) {
+                    type = SqlTokenType.GE;
                 } else {
                     type = SqlTokenType.GT;
                 }
                 break;
             case '!':
                 if (match('=')) {
+                    type = SqlTokenType.NE;
+                } else if (matchSkippingSpace('=')) {
                     type = SqlTokenType.NE;
                 } else if (match('~')) {
                     match('*');
@@ -653,12 +665,19 @@ public final class SqlLexer {
                 if (match('|')) {
                     type = (dialect.pipesAsOr() && !pipesAsConcat)
                             ? SqlTokenType.OR_OP : SqlTokenType.CONCAT;
+                } else if (matchSkippingSpace('|')) {
+                    type = (dialect.pipesAsOr() && !pipesAsConcat)
+                            ? SqlTokenType.OR_OP : SqlTokenType.CONCAT;
                 } else {
                     type = SqlTokenType.BIT_OR;
                 }
                 break;
             case '^':
-                type = SqlTokenType.BIT_XOR;
+                if (match('=') || matchSkippingSpace('=')) {
+                    type = SqlTokenType.NE; // Oracle ^=
+                } else {
+                    type = SqlTokenType.BIT_XOR;
+                }
                 break;
             case '~':
                 if (match('*')) {
@@ -693,6 +712,35 @@ public final class SqlLexer {
         return false;
     }
 
+    /** 允许运算符中间夹空白：{@code > =} / {@code < >} / {@code | |} / {@code ! =} / {@code ^ =}。 */
+    private boolean matchSkippingSpace(char expect) {
+        int savePos = pos;
+        int saveLine = line;
+        int saveLineStart = lineStart;
+        while (pos < limit) {
+            char ch = src[pos];
+            if (ch == ' ' || ch == '\t' || ch == '\r') {
+                pos++;
+                continue;
+            }
+            if (ch == '\n') {
+                pos++;
+                line++;
+                lineStart = pos;
+                continue;
+            }
+            break;
+        }
+        if (pos < limit && src[pos] == expect) {
+            pos++;
+            return true;
+        }
+        pos = savePos;
+        line = saveLine;
+        lineStart = saveLineStart;
+        return false;
+    }
+
     private void skipSpaceAndComment() {
         while (pos < limit) {
             if (executableDepth > 0 && pos + 1 < limit && src[pos] == '*' && src[pos + 1] == '/') {
@@ -718,6 +766,37 @@ public final class SqlLexer {
                 pos += 2;
                 skipToEol();
                 continue;
+            }
+            // 行内 // 备注：`// text`（// 后须有空白+内容）。
+            // 不吞 `DELIMITER //` / `SELECT 1 //`；遇 )];,; 等结构符即停（避免吃掉 `) as t`）。
+            if (c == '/' && pos + 1 < limit && src[pos + 1] == '/') {
+                int i = pos + 2;
+                boolean hasSpace = i < limit && (src[i] == ' ' || src[i] == '\t');
+                boolean hasText = false;
+                if (hasSpace) {
+                    int j = i;
+                    while (j < limit && (src[j] == ' ' || src[j] == '\t')) {
+                        j++;
+                    }
+                    hasText = j < limit && src[j] != '\n' && src[j] != '\r';
+                }
+                if (hasSpace && hasText) {
+                    if (keepComments) {
+                        return;
+                    }
+                    pos += 2;
+                    while (pos < limit) {
+                        char ch = src[pos];
+                        if (ch == '\n' || ch == '\r') {
+                            break;
+                        }
+                        if (ch == ')' || ch == ']' || ch == '}' || ch == ';' || ch == ',') {
+                            break;
+                        }
+                        pos++;
+                    }
+                    continue;
+                }
             }
             if (c == '#' && dialect.hashLineComment()) {
                 if (keepComments) {

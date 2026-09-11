@@ -57,6 +57,8 @@ public enum SqlTokenType {
     REGEX_OP,
     /** MySQL {@code <=>} 空安全相等 */
     NULL_SAFE_EQ,
+    /** Oracle/PG/Snowflake 命名实参 {@code =>} */
+    FAT_ARROW,
     QUESTION,
 
     /** 优化器提示（slash-star-plus ... star-slash） */
