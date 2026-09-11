@@ -214,4 +214,41 @@ public class SqlSchemaConvertOutputTest {
         assertFalse(ora, norm(ora).toUpperCase().contains("CURRENT_TIMESTAMP()"));
         assertReparsable(ora, SqlDialect.ORACLE);
     }
+
+    @Test
+    public void uuidOnPostgresWarnsWithoutGuessingEquivalent() {
+        // PG 是 gen_random_uuid()，名字与语义细节都不同，不猜等价，只告警
+        ConversionResult r = SqlSchemaConverter.convert("SELECT UUID() FROM t",
+                SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        assertTrue("PG 未对 UUID() 告警: " + r.sql(),
+                r.report().hasSeverityAtLeast(ConversionWarning.Severity.SEMANTIC_RISK));
+        assertEquals("SELECT UUID() FROM t", norm(r.sql()));
+    }
+
+    @Test
+    public void randOnPostgresWarns() {
+        ConversionResult r = SqlSchemaConverter.convert("SELECT * FROM t ORDER BY RAND() LIMIT 1",
+                SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        assertTrue("PG 未对 RAND() 告警: " + r.sql(),
+                r.report().hasSeverityAtLeast(ConversionWarning.Severity.SEMANTIC_RISK));
+    }
+
+    @Test
+    public void randOnSqlServerIsSameNameAndSilent() {
+        // SQL Server 有同名 RAND()，不该告警
+        ConversionResult r = SqlSchemaConverter.convert("SELECT RAND()",
+                SqlDialect.MYSQL, SqlDialect.SQLSERVER);
+        assertFalse("SQLSERVER 同名 RAND() 不应告警",
+                r.report().hasSeverityAtLeast(ConversionWarning.Severity.SEMANTIC_RISK));
+        assertEquals("SELECT RAND()", norm(r.sql()));
+    }
+
+    @Test
+    public void lastInsertIdOnOracleWarns() {
+        // LAST_INSERT_ID 是连接级会话状态，Oracle/PG 里要用 RETURNING/序列，无法函数级等价
+        ConversionResult r = SqlSchemaConverter.convert("SELECT LAST_INSERT_ID()",
+                SqlDialect.MYSQL, SqlDialect.ORACLE);
+        assertTrue("Oracle 未对 LAST_INSERT_ID() 告警: " + r.sql(),
+                r.report().hasSeverityAtLeast(ConversionWarning.Severity.SEMANTIC_RISK));
+    }
 }

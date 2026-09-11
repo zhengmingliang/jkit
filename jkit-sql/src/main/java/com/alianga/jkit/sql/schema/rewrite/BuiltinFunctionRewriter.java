@@ -137,6 +137,29 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
             }
             return fn;
         }
+        if ("UUID".equals(name) || "RAND".equals(name) || "LAST_INSERT_ID".equals(name)) {
+            return rewriteMysqlBuiltin(fn, name, family, report);
+        }
+        return fn;
+    }
+
+    /**
+     * UUID()/RAND()/LAST_INSERT_ID() 这类 MySQL 内建函数，各目标库有各自的名字
+     * （PG 是 gen_random_uuid()/random()，SQL Server 是 NEWID()，Oracle 是 SYS_GUID()），
+     * 名字与语义细节都不一致，不替用户猜等价；目标方言没有同名函数时告警并保留原文。
+     */
+    private static SqlExpr rewriteMysqlBuiltin(SqlFunctionExpr fn, String name, SqlDialect family,
+                                                 ConversionReport.Builder report) {
+        if (family == SqlDialect.MYSQL) {
+            return fn;
+        }
+        boolean sameName = ("UUID".equals(name) && (family == SqlDialect.HIVE || family == SqlDialect.PRESTO))
+                || ("RAND".equals(name) && (family == SqlDialect.SQLSERVER || family == SqlDialect.DB2
+                        || family == SqlDialect.H2));
+        if (!sameName) {
+            report.warn(ConversionWarning.Severity.SEMANTIC_RISK, name,
+                    name + " 在 " + family + " 无同名函数（如 PG 用 gen_random_uuid()/random()），已保留原文");
+        }
         return fn;
     }
 
