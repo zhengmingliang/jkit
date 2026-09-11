@@ -324,6 +324,8 @@ Phase 2–8 add `SQL.convert` / `SQL.convertBatch` for CREATE TABLE and `ALTER T
 
 Supported first-class dialects (MySQL, PostgreSQL, Oracle 11g/12c, SQL Server, H2, ANSI, DB2, SQLite, Hive, ClickHouse, Presto) and `fromName` product aliases: [design doc §4](../sql-schema-converter-design.md). How to extend types/functions: [§9](../sql-schema-converter-design.md).
 
+Entity scan (like data-set `EntityScanner`, no Spring): `SqlEntities.scan("com.example.entity")` then `createTable` / `insert` / `updateById` using the type registry and `SqlBuilder`. Annotate with `@SqlTable` or JPA `@Entity` (detected by name).
+
 ```java
 String pg = SQL.convert(
         "CREATE TABLE t (id INT AUTO_INCREMENT PRIMARY KEY, flag TINYINT(1) DEFAULT 0)",

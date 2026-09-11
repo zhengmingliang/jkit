@@ -453,6 +453,35 @@ java -jar target/benchmarks.jar com.alianga.test.sql.jmh.SqlSchemaConvertBenchma
 
 如何加类型别名、覆盖某方言写法、加 canonical 类型、加数据库、加函数改写，见 [第九节](./sql-schema-converter-design.md)。类型别名/覆盖走 SPI（`SqlSchemaConverterProvider`）；新语义类型和新函数要改本模块（枚举 / `FunctionAstRewriter`）。
 
+## 实体扫描生成 DDL / DML
+
+对标 data-set `EntityScanner`：扫描包下带 `@SqlTable` 或 JPA `@Entity` 的类（不依赖 Spring / JPA 编译），再按方言生成建表与增删改查。Java 类型走 canonical 类型表。
+
+```java
+import com.alianga.jkit.sql.entity.SqlEntities;
+import com.alianga.jkit.sql.entity.SqlTable;
+import com.alianga.jkit.sql.entity.SqlId;
+import com.alianga.jkit.sql.entity.SqlGenerated;
+import com.alianga.jkit.sql.entity.SqlColumn;
+
+@SqlTable(name = "demo_user")
+public class DemoUser {
+    @SqlId @SqlGenerated Long id;
+    @SqlColumn(name = "user_name", length = 32, nullable = false) String name;
+    Integer age;
+}
+
+List<Class<?>> entities = SqlEntities.scan("com.example.entity");
+String ddl = SqlEntities.createTable(DemoUser.class, SqlDialect.POSTGRES);
+// CREATE TABLE demo_user (id BIGINT NOT NULL GENERATED ALWAYS AS IDENTITY PRIMARY KEY, ...)
+String ins = SqlEntities.insert(user, SqlDialect.MYSQL);
+String upd = SqlEntities.updateById(user, SqlDialect.MYSQL);
+String del = SqlEntities.deleteById(DemoUser.class, 1L, SqlDialect.MYSQL);
+String sel = SqlEntities.selectById(DemoUser.class, 1L, SqlDialect.MYSQL);
+```
+
+有 `javax.persistence` / `jakarta.persistence` 时同样识别 `@Entity` `@Table` `@Column` `@Id` `@GeneratedValue` `@Transient` `@Lob`（反射按类名，无编译依赖）。
+
 ## 性能
 
 手写词法 + `ThreadLocal` 复用 Parser。和 Druid / JSqlParser 的对比测试在上级目录 **`tools-test`**（不进本模块，以免引入第三方依赖）：

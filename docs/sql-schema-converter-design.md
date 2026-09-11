@@ -394,7 +394,24 @@ mvn -pl jkit-sql test
 - `LocalDatasourceConvertTest`：读 `src/test/resources/datasource`，在本机 MySQL / PostgreSQL / Oracle 11g 建表（文件不入库；连不上 skip）
 - JMH：`com.alianga.test.sql.jmh.SqlSchemaConvertBenchmark`
 
-## 十一、明确不做
+## 十一、实体扫描生成 DDL / DML
+
+对标 data-set `com.dtsz.subject.uitls.scan.EntityScanner`，但不引入 Spring。`SqlEntityScanner` 扫 classpath（`file:` / `jar:`）下带 `@SqlTable` 或 JPA `@Entity` 的具体类。
+
+`SqlEntities` 结合类型表与 `SqlBuilder`：
+
+| 方法 | 产出 |
+|---|---|
+| `scan(package)` | 实体 `Class` 列表 |
+| `inspect(Class)` | `SqlEntityModel`（表名、列、主键、自增） |
+| `createTable` / `createTables` | 目标方言 `CREATE TABLE` |
+| `dropTable` | `DROP TABLE` |
+| `insert` / `insertPlaceholders` | `INSERT` |
+| `updateById` / `deleteById` / `selectById` / `selectAll` | 按主键 DML |
+
+Java → canonical：`String`→VARCHAR、`int/Integer`→INT、`long`→BIGINT、`boolean`→BOOLEAN、`BigDecimal`→DECIMAL、时间类型→DATE/TIME/DATETIME、`byte[]`→BLOB。列名默认驼峰转下划线；`XxxEntity` 去后缀当表名。
+
+## 十二、明确不做
 
 - 存储过程 / 触发器 / 视图的跨方言转换
 - 自动生成 Oracle ≤11g 的 SEQUENCE+TRIGGER
