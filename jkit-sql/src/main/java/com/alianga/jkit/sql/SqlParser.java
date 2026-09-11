@@ -2050,21 +2050,44 @@ public final class SqlParser {
             id.setQuoted(true);
         }
         id.addName(unquote(raw));
-        while (is(SqlTokenType.DOT)) {
-            if (lexer.peek().type() == SqlTokenType.STAR) {
+        while (true) {
+            if (is(SqlTokenType.DOT)) {
+                if (lexer.peek().type() == SqlTokenType.STAR) {
+                    break;
+                }
+                next();
+                // SQL Server：catalog..table（中间空 schema）
+                if (is(SqlTokenType.DOT)) {
+                    id.addName("");
+                    continue;
+                }
+                String part = consumeIdentPartRaw();
+                if (isQuoted(part)) {
+                    id.setQuoted(true);
+                }
+                id.addName(unquote(part));
+            } else if (is(SqlTokenType.NAMED_BIND) && lexer.lookahead(0) != null
+                    && lexer.lookahead(0).type() == SqlTokenType.DOT) {
+                // Informix：db:schema.table（:schema 被词法成 NAMED_BIND；须后接 . 以免吞掉三元 :）
+                String part = token.text();
+                if (part != null && part.startsWith(":")) {
+                    part = part.substring(1);
+                }
+                id.addName(part);
+                next();
+            } else if (is(SqlTokenType.COLON) && lexer.peek() != null
+                    && (identLikePeek(lexer.peek()))
+                    && lexer.lookahead(1) != null
+                    && lexer.lookahead(1).type() == SqlTokenType.DOT) {
+                next();
+                String part = consumeIdentPartRaw();
+                if (isQuoted(part)) {
+                    id.setQuoted(true);
+                }
+                id.addName(unquote(part));
+            } else {
                 break;
             }
-            next();
-            // SQL Server：catalog..table（中间空 schema）
-            if (is(SqlTokenType.DOT)) {
-                id.addName("");
-                continue;
-            }
-            String part = consumeIdentPartRaw();
-            if (isQuoted(part)) {
-                id.setQuoted(true);
-            }
-            id.addName(unquote(part));
         }
         if (is(SqlTokenType.VARIABLE) && token.text() != null && token.text().startsWith("@")) {
             // Oracle DB Link：fn@dblink / t@dblink
@@ -2092,6 +2115,14 @@ public final class SqlParser {
         return is(SqlTokenType.IDENT) || isWordOperatorIdent()
                 || (token.type() != null && token.type().keyword()
                 && !isAliasStop(token.type()));
+    }
+
+    private static boolean identLikePeek(SqlToken tok) {
+        if (tok == null || tok.type() == null) {
+            return false;
+        }
+        return tok.type() == SqlTokenType.IDENT
+                || (tok.type().keyword() && !isAliasStop(tok.type()));
     }
 
     /**

@@ -174,7 +174,7 @@ final class SqlDmlParser {
         }
         insert.setReplace(replace);
         insert.setTable(SqlTable.of(p.parseName()));
-        if (insert.overwrite() && p.is(SqlTokenType.PARTITION)) {
+        if (p.is(SqlTokenType.PARTITION)) {
             p.next();
             if (p.match(SqlTokenType.LPAREN)) {
                 insert.setPartitionRaw("(" + p.skipBalancedParensContent() + ")");
@@ -197,6 +197,10 @@ final class SqlDmlParser {
         } else if (p.is(SqlTokenType.LPAREN)) {
             // (SELECT…) / (WITH … SELECT…) / ((SELECT…) UNION …)
             insert.setQuery(p.selectParser.parseSelect());
+        } else if (p.match(SqlTokenType.DEFAULT)) {
+            p.expect(SqlTokenType.VALUES);
+            // INSERT … DEFAULT VALUES：空行占位
+            insert.valuesList().add(new ArrayList<SqlExpr>(0));
         } else if (p.match(SqlTokenType.VALUES) || p.match(SqlTokenType.VALUE)) {
             parseValuesRows(insert);
         }

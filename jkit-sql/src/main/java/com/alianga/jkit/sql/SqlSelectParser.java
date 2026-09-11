@@ -82,7 +82,23 @@ final class SqlSelectParser {
             SqlJoin.Type type = null;
             boolean natural = false;
             if (p.match(SqlTokenType.COMMA)) {
-                type = SqlJoin.Type.COMMA;
+                // Informix：FROM a, OUTER b  → 逗号后 OUTER 表视为外连接
+                if (p.is(SqlTokenType.OUTER) && p.lexer.peek() != null
+                        && p.lexer.peek().type() != SqlTokenType.APPLY) {
+                    p.next();
+                    type = SqlJoin.Type.LEFT;
+                } else {
+                    type = SqlJoin.Type.COMMA;
+                }
+            } else if (p.isIdent("GLOBAL") && p.lexer.peek() != null
+                    && (p.lexer.peek().type() == SqlTokenType.LEFT
+                    || p.lexer.peek().type() == SqlTokenType.RIGHT
+                    || p.lexer.peek().type() == SqlTokenType.FULL
+                    || p.lexer.peek().type() == SqlTokenType.INNER
+                    || p.lexer.peek().type() == SqlTokenType.JOIN)) {
+                // MaxCompute：global left join
+                p.next();
+                continue; // 重新识别 JOIN 类型
             } else if (p.match(SqlTokenType.NATURAL)) {
                 // NATURAL 与连接类型正交：NATURAL [LEFT|RIGHT|FULL|INNER] JOIN
                 natural = true;
@@ -401,6 +417,10 @@ final class SqlSelectParser {
             }
             select.setConnectBy(p.exprParser.parseExpr());
         }
+        // MySQL 偶见 HAVING 写在 GROUP BY 之前
+        if (p.match(SqlTokenType.HAVING)) {
+            select.setHaving(p.exprParser.parseExpr());
+        }
         if (p.match(SqlTokenType.GROUP)) {
             p.expect(SqlTokenType.BY);
             if (p.match(SqlTokenType.DISTINCT)) {
@@ -443,7 +463,7 @@ final class SqlSelectParser {
                 }
             }
         }
-        if (p.match(SqlTokenType.HAVING)) {
+        if (select.having() == null && p.match(SqlTokenType.HAVING)) {
             select.setHaving(p.exprParser.parseExpr());
         }
         // Teradata / Snowflake / ClickHouse：QUALIFY 窗口过滤（HAVING 之后、ORDER BY 之前）
@@ -494,12 +514,13 @@ final class SqlSelectParser {
                 p.next();
                 select.setForUpdateTail("BROWSE");
             } else if (p.isIdent("NO") && p.lexer.peek() != null
-                    && p.lexer.peek().textEqualsIgnoreCase("KEY")) {
+                    && (p.lexer.peek().type() == SqlTokenType.KEY
+                    || p.lexer.peek().textEqualsIgnoreCase("KEY"))) {
                 // PG：FOR NO KEY UPDATE
                 select.setForUpdateTail(p.consumeRawUntilClause());
-            } else if (p.isIdent("KEY") && p.lexer.peek() != null
+            } else if ((p.is(SqlTokenType.KEY) || p.isIdent("KEY")) && p.lexer.peek() != null
                     && p.lexer.peek().textEqualsIgnoreCase("SHARE")) {
-                // PG：FOR KEY SHARE
+                // PG：FOR KEY SHARE（KEY 为关键字）
                 select.setForUpdateTail(p.consumeRawUntilClause());
                 select.setLockInShare(true);
             } else if (p.match(SqlTokenType.SHARE) || p.isIdent("SHARE")) {

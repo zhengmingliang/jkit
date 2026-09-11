@@ -89,9 +89,53 @@ final class SqlExprParser {
         while (p.isSymbolOp(SqlTokenType.PLUS) || p.isSymbolOp(SqlTokenType.MINUS)) {
             SqlBinaryOp op = p.isSymbolOp(SqlTokenType.PLUS) ? SqlBinaryOp.PLUS : SqlBinaryOp.MINUS;
             p.next();
-            left = SqlBinaryExpr.of(left, op, parseMul());
+            // DB2：CURRENT_DATE + (1 DAY) / - 1 DAY（裸单位）
+            if (p.is(SqlTokenType.LPAREN) && lookingAtParenInterval()) {
+                p.next();
+                SqlFunctionExpr iv = new SqlFunctionExpr();
+                iv.setName(SqlIdentifier.of("INTERVAL"));
+                iv.addArgument(parsePrimary());
+                if (isIntervalUnitToken()) {
+                    iv.addArgument(SqlIdentifier.of(consumeIntervalUnitRaw()));
+                }
+                p.expect(SqlTokenType.RPAREN);
+                left = SqlBinaryExpr.of(left, op, iv);
+            } else {
+                SqlExpr right = parseMul();
+                // CURRENT_DATE - 1 DAY
+                if (isIntervalUnitToken()) {
+                    SqlFunctionExpr iv = new SqlFunctionExpr();
+                    iv.setName(SqlIdentifier.of("INTERVAL"));
+                    iv.addArgument(right);
+                    iv.addArgument(SqlIdentifier.of(consumeIntervalUnitRaw()));
+                    right = iv;
+                }
+                left = SqlBinaryExpr.of(left, op, right);
+            }
         }
         return left;
+    }
+
+    private boolean lookingAtParenInterval() {
+        if (!p.is(SqlTokenType.LPAREN)) {
+            return false;
+        }
+        SqlToken a = p.lexer.lookahead(0);
+        SqlToken b = p.lexer.lookahead(1);
+        if (a == null || b == null) {
+            return false;
+        }
+        if (a.type() != SqlTokenType.NUMBER && a.type() != SqlTokenType.STRING
+                && a.type() != SqlTokenType.BIND) {
+            return false;
+        }
+        String u = b.text();
+        return u != null && ("DAY".equalsIgnoreCase(u) || "DAYS".equalsIgnoreCase(u)
+                || "YEAR".equalsIgnoreCase(u) || "YEARS".equalsIgnoreCase(u)
+                || "MONTH".equalsIgnoreCase(u) || "MONTHS".equalsIgnoreCase(u)
+                || "HOUR".equalsIgnoreCase(u) || "HOURS".equalsIgnoreCase(u)
+                || "MINUTE".equalsIgnoreCase(u) || "SECOND".equalsIgnoreCase(u)
+                || "WEEK".equalsIgnoreCase(u));
     }
 
     /** 位置游离的 optimizer hint（如 WHERE 中的 {@code /*+TDDL:MASTER*&#47;}），暂存后由语句层统一挂出。 */
@@ -785,8 +829,12 @@ final class SqlExprParser {
             in.setValues(values);
             return in;
         }
-        // 单值无括号：col IN 1 / col IN 'x'
+        // 无括号子查询：col IN SELECT … / 单值 IN 1
         if (!p.is(SqlTokenType.LPAREN)) {
+            if (p.isQueryStart()) {
+                in.setSubquery(p.parseStatement());
+                return in;
+            }
             List<SqlExpr> values = new ArrayList<SqlExpr>(1);
             values.add(parsePrimary());
             in.setValues(values);
@@ -830,6 +878,11 @@ final class SqlExprParser {
         // 自定义 DELIMITER（如 //）与除法同形：语句终止处不再当二元运算符
         while (!p.atStmtBreak() && (p.is(SqlTokenType.STAR) || p.is(SqlTokenType.SLASH)
                 || p.isSymbolOp(SqlTokenType.PERCENT) || p.is(SqlTokenType.DIV) || p.is(SqlTokenType.MOD))) {
+            // 旧式外连接 a *= b：交给比较层，勿把 * 当乘
+            if (p.is(SqlTokenType.STAR) && p.lexer.peek() != null
+                    && p.lexer.peek().type() == SqlTokenType.EQ) {
+                break;
+            }
             SqlBinaryOp op;
             if (p.is(SqlTokenType.STAR)) {
                 op = SqlBinaryOp.MUL;
@@ -1103,6 +1156,7 @@ final class SqlExprParser {
             } while (p.match(SqlTokenType.COMMA));
         }
         p.expect(SqlTokenType.RBRACKET);
+        // ARRAY[]::text[] 等类型转换已由上层 :: 处理
         return fn;
     }
 
@@ -1472,6 +1526,14 @@ final class SqlExprParser {
         if (p.is(SqlTokenType.TILDE)) {
             p.next();
             return SqlUnaryExpr.of(SqlUnaryExpr.Op.TILDE, parseUnary());
+        }
+        // MySQL：&test 变量式引用 / 位取址
+        if (p.is(SqlTokenType.BIT_AND) && p.token.length() == 1) {
+            p.next();
+            SqlFunctionExpr amp = new SqlFunctionExpr();
+            amp.setName(SqlIdentifier.of("&"));
+            amp.addArgument(parseUnary());
+            return amp;
         }
         if (p.is(SqlTokenType.BINARY)) {
             p.next();

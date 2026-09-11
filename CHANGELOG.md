@@ -36,6 +36,12 @@
 
 ## 2.0.1 - 2026-09-09
 
+### jkit-sql（R8 竞品覆盖）
+- 旧式 `*=` 外连接（乘法消歧）；`FOR KEY SHARE`/`NO KEY UPDATE`（KEY 为关键字）
+- Informix `, OUTER t`；MaxCompute `GLOBAL … JOIN`；`INSERT DEFAULT VALUES`；`INSERT … PARTITION`（非 OVERWRITE）
+- `IN SELECT` 无括号；一元 `&ident`；Informix `db:schema.table`；HAVING 可置于 GROUP BY 前
+- DB2 风格日期运算：`CURRENT_DATE + (1 DAY)` / `- 1 DAY`
+
 ### jkit-sql（R7 竞品覆盖）
 - 脚本：分号后多段无法识别片段可跳过直至下一条真实语句或 EOF（软停）
 - 类型：`CAST(… AS SIGNED INTEGER|UNSIGNED INTEGER)`
