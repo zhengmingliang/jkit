@@ -251,4 +251,52 @@ public class SqlSchemaConvertOutputTest {
         assertTrue("Oracle 未对 LAST_INSERT_ID() 告警: " + r.sql(),
                 r.report().hasSeverityAtLeast(ConversionWarning.Severity.SEMANTIC_RISK));
     }
+
+    @Test
+    public void pgConcatOperatorBecomesConcatOnMysql() {
+        // MySQL 的 || 默认是逻辑或，直译会把拼接变成布尔判断
+        ConversionResult r = SqlSchemaConverter.convert("SELECT a || b FROM t",
+                SqlDialect.POSTGRES, SqlDialect.MYSQL);
+        assertEquals("SELECT CONCAT(a, b) FROM t", norm(r.sql()));
+        assertReparsable(r.sql(), SqlDialect.MYSQL);
+    }
+
+    @Test
+    public void pgConcatOperatorBecomesConcatOnSqlServerWithWarn() {
+        // SQL Server 没有 ||；CONCAT() 存在但把 NULL 当空串，与 || 的 NULL 传播不同，需告警
+        ConversionResult r = SqlSchemaConverter.convert("SELECT a || b FROM t",
+                SqlDialect.POSTGRES, SqlDialect.SQLSERVER);
+        assertEquals("SELECT CONCAT(a, b) FROM t", norm(r.sql()));
+        assertTrue("SQL Server 的 CONCAT 语义差异未告警: " + r.sql(),
+                r.report().hasSeverityAtLeast(ConversionWarning.Severity.SEMANTIC_RISK));
+        assertReparsable(r.sql(), SqlDialect.SQLSERVER);
+    }
+
+    @Test
+    public void nestedConcatOperatorFlattensIntoOneCall() {
+        // 注意不要用 first/last 这类保留字当列名，MySQL 侧复解析会挂
+        ConversionResult r = SqlSchemaConverter.convert(
+                "SELECT fname || ' ' || lname FROM t", SqlDialect.POSTGRES, SqlDialect.MYSQL);
+        assertEquals("SELECT CONCAT(fname, ' ', lname) FROM t", norm(r.sql()));
+        assertReparsable(r.sql(), SqlDialect.MYSQL);
+    }
+
+    @Test
+    public void concatOperatorSurvivesOnDialectsThatSupportIt() {
+        // PG / Oracle / SQLite / DB2 的 || 就是拼接，不该被改写
+        for (SqlDialect target : new SqlDialect[]{SqlDialect.POSTGRES, SqlDialect.ORACLE,
+                SqlDialect.SQLITE, SqlDialect.DB2}) {
+            ConversionResult r = SqlSchemaConverter.convert("SELECT a || b FROM t",
+                    SqlDialect.POSTGRES, target);
+            assertEquals("目标 " + target + " 不该改写 ||", "SELECT a || b FROM t", norm(r.sql()));
+            assertReparsable(r.sql(), target);
+        }
+    }
+
+    @Test
+    public void concatInsideOtherExpressionsIsRewritten() {
+        ConversionResult r = SqlSchemaConverter.convert(
+                "SELECT UPPER(a || b) FROM t WHERE a || b = 'xy'", SqlDialect.POSTGRES, SqlDialect.MYSQL);
+        assertEquals("SELECT UPPER(CONCAT(a, b)) FROM t WHERE CONCAT(a, b) = 'xy'", norm(r.sql()));
+    }
 }
