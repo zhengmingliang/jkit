@@ -484,6 +484,8 @@ String sel = SqlEntities.selectById(DemoUser.class, 1L, SqlDialect.MYSQL);
 
 有 `javax.persistence` / `jakarta.persistence` 时同样识别 `@Entity` `@Table` `@Column` `@Id` `@GeneratedValue` `@Transient` `@Lob`（反射按类名，无编译依赖）。
 
+`jkit-sql` 只生成 SQL。启动时连库建表 / 加列见独立模块 [jkit-sql-auto](./sql-auto.md)。
+
 ## 性能
 
 手写词法 + `ThreadLocal` 复用 Parser。和 Druid / JSqlParser 的对比测试在上级目录 **`tools-test`**（不进本模块，以免引入第三方依赖）：

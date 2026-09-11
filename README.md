@@ -71,7 +71,19 @@ Slack / Telegram / ntfy / 短信（阿里云、腾讯云、云片、华为云）
 
 零依赖手写 SQL 解析器，对标 Druid SQL Parser 与 JSqlParser 的常用入口。用法见 [docs/sql.md](docs/sql.md)。
 
-本仓库是多模块工程：根 POM 为 `jkit-parent`，运行时库在 `jkit-core`（发布坐标仍是 `com.alianga:jkit`），代码生成在 `jkit-curl-codegen`，消息通知在 `jkit-notify`，可选扩展渠道在 `jkit-notify-extra`，SQL 解析在 `jkit-sql`。根目录 `mvn test` 会构建全部模块。
+需要启动时按实体自动建表 / 更新表结构时，另加：
+
+```xml
+<dependency>
+    <groupId>com.alianga</groupId>
+    <artifactId>jkit-sql-auto</artifactId>
+    <version>2.0.1</version>
+</dependency>
+```
+
+扫描 `@SqlTable` / JPA / MyBatis-Plus 实体，对照 `DatabaseMetaData` 执行 `CREATE` / `ALTER`。`jkit-sql` 本身不执行 SQL。用法见 [docs/sql-auto.md](docs/sql-auto.md)。
+
+本仓库是多模块工程：根 POM 为 `jkit-parent`，运行时库在 `jkit-core`（发布坐标仍是 `com.alianga:jkit`），代码生成在 `jkit-curl-codegen`，消息通知在 `jkit-notify`，可选扩展渠道在 `jkit-notify-extra`，SQL 解析在 `jkit-sql`，自动建表在 `jkit-sql-auto`。根目录 `mvn test` 会构建全部模块。
 
 本库接替 [ZmlTools](https://github.com/wuyongshi/ZmlTools)（`top.wuyongshi:ZmlTools`）。**新项目请只用上面的坐标。** 已经依赖 ZmlTools 的工程有两种迁法：
 

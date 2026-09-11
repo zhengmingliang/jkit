@@ -131,6 +131,20 @@ public class SqlEntitiesTest {
     }
 
     @Test
+    public void columnSqlAndCreateIndex() {
+        SqlEntityModel model = SqlEntities.inspect(DemoUser.class);
+        String col = SqlEntities.columnSql(model.columns().get(1), SqlDialect.MYSQL, false);
+        assertTrue(col, col.contains("user_name"));
+        assertTrue(col.toUpperCase(), col.toUpperCase().contains("VARCHAR"));
+        assertFalse(col.toUpperCase(), col.toUpperCase().contains("PRIMARY KEY"));
+        String type = SqlEntities.columnTypeSql(model.idColumn(), SqlDialect.POSTGRES);
+        assertTrue(type, type.toUpperCase().contains("BIGINT") || type.toUpperCase().contains("INT"));
+        String idx = SqlEntities.createIndex("demo_user", "idx_email:email");
+        assertTrue(idx, idx.toUpperCase().contains("CREATE INDEX"));
+        assertTrue(idx, idx.contains("idx_email"));
+    }
+
+    @Test
     public void dropTable() {
         String sql = SqlEntities.dropTable(DemoUser.class, SqlDialect.MYSQL);
         assertTrue(sql.toUpperCase().contains("DROP TABLE"));

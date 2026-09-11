@@ -37,7 +37,7 @@ features:
     linkText: 查看 HTTP 文档
   - icon: 🧬
     title: SQL 解析
-    details: 零依赖手写 SQL 解析器，对标 Druid 与 JSqlParser 常用入口，支持多方言、格式化、统计与改写。
+    details: 零依赖手写 SQL 解析器，对标 Druid 与 JSqlParser 常用入口；另有 jkit-sql-auto 启动时按实体建表 / 加列。
     link: /sql
     linkText: 查看 SQL 文档
   - icon: 📣

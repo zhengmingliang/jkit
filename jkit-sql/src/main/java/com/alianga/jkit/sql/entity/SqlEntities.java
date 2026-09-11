@@ -77,6 +77,18 @@ public final class SqlEntities {
      * @return DDL
      */
     public static String createTable(SqlEntityModel model, SqlDialect dialect) {
+        return createTable(model, dialect, true);
+    }
+
+    /**
+     * {@code CREATE TABLE}，可选是否附带 {@code CREATE INDEX}。
+     *
+     * @param model 映射
+     * @param dialect 目标方言
+     * @param includeIndexes 是否在同一批里拼索引
+     * @return DDL
+     */
+    public static String createTable(SqlEntityModel model, SqlDialect dialect, boolean includeIndexes) {
         SqlDialect d = dialect == null ? SqlDialect.MYSQL : dialect;
         SqlDataTypeRegistry registry = SqlDataTypeRegistry.builtins();
         SqlSchemaConvertOptions options = SqlSchemaConvertOptions.defaults();
@@ -112,9 +124,11 @@ public final class SqlEntities {
             }
         }
         sb.append(')');
-        List<String> indexes = model.indexes();
-        for (int i = 0; i < indexes.size(); i++) {
-            sb.append("; ").append(indexSql(model.tableName(), indexes.get(i)));
+        if (includeIndexes) {
+            List<String> indexes = model.indexes();
+            for (int i = 0; i < indexes.size(); i++) {
+                sb.append("; ").append(indexSql(model.tableName(), indexes.get(i)));
+            }
         }
         return sb.toString();
     }
@@ -138,6 +152,57 @@ public final class SqlEntities {
             sb.append(insert(entities.get(i), dialect));
         }
         return sb.toString();
+    }
+
+    /**
+     * 单列定义文本（含类型 / NOT NULL / 自增 / 可选内联主键）。
+     * {@code ALTER TABLE … ADD} 应传 {@code inlinePk=false}。
+     *
+     * @param column 列
+     * @param dialect 方言
+     * @param inlinePk 是否在列上写 {@code PRIMARY KEY}（单主键建表时为 true）
+     * @return 列定义
+     */
+    public static String columnSql(SqlEntityColumn column, SqlDialect dialect, boolean inlinePk) {
+        if (column == null) {
+            return "";
+        }
+        SqlDialect d = dialect == null ? SqlDialect.MYSQL : dialect;
+        return renderColumn(column, d, SqlDataTypeRegistry.builtins(),
+                SqlSchemaConvertOptions.defaults(), new ConversionReport.Builder(), inlinePk);
+    }
+
+    /**
+     * 单列类型写法（不含列名与约束），供结构对比。
+     *
+     * @param column 列
+     * @param dialect 方言
+     * @return 类型文本
+     */
+    public static String columnTypeSql(SqlEntityColumn column, SqlDialect dialect) {
+        if (column == null) {
+            return "";
+        }
+        SqlDialect d = dialect == null ? SqlDialect.MYSQL : dialect;
+        if (column.rawType() != null && column.rawType().length() > 0) {
+            return column.rawType();
+        }
+        return SqlDataTypeRegistry.builtins().toDialect(
+                column.canonical(), d, column.precision(), column.scale());
+    }
+
+    /**
+     * {@code CREATE INDEX}。{@code spec} 为 {@code name:col1,col2} 或 {@code col1,col2}。
+     *
+     * @param tableName 表名
+     * @param spec 索引定义
+     * @return DDL；spec 空则空串
+     */
+    public static String createIndex(String tableName, String spec) {
+        if (tableName == null || tableName.isEmpty() || spec == null || spec.trim().isEmpty()) {
+            return "";
+        }
+        return indexSql(tableName, spec.trim());
     }
 
     private static String indexSql(String table, String spec) {
@@ -184,7 +249,13 @@ public final class SqlEntities {
         return sb.toString();
     }
 
-    static List<Class<?>> orderByForeignKeys(List<Class<?>> types) {
+    /**
+     * 按外键把被引用表排在前面。环或外部引用保持原相对顺序追加在末尾。
+     *
+     * @param types 实体类
+     * @return 新列表，不改入参
+     */
+    public static List<Class<?>> orderByForeignKeys(List<Class<?>> types) {
         if (types == null || types.size() <= 1) {
             return types == null ? new ArrayList<Class<?>>(0) : new ArrayList<Class<?>>(types);
         }

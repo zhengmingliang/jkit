@@ -22,6 +22,7 @@ jkit 是**纯 JDK、零第三方依赖**的 Java 通用工具库，由 [ZmlTools
 | --- | --- | --- |
 | `jkit-core` | `com.alianga:jkit` | 运行时核心库（字符串、日期、JSON、YAML、HTTP、配置等） |
 | `jkit-sql` | `com.alianga:jkit-sql` | 零依赖手写 SQL 解析器，对标 Druid / JSqlParser 常用入口 |
+| `jkit-sql-auto` | `com.alianga:jkit-sql-auto` | 启动时按实体自动建表 / 更新表结构（JDBC） |
 | `jkit-notify` | `com.alianga:jkit-notify` | 消息通知：钉钉 / 企微 / 飞书 / Server酱 / Bark / Webhook / SMTP |
 | `jkit-notify-extra` | `com.alianga:jkit-notify-extra` | 可选渠道：Slack / Telegram / ntfy / 短信（阿里云、腾讯云、云片、华为云） |
 | `jkit-curl-codegen` | `com.alianga:jkit-curl-codegen` | 把 curl 转成 OkHttp / fetch / requests 等其它语言源码 |
@@ -46,6 +47,14 @@ jkit 是**纯 JDK、零第三方依赖**的 Java 通用工具库，由 [ZmlTools
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit-sql</artifactId>
+    <version>2.0.1</version>
+</dependency>
+```
+
+```xml [自动建表]
+<dependency>
+    <groupId>com.alianga</groupId>
+    <artifactId>jkit-sql-auto</artifactId>
     <version>2.0.1</version>
 </dependency>
 ```

@@ -41,6 +41,7 @@
         <module>jkit-notify</module>
         <module>jkit-notify-extra</module>
         <module>jkit-sql</module>
+        <module>jkit-sql-auto</module>
     </modules>
 
     <properties>

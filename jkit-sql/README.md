@@ -19,7 +19,7 @@ SQL.addLimit(stmt, 100);
 SQL.format(stmt);
 ```
 
-完整说明见 [docs/sql.md](../docs/sql.md)。
+完整说明见 [docs/sql.md](../docs/sql.md)。启动时连库建表 / 加列见独立模块 [jkit-sql-auto](../jkit-sql-auto/README.md)。
 
 和 Druid / JSqlParser 的成功率与吞吐对比在上级目录 `tools-test`：
 

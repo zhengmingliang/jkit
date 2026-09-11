@@ -37,7 +37,7 @@ features:
     linkText: HTTP docs
   - icon: 🧬
     title: SQL Parsing
-    details: A hand-written, zero-dependency SQL parser matching the common entry points of Druid and JSqlParser, with multi-dialect support, formatting, statistics and rewriting.
+    details: A hand-written, zero-dependency SQL parser matching the common entry points of Druid and JSqlParser. jkit-sql-auto can create or update tables from entities at startup.
     link: /en/sql
     linkText: SQL docs
   - icon: 📣

@@ -22,6 +22,7 @@ This repository is a multi-module build rooted at `jkit-parent`. Pull in only wh
 | --- | --- | --- |
 | `jkit-core` | `com.alianga:jkit` | Runtime core (strings, dates, JSON, YAML, HTTP, configuration, …) |
 | `jkit-sql` | `com.alianga:jkit-sql` | Hand-written zero-dependency SQL parser matching the common entry points of Druid / JSqlParser |
+| `jkit-sql-auto` | `com.alianga:jkit-sql-auto` | Create / update tables from entities at startup (JDBC) |
 | `jkit-notify` | `com.alianga:jkit-notify` | Notifications: DingTalk / WeCom / Feishu / ServerChan / Bark / Webhook / SMTP |
 | `jkit-notify-extra` | `com.alianga:jkit-notify-extra` | Optional channels: Slack / Telegram / ntfy / SMS (Alibaba Cloud, Tencent Cloud, Yunpian, Huawei Cloud) |
 | `jkit-curl-codegen` | `com.alianga:jkit-curl-codegen` | Convert curl commands into OkHttp / fetch / requests and other source code |
@@ -46,6 +47,14 @@ Optional modules:
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit-sql</artifactId>
+    <version>2.0.1</version>
+</dependency>
+```
+
+```xml [Auto schema]
+<dependency>
+    <groupId>com.alianga</groupId>
+    <artifactId>jkit-sql-auto</artifactId>
     <version>2.0.1</version>
 </dependency>
 ```

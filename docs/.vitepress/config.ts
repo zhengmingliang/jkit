@@ -47,6 +47,7 @@ const zhNav: DefaultTheme.NavItem[] = [
       { text: '配置读取', link: '/config' },
       { text: 'HTTP 客户端', link: '/http' },
       { text: 'SQL 解析', link: '/sql' },
+      { text: '自动建表', link: '/sql-auto' },
       { text: '消息通知', link: '/notify' },
     ],
   },
@@ -83,6 +84,7 @@ const zhSidebar: DefaultTheme.Sidebar = [
     items: [
       { text: 'HTTP 客户端', link: '/http' },
       { text: 'SQL 解析', link: '/sql' },
+      { text: '自动建表', link: '/sql-auto' },
       { text: '消息通知', link: '/notify' },
     ],
   },
@@ -108,6 +110,7 @@ const enNav: DefaultTheme.NavItem[] = [
       { text: 'Configuration', link: '/en/config' },
       { text: 'HTTP Client', link: '/en/http' },
       { text: 'SQL Parsing', link: '/en/sql' },
+      { text: 'Auto Schema', link: '/en/sql-auto' },
       { text: 'Notification', link: '/en/notify' },
     ],
   },
@@ -144,6 +147,7 @@ const enSidebar: DefaultTheme.Sidebar = [
     items: [
       { text: 'HTTP Client', link: '/en/http' },
       { text: 'SQL Parsing', link: '/en/sql' },
+      { text: 'Auto Schema', link: '/en/sql-auto' },
       { text: 'Notification', link: '/en/notify' },
     ],
   },

@@ -597,5 +597,9 @@ P0–P2 已完成。余量：
 - 跨库数据搬迁、字符集排序结果一致
 - 把 MySQL `MODIFY` 自动变成 PG `ALTER COLUMN` **全套**语法（P1 只补 NOT NULL/DEFAULT 附录，不做 USING 表达式推断）
 - pairwise 类型表、为新产品改 `SqlDialect` 枚举
-- 在 `jkit-sql` 里执行 SQL / 引 JDBC / ORM
+- 在 `jkit-sql` 里执行 SQL / 引 JDBC / ORM（执行已放到独立模块 `jkit-sql-auto`，2026-09-12）
 - 公开文档或站点再放 next-plan 入口
+
+### 11.8 `jkit-sql-auto` ✅（2026-09-12）
+
+独立模块 `com.alianga:jkit-sql-auto`：启动时扫描实体、对照 `DatabaseMetaData`、执行 CREATE/ALTER。`jkit-sql` 仍不执行 SQL。模式 `none/validate/update/create/create-drop`；默认 UPDATE 只加不删。文档 `docs/sql-auto.md` + 英文。
