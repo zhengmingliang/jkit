@@ -25,11 +25,17 @@ public final class AutoIncrementStrategy {
         private final String clause;
         private final String overrideType;
         private final boolean dropped;
+        private final boolean afterPrimaryKey;
 
         Result(String clause, String overrideType, boolean dropped) {
+            this(clause, overrideType, dropped, false);
+        }
+
+        Result(String clause, String overrideType, boolean dropped, boolean afterPrimaryKey) {
             this.clause = clause;
             this.overrideType = overrideType;
             this.dropped = dropped;
+            this.afterPrimaryKey = afterPrimaryKey;
         }
 
         /**
@@ -51,6 +57,16 @@ public final class AutoIncrementStrategy {
          */
         public boolean dropped() {
             return dropped;
+        }
+
+        /**
+         * 自增子句是否必须排在 {@code PRIMARY KEY} 之后（SQLite 的 {@code AUTOINCREMENT}
+         * 只能写成 {@code INTEGER PRIMARY KEY AUTOINCREMENT}，写反了建表报错）。
+         *
+         * @return true 时渲染器把子句放到 PRIMARY KEY 后面
+         */
+        public boolean afterPrimaryKey() {
+            return afterPrimaryKey;
         }
     }
 
@@ -88,7 +104,8 @@ public final class AutoIncrementStrategy {
             case SQLSERVER:
                 return sqlServer(auto);
             case SQLITE:
-                return new Result("AUTOINCREMENT", null, false);
+                // SQLite 只允许 INTEGER PRIMARY KEY AUTOINCREMENT，顺序写反会报语法错
+                return new Result("AUTOINCREMENT", null, false, true);
             case HIVE:
             case CLICKHOUSE:
             case PRESTO:

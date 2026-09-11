@@ -3,6 +3,7 @@ package com.alianga.jkit.sql.schema;
 import com.alianga.jkit.sql.SQL;
 import com.alianga.jkit.sql.SqlDialect;
 import com.alianga.jkit.sql.schema.convert.ConversionResult;
+import com.alianga.jkit.sql.schema.convert.ConversionWarning;
 import com.alianga.jkit.sql.schema.convert.SqlSchemaConverter;
 
 import org.junit.Test;
@@ -109,6 +110,24 @@ public class SqlSchemaConvertOutputTest {
         String ora = SQL.convert("SELECT DATEDIFF(a, b) FROM t", SqlDialect.MYSQL, SqlDialect.ORACLE);
         assertEquals(ora, "SELECT (TRUNC(a) - TRUNC(b)) FROM t", norm(ora));
         assertReparsable(ora, SqlDialect.ORACLE);
+    }
+
+    @Test
+    public void sqliteAutoIncrementWithoutPrimaryKeyWarns() {
+        // AUTOINCREMENT 在 SQLite 只能挂 PRIMARY KEY，无主键时必须告警而不是悄悄丢掉
+        ConversionResult r = SqlSchemaConverter.convert("CREATE TABLE t (id BIGINT AUTO_INCREMENT)",
+                SqlDialect.MYSQL, SqlDialect.SQLITE);
+        assertTrue("无主键却没告警，AUTOINCREMENT 被静默丢弃: " + r.sql(),
+                r.report().hasSeverityAtLeast(ConversionWarning.Severity.MANUAL_ACTION_REQUIRED));
+    }
+
+    @Test
+    public void sqliteAutoIncrementFollowsPrimaryKey() {
+        // SQLite 要求 AUTOINCREMENT 紧跟 PRIMARY KEY 之后，写反了建表就报错
+        String lite = SQL.convert("CREATE TABLE t (id INT AUTO_INCREMENT PRIMARY KEY)",
+                SqlDialect.MYSQL, SqlDialect.SQLITE);
+        assertEquals(lite, "CREATE TABLE t (id INTEGER PRIMARY KEY AUTOINCREMENT)", norm(lite));
+        assertReparsable(lite, SqlDialect.SQLITE);
     }
 
     @Test

@@ -244,11 +244,17 @@ public final class ColumnDefinitionConverter {
                 sb.append(" DEFAULT ").append(body);
             }
         }
-        if (auto != null && auto.clause() != null) {
+        if (auto != null && auto.clause() != null && !auto.afterPrimaryKey()) {
             sb.append(' ').append(auto.clause());
         }
         if (pk) {
             sb.append(" PRIMARY KEY");
+            if (auto != null && auto.clause() != null && auto.afterPrimaryKey()) {
+                sb.append(' ').append(auto.clause());
+            }
+        } else if (auto != null && auto.clause() != null && auto.afterPrimaryKey()) {
+            report.warn(ConversionWarning.Severity.MANUAL_ACTION_REQUIRED, column.columnName(),
+                    "AUTOINCREMENT 在 SQLite 只能用于 INTEGER PRIMARY KEY，该列无主键约束，已去掉");
         }
         if (unique) {
             sb.append(" UNIQUE");
