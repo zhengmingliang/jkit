@@ -572,8 +572,8 @@ class CrossDialectDdlExecutionTest {
 | Phase 4 | `FunctionAstRewriter`：IF→CASE、NOW/CURDATE/CURTIME、GROUP_CONCAT↔STRING_AGG/LISTAGG、IFNULL/NVL/ISNULL、CONCAT、CAST 类型、`CONVERT USING` 告警 | 函数改写 AST 化 | Phase 1 | **已完成**（模板骨架预编译仍可后续加） |
 | Phase 5 | 分页转换接入（复用现有 `SqlRewriter.adaptPagination` / `format`） | 端到端 DML 转换 | Phase 3 | **已完成**（format 路径） |
 | Phase 6 | SPI（`SqlSchemaConverterProvider` + TestKit） | 第三方/内部团队可插拔新方言 | Phase 1, 4 | **已完成**（TestKit 在 test 源码，因 JUnit 仅为 test 依赖） |
-| Phase 7 | 性能优化 + JMH 基准入 CI | 性能回归门禁 | Phase 3-4 |
-| Phase 8 | Testcontainers 差分测试 + 属性测试 + 黄金语料扩展 | 生产就绪的正确性保证 | Phase 3-6 | **语料已起步**（`SqlSchemaConvertCorpusTest`）；容器差分仍待 |
+| Phase 7 | 性能优化 + JMH 基准入 CI | 性能回归门禁 | Phase 3-4 | JMH 仍放 `tools-test`（本模块零运行时依赖）；`convertBatch` 已提供 |
+| Phase 8 | Testcontainers 差分测试 + 属性测试 + 黄金语料扩展 | 生产就绪的正确性保证 | Phase 3-6 | **属性 roundtrip + 目标方言回解析已落地**；容器差分仍待（不引入 Testcontainers 依赖） |
 | Phase 9 | 生产灰度：先接入多租户 SaaS 场景里风险最低的只读分页改写，再逐步开放 DDL 迁移场景 | 灰度发布 | Phase 8 |
 
 ---

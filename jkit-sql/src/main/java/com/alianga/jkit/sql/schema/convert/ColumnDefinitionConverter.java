@@ -39,13 +39,7 @@ public final class ColumnDefinitionConverter {
             return "";
         }
         if (column.tableConstraint()) {
-            report.unchanged();
-            if (mysqlOnlyTableConstraint(column.rawText()) && !supportsMysqlIndex(target)) {
-                report.warn(ConversionWarning.Severity.SEMANTIC_RISK, "",
-                        "表级 MySQL KEY/INDEX 在 " + target + " 下原样保留，可能无法执行: "
-                                + column.rawText());
-            }
-            return column.rawText();
+            return convertTableConstraint(column, target, report);
         }
         CanonicalType canonical = registry.fromDialect(column.dataType(), source);
         if (canonical == CanonicalType.UNKNOWN) {
@@ -223,6 +217,27 @@ public final class ColumnDefinitionConverter {
     private static boolean supportsColumnCharset(SqlDialect dialect) {
         return dialect == SqlDialect.MYSQL || dialect == SqlDialect.HIVE
                 || dialect == SqlDialect.CLICKHOUSE;
+    }
+
+    private static String convertTableConstraint(ColumnDefinition column, SqlDialect target,
+                                                 ConversionReport.Builder report) {
+        String raw = column.rawText() == null ? "" : column.rawText().trim();
+        String u = raw.toUpperCase(Locale.ROOT);
+        if ((u.startsWith("UNIQUE KEY") || u.startsWith("UNIQUE INDEX")) && target != SqlDialect.MYSQL) {
+            int paren = raw.indexOf('(');
+            if (paren >= 0) {
+                report.converted();
+                return "UNIQUE " + raw.substring(paren);
+            }
+        }
+        if (mysqlOnlyTableConstraint(raw) && !supportsMysqlIndex(target)) {
+            report.warn(ConversionWarning.Severity.SEMANTIC_RISK, "",
+                    "已去掉 MySQL 表内索引（请手工 CREATE INDEX）: " + raw);
+            report.unchanged();
+            return "";
+        }
+        report.unchanged();
+        return raw;
     }
 
     private static boolean supportsMysqlIndex(SqlDialect dialect) {

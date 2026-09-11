@@ -73,6 +73,28 @@ public final class SqlSchemaConverter {
     }
 
     /**
+     * 批量转换，复用同一份 Registry。
+     *
+     * @param sqls 源 SQL 列表，可空
+     * @param source 源方言
+     * @param target 目标方言
+     * @param options 选项，null 视为默认
+     * @return 与输入等长的结果列表
+     */
+    public static List<ConversionResult> convertBatch(List<String> sqls, SqlDialect source,
+                                                      SqlDialect target,
+                                                      SqlSchemaConvertOptions options) {
+        if (sqls == null || sqls.isEmpty()) {
+            return new ArrayList<ConversionResult>(0);
+        }
+        List<ConversionResult> out = new ArrayList<ConversionResult>(sqls.size());
+        for (int i = 0; i < sqls.size(); i++) {
+            out.add(convert(sqls.get(i), source, target, options));
+        }
+        return out;
+    }
+
+    /**
      * @param stmt 已解析语句（会 clone，不改入参）
      * @param source 源方言
      * @param target 目标方言
@@ -111,8 +133,11 @@ public final class SqlSchemaConverter {
             rewritten.clear();
             SqlDataTypeRegistry registry = SqlDataTypeRegistry.builtins();
             for (int i = 0; i < cols.size(); i++) {
-                rewritten.add(ColumnDefinitionConverter.convert(
-                        cols.get(i), source, target, options, registry, report));
+                String next = ColumnDefinitionConverter.convert(
+                        cols.get(i), source, target, options, registry, report);
+                if (next != null && !next.isEmpty()) {
+                    rewritten.add(next);
+                }
             }
         }
         if (options.stripDialectOptions() && !supportsMysqlTableOptions(target)) {

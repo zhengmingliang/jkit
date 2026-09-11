@@ -141,6 +141,20 @@ public final class SQL {
     }
 
     /**
+     * 批量跨方言转换。
+     *
+     * @param sqls 源 SQL 列表
+     * @param source 源方言
+     * @param target 目标方言
+     * @return 结果列表
+     * @since 2.0.1
+     */
+    public static List<ConversionResult> convertBatch(List<String> sqls, SqlDialect source,
+                                                      SqlDialect target) {
+        return SqlSchemaConverter.convertBatch(sqls, source, target, SqlSchemaConvertOptions.defaults());
+    }
+
+    /**
      * 解析一条语句，方言默认 MySQL（含 GBase / MariaDB）。
      *
      * @param sql SQL

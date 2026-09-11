@@ -134,5 +134,6 @@ public class SqlSchemaConvertCorpusTest {
             assertTrue("expected warning " + minWarn + " for " + sql,
                     r.report().hasSeverityAtLeast(minWarn));
         }
+        com.alianga.jkit.sql.SQL.parse(r.sql(), target);
     }
 }

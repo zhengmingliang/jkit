@@ -187,6 +187,33 @@ public class SqlDataTypeRegistryTest {
     }
 
     @Test
+    public void roundtripEveryCanonicalOnEveryDialect() {
+        CanonicalType[] types = CanonicalType.values();
+        SqlDialect[] dialects = SqlDialect.values();
+        for (int ti = 0; ti < types.length; ti++) {
+            CanonicalType t = types[ti];
+            if (t == CanonicalType.UNKNOWN) {
+                continue;
+            }
+            Integer p = t.requiresPrecision() ? Integer.valueOf(10) : null;
+            Integer s = t.requiresScale() ? Integer.valueOf(2) : null;
+            for (int di = 0; di < dialects.length; di++) {
+                SqlDialect d = dialects[di];
+                String form = registry.toDialect(t, d, p, s);
+                CanonicalType back = registry.fromDialect(form, d);
+                LossyMapping lossy = registry.findLossy(d, form);
+                if (lossy != null) {
+                    assertTrue(t + " on " + d + " form " + form + " not in " + lossy.collapsedFrom(),
+                            lossy.collapsedFrom().contains(t));
+                    assertEquals(t + " on " + d + " " + form, lossy.primary(), back);
+                } else {
+                    assertEquals(t + " on " + d + " rendered " + form, t, back);
+                }
+            }
+        }
+    }
+
+    @Test
     public void roundtripNonLossyMysqlPostgres() {
         CanonicalType[] types = {
                 CanonicalType.INT, CanonicalType.BIGINT, CanonicalType.VARCHAR,

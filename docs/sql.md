@@ -436,6 +436,10 @@ Oracle ≤11g 的自增会给出 `MANUAL_ACTION_REQUIRED`（需手工 SEQUENCE+T
 - `CAST` / `CONVERT(expr, type)` 的类型走 canonical 表
 - MySQL `CONVERT(expr USING charset)` **不会**误映射成 CAST，只告警并保留原文
 
+目标方言不支持的 MySQL 表内 `KEY`/`INDEX`/`FULLTEXT` 会从 `CREATE TABLE` 中去掉并告警（避免生成无法执行的 DDL）；`UNIQUE KEY` 改写为可移植的 `UNIQUE (...)`。
+
+`SQL.convertBatch` 批量转换。转换结果会按目标方言再 parse 一遍作为语料回归（`SqlSchemaConvertCorpusTest`）。
+
 类型表可通过 SPI 扩展：实现 `SqlSchemaConverterProvider`，在 `META-INF/services/` 注册，`priority()` 越大越晚、可覆盖内置声明。
 
 ## 性能

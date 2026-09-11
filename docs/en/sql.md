@@ -320,7 +320,7 @@ types.fromDialect("TINYINT(1)", SqlDialect.MYSQL);                  // BOOLEAN
 
 Undeclared reverse collisions fail `RegistryValidator` at builtin-table build time.
 
-Phase 2–6 add `SQL.convert` for CREATE TABLE (types, identity, UNSIGNED, defaults, table options) and query functions (`IF`→`CASE`, `GROUP_CONCAT`↔`STRING_AGG`/`LISTAGG`, `IFNULL`/`NVL`, `CAST`). Pagination reuses the existing format adapter. Types are extensible via `SqlSchemaConverterProvider` SPI.
+Phase 2–6 add `SQL.convert` / `SQL.convertBatch` for CREATE TABLE (types, identity, UNSIGNED, defaults, table options) and query functions (`IF`→`CASE`, `GROUP_CONCAT`↔`STRING_AGG`/`LISTAGG`, `IFNULL`/`NVL`, `CAST`, `LOCATE`/`INSTR`). MySQL table-level `KEY`/`INDEX` is stripped (with a warning) so the DDL can parse on the target. Pagination reuses the existing format adapter. Types are extensible via `SqlSchemaConverterProvider` SPI.
 
 ```java
 String pg = SQL.convert(

@@ -238,7 +238,103 @@ public final class FunctionAstRewriter {
             if ("CONVERT".equals(name) && args.size() >= 2) {
                 return rewriteConvertAsCast(fn);
             }
+            if ("LOCATE".equals(name) && args.size() >= 2) {
+                return rewriteLocate(fn);
+            }
+            if ("INSTR".equals(name) && args.size() >= 2) {
+                return rewriteInstr(fn);
+            }
+            if ("CHARINDEX".equals(name) && args.size() >= 2) {
+                return rewriteCharIndex(fn);
+            }
+            if ("LENGTH".equals(name) || "CHAR_LENGTH".equals(name)
+                    || "CHARACTER_LENGTH".equals(name) || "LEN".equals(name)) {
+                return rewriteLength(fn);
+            }
+            if ("SUBSTRING".equals(name) || "SUBSTR".equals(name)) {
+                return rewriteSubstr(fn, name);
+            }
             return fn;
+        }
+
+        private SqlExpr rewriteLocate(SqlFunctionExpr fn) {
+            switch (target) {
+                case MYSQL:
+                case H2:
+                case HIVE:
+                    return fn;
+                case ORACLE:
+                case ORACLE12:
+                    swapFirstTwo(fn);
+                    fn.setName(SqlIdentifier.of("INSTR"));
+                    return fn;
+                case SQLSERVER:
+                    fn.setName(SqlIdentifier.of("CHARINDEX"));
+                    return fn;
+                default:
+                    fn.setName(SqlIdentifier.of("POSITION"));
+                    return fn;
+            }
+        }
+
+        private SqlExpr rewriteInstr(SqlFunctionExpr fn) {
+            if (target == SqlDialect.ORACLE || target == SqlDialect.ORACLE12) {
+                return fn;
+            }
+            swapFirstTwo(fn);
+            if (target == SqlDialect.SQLSERVER) {
+                fn.setName(SqlIdentifier.of("CHARINDEX"));
+            } else if (target == SqlDialect.MYSQL || target == SqlDialect.H2) {
+                fn.setName(SqlIdentifier.of("LOCATE"));
+            } else {
+                fn.setName(SqlIdentifier.of("POSITION"));
+            }
+            return fn;
+        }
+
+        private SqlExpr rewriteCharIndex(SqlFunctionExpr fn) {
+            if (target == SqlDialect.SQLSERVER) {
+                return fn;
+            }
+            if (target == SqlDialect.ORACLE || target == SqlDialect.ORACLE12) {
+                swapFirstTwo(fn);
+                fn.setName(SqlIdentifier.of("INSTR"));
+                return fn;
+            }
+            if (target == SqlDialect.MYSQL || target == SqlDialect.H2) {
+                fn.setName(SqlIdentifier.of("LOCATE"));
+                return fn;
+            }
+            fn.setName(SqlIdentifier.of("POSITION"));
+            return fn;
+        }
+
+        private SqlExpr rewriteLength(SqlFunctionExpr fn) {
+            if (target == SqlDialect.SQLSERVER) {
+                fn.setName(SqlIdentifier.of("LEN"));
+            } else {
+                fn.setName(SqlIdentifier.of("LENGTH"));
+            }
+            return fn;
+        }
+
+        private SqlExpr rewriteSubstr(SqlFunctionExpr fn, String name) {
+            if (target == SqlDialect.ORACLE || target == SqlDialect.ORACLE12) {
+                fn.setName(SqlIdentifier.of("SUBSTR"));
+            } else if ("SUBSTR".equals(name) && target == SqlDialect.SQLSERVER) {
+                fn.setName(SqlIdentifier.of("SUBSTRING"));
+            }
+            return fn;
+        }
+
+        private static void swapFirstTwo(SqlFunctionExpr fn) {
+            List<SqlExpr> args = fn.arguments();
+            if (args.size() < 2) {
+                return;
+            }
+            SqlExpr a = args.get(0);
+            args.set(0, args.get(1));
+            args.set(1, a);
         }
 
         private SqlExpr rewriteNullCoalesce(SqlFunctionExpr fn, String name) {

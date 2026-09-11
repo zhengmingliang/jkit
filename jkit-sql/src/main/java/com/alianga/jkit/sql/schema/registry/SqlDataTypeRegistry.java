@@ -28,6 +28,8 @@ public final class SqlDataTypeRegistry {
             new EnumMap<CanonicalType, EnumMap<SqlDialect, DialectTypeForm>>(CanonicalType.class);
     private final EnumMap<SqlDialect, Map<String, CanonicalType>> reverseExact =
             new EnumMap<SqlDialect, Map<String, CanonicalType>>(SqlDialect.class);
+    private final EnumMap<SqlDialect, Map<String, CanonicalType>> reversePatterned =
+            new EnumMap<SqlDialect, Map<String, CanonicalType>>(SqlDialect.class);
     private final EnumMap<SqlDialect, Map<String, CanonicalType>> aliases =
             new EnumMap<SqlDialect, Map<String, CanonicalType>>(SqlDialect.class);
     private final List<LossyMapping> lossyMappings = new ArrayList<LossyMapping>(16);
@@ -40,6 +42,7 @@ public final class SqlDataTypeRegistry {
         SqlDialect[] dialects = SqlDialect.values();
         for (int i = 0; i < dialects.length; i++) {
             reverseExact.put(dialects[i], new HashMap<String, CanonicalType>(32));
+            reversePatterned.put(dialects[i], new HashMap<String, CanonicalType>(32));
             aliases.put(dialects[i], new HashMap<String, CanonicalType>(32));
         }
     }
@@ -70,16 +73,19 @@ public final class SqlDataTypeRegistry {
         }
         row.put(dialect, form);
         Map<String, CanonicalType> exactMap = reverseExact.get(dialect);
-        Map<String, CanonicalType> aliasMap = aliases.get(dialect);
         if (form.placeholders() == 0) {
             String exact = normalize(form.pattern());
             exactMap.put(exact, type);
-            // 完整字面量 NUMBER(10) 只做精确匹配，不能把基名 NUMBER 抢成 TINYINT/INT
             if (form.pattern().indexOf('(') < 0) {
-                aliasMap.put(exact, type);
+                aliases.get(dialect).put(exact, type);
             }
         } else {
-            aliasMap.put(normalize(form.baseName()), type);
+            String base = form.baseName();
+            String rest = form.pattern().substring(base.length());
+            int close = rest.indexOf(')');
+            if (close >= 0 && rest.substring(close + 1).trim().isEmpty()) {
+                reversePatterned.get(dialect).put(normalize(base), type);
+            }
         }
     }
 
@@ -187,7 +193,17 @@ public final class SqlDataTypeRegistry {
         if (exact != null) {
             return exact;
         }
+        if (norm.contains("FOR BIT DATA")) {
+            return CanonicalType.BINARY;
+        }
         String base = baseName(norm);
+        boolean hasParams = norm.indexOf('(') >= 0;
+        if (hasParams) {
+            CanonicalType patterned = reversePatterned.get(dialect).get(base);
+            if (patterned != null) {
+                return patterned;
+            }
+        }
         CanonicalType alias = aliases.get(dialect).get(base);
         if (alias != null) {
             return alias;

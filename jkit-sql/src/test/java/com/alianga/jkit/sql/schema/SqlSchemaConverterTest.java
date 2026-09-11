@@ -144,17 +144,80 @@ public class SqlSchemaConverterTest {
     }
 
     @Test
-    public void mysqlKeyIndexWarnsOnPostgres() {
+    public void mysqlKeyIndexIsDroppedOnPostgres() {
         ConversionResult r = SqlSchemaConverter.convert(
                 "CREATE TABLE t (id INT, name VARCHAR(8), KEY idx_name (name))",
                 SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        String u = r.sql().toUpperCase();
+        assertFalse(r.sql(), u.contains("KEY IDX_NAME"));
         boolean found = false;
         for (int i = 0; i < r.report().warnings().size(); i++) {
-            if (r.report().warnings().get(i).severity() == ConversionWarning.Severity.SEMANTIC_RISK) {
+            if (r.report().warnings().get(i).severity() == ConversionWarning.Severity.SEMANTIC_RISK
+                    && r.report().warnings().get(i).message().contains("idx_name")) {
                 found = true;
             }
         }
         assertTrue(r.report().warnings().toString(), found);
+        SQL.parse(r.sql(), SqlDialect.POSTGRES);
+    }
+
+    @Test
+    public void uniqueKeyBecomesUnique() {
+        String pg = SQL.convert(
+                "CREATE TABLE t (id INT, email VARCHAR(64), UNIQUE KEY uk_email (email))",
+                SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        String u = pg.toUpperCase();
+        assertTrue(pg, u.contains("UNIQUE"));
+        assertFalse(pg, u.contains("UNIQUE KEY"));
+        SQL.parse(pg, SqlDialect.POSTGRES);
+    }
+
+    @Test
+    public void convertedDdlParsesInTargetDialect() {
+        String[] mysql = {
+                "CREATE TABLE t (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(32) NOT NULL, ts DATETIME)",
+                "CREATE TABLE t (flag TINYINT(1) DEFAULT 0, amt DECIMAL(10,2), KEY k (flag))",
+                "SELECT IF(a>1,b,c), NOW(), IFNULL(x,0), GROUP_CONCAT(n SEPARATOR ',') FROM t LIMIT 10"
+        };
+        SqlDialect[] targets = {SqlDialect.POSTGRES, SqlDialect.ORACLE12, SqlDialect.SQLSERVER, SqlDialect.H2};
+        for (int i = 0; i < mysql.length; i++) {
+            for (int t = 0; t < targets.length; t++) {
+                String out = SQL.convert(mysql[i], SqlDialect.MYSQL, targets[t]);
+                SQL.parse(out, targets[t]);
+            }
+        }
+    }
+
+    @Test
+    public void convertBatchPreservesOrder() {
+        java.util.List<String> in = java.util.Arrays.asList(
+                "CREATE TABLE a (id INT)",
+                "SELECT IF(1,2,3)");
+        java.util.List<ConversionResult> out = SQL.convertBatch(in, SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        assertEquals(2, out.size());
+        assertTrue(out.get(0).sql().toUpperCase().contains("INTEGER"));
+        assertTrue(out.get(1).sql().toUpperCase().contains("CASE"));
+    }
+
+    @Test
+    public void locateBecomesPositionOnPostgres() {
+        String pg = SQL.convert("SELECT LOCATE('a', name) FROM t", SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        assertTrue(pg, pg.toUpperCase().contains("POSITION"));
+        assertFalse(pg, pg.toUpperCase().contains("LOCATE"));
+    }
+
+    @Test
+    public void locateBecomesInstrOnOracle() {
+        String ora = SQL.convert("SELECT LOCATE('a', name) FROM t", SqlDialect.MYSQL, SqlDialect.ORACLE);
+        assertTrue(ora, ora.toUpperCase().contains("INSTR"));
+        assertFalse(ora, ora.toUpperCase().contains("LOCATE"));
+    }
+
+    @Test
+    public void lengthBecomesLenOnSqlServer() {
+        String s = SQL.convert("SELECT LENGTH(name) FROM t", SqlDialect.MYSQL, SqlDialect.SQLSERVER);
+        assertTrue(s, s.toUpperCase().contains("LEN("));
+        assertFalse(s, s.toUpperCase().contains("LENGTH"));
     }
 
     @Test
