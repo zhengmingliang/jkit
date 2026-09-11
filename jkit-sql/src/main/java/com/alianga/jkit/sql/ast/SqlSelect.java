@@ -584,6 +584,17 @@ public final class SqlSelect extends SqlStatement {
     }
 
     /**
+     * {@inheritDoc}
+     *
+     * <p>{@code SELECT ... FOR UPDATE} 虽然语句类型是 SELECT，但持行锁，必须按写语句对待：
+     * 读写分离路由若把它发到从库，锁就失效了。
+     */
+    @Override
+    public boolean isReadOnly() {
+        return !forUpdate && !lockInShare && super.isReadOnly();
+    }
+
+    /**
      * @param forUpdate FOR UPDATE
      */
     public void setForUpdate(boolean forUpdate) {
