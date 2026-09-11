@@ -2,8 +2,14 @@ package com.alianga.jkit.sql.schema.registry;
 
 import com.alianga.jkit.sql.SqlDialect;
 import com.alianga.jkit.sql.schema.model.CanonicalType;
+import com.alianga.jkit.sql.schema.spi.SqlSchemaConverterProvider;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.EnumSet;
+import java.util.List;
+import java.util.ServiceLoader;
 
 /**
  * 内置 12 种方言的 canonical 类型声明、别名与有损映射。
@@ -20,9 +26,31 @@ final class SqlDataTypeRegistryBuiltins {
         registerTypes(r);
         registerAliases(r);
         registerLossy(r);
+        loadProviders(r);
         r.freeze();
         RegistryValidator.validate(r).throwIfInvalid();
         return r;
+    }
+
+    private static void loadProviders(SqlDataTypeRegistry registry) {
+        List<SqlSchemaConverterProvider> providers = new ArrayList<SqlSchemaConverterProvider>();
+        for (SqlSchemaConverterProvider p : ServiceLoader.load(SqlSchemaConverterProvider.class)) {
+            if (p != null) {
+                providers.add(p);
+            }
+        }
+        Collections.sort(providers, new Comparator<SqlSchemaConverterProvider>() {
+            /**
+             * {@inheritDoc}
+             */
+            @Override
+            public int compare(SqlSchemaConverterProvider a, SqlSchemaConverterProvider b) {
+                return Integer.compare(a.priority(), b.priority());
+            }
+        });
+        for (int i = 0; i < providers.size(); i++) {
+            providers.get(i).registerTypes(registry);
+        }
     }
 
     private static void registerTypes(SqlDataTypeRegistry r) {

@@ -320,7 +320,7 @@ types.fromDialect("TINYINT(1)", SqlDialect.MYSQL);                  // BOOLEAN
 
 Undeclared reverse collisions fail `RegistryValidator` at builtin-table build time.
 
-Phase 2–3 add `SQL.convert` for CREATE TABLE (types, identity, UNSIGNED, defaults, table options). Other statements are formatted for the target dialect (pagination reuses the existing adapter). Function rewrite (IF→CASE, …) is Phase 4.
+Phase 2–6 add `SQL.convert` for CREATE TABLE (types, identity, UNSIGNED, defaults, table options) and query functions (`IF`→`CASE`, `GROUP_CONCAT`↔`STRING_AGG`/`LISTAGG`, `IFNULL`/`NVL`, `CAST`). Pagination reuses the existing format adapter. Types are extensible via `SqlSchemaConverterProvider` SPI.
 
 ```java
 String pg = SQL.convert(

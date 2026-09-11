@@ -3,6 +3,7 @@ package com.alianga.jkit.sql.schema.rewrite;
 import com.alianga.jkit.sql.SqlDialect;
 import com.alianga.jkit.sql.ast.SqlBetweenExpr;
 import com.alianga.jkit.sql.ast.SqlBinaryExpr;
+import com.alianga.jkit.sql.ast.SqlBinaryOp;
 import com.alianga.jkit.sql.ast.SqlCaseExpr;
 import com.alianga.jkit.sql.ast.SqlCastExpr;
 import com.alianga.jkit.sql.ast.SqlDelete;
@@ -12,6 +13,7 @@ import com.alianga.jkit.sql.ast.SqlIdentifier;
 import com.alianga.jkit.sql.ast.SqlInExpr;
 import com.alianga.jkit.sql.ast.SqlInsert;
 import com.alianga.jkit.sql.ast.SqlListExpr;
+import com.alianga.jkit.sql.ast.SqlLiteral;
 import com.alianga.jkit.sql.ast.SqlOrderByItem;
 import com.alianga.jkit.sql.ast.SqlQueryExpr;
 import com.alianga.jkit.sql.ast.SqlSelect;
@@ -21,6 +23,7 @@ import com.alianga.jkit.sql.ast.SqlUnaryExpr;
 import com.alianga.jkit.sql.ast.SqlUpdate;
 import com.alianga.jkit.sql.schema.convert.ConversionReport;
 import com.alianga.jkit.sql.schema.convert.ConversionWarning;
+import com.alianga.jkit.sql.schema.registry.SqlDataTypeRegistry;
 import com.alianga.jkit.sql.visitor.SqlAstVisitor;
 
 import java.util.List;
@@ -47,14 +50,17 @@ public final class FunctionAstRewriter {
         if (stmt == null || source == target) {
             return;
         }
-        stmt.accept(new Visitor(target, report));
+        stmt.accept(new Visitor(source, target, report));
     }
 
     private static final class Visitor extends SqlAstVisitor {
+        private final SqlDialect source;
         private final SqlDialect target;
         private final ConversionReport.Builder report;
+        private final SqlDataTypeRegistry types = SqlDataTypeRegistry.builtins();
 
-        Visitor(SqlDialect target, ConversionReport.Builder report) {
+        Visitor(SqlDialect source, SqlDialect target, ConversionReport.Builder report) {
+            this.source = source;
             this.target = target;
             this.report = report;
         }
@@ -152,6 +158,9 @@ public final class FunctionAstRewriter {
             if (expr instanceof SqlCastExpr) {
                 SqlCastExpr c = (SqlCastExpr) expr;
                 c.setExpr(rewriteExpr(c.expr()));
+                if (c.dataType() != null) {
+                    c.setDataType(types.convert(c.dataType(), source, target));
+                }
                 return c;
             }
             if (expr instanceof SqlBetweenExpr) {
@@ -186,6 +195,10 @@ public final class FunctionAstRewriter {
             for (int i = 0; i < args.size(); i++) {
                 args.set(i, rewriteExpr(args.get(i)));
             }
+            if (fn.separator() != null) {
+                fn.setSeparator(rewriteExpr(fn.separator()));
+            }
+            rewriteOrderExprs(fn);
             String name = functionName(fn);
             if (fn.usingCharset()) {
                 if (target != SqlDialect.MYSQL) {
@@ -212,7 +225,195 @@ public final class FunctionAstRewriter {
                 fn.setName(SqlIdentifier.of("CURRENT_TIME"));
                 return fn;
             }
+            if (("IFNULL".equals(name) || "NVL".equals(name) || "ISNULL".equals(name))
+                    && args.size() >= 2) {
+                return rewriteNullCoalesce(fn, name);
+            }
+            if ("GROUP_CONCAT".equals(name) || "STRING_AGG".equals(name) || "LISTAGG".equals(name)) {
+                return rewriteListAgg(fn, name);
+            }
+            if ("CONCAT".equals(name)) {
+                return rewriteConcat(fn);
+            }
+            if ("CONVERT".equals(name) && args.size() >= 2) {
+                return rewriteConvertAsCast(fn);
+            }
             return fn;
+        }
+
+        private SqlExpr rewriteNullCoalesce(SqlFunctionExpr fn, String name) {
+            String want = coalesceName(target);
+            if (want.equals(name)) {
+                return fn;
+            }
+            fn.setName(SqlIdentifier.of(want));
+            return fn;
+        }
+
+        private static String coalesceName(SqlDialect dialect) {
+            switch (dialect) {
+                case MYSQL:
+                case H2:
+                case SQLITE:
+                    return "IFNULL";
+                case ORACLE:
+                case ORACLE12:
+                    return "NVL";
+                case SQLSERVER:
+                    return "ISNULL";
+                default:
+                    return "COALESCE";
+            }
+        }
+
+        private SqlExpr rewriteListAgg(SqlFunctionExpr fn, String name) {
+            SqlExpr sep = fn.separator();
+            if (sep == null && fn.arguments().size() >= 2) {
+                sep = fn.arguments().get(1);
+            }
+            if (sep == null) {
+                sep = SqlLiteral.of(SqlLiteral.Kind.STRING, ",");
+            }
+            switch (target) {
+                case MYSQL:
+                case H2:
+                    fn.setName(SqlIdentifier.of("GROUP_CONCAT"));
+                    trimToOneArg(fn);
+                    fn.setSeparator(sep);
+                    fn.setWithinGroup(false);
+                    return fn;
+                case SQLITE:
+                    fn.setName(SqlIdentifier.of("GROUP_CONCAT"));
+                    setTwoArgs(fn, sep);
+                    fn.setSeparator(null);
+                    fn.setWithinGroup(false);
+                    return fn;
+                case POSTGRES:
+                case ANSI:
+                case PRESTO:
+                    fn.setName(SqlIdentifier.of("STRING_AGG"));
+                    setTwoArgs(fn, sep);
+                    fn.setSeparator(null);
+                    fn.setWithinGroup(false);
+                    return fn;
+                case SQLSERVER:
+                case DB2:
+                    fn.setName(SqlIdentifier.of("STRING_AGG"));
+                    setTwoArgs(fn, sep);
+                    fn.setSeparator(null);
+                    fn.setWithinGroup(fn.orderBy() != null && !fn.orderBy().isEmpty());
+                    return fn;
+                case ORACLE:
+                case ORACLE12:
+                    fn.setName(SqlIdentifier.of("LISTAGG"));
+                    setTwoArgs(fn, sep);
+                    fn.setSeparator(null);
+                    fn.setWithinGroup(true);
+                    if (fn.orderBy() == null || fn.orderBy().isEmpty()) {
+                        SqlOrderByItem item = new SqlOrderByItem();
+                        item.setExpr(fn.arguments().get(0));
+                        fn.orderBy().add(item);
+                    }
+                    return fn;
+                default:
+                    report.warn(ConversionWarning.Severity.SEMANTIC_RISK, name,
+                            target + " 无通用 GROUP_CONCAT/STRING_AGG 等价物，已保留原文");
+                    return fn;
+            }
+        }
+
+        private SqlExpr rewriteConcat(SqlFunctionExpr fn) {
+            List<SqlExpr> args = fn.arguments();
+            if ((target == SqlDialect.ORACLE || target == SqlDialect.ORACLE12) && args.size() > 2) {
+                SqlExpr acc = args.get(0);
+                for (int i = 1; i < args.size(); i++) {
+                    SqlBinaryExpr bin = new SqlBinaryExpr();
+                    bin.setOperator(SqlBinaryOp.CONCAT);
+                    bin.setLeft(acc);
+                    bin.setRight(args.get(i));
+                    acc = bin;
+                }
+                return acc;
+            }
+            return fn;
+        }
+
+        private SqlExpr rewriteConvertAsCast(SqlFunctionExpr fn) {
+            List<SqlExpr> args = fn.arguments();
+            SqlExpr value;
+            String type;
+            if (source == SqlDialect.SQLSERVER) {
+                type = typeText(args.get(0));
+                value = args.get(1);
+            } else {
+                value = args.get(0);
+                type = typeText(args.get(1));
+            }
+            if (type == null) {
+                return fn;
+            }
+            SqlCastExpr c = new SqlCastExpr();
+            c.setExpr(value);
+            c.setDataType(types.convert(type, source, target));
+            return c;
+        }
+
+        private static void trimToOneArg(SqlFunctionExpr fn) {
+            List<SqlExpr> args = fn.arguments();
+            while (args.size() > 1) {
+                args.remove(args.size() - 1);
+            }
+        }
+
+        private static void setTwoArgs(SqlFunctionExpr fn, SqlExpr sep) {
+            List<SqlExpr> args = fn.arguments();
+            if (args.isEmpty()) {
+                return;
+            }
+            SqlExpr col = args.get(0);
+            args.clear();
+            args.add(col);
+            args.add(sep);
+        }
+
+        private void rewriteOrderExprs(SqlFunctionExpr fn) {
+            if (fn.orderBy() == null || fn.orderBy().isEmpty()) {
+                return;
+            }
+            List<SqlOrderByItem> items = fn.orderBy();
+            for (int i = 0; i < items.size(); i++) {
+                items.get(i).setExpr(rewriteExpr(items.get(i).expr()));
+            }
+        }
+
+        private static String typeText(SqlExpr expr) {
+            if (expr instanceof SqlIdentifier) {
+                return ((SqlIdentifier) expr).qualifiedName();
+            }
+            if (expr instanceof SqlFunctionExpr) {
+                SqlFunctionExpr f = (SqlFunctionExpr) expr;
+                String n = functionName(f);
+                List<SqlExpr> a = f.arguments();
+                if (a == null || a.isEmpty()) {
+                    return n;
+                }
+                StringBuilder sb = new StringBuilder(n).append('(');
+                for (int i = 0; i < a.size(); i++) {
+                    if (i > 0) {
+                        sb.append(',');
+                    }
+                    SqlExpr arg = a.get(i);
+                    if (arg instanceof SqlLiteral) {
+                        sb.append(((SqlLiteral) arg).value());
+                    } else if (arg instanceof SqlIdentifier) {
+                        sb.append(((SqlIdentifier) arg).simpleName());
+                    } else {
+                        return n;
+                    }
+                }
+                return sb.append(')').toString();
+            }
+            return null;
         }
 
         private void rewriteExprList(List<SqlExpr> list) {

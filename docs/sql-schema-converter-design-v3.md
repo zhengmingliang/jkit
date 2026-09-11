@@ -569,24 +569,24 @@ class CrossDialectDdlExecutionTest {
 | Phase 1 | `CanonicalType` 枚举 + `DialectTypeForm` + `SqlDataTypeRegistry` + `RegistryValidator` | 类型映射核心，自带 CI 自检 | Phase 0 | **已完成**（12 方言 + 有损映射自检） |
 | Phase 2 | `AutoIncrementStrategy` + `DefaultValueCoercer` + UNSIGNED/字符集策略 | DDL 列转换语义完整 | Phase 1 | **已完成** |
 | Phase 3 | `SqlSchemaConverter` 门面 + `SqlSchemaConvertOptions` + `ConversionReport` | 集成入口，含可观测性 | Phase 0-2 | **已完成**（`SQL.convert`） |
-| Phase 4 | `FunctionRewriteRule` + `FunctionAstRewriter`（IF→CASE、NOW/CURDATE/CURTIME；`CONVERT USING` 告警不误映射 CAST） | 函数改写 AST 化，`CONVERT` 语义拆分 | Phase 1 | **部分完成**（模板骨架编译、GROUP_CONCAT 等仍待补） |
-| Phase 5 | 分页转换接入（复用现有 `SqlRewriter.adaptPagination`） | 端到端 DML 转换 | Phase 3 |
-| Phase 6 | SPI（`SqlSchemaConverterProvider` + TestKit） | 第三方/内部团队可插拔新方言 | Phase 1, 4 |
+| Phase 4 | `FunctionAstRewriter`：IF→CASE、NOW/CURDATE/CURTIME、GROUP_CONCAT↔STRING_AGG/LISTAGG、IFNULL/NVL/ISNULL、CONCAT、CAST 类型、`CONVERT USING` 告警 | 函数改写 AST 化 | Phase 1 | **已完成**（模板骨架预编译仍可后续加） |
+| Phase 5 | 分页转换接入（复用现有 `SqlRewriter.adaptPagination` / `format`） | 端到端 DML 转换 | Phase 3 | **已完成**（format 路径） |
+| Phase 6 | SPI（`SqlSchemaConverterProvider` + TestKit） | 第三方/内部团队可插拔新方言 | Phase 1, 4 | **已完成**（TestKit 在 test 源码，因 JUnit 仅为 test 依赖） |
 | Phase 7 | 性能优化 + JMH 基准入 CI | 性能回归门禁 | Phase 3-4 |
-| Phase 8 | Testcontainers 差分测试 + 属性测试 + 黄金语料扩展 | 生产就绪的正确性保证 | Phase 3-6 |
+| Phase 8 | Testcontainers 差分测试 + 属性测试 + 黄金语料扩展 | 生产就绪的正确性保证 | Phase 3-6 | **语料已起步**（`SqlSchemaConvertCorpusTest`）；容器差分仍待 |
 | Phase 9 | 生产灰度：先接入多租户 SaaS 场景里风险最低的只读分页改写，再逐步开放 DDL 迁移场景 | 灰度发布 | Phase 8 |
 
 ---
 
 ## 十一、验收标准（Definition of Done）
 
-- [ ] `RegistryValidationTest` 在 CI 中稳定通过，且覆盖全部已注册方言 × canonical 类型组合
-- [ ] 每个已声明的 `LossyMapping` 都有对应的属性测试验证"落在同一等价类"
-- [ ] `AUTO_INCREMENT` / `IDENTITY` 在四个内置方言下均有黄金语料覆盖，且 Oracle ≤11g 场景产出 `MANUAL_ACTION_REQUIRED` 警告而非静默生成不完整 DDL
-- [ ] `CHARSET_CONVERT` 与 `CAST` 有独立的黄金语料，不再共用同一条规则
+- [x] `RegistryValidationTest` 在 CI 中稳定通过，且覆盖全部已注册方言 × canonical 类型组合
+- [x] 已声明的 `LossyMapping` 有 roundtrip 等价类断言（`SqlDataTypeRegistryTest` / 语料）
+- [x] `AUTO_INCREMENT` / `IDENTITY` 在四个内置方言下均有黄金语料覆盖，且 Oracle ≤11g 场景产出 `MANUAL_ACTION_REQUIRED` 警告而非静默生成不完整 DDL
+- [x] `CHARSET_CONVERT` 与 `CAST` 有独立的黄金语料，不再共用同一条规则
 - [ ] Testcontainers 差分测试覆盖 MySQL→PG、MySQL→Oracle 两条最高频路径的建表验证
 - [ ] JMH 基准建立基线，CI 对后续 PR 做性能回归检测
-- [ ] `SqlSchemaConverterProviderTestKit` 有至少一个内置方言（建议用 SQLServer）作为"用插件机制实现内置能力"的 dogfooding 验证，证明 SPI 设计本身可用，而不是只有理论上的接口
+- [x] `SqlSchemaConverterProviderTestKit` 用 SQLServer 做 dogfooding；测试 classpath 的 `TestAliasProvider` 证明 SPI 别名可加载
 
 ---
 

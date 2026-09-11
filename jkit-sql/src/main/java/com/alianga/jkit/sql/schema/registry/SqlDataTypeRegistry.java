@@ -73,18 +73,13 @@ public final class SqlDataTypeRegistry {
         Map<String, CanonicalType> aliasMap = aliases.get(dialect);
         if (form.placeholders() == 0) {
             String exact = normalize(form.pattern());
-            if (!exactMap.containsKey(exact)) {
-                exactMap.put(exact, type);
-            }
+            exactMap.put(exact, type);
             // 完整字面量 NUMBER(10) 只做精确匹配，不能把基名 NUMBER 抢成 TINYINT/INT
-            if (form.pattern().indexOf('(') < 0 && !aliasMap.containsKey(exact)) {
+            if (form.pattern().indexOf('(') < 0) {
                 aliasMap.put(exact, type);
             }
         } else {
-            String base = normalize(form.baseName());
-            if (!aliasMap.containsKey(base)) {
-                aliasMap.put(base, type);
-            }
+            aliasMap.put(normalize(form.baseName()), type);
         }
     }
 
@@ -100,15 +95,9 @@ public final class SqlDataTypeRegistry {
         if (dialect == null || type == null || typeName == null || typeName.isEmpty()) {
             return;
         }
-        Map<String, CanonicalType> aliasMap = aliases.get(dialect);
         String key = normalize(typeName);
-        if (!aliasMap.containsKey(key)) {
-            aliasMap.put(key, type);
-        }
-        Map<String, CanonicalType> exactMap = reverseExact.get(dialect);
-        if (!exactMap.containsKey(key)) {
-            exactMap.put(key, type);
-        }
+        aliases.get(dialect).put(key, type);
+        reverseExact.get(dialect).put(key, type);
     }
 
     /**

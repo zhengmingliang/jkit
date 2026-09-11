@@ -189,6 +189,74 @@ public class SqlSchemaConverterTest {
     }
 
     @Test
+    public void groupConcatToPostgresStringAgg() {
+        String pg = SQL.convert(
+                "SELECT GROUP_CONCAT(name ORDER BY id SEPARATOR ',') FROM t",
+                SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        String u = pg.toUpperCase();
+        assertTrue(pg, u.contains("STRING_AGG"));
+        assertFalse(pg, u.contains("GROUP_CONCAT"));
+        assertFalse(pg, u.contains("SEPARATOR"));
+        assertTrue(pg, u.contains("ORDER"));
+    }
+
+    @Test
+    public void groupConcatToOracleListAgg() {
+        String ora = SQL.convert(
+                "SELECT GROUP_CONCAT(name SEPARATOR ',') FROM t",
+                SqlDialect.MYSQL, SqlDialect.ORACLE);
+        String u = ora.toUpperCase();
+        assertTrue(ora, u.contains("LISTAGG"));
+        assertTrue(ora, u.contains("WITHIN"));
+        assertFalse(ora, u.contains("GROUP_CONCAT"));
+        assertFalse(ora, u.contains("SEPARATOR"));
+    }
+
+    @Test
+    public void stringAggToMysqlGroupConcat() {
+        String mysql = SQL.convert(
+                "SELECT STRING_AGG(name, ',') FROM t",
+                SqlDialect.POSTGRES, SqlDialect.MYSQL);
+        String u = mysql.toUpperCase();
+        assertTrue(mysql, u.contains("GROUP_CONCAT"));
+        assertTrue(mysql, u.contains("SEPARATOR"));
+    }
+
+    @Test
+    public void ifnullToCoalesceOnPostgres() {
+        String pg = SQL.convert("SELECT IFNULL(a, 0) FROM t", SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        assertTrue(pg, pg.toUpperCase().contains("COALESCE"));
+        assertFalse(pg, pg.toUpperCase().contains("IFNULL"));
+    }
+
+    @Test
+    public void ifnullToNvlOnOracle() {
+        String ora = SQL.convert("SELECT IFNULL(a, 0) FROM t", SqlDialect.MYSQL, SqlDialect.ORACLE);
+        assertTrue(ora, ora.toUpperCase().contains("NVL"));
+    }
+
+    @Test
+    public void concatManyArgsToOraclePipes() {
+        String ora = SQL.convert("SELECT CONCAT(a, b, c) FROM t", SqlDialect.MYSQL, SqlDialect.ORACLE);
+        assertTrue(ora, ora.contains("||"));
+        assertFalse(ora, ora.toUpperCase().contains("CONCAT"));
+    }
+
+    @Test
+    public void castIntBecomesIntegerOnPostgres() {
+        String pg = SQL.convert("SELECT CAST(id AS INT) FROM t", SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        assertTrue(pg, pg.toUpperCase().contains("INTEGER"));
+    }
+
+    @Test
+    public void convertTypeBecomesCast() {
+        String pg = SQL.convert("SELECT CONVERT(id, CHAR) FROM t", SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        String u = pg.toUpperCase();
+        assertTrue(pg, u.contains("CAST"));
+        assertFalse(pg, u.contains("CONVERT"));
+    }
+
+    @Test
     public void columnCharsetStripped() {
         ConversionResult r = SqlSchemaConverter.convert(
                 "CREATE TABLE t (name VARCHAR(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin)",

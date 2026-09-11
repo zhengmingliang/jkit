@@ -426,7 +426,17 @@ ConversionResult r = SQL.convert(sql, SqlDialect.MYSQL, SqlDialect.ORACLE,
 
 Oracle ≤11g 的自增会给出 `MANUAL_ACTION_REQUIRED`（需手工 SEQUENCE+TRIGGER），不会静默生成不完整 DDL。
 
-查询函数已改写 `IF(a,b,c)` → `CASE WHEN`（非 MySQL）、`NOW()`/`CURDATE()`/`CURTIME()`；MySQL `CONVERT(expr USING charset)` **不会**误映射成 CAST，只告警并保留原文。
+查询函数已改写：
+
+- `IF(a,b,c)` → `CASE WHEN`（非 MySQL）
+- `NOW()` / `CURDATE()` / `CURTIME()`
+- `GROUP_CONCAT` ↔ `STRING_AGG` / `LISTAGG`
+- `IFNULL` / `NVL` / `ISNULL`（二元）按目标方言改名；`COALESCE` 为 PG/ANSI
+- `CONCAT(a,b,c)` 在 Oracle 下改为 `||`（Oracle `CONCAT` 只接受两参数）
+- `CAST` / `CONVERT(expr, type)` 的类型走 canonical 表
+- MySQL `CONVERT(expr USING charset)` **不会**误映射成 CAST，只告警并保留原文
+
+类型表可通过 SPI 扩展：实现 `SqlSchemaConverterProvider`，在 `META-INF/services/` 注册，`priority()` 越大越晚、可覆盖内置声明。
 
 ## 性能
 
