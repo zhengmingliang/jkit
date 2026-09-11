@@ -23,6 +23,32 @@ import static org.junit.Assert.fail;
 public class SqlSchemaConverterTest {
 
     @Test
+    public void alterAddColumnConvertsType() {
+        String pg = SQL.convert("ALTER TABLE t ADD COLUMN name VARCHAR(32) NOT NULL",
+                SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        assertTrue(pg, pg.toUpperCase().contains("VARCHAR(32)"));
+        SQL.parse(pg, SqlDialect.POSTGRES);
+    }
+
+    @Test
+    public void alterModifyColumnConvertsTypeAndWarns() {
+        ConversionResult r = SqlSchemaConverter.convert(
+                "ALTER TABLE t MODIFY amt DECIMAL(10,2) NOT NULL",
+                SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        assertTrue(r.sql(), r.sql().toUpperCase().contains("NUMERIC(10,2)"));
+        assertTrue(r.report().hasSeverityAtLeast(ConversionWarning.Severity.SEMANTIC_RISK));
+    }
+
+    @Test
+    public void alterChangeColumnConvertsNewType() {
+        ConversionResult r = SqlSchemaConverter.convert(
+                "ALTER TABLE t CHANGE COLUMN old_c new_c INT NOT NULL",
+                SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        assertTrue(r.sql(), r.sql().toUpperCase().contains("INTEGER"));
+        assertTrue(r.report().hasSeverityAtLeast(ConversionWarning.Severity.SEMANTIC_RISK));
+    }
+
+    @Test
     public void mysqlToPostgresBasicTypes() {
         String pg = SQL.convert(
                 "CREATE TABLE t (id INT NOT NULL, name VARCHAR(100), amount DECIMAL(10,2))",

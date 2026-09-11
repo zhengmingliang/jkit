@@ -572,8 +572,8 @@ class CrossDialectDdlExecutionTest {
 | Phase 4 | `FunctionAstRewriter`：IF→CASE、NOW/CURDATE/CURTIME、GROUP_CONCAT↔STRING_AGG/LISTAGG、IFNULL/NVL/ISNULL、CONCAT、CAST 类型、`CONVERT USING` 告警 | 函数改写 AST 化 | Phase 1 | **已完成**（模板骨架预编译仍可后续加） |
 | Phase 5 | 分页转换接入（复用现有 `SqlRewriter.adaptPagination` / `format`） | 端到端 DML 转换 | Phase 3 | **已完成**（format 路径） |
 | Phase 6 | SPI（`SqlSchemaConverterProvider` + TestKit） | 第三方/内部团队可插拔新方言 | Phase 1, 4 | **已完成**（TestKit 在 test 源码，因 JUnit 仅为 test 依赖） |
-| Phase 7 | 性能优化 + JMH 基准入 CI | 性能回归门禁 | Phase 3-4 | JMH 仍放 `tools-test`（本模块零运行时依赖）；`convertBatch` 已提供 |
-| Phase 8 | Testcontainers 差分测试 + 属性测试 + 黄金语料扩展 | 生产就绪的正确性保证 | Phase 3-6 | **属性 roundtrip + 目标方言回解析已落地**；容器差分仍待（不引入 Testcontainers 依赖） |
+| Phase 7 | 性能优化 + JMH 基准入 CI | 性能回归门禁 | Phase 3-4 | **基准类已放 `tools-test`**：`SqlSchemaConvertBenchmark`（本模块零运行时依赖） |
+| Phase 8 | Testcontainers 差分测试 + 属性测试 + 黄金语料扩展 | 生产就绪的正确性保证 | Phase 3-6 | **属性 roundtrip + 回解析 + ALTER 列转换**；MySQL→PG 容器建表在 `tools-test` `CrossDialectDdlExecutionTest`（无 Docker 则 skip） |
 | Phase 9 | 生产灰度：先接入多租户 SaaS 场景里风险最低的只读分页改写，再逐步开放 DDL 迁移场景 | 灰度发布 | Phase 8 |
 
 ---
@@ -584,8 +584,8 @@ class CrossDialectDdlExecutionTest {
 - [x] 已声明的 `LossyMapping` 有 roundtrip 等价类断言（`SqlDataTypeRegistryTest` / 语料）
 - [x] `AUTO_INCREMENT` / `IDENTITY` 在四个内置方言下均有黄金语料覆盖，且 Oracle ≤11g 场景产出 `MANUAL_ACTION_REQUIRED` 警告而非静默生成不完整 DDL
 - [x] `CHARSET_CONVERT` 与 `CAST` 有独立的黄金语料，不再共用同一条规则
-- [ ] Testcontainers 差分测试覆盖 MySQL→PG、MySQL→Oracle 两条最高频路径的建表验证
-- [ ] JMH 基准建立基线，CI 对后续 PR 做性能回归检测
+- [x] Testcontainers 差分测试覆盖 MySQL→PG 建表验证（`tools-test`；无 Docker skip）。Oracle 容器镜像过大，仍用目标方言回解析兜底
+- [x] JMH 基准类 `SqlSchemaConvertBenchmark` 已建立（`tools-test`）；CI 阈值门禁仍需积累基线后另开
 - [x] `SqlSchemaConverterProviderTestKit` 用 SQLServer 做 dogfooding；测试 classpath 的 `TestAliasProvider` 证明 SPI 别名可加载
 
 ---

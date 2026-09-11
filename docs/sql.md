@@ -438,7 +438,15 @@ Oracle ≤11g 的自增会给出 `MANUAL_ACTION_REQUIRED`（需手工 SEQUENCE+T
 
 目标方言不支持的 MySQL 表内 `KEY`/`INDEX`/`FULLTEXT` 会从 `CREATE TABLE` 中去掉并告警（避免生成无法执行的 DDL）；`UNIQUE KEY` 改写为可移植的 `UNIQUE (...)`。
 
-`SQL.convertBatch` 批量转换。转换结果会按目标方言再 parse 一遍作为语料回归（`SqlSchemaConvertCorpusTest`）。
+`SQL.convertBatch` 批量转换。`ALTER TABLE ADD/MODIFY/CHANGE` 会转换列类型（`CHANGE`/`MODIFY` 在非 MySQL 下告警：需手工改写成 `ALTER COLUMN`）。
+
+转换结果会按目标方言再 parse 一遍作为语料回归。真实建表验证在上级目录 `tools-test`：
+
+```text
+cd ../tools-test
+mvn -Dtest=CrossDialectDdlExecutionTest test   # 需要 Docker；没有则 skip
+java -jar target/benchmarks.jar com.alianga.test.sql.jmh.SqlSchemaConvertBenchmark -f 1 -wi 1 -i 1
+```
 
 类型表可通过 SPI 扩展：实现 `SqlSchemaConverterProvider`，在 `META-INF/services/` 注册，`priority()` 越大越晚、可覆盖内置声明。
 

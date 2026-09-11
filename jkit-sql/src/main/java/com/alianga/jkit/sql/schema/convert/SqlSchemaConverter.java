@@ -4,6 +4,7 @@ import com.alianga.jkit.sql.SQL;
 import com.alianga.jkit.sql.SqlDialect;
 import com.alianga.jkit.sql.ast.SqlDdlStatement;
 import com.alianga.jkit.sql.ast.SqlStatement;
+import com.alianga.jkit.sql.ast.SqlStatementType;
 import com.alianga.jkit.sql.schema.model.ColumnDefinition;
 import com.alianga.jkit.sql.schema.parse.SqlColumnDefinitionParser;
 import com.alianga.jkit.sql.schema.registry.SqlDataTypeRegistry;
@@ -127,11 +128,11 @@ public final class SqlSchemaConverter {
         if (objectType == null || !"TABLE".equalsIgnoreCase(objectType)) {
             return;
         }
+        SqlDataTypeRegistry registry = SqlDataTypeRegistry.builtins();
         List<ColumnDefinition> cols = SqlColumnDefinitionParser.fromDdl(ddl, source);
         if (!cols.isEmpty()) {
             List<String> rewritten = ddl.columnDefinitions();
             rewritten.clear();
-            SqlDataTypeRegistry registry = SqlDataTypeRegistry.builtins();
             for (int i = 0; i < cols.size(); i++) {
                 String next = ColumnDefinitionConverter.convert(
                         cols.get(i), source, target, options, registry, report);
@@ -140,6 +141,7 @@ public final class SqlSchemaConverter {
                 }
             }
         }
+        convertAlterColumn(ddl, source, target, options, registry, report);
         if (options.stripDialectOptions() && !supportsMysqlTableOptions(target)) {
             if (ddl.engine() != null) {
                 report.warn(ConversionWarning.Severity.INFO, tableName(ddl),
@@ -157,6 +159,41 @@ public final class SqlSchemaConverter {
                 ddl.setCollate(null);
             }
         }
+    }
+
+    private static void convertAlterColumn(SqlDdlStatement ddl, SqlDialect source, SqlDialect target,
+                                           SqlSchemaConvertOptions options, SqlDataTypeRegistry registry,
+                                           ConversionReport.Builder report) {
+        if (ddl.type() != SqlStatementType.ALTER
+                || ddl.columnDefinition() == null || ddl.columns().isEmpty()) {
+            return;
+        }
+        String action = ddl.alterAction() == null ? "" : ddl.alterAction().toUpperCase();
+        String colName = ddl.columns().get(ddl.columns().size() - 1).simpleName();
+        ColumnDefinition parsed = SqlColumnDefinitionParser.parse(
+                colName + " " + ddl.columnDefinition().trim(), source);
+        String converted = ColumnDefinitionConverter.convert(
+                parsed, source, target, options, registry, report);
+        ddl.setColumnDefinition(stripLeadingColumnName(converted, colName));
+        if (target != SqlDialect.MYSQL && (action.startsWith("CHANGE") || action.startsWith("MODIFY"))) {
+            report.warn(ConversionWarning.Severity.SEMANTIC_RISK, colName,
+                    "MySQL " + action + " 在 " + target + " 无同款语法，已转换类型但仍需手工改写成 ALTER COLUMN");
+        }
+    }
+
+    private static String stripLeadingColumnName(String converted, String colName) {
+        if (converted == null) {
+            return "";
+        }
+        String t = converted.trim();
+        if (colName != null && t.length() > colName.length()
+                && t.regionMatches(true, 0, colName, 0, colName.length())) {
+            char next = t.length() > colName.length() ? t.charAt(colName.length()) : ' ';
+            if (next == ' ' || next == '\t') {
+                return t.substring(colName.length()).trim();
+            }
+        }
+        return t;
     }
 
     private static boolean supportsMysqlTableOptions(SqlDialect dialect) {
