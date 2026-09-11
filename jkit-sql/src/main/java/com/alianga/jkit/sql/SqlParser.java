@@ -2031,6 +2031,11 @@ public final class SqlParser {
                 break;
             }
             next();
+            // SQL Server：catalog..table（中间空 schema）
+            if (is(SqlTokenType.DOT)) {
+                id.addName("");
+                continue;
+            }
             String part = consumeIdentPartRaw();
             if (isQuoted(part)) {
                 id.setQuoted(true);

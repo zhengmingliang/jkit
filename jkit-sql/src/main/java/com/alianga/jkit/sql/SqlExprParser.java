@@ -151,6 +151,10 @@ final class SqlExprParser {
                 || p.is(SqlTokenType.SHIFT_LEFT) || p.is(SqlTokenType.SHIFT_RIGHT)
                 || p.is(SqlTokenType.CONCAT) || p.is(SqlTokenType.JSON_OP)) {
             SqlTokenType t = p.token.type();
+            // 单 | 后接 SELECT/INSERT… 时视为脚本分隔，留给 parseAll
+            if (t == SqlTokenType.BIT_OR && p.token.length() == 1 && lookingAtStmtKeyword(p.lexer.peek())) {
+                break;
+            }
             String opText = p.token.text();
             p.next();
             SqlBinaryOp op;
@@ -172,6 +176,17 @@ final class SqlExprParser {
             left = SqlBinaryExpr.of(left, op, parseAdd());
         }
         return left;
+    }
+
+    private static boolean lookingAtStmtKeyword(SqlToken tok) {
+        if (tok == null || tok.type() == null) {
+            return false;
+        }
+        SqlTokenType t = tok.type();
+        return t == SqlTokenType.SELECT || t == SqlTokenType.INSERT || t == SqlTokenType.UPDATE
+                || t == SqlTokenType.DELETE || t == SqlTokenType.MERGE || t == SqlTokenType.WITH
+                || t == SqlTokenType.CREATE || t == SqlTokenType.DROP || t == SqlTokenType.ALTER
+                || t == SqlTokenType.REPLACE || t == SqlTokenType.CALL || t == SqlTokenType.GRANT;
     }
 
     private SqlCaseExpr parseCase() {
@@ -692,6 +707,23 @@ final class SqlExprParser {
             p.next();
             left = SqlBinaryExpr.of(left, SqlBinaryOp.OR, parseXor());
         }
+        // 三元：a ? b : c（? 与 JDBC 绑定同形，仅当后续有 : 时成立）
+        if (p.is(SqlTokenType.BIND)) {
+            SqlToken after = p.lexer.peek();
+            // 粗判：? 后不是运算符收尾位置时尝试三元；失败代价由 expect COLON 体现
+            if (after != null && after.type() != SqlTokenType.COMMA && after.type() != SqlTokenType.RPAREN
+                    && after.type() != SqlTokenType.EOF && after.type() != SqlTokenType.SEMICOLON) {
+                p.next(); // ?
+                SqlExpr mid = parseOr();
+                p.expect(SqlTokenType.COLON);
+                SqlFunctionExpr tern = new SqlFunctionExpr();
+                tern.setName(SqlIdentifier.of("IF"));
+                tern.addArgument(left);
+                tern.addArgument(mid);
+                tern.addArgument(parseOr());
+                return tern;
+            }
+        }
         return left;
     }
 
@@ -812,24 +844,71 @@ final class SqlExprParser {
             // 不直接 return：后面还要挂 ::type / [下标] / COLLATE 等后缀
             expr = parseFunction((SqlIdentifier) expr);
         }
-        // 函数/子查询结果字段访问：f(args).f2.f3（标识符链已在上方 DOT 循环处理）
+        // 函数/子查询结果字段访问：f(args).f2.f3 / f(args).g(args)（标识符链已在上方 DOT 循环处理）
         while (!(expr instanceof SqlIdentifier) && p.is(SqlTokenType.DOT)
                 && p.lexer.peek() != null
                 && p.lexer.peek().type() != SqlTokenType.STAR) {
             p.next(); // DOT
             String part = p.consumeIdentPartRaw();
-            expr = SqlBinaryExpr.of(expr, SqlBinaryOp.MEMBER, SqlIdentifier.of(SqlParser.unquote(part)));
+            SqlExpr field = SqlIdentifier.of(SqlParser.unquote(part));
+            if (p.is(SqlTokenType.LPAREN)) {
+                field = parseFunction((SqlIdentifier) field);
+            }
+            expr = SqlBinaryExpr.of(expr, SqlBinaryOp.MEMBER, field);
         }
         if (isArrayConstructorHead(expr)) {
             expr = parseArrayConstructor();
         }
-        while (p.match(SqlTokenType.LBRACKET)) {
-            SqlExpr index = parseExpr();
-            p.expect(SqlTokenType.RBRACKET);
-            expr = SqlBinaryExpr.of(expr, SqlBinaryOp.SUBSCRIPT, index);
+        while (true) {
+            boolean progressed = false;
+            while (p.match(SqlTokenType.LBRACKET)) {
+                SqlExpr index = parseExpr();
+                p.expect(SqlTokenType.RBRACKET);
+                expr = SqlBinaryExpr.of(expr, SqlBinaryOp.SUBSCRIPT, index);
+                progressed = true;
+            }
+            while (p.is(SqlTokenType.DOT) && p.lexer.peek() != null
+                    && p.lexer.peek().type() != SqlTokenType.STAR) {
+                p.next();
+                String part = p.consumeIdentPartRaw();
+                SqlExpr field = SqlIdentifier.of(SqlParser.unquote(part));
+                if (p.is(SqlTokenType.LPAREN)) {
+                    field = parseFunction((SqlIdentifier) field);
+                }
+                if (expr instanceof SqlIdentifier) {
+                    ((SqlIdentifier) expr).addName(SqlParser.unquote(part));
+                    // 若已变函数调用则改走 MEMBER
+                    if (field instanceof SqlFunctionExpr) {
+                        expr = SqlBinaryExpr.of(SqlIdentifier.of(((SqlIdentifier) expr).qualifiedName()),
+                                SqlBinaryOp.MEMBER, field);
+                    }
+                } else {
+                    expr = SqlBinaryExpr.of(expr, SqlBinaryOp.MEMBER, field);
+                }
+                progressed = true;
+            }
+            if (!progressed) {
+                break;
+            }
         }
         if (p.match(SqlTokenType.COLLATE)) {
             expr = SqlBinaryExpr.of(expr, SqlBinaryOp.COLLATE, p.parseName());
+        }
+        // PG：expr AT TIME ZONE 'UTC'
+        while (p.isIdent("AT") && p.lexer.peek() != null
+                && (p.lexer.peek().type() == SqlTokenType.TIME
+                || p.lexer.peek().textEqualsIgnoreCase("TIME"))) {
+            p.next(); // AT
+            p.next(); // TIME
+            if (!(p.isIdent("ZONE") || (p.token.type() != null && p.token.textEqualsIgnoreCase("ZONE")))) {
+                break;
+            }
+            p.next(); // ZONE
+            SqlFunctionExpr atz = new SqlFunctionExpr();
+            atz.setName(SqlIdentifier.of("AT TIME ZONE"));
+            atz.addArgument(expr);
+            atz.addArgument(parsePrimaryInner());
+            expr = atz;
         }
         // PG ::type 绑定紧于算术（COUNT(*)::numeric / 2）
         while (p.match(SqlTokenType.CAST_OP)) {

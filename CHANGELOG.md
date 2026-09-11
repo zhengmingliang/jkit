@@ -36,6 +36,11 @@
 
 ## 2.0.1 - 2026-09-09
 
+### 新增（jkit-sql 覆盖率提升第六轮）
+- `|` 后接语句关键字时不按按位或（脚本分隔）；`AT TIME ZONE`；`?1` JDBC 绑定
+- 子查询/`FROM (WITH …)`；双点 `catalog..table`；`FOR KEY SHARE`/`NO KEY UPDATE`
+- 语句级 `WITH UR`；三元 `a ? b : c`；`OFFSET n LIMIT m`；函数结果 `.f()` / 下标后字段链
+
 ### 新增（jkit-sql 覆盖率提升第五轮）
 - 语句关键字不再作表别名（`FROM dual SELECT …` 多语句）；脚本软分隔 `|`/`/`；分号后尾部垃圾软停止
 - `UPDATE SET (a,b)=(…)`、`:=`；`FOR SHARE` / `FOR XML`；DB2 `WITH UR`；`PIVOT XML`

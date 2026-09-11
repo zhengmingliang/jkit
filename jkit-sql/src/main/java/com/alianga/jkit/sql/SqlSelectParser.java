@@ -210,6 +210,11 @@ final class SqlSelectParser {
             limit.setOffset(p.exprParser.parsePrimary());
             p.match(SqlTokenType.ROW);
             p.match(SqlTokenType.ROWS);
+            // OFFSET n LIMIT m（OFFSET 在前）
+            if (limit.rowCount() == null && p.is(SqlTokenType.LIMIT)) {
+                p.next();
+                limit.setRowCount(p.exprParser.parseExpr());
+            }
         }
         if (p.match(SqlTokenType.FETCH)) {
             p.match(SqlTokenType.FIRST);
@@ -247,6 +252,13 @@ final class SqlSelectParser {
     }
 
     SqlSelect parseSelect() {
+        if (p.is(SqlTokenType.WITH)) {
+            com.alianga.jkit.sql.ast.SqlStatement w = p.parseStatement();
+            if (!(w instanceof SqlSelect)) {
+                throw p.error("expected SELECT after WITH");
+            }
+            return (SqlSelect) w;
+        }
         if (p.is(SqlTokenType.LPAREN)) {
             p.next();
             SqlSelect inner;
@@ -332,7 +344,7 @@ final class SqlSelectParser {
                 select.setTopWithTies(true);
             }
         }
-        // Informix：SELECT SKIP n FIRST m …
+        // Informix：SELECT SKIP n FIRST m …（n 可为 ? / ?1）
         if (p.isIdent("SKIP")) {
             p.next();
             SqlLimit lim = select.limit();
@@ -340,11 +352,11 @@ final class SqlSelectParser {
                 lim = new SqlLimit();
                 select.setLimit(lim);
             }
-            lim.setOffset(p.exprParser.parsePrimary());
+            lim.setOffset(parseSkipFirstArg());
         }
         if (p.isIdent("FIRST") || p.is(SqlTokenType.FIRST)) {
             p.next();
-            select.setTop(p.exprParser.parsePrimary());
+            select.setTop(parseSkipFirstArg());
         }
         consumeSelectHints(select);
         do {
@@ -446,6 +458,16 @@ final class SqlSelectParser {
         parseLimitFetch(select);
         // MySQL：INTO 也可出现在 FROM/WHERE/ORDER/LIMIT 之后（与 SELECT 列表后 INTO 二选一）
         parseSelectInto(select);
+        // DB2：语句级 WITH UR|CS|RS|RR
+        if (p.is(SqlTokenType.WITH) && p.lexer.peek() != null
+                && (p.lexer.peek().textEqualsIgnoreCase("UR")
+                || p.lexer.peek().textEqualsIgnoreCase("CS")
+                || p.lexer.peek().textEqualsIgnoreCase("RS")
+                || p.lexer.peek().textEqualsIgnoreCase("RR"))) {
+            p.next();
+            select.setQueryOption("WITH " + p.token.text().toUpperCase());
+            p.next();
+        }
         if (p.match(SqlTokenType.FOR)) {
             if (p.isIdent("SYSTEM_TIME")) {
                 // 时态表查询更常见于表级；此处兜底吞掉残留 FOR SYSTEM_TIME …
@@ -454,6 +476,15 @@ final class SqlSelectParser {
                 // SQL Server：FOR XML PATH('') [, TYPE] …
                 p.next();
                 select.setForUpdateTail("XML " + p.consumeRawUntilClause());
+            } else if (p.isIdent("NO") && p.lexer.peek() != null
+                    && p.lexer.peek().textEqualsIgnoreCase("KEY")) {
+                // PG：FOR NO KEY UPDATE
+                select.setForUpdateTail(p.consumeRawUntilClause());
+            } else if (p.isIdent("KEY") && p.lexer.peek() != null
+                    && p.lexer.peek().textEqualsIgnoreCase("SHARE")) {
+                // PG：FOR KEY SHARE
+                select.setForUpdateTail(p.consumeRawUntilClause());
+                select.setLockInShare(true);
             } else if (p.match(SqlTokenType.SHARE) || p.isIdent("SHARE")) {
                 if (p.isIdent("SHARE")) {
                     p.next();
@@ -737,6 +768,11 @@ final class SqlSelectParser {
             table.partitions().add(p.parseName());
         } while (p.match(SqlTokenType.COMMA));
         p.expect(SqlTokenType.RPAREN);
+    }
+
+    /** Informix SKIP/FIRST 参数：字面量 / 绑定。 */
+    private SqlExpr parseSkipFirstArg() {
+        return p.exprParser.parsePrimary();
     }
 
     /**

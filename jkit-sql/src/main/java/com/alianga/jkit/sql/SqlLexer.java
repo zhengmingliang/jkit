@@ -251,6 +251,10 @@ public final class SqlLexer {
         }
         if (c == '?') {
             pos++;
+            // JDBC 位置绑定 ?1 / ?2
+            while (pos < limit && src[pos] >= '0' && src[pos] <= '9') {
+                pos++;
+            }
             token.set(SqlTokenType.BIND, src, tStart, pos, tLine, tCol);
             return;
         }
