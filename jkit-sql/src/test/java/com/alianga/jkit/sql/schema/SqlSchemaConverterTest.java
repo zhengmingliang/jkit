@@ -48,8 +48,9 @@ public class SqlSchemaConverterTest {
         ConversionResult r = SqlSchemaConverter.convert(
                 "ALTER TABLE t MODIFY amt DECIMAL(10,2) NOT NULL",
                 SqlDialect.MYSQL, SqlDialect.POSTGRES);
-        assertTrue(r.sql(), r.sql().toUpperCase().contains("ALTER COLUMN"));
-        assertTrue(r.sql(), r.sql().toUpperCase().contains("NUMERIC"));
+        // 精确断言而非 contains：曾经的 "ALTER COLUMN amt TYPE amt NUMERIC(10,2)" 同样能过 contains
+        assertEquals(r.sql(), "ALTER TABLE t ALTER COLUMN amt TYPE NUMERIC(10,2)",
+                r.sql().replaceAll("\\s+", " ").trim());
         SQL.parse(r.sql(), SqlDialect.POSTGRES);
     }
 
@@ -58,8 +59,9 @@ public class SqlSchemaConverterTest {
         ConversionResult r = SqlSchemaConverter.convert(
                 "ALTER TABLE t CHANGE COLUMN old_c new_c INT NOT NULL",
                 SqlDialect.MYSQL, SqlDialect.POSTGRES);
-        assertTrue(r.sql(), r.sql().toUpperCase().contains("INTEGER"));
-        assertTrue(r.sql(), r.sql().toUpperCase().contains("ALTER COLUMN"));
+        assertEquals(r.sql(), "ALTER TABLE t ALTER COLUMN new_c TYPE INTEGER",
+                r.sql().replaceAll("\\s+", " ").trim());
+        SQL.parse(r.sql(), SqlDialect.POSTGRES);
         assertFalse(r.report().extraSql().isEmpty());
         assertTrue(r.report().extraSql().get(0).toUpperCase().contains("RENAME COLUMN"));
     }
