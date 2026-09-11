@@ -158,6 +158,37 @@ public class SqlSchemaConverterTest {
     }
 
     @Test
+    public void mysqlIfBecomesCaseWhen() {
+        String pg = SQL.convert("SELECT IF(a > 1, b, c) FROM t", SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        String u = pg.toUpperCase();
+        assertTrue(pg, u.contains("CASE"));
+        assertTrue(pg, u.contains("WHEN"));
+        assertFalse(pg, u.contains("IF("));
+    }
+
+    @Test
+    public void mysqlNowBecomesCurrentTimestamp() {
+        String pg = SQL.convert("SELECT NOW() FROM t", SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        assertTrue(pg, pg.toUpperCase().contains("CURRENT_TIMESTAMP"));
+        assertFalse(pg, pg.toUpperCase().contains("NOW"));
+    }
+
+    @Test
+    public void convertUsingWarnsAndKeeps() {
+        ConversionResult r = SqlSchemaConverter.convert(
+                "SELECT CONVERT(name USING utf8mb4) FROM t",
+                SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        boolean found = false;
+        for (int i = 0; i < r.report().warnings().size(); i++) {
+            if (r.report().warnings().get(i).message().contains("CONVERT")) {
+                found = true;
+            }
+        }
+        assertTrue(r.report().warnings().toString(), found);
+        assertTrue(r.sql().toUpperCase().contains("CONVERT"));
+    }
+
+    @Test
     public void columnCharsetStripped() {
         ConversionResult r = SqlSchemaConverter.convert(
                 "CREATE TABLE t (name VARCHAR(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin)",

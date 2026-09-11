@@ -424,7 +424,9 @@ ConversionResult r = SQL.convert(sql, SqlDialect.MYSQL, SqlDialect.ORACLE,
                 .failOnSeverity(ConversionWarning.Severity.MANUAL_ACTION_REQUIRED));
 ```
 
-Oracle ≤11g 的自增会给出 `MANUAL_ACTION_REQUIRED`（需手工 SEQUENCE+TRIGGER），不会静默生成不完整 DDL。函数改写（IF→CASE 等）仍属后续 Phase 4。
+Oracle ≤11g 的自增会给出 `MANUAL_ACTION_REQUIRED`（需手工 SEQUENCE+TRIGGER），不会静默生成不完整 DDL。
+
+查询函数已改写 `IF(a,b,c)` → `CASE WHEN`（非 MySQL）、`NOW()`/`CURDATE()`/`CURTIME()`；MySQL `CONVERT(expr USING charset)` **不会**误映射成 CAST，只告警并保留原文。
 
 ## 性能
 

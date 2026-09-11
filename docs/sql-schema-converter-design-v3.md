@@ -569,7 +569,7 @@ class CrossDialectDdlExecutionTest {
 | Phase 1 | `CanonicalType` 枚举 + `DialectTypeForm` + `SqlDataTypeRegistry` + `RegistryValidator` | 类型映射核心，自带 CI 自检 | Phase 0 | **已完成**（12 方言 + 有损映射自检） |
 | Phase 2 | `AutoIncrementStrategy` + `DefaultValueCoercer` + UNSIGNED/字符集策略 | DDL 列转换语义完整 | Phase 1 | **已完成** |
 | Phase 3 | `SqlSchemaConverter` 门面 + `SqlSchemaConvertOptions` + `ConversionReport` | 集成入口，含可观测性 | Phase 0-2 | **已完成**（`SQL.convert`） |
-| Phase 4 | `FunctionRewriteRule` + `TemplateFunctionRewriteRule` + `SqlFunctionRegistry` 重构 | 函数改写 AST 化，`CONVERT` 语义拆分 | Phase 1 |
+| Phase 4 | `FunctionRewriteRule` + `FunctionAstRewriter`（IF→CASE、NOW/CURDATE/CURTIME；`CONVERT USING` 告警不误映射 CAST） | 函数改写 AST 化，`CONVERT` 语义拆分 | Phase 1 | **部分完成**（模板骨架编译、GROUP_CONCAT 等仍待补） |
 | Phase 5 | 分页转换接入（复用现有 `SqlRewriter.adaptPagination`） | 端到端 DML 转换 | Phase 3 |
 | Phase 6 | SPI（`SqlSchemaConverterProvider` + TestKit） | 第三方/内部团队可插拔新方言 | Phase 1, 4 |
 | Phase 7 | 性能优化 + JMH 基准入 CI | 性能回归门禁 | Phase 3-4 |

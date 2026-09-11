@@ -7,6 +7,7 @@ import com.alianga.jkit.sql.ast.SqlStatement;
 import com.alianga.jkit.sql.schema.model.ColumnDefinition;
 import com.alianga.jkit.sql.schema.parse.SqlColumnDefinitionParser;
 import com.alianga.jkit.sql.schema.registry.SqlDataTypeRegistry;
+import com.alianga.jkit.sql.schema.rewrite.FunctionAstRewriter;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -94,6 +95,7 @@ public final class SqlSchemaConverter {
         if (copy instanceof SqlDdlStatement) {
             convertDdl((SqlDdlStatement) copy, source, target, options, report);
         }
+        FunctionAstRewriter.rewrite(copy, source, target, report);
         return copy;
     }
 
