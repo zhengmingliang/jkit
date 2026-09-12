@@ -16,6 +16,7 @@
 - **方言**：新增一等枚举 `DAMENG`（`dm`/`dameng`/`jdbc:dm:`）；分页 LIMIT/OFFSET，自增 IDENTITY。达梦函数改写：`NVL`/`INSTR`/`LISTAGG`/`TO_DATE`/`DATE_FORMAT→TO_CHAR`，`FROM_UNIXTIME` → `TO_DATE('1970-01-01') + NUMTODSINTERVAL(...)`。
 - **修复**：`GROUP_CONCAT` 无显式 `SEPARATOR` 时转 `STRING_AGG`/`LISTAGG` 丢分隔符（产出 `STRING_AGG(a, ,)`）；MySQL `MODIFY`/`CHANGE` 转 PG/ANSI/H2/PRESTO 时列名重复（产出 `ALTER COLUMN c TYPE c INTEGER`）。
 - **转换**：函数改写覆盖 JOIN ON / MERGE / OVER / 列 `DEFAULT NOW()`；`DATE_ADD`/`DATEDIFF`/`FROM_UNIXTIME`/`UNIX_TIMESTAMP`/`REPEAT`/`TO_CHAR`/`SUBSTRING`/`LEFT`/`RIGHT`/`DECODE`/`NVL2` 等内置规则（SQL Server/SQLite/Hive/ClickHouse/达梦均有对应写法）；PG `ALTER COLUMN` 附录 `SET NOT NULL`/`DEFAULT`；独立 `CREATE INDEX` 去掉 `USING BTREE`；FULLTEXT 升为 `MANUAL_ACTION_REQUIRED`。
+- **修复**：`SUBSTRING` 回写按方言分流——PG/MySQL/H2 等用 `FROM n FOR m`，SQL Server/SQLite/Hive/ClickHouse 用逗号形态（此前一律 `FROM/FOR`，SQL Server 报 `Incorrect syntax near FOR`、SQLite 报 `near FROM`）；SQLite/Hive 的 `LEFT`/`RIGHT` 展开成 `SUBSTR`；PG/SQL Server 三参数负起点改 `LENGTH/LEN(s)-n+1`（SQL 标准 `FROM -n FOR m` 不从末尾计数）；达梦裸 SELECT 补 `FROM dual`。
 - **SPI**：`SqlSchemaConverterProviders.loadSorted()` 一次加载，类型表与函数表共用实例。
 - **实体**：JPA `@Index`/`@Enumerated`/`@Embedded`、集合字段默认跳过、`createTables` 按外键排序；反射认 MyBatis-Plus `@TableName`/`@TableId`/`@TableField` 与 MyBatis `@Alias`（无编译依赖）。
 - **扩展**：函数改写真正走 `SqlSchemaConverterProvider.registerFunctions`（内置挂 `SqlFunctionRegistry`，SPI 后覆盖；`rewrite` 返回 `null` 回落内置）。`FunctionAstRewriter` 只遍历，第三方不必改它。

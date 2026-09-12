@@ -399,7 +399,8 @@ public final class SqlFormatter {
             sp();
             writeFrom(select.from());
         } else if (dialect.typeFamily() == SqlDialect.ORACLE
-                || dialect.typeFamily() == SqlDialect.ORACLE12) {
+                || dialect.typeFamily() == SqlDialect.ORACLE12
+                || dialect.typeFamily() == SqlDialect.DAMENG) {
             // Oracle / 达梦 不允许裸 SELECT <expr>，必须补 FROM dual
             nl();
             kw("FROM");
@@ -3367,7 +3368,8 @@ public final class SqlFormatter {
             writeExpr(args.get(1));
         } else if (equalsIgnoreCase(fnName, "TRIM")) {
             writeTrimArgs(args);
-        } else if (equalsIgnoreCase(fnName, "SUBSTRING") && args.size() >= 2 && args.size() <= 3) {
+        } else if (equalsIgnoreCase(fnName, "SUBSTRING") && args.size() >= 2 && args.size() <= 3
+                && substringUsesFromFor()) {
             writeExpr(args.get(0));
             sp();
             kw("FROM");
@@ -3415,6 +3417,20 @@ public final class SqlFormatter {
             out.append(')');
         }
         writeFunctionSuffix(fn);
+    }
+
+    /**
+     * SQL 标准 {@code SUBSTRING(x FROM n FOR m)}：PG / ANSI / MySQL / H2 / Presto / DB2 认。
+     * SQL Server / SQLite / Hive / ClickHouse 只认逗号形态 {@code SUBSTRING(x, n, m)}。
+     */
+    private boolean substringUsesFromFor() {
+        SqlDialect family = dialect.typeFamily();
+        return family == SqlDialect.MYSQL
+                || family == SqlDialect.POSTGRES
+                || family == SqlDialect.ANSI
+                || family == SqlDialect.H2
+                || family == SqlDialect.PRESTO
+                || family == SqlDialect.DB2;
     }
 
     private void writeFunctionSuffix(SqlFunctionExpr fn) {

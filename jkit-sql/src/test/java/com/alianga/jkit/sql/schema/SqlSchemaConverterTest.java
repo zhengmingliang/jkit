@@ -495,19 +495,42 @@ public class SqlSchemaConverterTest {
                 SqlDialect.MYSQL, SqlDialect.DAMENG);
         assertTrue(dameng, dameng.toUpperCase().contains("SUBSTR"));
         assertTrue(dameng, dameng.contains("1"));
+        String damengBare = SQL.convert("SELECT LEFT('hello', 2)",
+                SqlDialect.MYSQL, SqlDialect.DAMENG);
+        assertTrue(damengBare, damengBare.toUpperCase().contains("FROM DUAL"));
 
         String ss = SQL.convert("SELECT SUBSTRING(a, 2) FROM t",
                 SqlDialect.MYSQL, SqlDialect.SQLSERVER);
-        assertTrue(ss, ss.toUpperCase().contains("SUBSTRING"));
-        assertTrue(ss, ss.toUpperCase().contains("LEN"));
+        assertEquals("SELECT SUBSTRING(a, 2, LEN(a) - 2 + 1) FROM t", oneLine(ss));
+
+        String ss3 = SQL.convert("SELECT SUBSTRING(a, 2, 3) FROM t",
+                SqlDialect.MYSQL, SqlDialect.SQLSERVER);
+        assertEquals("SELECT SUBSTRING(a, 2, 3) FROM t", oneLine(ss3));
+        assertFalse(ss3, ss3.toUpperCase().contains(" FROM 2"));
+
+        String ssNeg3 = SQL.convert("SELECT SUBSTRING(a, -3, 2) FROM t",
+                SqlDialect.MYSQL, SqlDialect.SQLSERVER);
+        assertEquals("SELECT SUBSTRING(a, LEN(a) - 3 + 1, 2) FROM t", oneLine(ssNeg3));
 
         String pgNeg = SQL.convert("SELECT SUBSTRING(a, -2) FROM t",
                 SqlDialect.MYSQL, SqlDialect.POSTGRES);
         assertTrue(pgNeg, pgNeg.toUpperCase().contains("RIGHT"));
 
+        String pgNeg3 = SQL.convert("SELECT SUBSTRING(a, -3, 2) FROM t",
+                SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        assertEquals("SELECT SUBSTRING(a FROM LENGTH(a) - 3 + 1 FOR 2) FROM t", oneLine(pgNeg3));
+
         String sqlite = SQL.convert("SELECT LOCATE('x', a) FROM t",
                 SqlDialect.MYSQL, SqlDialect.SQLITE);
         assertTrue(sqlite, sqlite.toUpperCase().contains("INSTR"));
+
+        String sqliteLeft = SQL.convert("SELECT LEFT(a, 2) FROM t",
+                SqlDialect.MYSQL, SqlDialect.SQLITE);
+        assertEquals("SELECT SUBSTR(a, 1, 2) FROM t", oneLine(sqliteLeft));
+
+        String sqliteSub = SQL.convert("SELECT SUBSTRING(a, 2, 3) FROM t",
+                SqlDialect.MYSQL, SqlDialect.SQLITE);
+        assertEquals("SELECT SUBSTRING(a, 2, 3) FROM t", oneLine(sqliteSub));
     }
 
     @Test
@@ -559,5 +582,9 @@ public class SqlSchemaConverterTest {
         assertFalse(r.sql(), u.contains("CHARACTER SET"));
         assertFalse(r.sql(), u.contains("COLLATE"));
         assertTrue(u.contains("VARCHAR(32)"));
+    }
+
+    private static String oneLine(String sql) {
+        return sql.replace('\n', ' ').replaceAll("\\s+", " ").trim();
     }
 }

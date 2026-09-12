@@ -207,7 +207,8 @@ SQL.convert(sql, SqlDialect.fromName("dm"), SqlDialect.MYSQL);
 | `CONVERT(expr USING charset)` | **不**改写成 CAST，只 `SEMANTIC_RISK` 并保留原文 |
 | `LOCATE` / `INSTR` / `CHARINDEX` | PG `POSITION`；Oracle `INSTR`（参数对调）；SQL Server `CHARINDEX` |
 | `LENGTH` / `LEN` | SQL Server `LEN`，其余 `LENGTH` |
-| `SUBSTRING` / `SUBSTR` | Oracle `SUBSTR` |
+| `SUBSTRING` / `SUBSTR` / `MID` | Oracle/达梦 `SUBSTR`；SQL Server 两参数补 `LEN`、负起点改 `RIGHT`，三参数负起点改 `LEN(s)-n+1`；PG 两参数负起点改 `RIGHT`，三参数负起点改 `LENGTH(s)-n+1`。回写：PG/MySQL/H2 用 `FROM n FOR m`，SQL Server/SQLite/Hive/ClickHouse 用逗号 |
+| `LEFT` / `RIGHT` | Oracle/达梦/SQLite/Hive 展开成 `SUBSTR`；其余保留 |
 | `DATE_ADD` / `DATE_SUB` | 非 MySQL → 加减 `INTERVAL`（PG 写成 `INTERVAL '1 day'`） |
 | `DATEDIFF` | PG/Oracle 改为日期相减 |
 | `FROM_UNIXTIME` | PG `TO_TIMESTAMP` |

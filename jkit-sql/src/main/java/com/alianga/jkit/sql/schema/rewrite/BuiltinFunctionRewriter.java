@@ -265,33 +265,17 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
         if (sqlServer) {
             fn.setName(SqlIdentifier.of("SUBSTRING"));
             if (args.size() == 2) {
-                SqlExpr from = args.get(1);
-                Integer n = intLiteral(from);
-                if (n != null && n.intValue() < 0) {
-                    SqlFunctionExpr right = new SqlFunctionExpr();
-                    right.setName(SqlIdentifier.of("RIGHT"));
-                    right.addArgument(args.get(0));
-                    right.addArgument(SqlLiteral.of(SqlLiteral.Kind.NUMBER,
-                            String.valueOf(-n.intValue())));
-                    return right;
-                }
-                args.add(lengthMinusFromPlusOne(args.get(0), from));
+                return rewriteTwoArgSubstring(fn, args, true);
             }
+            rewriteNegativeStartUsingLength(args, true);
             return fn;
         }
         if (pgLike) {
             fn.setName(SqlIdentifier.of("SUBSTRING"));
             if (args.size() == 2) {
-                Integer n = intLiteral(args.get(1));
-                if (n != null && n.intValue() < 0) {
-                    SqlFunctionExpr right = new SqlFunctionExpr();
-                    right.setName(SqlIdentifier.of("RIGHT"));
-                    right.addArgument(args.get(0));
-                    right.addArgument(SqlLiteral.of(SqlLiteral.Kind.NUMBER,
-                            String.valueOf(-n.intValue())));
-                    return right;
-                }
+                return rewriteTwoArgSubstring(fn, args, false);
             }
+            rewriteNegativeStartUsingLength(args, false);
             return fn;
         }
         if (family == SqlDialect.MYSQL || family == SqlDialect.H2 || family == SqlDialect.HIVE
@@ -309,7 +293,8 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
             return fn;
         }
         if (family == SqlDialect.ORACLE || family == SqlDialect.ORACLE12
-                || family == SqlDialect.DAMENG) {
+                || family == SqlDialect.DAMENG
+                || family == SqlDialect.SQLITE || family == SqlDialect.HIVE) {
             SqlFunctionExpr out = new SqlFunctionExpr();
             out.setName(SqlIdentifier.of("SUBSTR"));
             out.addArgument(fn.arguments().get(0));
@@ -330,6 +315,56 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
             return out;
         }
         return fn;
+    }
+
+    /**
+     * 两参数 {@code SUBSTRING(s, n)}：负起点改 {@code RIGHT}（SQL Server / PG 的 FROM 形态
+     * 都不从末尾计数）；正起点在 SQL Server 上补 {@code LEN(s)-n+1}，因其第三参必填。
+     */
+    private static SqlExpr rewriteTwoArgSubstring(SqlFunctionExpr fn, List<SqlExpr> args,
+                                                    boolean sqlServer) {
+        SqlExpr from = args.get(1);
+        Integer n = intLiteral(from);
+        if (n != null && n.intValue() < 0) {
+            return toRight(args.get(0), -n.intValue());
+        }
+        if (sqlServer) {
+            args.add(lengthMinusFromPlusOne(args.get(0), from));
+        }
+        return fn;
+    }
+
+    /**
+     * 三参数负起点：MySQL 从末尾计数，SQL 标准 {@code FROM n FOR m} 与 SQL Server
+     * {@code SUBSTRING} 都把起点小于 1 当成字符串前面的虚位置。改成
+     * {@code LEN/LENGTH(s) - |n| + 1}。
+     */
+    private static void rewriteNegativeStartUsingLength(List<SqlExpr> args, boolean sqlServer) {
+        if (args.size() < 3) {
+            return;
+        }
+        Integer n = intLiteral(args.get(1));
+        if (n == null || n.intValue() >= 0) {
+            return;
+        }
+        args.set(1, startFromEnd(args.get(0), -n.intValue(), sqlServer));
+    }
+
+    private static SqlFunctionExpr toRight(SqlExpr col, int count) {
+        SqlFunctionExpr right = new SqlFunctionExpr();
+        right.setName(SqlIdentifier.of("RIGHT"));
+        right.addArgument(col);
+        right.addArgument(SqlLiteral.of(SqlLiteral.Kind.NUMBER, String.valueOf(count)));
+        return right;
+    }
+
+    private static SqlExpr startFromEnd(SqlExpr col, int absStart, boolean sqlServer) {
+        SqlFunctionExpr length = new SqlFunctionExpr();
+        length.setName(SqlIdentifier.of(sqlServer ? "LEN" : "LENGTH"));
+        length.addArgument(col);
+        SqlBinaryExpr minus = SqlBinaryExpr.of(length, SqlBinaryOp.MINUS,
+                SqlLiteral.of(SqlLiteral.Kind.NUMBER, String.valueOf(absStart)));
+        return SqlBinaryExpr.of(minus, SqlBinaryOp.PLUS, SqlLiteral.of(SqlLiteral.Kind.NUMBER, "1"));
     }
 
     private static SqlExpr lengthMinusFromPlusOne(SqlExpr col, SqlExpr from) {

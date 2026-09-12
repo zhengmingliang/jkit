@@ -437,6 +437,7 @@ Oracle ≤11g 的自增默认给出 `MANUAL_ACTION_REQUIRED`；`generateOracleSe
 - `CAST` / `CONVERT(expr, type)` 的类型走 canonical 表
 - MySQL `CONVERT(expr USING charset)` **不会**误映射成 CAST，只告警并保留原文
 - `DATE_ADD`/`DATE_SUB` → 加减 `INTERVAL`；`DATEDIFF` → 日期相减；`FROM_UNIXTIME` → `TO_TIMESTAMP`
+- `SUBSTRING`/`LEFT`/`RIGHT`/`MID`：Oracle/达梦 `SUBSTR`；SQL Server 两参数补 `LEN`、负起点改 `RIGHT`；SQLite/Hive 的 `LEFT`/`RIGHT` 展开成 `SUBSTR`。回写按方言：PG/MySQL 用 `FROM n FOR m`，SQL Server/SQLite 用逗号
 - `DECODE`/`NVL2` → `CASE`；`FIND_IN_SET`/`SUBSTRING_INDEX` 无干净等价则告警并保留
 
 目标方言不支持的 MySQL 表内 `KEY`/`INDEX` 会改成附录 `CREATE INDEX`；`FULLTEXT`/`SPATIAL` 去掉并 `MANUAL_ACTION_REQUIRED`。`UNIQUE KEY` 改写为可移植的 `UNIQUE (...)`。独立 `CREATE INDEX … USING BTREE` 转到非 MySQL 时去掉 `USING`。
@@ -450,6 +451,7 @@ cd ../tools-test
 mvn -Dtest=CrossDialectDdlExecutionTest test      # MySQL→PG 建表；需要 Docker+本地 postgres 镜像，没有则 skip
 mvn -Dtest=CrossDialectExprExecutionTest test     # DDL+表达式真库执行：PG 上 DATE_ADD→INTERVAL、DATEDIFF→CAST 减法、MySQL 上 ||→CONCAT、SQLite 上 AUTOINCREMENT、NUMERIC(10,2) 不截断；PG/MySQL 走 Docker，SQLite 走内存库
 mvn -Dtest=LocalDatasourceConvertTest test        # 读 src/test/resources/datasource，连本机 MySQL/PG/Oracle
+mvn -Dtest=LocalDatasourceFunctionRewriteTest test  # 同上，真库执行 SUBSTRING/LEFT/RIGHT/LOCATE 改写结果
 java -jar target/benchmarks.jar com.alianga.test.sql.jmh.SqlSchemaConvertBenchmark -f 1 -wi 1 -i 1
 ```
 
