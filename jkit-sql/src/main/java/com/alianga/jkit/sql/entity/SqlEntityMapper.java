@@ -19,7 +19,8 @@ import java.util.Map;
  * 把实体类解析成 {@link SqlEntityModel}。认 jkit 注解，并用反射认（无编译依赖）：
  * JPA {@code javax/jakarta.persistence}、MyBatis-Plus {@code com.baomidou.mybatisplus.annotation}、
  * MyBatis {@code org.apache.ibatis.type.Alias}（仅作表名回退）、
- * Hibernate {@code org.hibernate.annotations.Comment} / {@code ColumnDefault}。
+ * 任意简单名为 {@code Comment} 的注解（类=表注释、字段=列注释，读 {@code value}/{@code comment}）、
+ * Hibernate {@code ColumnDefault}。
  *
  * @author 郑明亮
  * @since 2.0.1
@@ -219,9 +220,9 @@ public final class SqlEntityMapper {
         if (col != null && col.comment() != null && col.comment().length() > 0) {
             comment = col.comment();
         } else {
-            comment = hibernateValue(namedAnnotation(field, "org.hibernate.annotations.Comment"));
+            comment = annotationText(namedBySimpleName(field, "Comment"));
         }
-        String defaultValue = hibernateValue(
+        String defaultValue = annotationText(
                 namedAnnotation(field, "org.hibernate.annotations.ColumnDefault"));
         return new SqlEntityColumn(name, canonical, prec, sc, nullable, id, generated, unique,
                 rawType, refTable, refCol, comment, defaultValue, field);
@@ -232,14 +233,17 @@ public final class SqlEntityMapper {
         if (sqlTable != null && sqlTable.comment() != null && sqlTable.comment().length() > 0) {
             return sqlTable.comment();
         }
-        return hibernateValue(namedAnnotation(type, "org.hibernate.annotations.Comment"));
+        return annotationText(namedBySimpleName(type, "Comment"));
     }
 
-    private static String hibernateValue(Object annotation) {
+    private static String annotationText(Object annotation) {
         if (annotation == null) {
             return null;
         }
         String v = stringAttr(annotation, "value");
+        if (v == null || v.trim().isEmpty()) {
+            v = stringAttr(annotation, "comment");
+        }
         if (v == null) {
             return null;
         }
@@ -499,6 +503,26 @@ public final class SqlEntityMapper {
         Annotation[] anns = field.getAnnotations();
         for (int i = 0; i < anns.length; i++) {
             if (name.equals(anns[i].annotationType().getName())) {
+                return anns[i];
+            }
+        }
+        return null;
+    }
+
+    private static Annotation namedBySimpleName(Class<?> type, String simpleName) {
+        Annotation[] anns = type.getAnnotations();
+        for (int i = 0; i < anns.length; i++) {
+            if (simpleName.equals(anns[i].annotationType().getSimpleName())) {
+                return anns[i];
+            }
+        }
+        return null;
+    }
+
+    private static Annotation namedBySimpleName(Field field, String simpleName) {
+        Annotation[] anns = field.getAnnotations();
+        for (int i = 0; i < anns.length; i++) {
+            if (simpleName.equals(anns[i].annotationType().getSimpleName())) {
                 return anns[i];
             }
         }

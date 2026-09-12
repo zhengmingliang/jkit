@@ -2,6 +2,7 @@ package com.alianga.jkit.sql.entity;
 
 import com.alianga.jkit.sql.SQL;
 import com.alianga.jkit.sql.SqlDialect;
+import com.alianga.jkit.sql.entity.fixture.AnyCommentUser;
 import com.alianga.jkit.sql.entity.fixture.JpaAuth;
 import com.alianga.jkit.sql.entity.fixture.JpaOrg;
 import com.alianga.jkit.sql.entity.fixture.JpaUser;
@@ -131,6 +132,16 @@ public class SqlEntitiesTest {
         assertTrue(pg, pg.contains("COMMENT ON TABLE"));
         assertTrue(pg, pg.contains("DEFAULT ''"));
         assertTrue(pg, pg.contains("COMMENT ON COLUMN"));
+    }
+
+    @Test
+    public void anyPackageCommentAnnotation() {
+        SqlEntityModel model = SqlEntities.inspect(AnyCommentUser.class);
+        assertEquals("自定义表注释", model.comment());
+        assertEquals("自定义列注释", model.columns().get(1).comment());
+        String mysql = SqlEntities.createTable(AnyCommentUser.class, SqlDialect.MYSQL);
+        assertTrue(mysql, mysql.contains("COMMENT '自定义表注释'"));
+        assertTrue(mysql, mysql.contains("COMMENT '自定义列注释'"));
     }
 
     @Test
