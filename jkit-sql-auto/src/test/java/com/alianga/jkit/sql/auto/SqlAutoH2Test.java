@@ -9,6 +9,11 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
+import javax.sql.DataSource;
+
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
@@ -129,6 +134,51 @@ public class SqlAutoH2Test {
     }
 
     @Test
+    public void dryRunDoesNotOpenJdbc() {
+        SqlAutoPlan plan = SqlAuto.run(SqlAutoOptions.defaults()
+                .url("jdbc:mysql://127.0.0.1:3306/schedule")
+                .entities(AutoUser.class)
+                .dryRun(true)
+                .showSql(false));
+        List<String> sql = plan.sql();
+        assertFalse(sql.isEmpty());
+        String joined = sql.toString().toLowerCase();
+        assertTrue(joined, joined.contains("create table"));
+        assertTrue(joined, joined.contains("auto_user"));
+        assertTrue(joined, joined.contains("auto_increment"));
+    }
+
+    @Test
+    public void dryRunDoesNotOpenDataSource() {
+        SqlAutoPlan plan = SqlAuto.run(SqlAutoOptions.defaults()
+                .dataSource(failingDataSource())
+                .entities(AutoUser.class)
+                .dialect(SqlDialect.MYSQL)
+                .dryRun(true)
+                .showSql(false));
+        assertFalse(plan.sql().isEmpty());
+    }
+
+    @Test
+    public void dryRunDoesNotNeedUrl() {
+        SqlAutoPlan plan = SqlAuto.run(SqlAutoOptions.defaults()
+                .entities(AutoUser.class)
+                .dialect(SqlDialect.MYSQL)
+                .dryRun(true)
+                .showSql(false));
+        assertFalse(plan.sql().isEmpty());
+    }
+
+    @Test
+    public void planDryRunDoesNotOpenJdbc() {
+        SqlAutoPlan plan = SqlAuto.plan(SqlAutoOptions.defaults()
+                .url("jdbc:mysql://127.0.0.1:3306/schedule")
+                .entities(AutoUser.class)
+                .dryRun(true));
+        assertFalse(plan.sql().isEmpty());
+    }
+
+    @Test
     public void fromUrlRun() {
         SqlAutoPlan plan = SqlAuto.run(options().entities(AutoUser.class).url(url).username("sa").password(""));
         assertTrue(tableExists("AUTO_USER"));
@@ -205,6 +255,22 @@ public class SqlAutoH2Test {
         } finally {
             st.close();
         }
+    }
+
+    private static DataSource failingDataSource() {
+        return (DataSource) Proxy.newProxyInstance(DataSource.class.getClassLoader(),
+                new Class<?>[] {DataSource.class}, new InvocationHandler() {
+                    /**
+                     * {@inheritDoc}
+                     */
+                    @Override
+                    public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+                        if (method.getDeclaringClass() == Object.class) {
+                            return method.invoke(this, args);
+                        }
+                        throw new SQLException("dry-run must not open DataSource");
+                    }
+                });
     }
 
     private static int indexOfTable(SqlAutoPlan plan, String table) {

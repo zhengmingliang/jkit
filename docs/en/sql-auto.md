@@ -70,7 +70,7 @@ With an open `Connection`:
 SqlAuto.run(connection, SqlAutoOptions.defaults().entities(User.class, Order.class));
 ```
 
-Dry-run (plan only, do not change the database):
+Dry-run (plan only, do not change the database). `run(options)` with `dryRun(true)` **does not open JDBC** (the URL is only used to infer the dialect) and plans a full `CREATE` as if the schema were empty, so the database does not need to be running. To preview `ALTER` against live tables, pass an open `Connection` to `run(connection, options)`:
 
 ```java
 SqlAutoPlan plan = SqlAuto.run(SqlAutoOptions.defaults()
@@ -115,7 +115,7 @@ Mirrors JPA `spring.jpa.hibernate.ddl-auto`:
 | `jkit.sql.auto.create-index` | `true` | emit `CREATE INDEX` |
 | `jkit.sql.auto.quote-identifiers` | `false` | quote identifiers in the dialect |
 | `jkit.sql.auto.show-sql` | `true` | log SQL |
-| `jkit.sql.auto.dry-run` | `false` | plan only |
+| `jkit.sql.auto.dry-run` | `false` | plan only; `run(options)` does not open JDBC (URL is only used to infer dialect) |
 | `jkit.sql.auto.catalog` / `schema` | JDBC default | `DatabaseMetaData` lookup scope |
 
 `application.yml` example:

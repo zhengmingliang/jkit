@@ -242,14 +242,14 @@ public class SqlAutoSettings {
     }
 
     /**
-     * @return 只规划
+     * @return 只规划不执行；{@link SqlAuto#run(SqlAutoOptions)} 时不打开 JDBC
      */
     public boolean isDryRun() {
         return dryRun;
     }
 
     /**
-     * @param dryRun 只规划
+     * @param dryRun 只规划不执行
      */
     public void setDryRun(boolean dryRun) {
         this.dryRun = dryRun;

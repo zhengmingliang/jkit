@@ -29,7 +29,7 @@ public final class SqlAutoExecutor {
     public static List<SqlAutoChange> execute(Connection connection, SqlAutoPlan plan,
                                               SqlAutoOptions options) {
         List<SqlAutoChange> done = new ArrayList<SqlAutoChange>(4);
-        if (connection == null || plan == null || plan.isEmpty()) {
+        if (plan == null || plan.isEmpty()) {
             return done;
         }
         SqlAutoOptions opt = options == null ? SqlAutoOptions.defaults() : options;
@@ -43,6 +43,9 @@ public final class SqlAutoExecutor {
                     }
                 }
             }
+            return done;
+        }
+        if (connection == null) {
             return done;
         }
         List<SqlAutoChange> changes = plan.changes();

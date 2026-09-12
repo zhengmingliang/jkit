@@ -52,14 +52,14 @@ public final class SqlAuto {
     /**
      * 从进程配置加载并执行。{@code jkit.sql.auto.enabled=false} 或模式 {@code none} 时直接返回空计划。
      *
-     * @return 执行后的计划（dry-run 时也返回规划结果）
+     * @return 执行后的计划（dry-run 时不连库，也返回规划结果）
      */
     public static SqlAutoPlan run() {
         return run(SqlAutoOptions.fromConfig());
     }
 
     /**
-     * @param options 选项
+     * @param options 选项；{@code dryRun} 时不打开 JDBC / DataSource
      * @return 计划
      */
     public static SqlAutoPlan run(SqlAutoOptions options) {
@@ -71,6 +71,9 @@ public final class SqlAuto {
         if (types.isEmpty()) {
             LOG.info("jkit-sql-auto: no entities, skip");
             return SqlAutoPlan.empty();
+        }
+        if (opt.dryRun()) {
+            return dryRun(types, opt);
         }
         ConnectionHolder holder = open(opt);
         try {
@@ -85,7 +88,7 @@ public final class SqlAuto {
                 return plan;
             }
             SqlAutoExecutor.execute(conn, plan, opt);
-            if (opt.mode() == SqlAutoMode.CREATE_DROP && !opt.dryRun()) {
+            if (opt.mode() == SqlAutoMode.CREATE_DROP) {
                 registerDropHook(types, opt, dialect, holder.owns);
             }
             return plan;
@@ -95,7 +98,7 @@ public final class SqlAuto {
     }
 
     /**
-     * 只规划不执行。
+     * 只规划不执行。{@code dryRun} 时不打开 JDBC，按空库规划。
      *
      * @param options 选项
      * @return 计划
@@ -103,6 +106,9 @@ public final class SqlAuto {
     public static SqlAutoPlan plan(SqlAutoOptions options) {
         SqlAutoOptions opt = options == null ? SqlAutoOptions.defaults() : options;
         List<Class<?>> types = collectEntities(opt);
+        if (opt.dryRun()) {
+            return plan(types, null, SqlAutoDialects.resolve(opt, null), opt);
+        }
         ConnectionHolder holder = open(opt);
         try {
             SqlDialect dialect = SqlAutoDialects.resolve(opt, holder.connection);
@@ -113,10 +119,10 @@ public final class SqlAuto {
     }
 
     /**
-     * 已有连接上规划。
+     * 已有连接上规划。{@code connection} 为空时按空库规划（全量 CREATE），不读元数据。
      *
      * @param types 实体
-     * @param connection 连接
+     * @param connection 连接，可空
      * @param dialect 方言
      * @param options 选项
      * @return 计划
@@ -126,7 +132,7 @@ public final class SqlAuto {
         SqlAutoOptions opt = options == null ? SqlAutoOptions.defaults() : options;
         SqlDialect d = dialect == null ? SqlAutoDialects.resolve(opt, connection) : dialect;
         List<Class<?>> ordered = SqlEntities.orderByForeignKeys(types);
-        SqlAutoInspector inspector = new SqlAutoInspector(connection, opt, d);
+        SqlAutoInspector inspector = connection == null ? null : new SqlAutoInspector(connection, opt, d);
         List<SqlAutoChange> changes = new ArrayList<SqlAutoChange>(8);
         Map<String, Class<?>> seen = new LinkedHashMap<String, Class<?>>(ordered.size());
         List<SqlEntityModel> models = new ArrayList<SqlEntityModel>(ordered.size());
@@ -140,7 +146,7 @@ public final class SqlAuto {
             }
             seen.put(key, type);
             models.add(model);
-            lives.add(inspector.inspect(model.tableName()));
+            lives.add(inspector == null ? null : inspector.inspect(model.tableName()));
         }
         if (opt.mode() == SqlAutoMode.CREATE || opt.mode() == SqlAutoMode.CREATE_DROP) {
             for (int i = models.size() - 1; i >= 0; i--) {
@@ -239,6 +245,27 @@ public final class SqlAuto {
         } finally {
             holder.close();
         }
+    }
+
+    /**
+     * dry-run：不打开 JDBC，按空库规划；方言从选项 / URL 推断。
+     *
+     * @param types 实体
+     * @param opt 选项
+     * @return 计划
+     */
+    private static SqlAutoPlan dryRun(List<Class<?>> types, SqlAutoOptions opt) {
+        SqlDialect dialect = SqlAutoDialects.resolve(opt, null);
+        SqlAutoPlan plan = plan(types, null, dialect, opt);
+        if (opt.mode() == SqlAutoMode.VALIDATE) {
+            List<SqlAutoChange> bad = plan.ofKind(SqlAutoChange.Kind.VALIDATE);
+            if (!bad.isEmpty()) {
+                throw new SqlAutoException("schema validate failed: " + bad);
+            }
+            return plan;
+        }
+        SqlAutoExecutor.execute(null, plan, opt);
+        return plan;
     }
 
     static List<Class<?>> collectEntities(SqlAutoOptions options) {

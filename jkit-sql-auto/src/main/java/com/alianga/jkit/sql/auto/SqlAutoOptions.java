@@ -405,13 +405,17 @@ public final class SqlAutoOptions {
     }
 
     /**
-     * @return 只规划不执行
+     * @return 只规划不执行；{@link SqlAuto#run(SqlAutoOptions)} 时不打开 JDBC
      */
     public boolean dryRun() {
         return dryRun;
     }
 
     /**
+     * 只规划不执行。{@link SqlAuto#run(SqlAutoOptions)} / {@link SqlAuto#plan(SqlAutoOptions)}
+     * 不打开数据源，URL 仅用于推断方言，按空库生成全量 {@code CREATE}。
+     * 已有 {@link java.sql.Connection} 时仍对照活表，只是不执行 DDL。
+     *
      * @param dryRun 只规划
      * @return this
      */

@@ -41,7 +41,7 @@ public final class SqlAutoInspector {
      * @return 活表；不存在则 null
      */
     public SqlAutoLiveTable inspect(String tableName) {
-        if (tableName == null || tableName.isEmpty()) {
+        if (connection == null || tableName == null || tableName.isEmpty()) {
             return null;
         }
         try {

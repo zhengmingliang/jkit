@@ -70,7 +70,7 @@ SqlAuto.run(SqlAutoOptions.defaults()
 SqlAuto.run(connection, SqlAutoOptions.defaults().entities(User.class, Order.class));
 ```
 
-只看将要执行的 SQL、不改库：
+只看将要执行的 SQL、不改库。`run(options)` 在 `dryRun(true)` 时**不打开 JDBC**（URL 只用来推断方言），按空库规划全量 `CREATE`，库没启动也能打印 SQL。若要对照现有表看 `ALTER`，把已打开的 `Connection` 传给 `run(connection, options)`：
 
 ```java
 SqlAutoPlan plan = SqlAuto.run(SqlAutoOptions.defaults()
@@ -115,7 +115,7 @@ plan.sql(); // List<String>
 | `jkit.sql.auto.create-index` | `true` | 是否补 `CREATE INDEX` |
 | `jkit.sql.auto.quote-identifiers` | `false` | 标识符加方言引号 |
 | `jkit.sql.auto.show-sql` | `true` | 打日志 |
-| `jkit.sql.auto.dry-run` | `false` | 只规划不执行 |
+| `jkit.sql.auto.dry-run` | `false` | 只规划不执行；`run(options)` 时不打开 JDBC，URL 仅用于推断方言 |
 | `jkit.sql.auto.catalog` / `schema` | JDBC 默认 | `DatabaseMetaData` 查找范围 |
 
 `application.yml` 示例：
