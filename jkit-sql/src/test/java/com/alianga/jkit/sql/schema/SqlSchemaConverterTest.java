@@ -486,6 +486,31 @@ public class SqlSchemaConverterTest {
     }
 
     @Test
+    public void substringRewriteAcrossDialects() {
+        String oracle = SQL.convert("SELECT SUBSTRING(a, 2, 3) FROM t",
+                SqlDialect.MYSQL, SqlDialect.ORACLE);
+        assertTrue(oracle, oracle.toUpperCase().contains("SUBSTR"));
+
+        String dameng = SQL.convert("SELECT LEFT(a, 2) FROM t",
+                SqlDialect.MYSQL, SqlDialect.DAMENG);
+        assertTrue(dameng, dameng.toUpperCase().contains("SUBSTR"));
+        assertTrue(dameng, dameng.contains("1"));
+
+        String ss = SQL.convert("SELECT SUBSTRING(a, 2) FROM t",
+                SqlDialect.MYSQL, SqlDialect.SQLSERVER);
+        assertTrue(ss, ss.toUpperCase().contains("SUBSTRING"));
+        assertTrue(ss, ss.toUpperCase().contains("LEN"));
+
+        String pgNeg = SQL.convert("SELECT SUBSTRING(a, -2) FROM t",
+                SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        assertTrue(pgNeg, pgNeg.toUpperCase().contains("RIGHT"));
+
+        String sqlite = SQL.convert("SELECT LOCATE('x', a) FROM t",
+                SqlDialect.MYSQL, SqlDialect.SQLITE);
+        assertTrue(sqlite, sqlite.toUpperCase().contains("INSTR"));
+    }
+
+    @Test
     public void findInSetWarnsAndKeeps() {
         ConversionResult r = SqlSchemaConverter.convert(
                 "SELECT FIND_IN_SET('a', list) FROM t", SqlDialect.MYSQL, SqlDialect.POSTGRES);

@@ -106,7 +106,7 @@ public final class SqlFunctionRegistry {
                 "CONCAT", "CONVERT",
                 "LOCATE", "INSTR", "CHARINDEX",
                 "LENGTH", "CHAR_LENGTH", "CHARACTER_LENGTH", "LEN",
-                "SUBSTRING", "SUBSTR",
+                "SUBSTRING", "SUBSTR", "MID", "LEFT", "RIGHT",
                 "DATE_ADD", "ADDDATE", "DATE_SUB", "SUBDATE",
                 "DATEDIFF", "TIMESTAMPDIFF",
                 "FROM_UNIXTIME", "UNIX_TIMESTAMP",

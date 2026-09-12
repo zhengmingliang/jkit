@@ -11,6 +11,7 @@ import com.alianga.jkit.sql.ast.SqlFunctionExpr;
 import com.alianga.jkit.sql.ast.SqlIdentifier;
 import com.alianga.jkit.sql.ast.SqlLiteral;
 import com.alianga.jkit.sql.ast.SqlOrderByItem;
+import com.alianga.jkit.sql.ast.SqlUnaryExpr;
 import com.alianga.jkit.sql.schema.convert.ConversionReport;
 import com.alianga.jkit.sql.schema.convert.ConversionWarning;
 import com.alianga.jkit.sql.schema.registry.SqlDataTypeRegistry;
@@ -102,8 +103,9 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
                 || "CHARACTER_LENGTH".equals(name) || "LEN".equals(name)) {
             return rewriteLength(fn, family);
         }
-        if ("SUBSTRING".equals(name) || "SUBSTR".equals(name)) {
-            return rewriteSubstr(fn, name, family);
+        if ("SUBSTRING".equals(name) || "SUBSTR".equals(name)
+                || "MID".equals(name) || "LEFT".equals(name) || "RIGHT".equals(name)) {
+            return rewriteSubstr(fn, name, family, report);
         }
         if ("DATE_ADD".equals(name) || "ADDDATE".equals(name)
                 || "DATE_SUB".equals(name) || "SUBDATE".equals(name)) {
@@ -186,6 +188,7 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
             case ORACLE:
             case ORACLE12:
             case DAMENG:
+            case SQLITE:
                 swapFirstTwo(fn);
                 fn.setName(SqlIdentifier.of("INSTR"));
                 return fn;
@@ -200,7 +203,7 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
 
     private static SqlExpr rewriteInstr(SqlFunctionExpr fn, SqlDialect family) {
         if (family == SqlDialect.ORACLE || family == SqlDialect.ORACLE12
-                || family == SqlDialect.DAMENG) {
+                || family == SqlDialect.DAMENG || family == SqlDialect.SQLITE) {
             return fn;
         }
         swapFirstTwo(fn);
@@ -219,7 +222,7 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
             return fn;
         }
         if (family == SqlDialect.ORACLE || family == SqlDialect.ORACLE12
-                || family == SqlDialect.DAMENG) {
+                || family == SqlDialect.DAMENG || family == SqlDialect.SQLITE) {
             swapFirstTwo(fn);
             fn.setName(SqlIdentifier.of("INSTR"));
             return fn;
@@ -241,14 +244,127 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
         return fn;
     }
 
-    private static SqlExpr rewriteSubstr(SqlFunctionExpr fn, String name, SqlDialect family) {
+    private static SqlExpr rewriteSubstr(SqlFunctionExpr fn, String name, SqlDialect family,
+                                         ConversionReport.Builder report) {
+        List<SqlExpr> args = fn.arguments();
+        if ("LEFT".equals(name) || "RIGHT".equals(name)) {
+            return rewriteLeftRight(fn, name, family, report);
+        }
+        if ("MID".equals(name)) {
+            name = "SUBSTRING";
+        }
+        boolean oracleFamily = family == SqlDialect.ORACLE || family == SqlDialect.ORACLE12
+                || family == SqlDialect.DAMENG;
+        boolean sqlServer = family == SqlDialect.SQLSERVER;
+        boolean pgLike = family == SqlDialect.POSTGRES || family == SqlDialect.ANSI
+                || family == SqlDialect.PRESTO;
+        if (oracleFamily) {
+            fn.setName(SqlIdentifier.of("SUBSTR"));
+            return fn;
+        }
+        if (sqlServer) {
+            fn.setName(SqlIdentifier.of("SUBSTRING"));
+            if (args.size() == 2) {
+                SqlExpr from = args.get(1);
+                Integer n = intLiteral(from);
+                if (n != null && n.intValue() < 0) {
+                    SqlFunctionExpr right = new SqlFunctionExpr();
+                    right.setName(SqlIdentifier.of("RIGHT"));
+                    right.addArgument(args.get(0));
+                    right.addArgument(SqlLiteral.of(SqlLiteral.Kind.NUMBER,
+                            String.valueOf(-n.intValue())));
+                    return right;
+                }
+                args.add(lengthMinusFromPlusOne(args.get(0), from));
+            }
+            return fn;
+        }
+        if (pgLike) {
+            fn.setName(SqlIdentifier.of("SUBSTRING"));
+            if (args.size() == 2) {
+                Integer n = intLiteral(args.get(1));
+                if (n != null && n.intValue() < 0) {
+                    SqlFunctionExpr right = new SqlFunctionExpr();
+                    right.setName(SqlIdentifier.of("RIGHT"));
+                    right.addArgument(args.get(0));
+                    right.addArgument(SqlLiteral.of(SqlLiteral.Kind.NUMBER,
+                            String.valueOf(-n.intValue())));
+                    return right;
+                }
+            }
+            return fn;
+        }
+        if (family == SqlDialect.MYSQL || family == SqlDialect.H2 || family == SqlDialect.HIVE
+                || family == SqlDialect.SQLITE || family == SqlDialect.CLICKHOUSE) {
+            fn.setName(SqlIdentifier.of("SUBSTRING"));
+            return fn;
+        }
+        fn.setName(SqlIdentifier.of("SUBSTRING"));
+        return fn;
+    }
+
+    private static SqlExpr rewriteLeftRight(SqlFunctionExpr fn, String name, SqlDialect family,
+                                            ConversionReport.Builder report) {
+        if (fn.arguments().size() < 2) {
+            return fn;
+        }
         if (family == SqlDialect.ORACLE || family == SqlDialect.ORACLE12
                 || family == SqlDialect.DAMENG) {
-            fn.setName(SqlIdentifier.of("SUBSTR"));
-        } else if ("SUBSTR".equals(name) && family == SqlDialect.SQLSERVER) {
-            fn.setName(SqlIdentifier.of("SUBSTRING"));
+            SqlFunctionExpr out = new SqlFunctionExpr();
+            out.setName(SqlIdentifier.of("SUBSTR"));
+            out.addArgument(fn.arguments().get(0));
+            if ("LEFT".equals(name)) {
+                out.addArgument(SqlLiteral.of(SqlLiteral.Kind.NUMBER, "1"));
+                out.addArgument(fn.arguments().get(1));
+            } else {
+                SqlExpr n = fn.arguments().get(1);
+                Integer v = intLiteral(n);
+                if (v != null) {
+                    out.addArgument(SqlLiteral.of(SqlLiteral.Kind.NUMBER, String.valueOf(-v.intValue())));
+                } else {
+                    SqlBinaryExpr neg = SqlBinaryExpr.of(SqlLiteral.of(SqlLiteral.Kind.NUMBER, "0"),
+                            SqlBinaryOp.MINUS, n);
+                    out.addArgument(neg);
+                }
+            }
+            return out;
         }
         return fn;
+    }
+
+    private static SqlExpr lengthMinusFromPlusOne(SqlExpr col, SqlExpr from) {
+        SqlFunctionExpr length = new SqlFunctionExpr();
+        length.setName(SqlIdentifier.of("LEN"));
+        length.addArgument(col);
+        SqlBinaryExpr minus = SqlBinaryExpr.of(length, SqlBinaryOp.MINUS, from);
+        return SqlBinaryExpr.of(minus, SqlBinaryOp.PLUS, SqlLiteral.of(SqlLiteral.Kind.NUMBER, "1"));
+    }
+
+    private static Integer intLiteral(SqlExpr expr) {
+        int sign = 1;
+        if (expr instanceof SqlUnaryExpr) {
+            SqlUnaryExpr unary = (SqlUnaryExpr) expr;
+            if (unary.operator() == SqlUnaryExpr.Op.MINUS) {
+                sign = -1;
+                expr = unary.expr();
+            } else if (unary.operator() == SqlUnaryExpr.Op.PLUS) {
+                expr = unary.expr();
+            } else {
+                return null;
+            }
+        }
+        if (!(expr instanceof SqlLiteral)) {
+            return null;
+        }
+        SqlLiteral lit = (SqlLiteral) expr;
+        if (lit.kind() != SqlLiteral.Kind.NUMBER || lit.value() == null) {
+            return null;
+        }
+        try {
+            return Integer.valueOf(sign * Integer.parseInt(lit.value()));
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     private static void swapFirstTwo(SqlFunctionExpr fn) {
