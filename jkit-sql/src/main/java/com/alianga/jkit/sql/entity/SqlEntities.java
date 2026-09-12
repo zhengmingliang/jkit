@@ -398,6 +398,7 @@ public final class SqlEntities {
 
     /**
      * {@code CREATE INDEX}。{@code spec} 为 {@code name:col1,col2} 或 {@code col1,col2}。
+     * 未写名字时用 {@link #indexName(String, String)}：{@code {table}_{col}_idx}，避免同表多索引撞名。
      *
      * @param tableName 表名
      * @param spec 索引定义
@@ -410,18 +411,57 @@ public final class SqlEntities {
         return indexSql(tableName, spec.trim());
     }
 
-    private static String indexSql(String table, String spec) {
-        String name = table + "_idx";
-        String cols = spec;
-        int colon = spec.indexOf(':');
-        if (colon > 0) {
-            name = spec.substring(0, colon).trim();
-            cols = spec.substring(colon + 1).trim();
+    /**
+     * 索引名。{@code spec} 含 {@code name:cols} 时用显式名；否则 {@code {table}_{cols}_idx}。
+     *
+     * @param tableName 表名
+     * @param spec {@code name:col1,col2} 或 {@code col1,col2}
+     * @return 索引名；spec 空则 {@code {table}_idx}
+     * @since 2.0.1
+     */
+    public static String indexName(String tableName, String spec) {
+        String table = tableName == null ? "" : tableName;
+        if (spec == null || spec.trim().isEmpty()) {
+            return table + "_idx";
         }
+        String trimmed = spec.trim();
+        int colon = trimmed.indexOf(':');
+        if (colon > 0) {
+            String name = trimmed.substring(0, colon).trim();
+            if (name.length() > 0) {
+                return name;
+            }
+        }
+        String cols = colon > 0 ? trimmed.substring(colon + 1) : trimmed;
+        return defaultIndexName(table, cols);
+    }
+
+    private static String indexSql(String table, String spec) {
+        String name = indexName(table, spec);
+        int colon = spec.indexOf(':');
+        String cols = colon > 0 ? spec.substring(colon + 1).trim() : spec;
         if (!cols.startsWith("(")) {
             cols = "(" + cols + ")";
         }
         return "CREATE INDEX " + name + " ON " + table + " " + cols;
+    }
+
+    private static String defaultIndexName(String table, String cols) {
+        String cleaned = cols == null ? "" : cols.trim();
+        if (cleaned.startsWith("(") && cleaned.endsWith(")") && cleaned.length() >= 2) {
+            cleaned = cleaned.substring(1, cleaned.length() - 1).trim();
+        }
+        cleaned = cleaned.replace(' ', '_').replace(',', '_');
+        while (cleaned.indexOf("__") >= 0) {
+            cleaned = cleaned.replace("__", "_");
+        }
+        if (cleaned.endsWith("_") && cleaned.length() > 1) {
+            cleaned = cleaned.substring(0, cleaned.length() - 1);
+        }
+        if (cleaned.isEmpty() || "_".equals(cleaned)) {
+            return table + "_idx";
+        }
+        return table + "_" + cleaned + "_idx";
     }
 
     /**

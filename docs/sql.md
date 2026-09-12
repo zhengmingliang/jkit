@@ -510,7 +510,8 @@ String sel = SqlEntities.selectById(DemoUser.class, 1L, SqlDialect.MYSQL);
 | `selectById(Class<?>, Object, SqlDialect)` / `selectAll(Class<?>, SqlDialect)` | 按主键查 / 全表查 |
 | `columnSql(SqlEntityColumn, SqlDialect, boolean inlinePk)` | 单列定义文本；`ALTER TABLE … ADD` 传 `inlinePk=false` |
 | `columnTypeSql(SqlEntityColumn, SqlDialect)` | 只取类型文本，供结构对比 |
-| `createIndex(String tableName, String spec)` | 单独一条 `CREATE INDEX`；`spec` 为 `name:col1,col2` 或 `col1,col2` |
+| `createIndex(String tableName, String spec)` | 单独一条 `CREATE INDEX`；`spec` 为 `name:col1,col2` 或 `col1,col2`（未写名字则 `{table}_{col}_idx`） |
+| `indexName(String tableName, String spec)` | 解析 / 生成索引名，与 `createIndex` 同一规则 |
 | `extraSql(SqlEntityModel, SqlDialect, SqlSchemaConvertOptions)` | 建表附录：`COMMENT ON` / SQL Server 扩展属性 / 无 IDENTITY 方言的 SEQUENCE |
 | `sequenceSql(String table, SqlEntityColumn, SqlDialect)` | 无 IDENTITY 时生成 SEQUENCE（+ Oracle 触发器）；否则 `null` |
 

@@ -2,6 +2,7 @@ package com.alianga.jkit.sql.entity;
 
 import com.alianga.jkit.sql.SQL;
 import com.alianga.jkit.sql.SqlDialect;
+import com.alianga.jkit.sql.entity.fixture.JpaAuth;
 import com.alianga.jkit.sql.entity.fixture.JpaOrg;
 import com.alianga.jkit.sql.entity.fixture.JpaUser;
 import com.alianga.jkit.sql.entity.fixture.MbAliasUser;
@@ -218,6 +219,23 @@ public class SqlEntitiesTest {
         String idx = SqlEntities.createIndex("demo_user", "idx_email:email");
         assertTrue(idx, idx.toUpperCase().contains("CREATE INDEX"));
         assertTrue(idx, idx.contains("idx_email"));
+        assertEquals("idx_email", SqlEntities.indexName("demo_user", "idx_email:email"));
+        assertEquals("demo_user_email_idx", SqlEntities.indexName("demo_user", "email"));
+    }
+
+    @Test
+    public void unnamedJpaIndexesGetDistinctNames() {
+        SqlEntityModel model = SqlEntities.inspect(JpaAuth.class);
+        assertEquals(2, model.indexes().size());
+        String i0 = SqlEntities.createIndex(model.tableName(), model.indexes().get(0));
+        String i1 = SqlEntities.createIndex(model.tableName(), model.indexes().get(1));
+        assertTrue(i0, i0.contains("t_schedule_auth_resource_id_idx"));
+        assertTrue(i1, i1.contains("t_schedule_auth_permission_id_idx"));
+        assertFalse(i0 + " vs " + i1, i0.equals(i1));
+        String ddl = SqlEntities.createTable(JpaAuth.class, SqlDialect.MYSQL);
+        assertTrue(ddl, ddl.contains("t_schedule_auth_resource_id_idx"));
+        assertTrue(ddl, ddl.contains("t_schedule_auth_permission_id_idx"));
+        assertFalse(ddl, ddl.contains("t_schedule_auth_idx ON"));
     }
 
     @Test

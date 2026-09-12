@@ -392,7 +392,8 @@ String sel = SqlEntities.selectById(DemoUser.class, 1L, SqlDialect.MYSQL);
 | `selectById(Class<?>, Object, SqlDialect)` / `selectAll(Class<?>, SqlDialect)` | Select by id / select all |
 | `columnSql(SqlEntityColumn, SqlDialect, boolean inlinePk)` | One column definition; pass `inlinePk=false` for `ALTER TABLE … ADD` |
 | `columnTypeSql(SqlEntityColumn, SqlDialect)` | Type text only, for schema comparison |
-| `createIndex(String tableName, String spec)` | A standalone `CREATE INDEX`; `spec` is `name:col1,col2` or `col1,col2` |
+| `createIndex(String tableName, String spec)` | A standalone `CREATE INDEX`; `spec` is `name:col1,col2` or `col1,col2` (unnamed → `{table}_{col}_idx`) |
+| `indexName(String tableName, String spec)` | Resolve / generate the index name, same rules as `createIndex` |
 | `extraSql(SqlEntityModel, SqlDialect, SqlSchemaConvertOptions)` | Post-create extras: `COMMENT ON` / SQL Server extended properties / SEQUENCE on dialects without IDENTITY |
 | `sequenceSql(String table, SqlEntityColumn, SqlDialect)` | SEQUENCE (+ Oracle trigger) when the dialect has no IDENTITY; otherwise `null` |
 

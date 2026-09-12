@@ -25,7 +25,7 @@ public @interface SqlTable {
     String comment() default "";
 
     /**
-     * 索引，元素为 {@code col} 或 {@code name:col1,col2}。
+     * 索引，元素为 {@code col} 或 {@code name:col1,col2}。未写名字时生成 {@code {table}_{col}_idx}。
      *
      * @return 索引定义
      */

@@ -462,7 +462,7 @@ public final class SqlAutoDdl {
         List<String> indexes = model.indexes();
         for (int i = 0; i < indexes.size(); i++) {
             String spec = indexes.get(i);
-            String name = indexName(model.tableName(), spec);
+            String name = SqlEntities.indexName(model.tableName(), spec);
             if (coveredByUniqueColumn(model, spec)) {
                 continue;
             }
@@ -510,14 +510,6 @@ public final class SqlAutoDdl {
             }
         }
         return false;
-    }
-
-    private static String indexName(String table, String spec) {
-        int colon = spec.indexOf(':');
-        if (colon > 0) {
-            return spec.substring(0, colon).trim();
-        }
-        return table + "_idx";
     }
 
     private static String indexColumns(String spec) {
