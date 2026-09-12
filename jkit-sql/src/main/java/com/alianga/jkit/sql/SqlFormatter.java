@@ -398,6 +398,13 @@ public final class SqlFormatter {
             kw("FROM");
             sp();
             writeFrom(select.from());
+        } else if (dialect.typeFamily() == SqlDialect.ORACLE
+                || dialect.typeFamily() == SqlDialect.ORACLE12) {
+            // Oracle / 达梦 不允许裸 SELECT <expr>，必须补 FROM dual
+            nl();
+            kw("FROM");
+            sp();
+            kw("dual");
         }
         if (select.modelClause() != null) {
             nl();

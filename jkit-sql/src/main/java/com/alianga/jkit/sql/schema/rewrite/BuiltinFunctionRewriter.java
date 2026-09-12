@@ -586,11 +586,24 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
         return cast;
     }
 
-    private static SqlFunctionExpr truncToDate(SqlExpr expr) {
+    private static SqlExpr truncToDate(SqlExpr expr) {
+        // Oracle 的 TRUNC 对字符串字面量会按 TRUNC(number) 解析而报 ORA-01722，
+        // 必须先把字符串参数显式转成 DATE：TRUNC(TO_DATE(expr, 'YYYY-MM-DD'))
+        SqlExpr base = expr instanceof SqlLiteral
+                && ((SqlLiteral) expr).kind() == SqlLiteral.Kind.STRING
+                ? toDateLiteral(expr) : expr;
         SqlFunctionExpr trunc = new SqlFunctionExpr();
         trunc.setName(SqlIdentifier.of("TRUNC"));
-        trunc.arguments().add(expr);
+        trunc.arguments().add(base);
         return trunc;
+    }
+
+    private static SqlExpr toDateLiteral(SqlExpr expr) {
+        SqlFunctionExpr toDate = new SqlFunctionExpr();
+        toDate.setName(SqlIdentifier.of("TO_DATE"));
+        toDate.addArgument(expr);
+        toDate.addArgument(SqlLiteral.of(SqlLiteral.Kind.STRING, "'YYYY-MM-DD'"));
+        return toDate;
     }
 
     private static SqlExpr rewriteTimestampDiff(SqlFunctionExpr fn, SqlDialect family,
