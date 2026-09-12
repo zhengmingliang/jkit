@@ -133,6 +133,13 @@ public final class SqlAutoDialects {
         if (n.contains("dm dbms") || n.contains("dameng") || n.contains("dm database")) {
             return SqlDialect.DAMENG;
         }
+        // 产品名是多词串（如 "Microsoft SQL Server"），给 fromName 做短名精确匹配会失败并回落 MySQL
+        if (n.contains("sql server") || n.contains("sqlserver")) {
+            return SqlDialect.SQLSERVER;
+        }
+        if (n.contains("db2")) {
+            return SqlDialect.DB2;
+        }
         return SqlDialect.fromName(product);
     }
 

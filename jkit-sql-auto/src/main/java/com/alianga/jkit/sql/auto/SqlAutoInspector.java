@@ -31,9 +31,34 @@ public final class SqlAutoInspector {
      */
     public SqlAutoInspector(Connection connection, SqlAutoOptions options, SqlDialect dialect) {
         this.connection = connection;
-        this.catalog = options == null ? null : emptyToNull(options.catalog());
         this.schema = options == null ? null : emptyToNull(options.schema());
         this.dialect = dialect == null ? SqlDialect.MYSQL : dialect;
+        this.catalog = resolveCatalog(options);
+    }
+
+    /**
+     * 只查数据源指定的库：优先用配置，没配就从 JDBC 连接当前 catalog 取。
+     *
+     * <p>catalog 传 null 时，部分驱动（MySQL / PostgreSQL 等）会跨库扫描，
+     * 把别的 schema 下的同名表误判为"已存在"，进而对本库的缺失表发出 ALTER 而不是 CREATE。
+     *
+     * @param options 选项
+     * @return catalog，无法获取时为 null
+     */
+    private String resolveCatalog(SqlAutoOptions options) {
+        String configured = options == null ? null : emptyToNull(options.catalog());
+        if (configured != null) {
+            return configured;
+        }
+        if (connection == null) {
+            return null;
+        }
+        try {
+            return emptyToNull(connection.getCatalog());
+        } catch (SQLException e) {
+            // 少数驱动不支持 getCatalog，回退到驱动默认行为
+            return null;
+        }
     }
 
     /**
