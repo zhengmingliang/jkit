@@ -13,9 +13,9 @@
 ### jkit-sql
 - **实体**：公开 `columnSql` / `columnTypeSql` / `createIndex` / `orderByForeignKeys` / `extraSql` / `sequenceSql`，`createTable(..., includeIndexes)` 可供自动建表拆开索引与附录。
 - **实体**：`@SqlTable(comment)` / `@SqlColumn(comment)` 按方言生成表/列注释；Oracle ≤11g 无 IDENTITY 时附录 SEQUENCE + TRIGGER。
-- **方言**：新增一等枚举 `DAMENG`（`dm`/`dameng`/`jdbc:dm:`）；分页 LIMIT/OFFSET，自增 IDENTITY。函数改写对齐 common-model：`NVL`/`INSTR`/`LISTAGG`/`TO_DATE`/`DATE_FORMAT→TO_CHAR`，`FROM_UNIXTIME` → `TO_DATE('1970-01-01') + NUMTODSINTERVAL(...)`。
+- **方言**：新增一等枚举 `DAMENG`（`dm`/`dameng`/`jdbc:dm:`）；分页 LIMIT/OFFSET，自增 IDENTITY。达梦函数改写：`NVL`/`INSTR`/`LISTAGG`/`TO_DATE`/`DATE_FORMAT→TO_CHAR`，`FROM_UNIXTIME` → `TO_DATE('1970-01-01') + NUMTODSINTERVAL(...)`。
 - **修复**：`GROUP_CONCAT` 无显式 `SEPARATOR` 时转 `STRING_AGG`/`LISTAGG` 丢分隔符（产出 `STRING_AGG(a, ,)`）；MySQL `MODIFY`/`CHANGE` 转 PG/ANSI/H2/PRESTO 时列名重复（产出 `ALTER COLUMN c TYPE c INTEGER`）。
-- **转换**：函数改写覆盖 JOIN ON / MERGE / OVER / 列 `DEFAULT NOW()`；`DATE_ADD`/`DATEDIFF`/`FROM_UNIXTIME`/`DECODE`/`NVL2` 等内置规则；PG `ALTER COLUMN` 附录 `SET NOT NULL`/`DEFAULT`；独立 `CREATE INDEX` 去掉 `USING BTREE`；FULLTEXT 升为 `MANUAL_ACTION_REQUIRED`。
+- **转换**：函数改写覆盖 JOIN ON / MERGE / OVER / 列 `DEFAULT NOW()`；`DATE_ADD`/`DATEDIFF`/`FROM_UNIXTIME`/`UNIX_TIMESTAMP`/`REPEAT`/`TO_CHAR`/`DECODE`/`NVL2` 等内置规则（SQL Server/SQLite/Hive/ClickHouse/达梦均有对应写法）；PG `ALTER COLUMN` 附录 `SET NOT NULL`/`DEFAULT`；独立 `CREATE INDEX` 去掉 `USING BTREE`；FULLTEXT 升为 `MANUAL_ACTION_REQUIRED`。
 - **SPI**：`SqlSchemaConverterProviders.loadSorted()` 一次加载，类型表与函数表共用实例。
 - **实体**：JPA `@Index`/`@Enumerated`/`@Embedded`、集合字段默认跳过、`createTables` 按外键排序；反射认 MyBatis-Plus `@TableName`/`@TableId`/`@TableField` 与 MyBatis `@Alias`（无编译依赖）。
 - **扩展**：函数改写真正走 `SqlSchemaConverterProvider.registerFunctions`（内置挂 `SqlFunctionRegistry`，SPI 后覆盖；`rewrite` 返回 `null` 回落内置）。`FunctionAstRewriter` 只遍历，第三方不必改它。

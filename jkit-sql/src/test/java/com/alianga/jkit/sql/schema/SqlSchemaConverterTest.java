@@ -458,6 +458,34 @@ public class SqlSchemaConverterTest {
     }
 
     @Test
+    public void functionRewriteAcrossDialects() {
+        String ssUnix = SQL.convert("SELECT FROM_UNIXTIME(ts) FROM t",
+                SqlDialect.MYSQL, SqlDialect.SQLSERVER);
+        assertTrue(ssUnix, ssUnix.toUpperCase().contains("DATEADD"));
+        SQL.parse(ssUnix, SqlDialect.SQLSERVER);
+
+        String sqliteUnix = SQL.convert("SELECT FROM_UNIXTIME(ts) FROM t",
+                SqlDialect.MYSQL, SqlDialect.SQLITE);
+        assertTrue(sqliteUnix, sqliteUnix.toLowerCase().contains("unixepoch"));
+
+        String pgEpoch = SQL.convert("SELECT UNIX_TIMESTAMP(ts) FROM t",
+                SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        assertTrue(pgEpoch, pgEpoch.toLowerCase().contains("date_part"));
+
+        String ssRepeat = SQL.convert("SELECT REPEAT(a, 3) FROM t",
+                SqlDialect.MYSQL, SqlDialect.SQLSERVER);
+        assertTrue(ssRepeat, ssRepeat.toUpperCase().contains("REPLICATE"));
+
+        String oracleRepeat = SQL.convert("SELECT REPEAT(a, 3) FROM t",
+                SqlDialect.MYSQL, SqlDialect.ORACLE);
+        assertTrue(oracleRepeat, oracleRepeat.toUpperCase().contains("RPAD"));
+
+        String hiveDate = SQL.convert("SELECT STR_TO_DATE(a, '%Y-%m-%d') FROM t",
+                SqlDialect.MYSQL, SqlDialect.HIVE);
+        assertTrue(hiveDate, hiveDate.toLowerCase().contains("unix_timestamp"));
+    }
+
+    @Test
     public void findInSetWarnsAndKeeps() {
         ConversionResult r = SqlSchemaConverter.convert(
                 "SELECT FIND_IN_SET('a', list) FROM t", SqlDialect.MYSQL, SqlDialect.POSTGRES);

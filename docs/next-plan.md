@@ -608,4 +608,4 @@ Spring Boot 2/3 starter：`jkit-sql-auto-spring-boot-2`（`spring.factories`）�
 
 表 / 列注释按方言生成（MySQL/Hive/ClickHouse 内联、H2 列内 + `COMMENT ON TABLE`、PG/Oracle/DB2/ANSI `COMMENT ON`、SQL Server `sp_addextendedproperty`、Presto 表级 `WITH`、SQLite 忽略）。Oracle ≤11g 自增用 SEQUENCE + TRIGGER；达梦列上写 IDENTITY。`CREATE TABLE`（`includeIndexes=false`）不含附录，由 `extraSql` 单独执行。
 
-`SqlDialect.DAMENG` 一等方言：`fromName("dm"/"dameng")`、`jdbc:dm:`。函数改写对齐 common-model（`NVL`/`INSTR`/`LISTAGG`/`TO_DATE`/`FROM_UNIXTIME→NUMTODSINTERVAL`）。
+`SqlDialect.DAMENG` 一等方言：`fromName("dm"/"dameng")`、`jdbc:dm:`。函数改写：`NVL`/`INSTR`/`LISTAGG`/`TO_DATE`/`FROM_UNIXTIME→NUMTODSINTERVAL`。

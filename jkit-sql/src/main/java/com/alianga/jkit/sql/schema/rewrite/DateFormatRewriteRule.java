@@ -25,6 +25,12 @@ public final class DateFormatRewriteRule implements FunctionRewriteRule {
         if (family == SqlDialect.MYSQL || family == SqlDialect.H2 || family == SqlDialect.HIVE) {
             return fn;
         }
+        if (family == SqlDialect.SQLITE) {
+            report.warn(ConversionWarning.Severity.SEMANTIC_RISK, "DATE_FORMAT",
+                    "DATE_FORMAT 格式符与 strftime 不完全等价");
+            fn.setName(SqlIdentifier.of("strftime"));
+            return fn;
+        }
         if (family == SqlDialect.POSTGRES || family == SqlDialect.ORACLE
                 || family == SqlDialect.ORACLE12 || family == SqlDialect.DAMENG
                 || family == SqlDialect.ANSI) {

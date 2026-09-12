@@ -140,6 +140,12 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
         if ("UUID".equals(name) || "RAND".equals(name) || "LAST_INSERT_ID".equals(name)) {
             return rewriteMysqlBuiltin(fn, name, family, report);
         }
+        if ("REPEAT".equals(name) || "REPLICATE".equals(name) || "RPAD".equals(name)) {
+            return rewriteRepeat(fn, name, family, report);
+        }
+        if ("TO_CHAR".equals(name)) {
+            return rewriteToChar(fn, family);
+        }
         return fn;
     }
 
@@ -618,7 +624,7 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
 
     private static SqlExpr rewriteFromUnixTime(SqlFunctionExpr fn, SqlDialect family,
                                                ConversionReport.Builder report) {
-        if (family == SqlDialect.MYSQL || family == SqlDialect.H2) {
+        if (family == SqlDialect.MYSQL || family == SqlDialect.H2 || family == SqlDialect.HIVE) {
             return fn;
         }
         if (family == SqlDialect.POSTGRES || family == SqlDialect.ANSI || family == SqlDialect.PRESTO) {
@@ -627,7 +633,6 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
         }
         if (family == SqlDialect.ORACLE || family == SqlDialect.ORACLE12
                 || family == SqlDialect.DAMENG) {
-            // common-model：TO_DATE('1970-01-01','yyyy-MM-dd') + NUMTODSINTERVAL(ts, 'SECOND')
             SqlFunctionExpr epoch = new SqlFunctionExpr();
             epoch.setName(SqlIdentifier.of("TO_DATE"));
             epoch.addArgument(SqlLiteral.of(SqlLiteral.Kind.STRING, "'1970-01-01'"));
@@ -642,6 +647,29 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
             bin.setParenthesized(true);
             return bin;
         }
+        if (family == SqlDialect.SQLSERVER) {
+            SqlFunctionExpr out = new SqlFunctionExpr();
+            out.setName(SqlIdentifier.of("DATEADD"));
+            out.addArgument(SqlIdentifier.of("SECOND"));
+            if (!fn.arguments().isEmpty()) {
+                out.addArgument(fn.arguments().get(0));
+            }
+            out.addArgument(SqlLiteral.of(SqlLiteral.Kind.STRING, "'1970-01-01'"));
+            return out;
+        }
+        if (family == SqlDialect.SQLITE) {
+            SqlFunctionExpr out = new SqlFunctionExpr();
+            out.setName(SqlIdentifier.of("datetime"));
+            if (!fn.arguments().isEmpty()) {
+                out.addArgument(fn.arguments().get(0));
+            }
+            out.addArgument(SqlLiteral.of(SqlLiteral.Kind.STRING, "'unixepoch'"));
+            return out;
+        }
+        if (family == SqlDialect.CLICKHOUSE) {
+            fn.setName(SqlIdentifier.of("fromUnixTimestamp"));
+            return fn;
+        }
         report.warn(ConversionWarning.Severity.SEMANTIC_RISK, "FROM_UNIXTIME",
                 "FROM_UNIXTIME 在 " + family + " 无通用映射，已保留原文");
         return fn;
@@ -649,11 +677,109 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
 
     private static SqlExpr rewriteUnixTimestamp(SqlFunctionExpr fn, SqlDialect family,
                                                 ConversionReport.Builder report) {
-        if (family == SqlDialect.MYSQL || family == SqlDialect.H2) {
+        if (family == SqlDialect.MYSQL || family == SqlDialect.H2 || family == SqlDialect.HIVE) {
+            return fn;
+        }
+        if (family == SqlDialect.POSTGRES || family == SqlDialect.ANSI || family == SqlDialect.PRESTO) {
+            if (fn.arguments().isEmpty()) {
+                return fn;
+            }
+            SqlFunctionExpr datePart = new SqlFunctionExpr();
+            datePart.setName(SqlIdentifier.of("date_part"));
+            datePart.addArgument(SqlLiteral.of(SqlLiteral.Kind.STRING, "'epoch'"));
+            datePart.addArgument(fn.arguments().get(0));
+            return datePart;
+        }
+        if (family == SqlDialect.SQLSERVER) {
+            SqlFunctionExpr out = new SqlFunctionExpr();
+            out.setName(SqlIdentifier.of("DATEDIFF"));
+            out.addArgument(SqlIdentifier.of("SECOND"));
+            out.addArgument(SqlLiteral.of(SqlLiteral.Kind.STRING, "'1970-01-01'"));
+            if (!fn.arguments().isEmpty()) {
+                out.addArgument(fn.arguments().get(0));
+            }
+            return out;
+        }
+        if (family == SqlDialect.SQLITE) {
+            SqlFunctionExpr out = new SqlFunctionExpr();
+            out.setName(SqlIdentifier.of("strftime"));
+            out.addArgument(SqlLiteral.of(SqlLiteral.Kind.STRING, "'%s'"));
+            if (!fn.arguments().isEmpty()) {
+                out.addArgument(fn.arguments().get(0));
+            }
+            return out;
+        }
+        if (family == SqlDialect.CLICKHOUSE) {
+            fn.setName(SqlIdentifier.of("toUnixTimestamp"));
             return fn;
         }
         report.warn(ConversionWarning.Severity.SEMANTIC_RISK, "UNIX_TIMESTAMP",
                 "UNIX_TIMESTAMP 在 " + family + " 无通用映射，已保留原文");
+        return fn;
+    }
+
+    private static SqlExpr rewriteRepeat(SqlFunctionExpr fn, String name, SqlDialect family,
+                                         ConversionReport.Builder report) {
+        if (family == SqlDialect.MYSQL || family == SqlDialect.H2 || family == SqlDialect.HIVE
+                || family == SqlDialect.POSTGRES || family == SqlDialect.PRESTO
+                || family == SqlDialect.CLICKHOUSE) {
+            if ("REPEAT".equals(name)) {
+                return fn;
+            }
+            fn.setName(SqlIdentifier.of("REPEAT"));
+            return fn;
+        }
+        if (family == SqlDialect.SQLSERVER) {
+            fn.setName(SqlIdentifier.of("REPLICATE"));
+            return fn;
+        }
+        if (family == SqlDialect.ORACLE || family == SqlDialect.ORACLE12
+                || family == SqlDialect.DAMENG) {
+            if (fn.arguments().size() < 2) {
+                return fn;
+            }
+            SqlExpr text = fn.arguments().get(0);
+            SqlExpr times = fn.arguments().get(1);
+            SqlFunctionExpr length = new SqlFunctionExpr();
+            length.setName(SqlIdentifier.of("LENGTH"));
+            length.addArgument(text);
+            SqlBinaryExpr width = SqlBinaryExpr.of(times, SqlBinaryOp.MUL, length);
+            SqlFunctionExpr rpad = new SqlFunctionExpr();
+            rpad.setName(SqlIdentifier.of("RPAD"));
+            rpad.addArgument(text);
+            rpad.addArgument(width);
+            rpad.addArgument(text);
+            return rpad;
+        }
+        if (family == SqlDialect.SQLITE) {
+            report.warn(ConversionWarning.Severity.SEMANTIC_RISK, name,
+                    "SQLite 无 REPEAT/REPLICATE，已保留原文");
+            return fn;
+        }
+        fn.setName(SqlIdentifier.of("REPEAT"));
+        return fn;
+    }
+
+    private static SqlExpr rewriteToChar(SqlFunctionExpr fn, SqlDialect family) {
+        if (family == SqlDialect.ORACLE || family == SqlDialect.ORACLE12
+                || family == SqlDialect.DAMENG || family == SqlDialect.POSTGRES
+                || family == SqlDialect.ANSI) {
+            return fn;
+        }
+        if (family == SqlDialect.MYSQL || family == SqlDialect.H2 || family == SqlDialect.HIVE) {
+            if (fn.arguments().size() >= 2) {
+                fn.setName(SqlIdentifier.of("DATE_FORMAT"));
+            }
+            return fn;
+        }
+        if (family == SqlDialect.SQLSERVER) {
+            fn.setName(SqlIdentifier.of("CONVERT"));
+            return fn;
+        }
+        if (family == SqlDialect.SQLITE) {
+            fn.setName(SqlIdentifier.of("strftime"));
+            return fn;
+        }
         return fn;
     }
 
@@ -662,6 +788,17 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
         if ("STR_TO_DATE".equals(name)) {
             if (family == SqlDialect.MYSQL || family == SqlDialect.H2) {
                 return fn;
+            }
+            if (family == SqlDialect.HIVE) {
+                report.warn(ConversionWarning.Severity.SEMANTIC_RISK, name,
+                        "STR_TO_DATE 在 Hive 改写为 from_unixtime(unix_timestamp(...))，格式符可能有损");
+                SqlFunctionExpr unix = new SqlFunctionExpr();
+                unix.setName(SqlIdentifier.of("unix_timestamp"));
+                unix.arguments().addAll(fn.arguments());
+                SqlFunctionExpr fromUnix = new SqlFunctionExpr();
+                fromUnix.setName(SqlIdentifier.of("from_unixtime"));
+                fromUnix.addArgument(unix);
+                return fromUnix;
             }
             if (family == SqlDialect.POSTGRES || family == SqlDialect.ORACLE
                     || family == SqlDialect.ORACLE12 || family == SqlDialect.DAMENG
