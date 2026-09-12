@@ -560,6 +560,18 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
         if (family == SqlDialect.SQLSERVER && args.size() >= 3) {
             return fn;
         }
+        // MySQL DATEDIFF(a, b) = a - b (天差，date 部分)。
+        // SQL Server DATEDIFF(datepart, startdate, enddate) = enddate - startdate，
+        // 且 datepart 必须显式给出（MySQL 隐含 day）；参数顺序也相反。
+        if (family == SqlDialect.SQLSERVER && args.size() == 2) {
+            SqlFunctionExpr out2 = new SqlFunctionExpr();
+            out2.setName(SqlIdentifier.of("DATEDIFF"));
+            out2.addArgument(SqlIdentifier.of("day"));
+            // 参数反转：MySQL 的 a 变 SQL Server 的 enddate（第二参），b 变 startdate（第二参）
+            out2.addArgument(args.get(1));
+            out2.addArgument(args.get(0));
+            return out2;
+        }
         if (args.size() < 2) {
             return fn;
         }
