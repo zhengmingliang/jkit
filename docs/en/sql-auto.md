@@ -1,10 +1,126 @@
-# Auto schema module
+# Auto schema
 
-`com.alianga:jkit-sql-auto` scans entity classes at startup, compares them with the live schema, and runs `CREATE TABLE` / `ALTER TABLE ADD`. DDL text comes from [jkit-sql](./sql.md) `SqlEntities`; this module only inspects `DatabaseMetaData` and executes.
+At startup, scan entity classes, compare them with the live schema, and run `CREATE TABLE` / `ALTER TABLE ADD` / `CREATE INDEX`.
 
-`jkit-sql` **does not run SQL and does not ship a JDBC driver**. Add this module when you need to change a live schema. Runtime stays free of third-party libraries (tests use H2). JDK 8+.
+DDL text comes from [jkit-sql](./sql.md) `SqlEntities`. This module only inspects `DatabaseMetaData` and executes. `jkit-sql` **does not run SQL and does not ship a JDBC driver**. Runtime stays free of third-party libraries. JDK 8+ (the Boot 3 starter needs JDK 17+).
 
-## Dependency
+Pick one path:
+
+| Project | Artifact | Extra startup code? |
+| --- | --- | --- |
+| Spring Boot **2.x** | `jkit-sql-auto-spring-boot-2` | No. Runs once when the app is ready, using the app `DataSource` |
+| Spring Boot **3.x** | `jkit-sql-auto-spring-boot-3` | Same |
+| Plain Java / servlet / your own `main` | `jkit-sql-auto` | Yes. Call `SqlAuto.run(...)` once at startup |
+
+All three artifacts pull in `jkit` and `jkit-sql`. The host still supplies the JDBC driver.
+
+---
+
+## 1. Write an entity
+
+Discovery recognises three styles (by FQCN, **no** JPA / MyBatis-Plus compile dependency):
+
+- jkit `@SqlTable` / `@SqlId` / `@SqlColumn` / `@SqlGenerated`
+- JPA `@Entity` / `@Table` / `@Id` / `@Column` / `@GeneratedValue` (`javax` or `jakarta`)
+- MyBatis-Plus `@TableName` / `@TableId`
+
+```java
+import com.alianga.jkit.sql.entity.SqlColumn;
+import com.alianga.jkit.sql.entity.SqlGenerated;
+import com.alianga.jkit.sql.entity.SqlId;
+import com.alianga.jkit.sql.entity.SqlTable;
+
+@SqlTable(name = "demo_user", comment = "users", indexes = {"idx_email:email"})
+public class User {
+    @SqlId
+    @SqlGenerated          // integer → AUTO_INCREMENT / IDENTITY; String/UUID stays a plain PK
+    private Long id;
+
+    @SqlColumn(name = "user_name", length = 32, nullable = false, comment = "name")
+    private String name;
+
+    @SqlColumn(length = 64, unique = true)
+    private String email;
+}
+```
+
+Existing JPA classes need no extra annotations:
+
+```java
+@Entity
+@Table(name = "file_storage")
+public class FileStorage {
+    @Id
+    @Column(name = "id", length = 32)
+    @GeneratedValue(generator = "system-uuid")  // string UUID, not IDENTITY
+    private String id;
+    // ...
+}
+```
+
+Indexes: `@SqlTable(indexes = {"col"})` or `"name:col1,col2"`; JPA `@Table(indexes = @Index(...))` is also read. Unnamed indexes become `{table}_{col}_idx`.
+
+Types, comments and foreign keys: [entity scan](./sql.md#entity-scan-ddl--dml).
+
+---
+
+## 2. Spring Boot
+
+Add the matching starter, set `jkit.sql.auto.packages` (or `entities`), and **do not** call `SqlAuto.run` from `main`. It runs once on `ApplicationReadyEvent` and uses the container `DataSource` (usually `spring.datasource.*`).
+
+### Boot 2.x (JDK 8+)
+
+```xml
+<dependency>
+    <groupId>com.alianga</groupId>
+    <artifactId>jkit-sql-auto-spring-boot-2</artifactId>
+    <version>2.0.1</version>
+</dependency>
+```
+
+### Boot 3.x (JDK 17+)
+
+```xml
+<dependency>
+    <groupId>com.alianga</groupId>
+    <artifactId>jkit-sql-auto-spring-boot-3</artifactId>
+    <version>2.0.1</version>
+</dependency>
+```
+
+### `application.yml`
+
+```yaml
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/shop
+    username: shop
+    password: secret
+
+jkit:
+  sql:
+    auto:
+      enabled: true          # default true; false skips the whole step
+      mode: update           # none / validate / update / create / create-drop
+      packages: com.example.entity
+      # entities:
+      #   - com.example.entity.User
+      show-sql: true
+```
+
+Set at least `packages` or `entities`, or the log will say `no entities, skip`.
+
+Keep `mode: update` in production (add tables/columns/indexes only). Use `create` / `create-drop` in development.
+
+Turn it off with `jkit.sql.auto.enabled: false` or `mode: none`.
+
+Boot 2 registers via `spring.factories`, Boot 3 via `AutoConfiguration.imports`. Adding the artifact is enough; no `@Import`.
+
+---
+
+## 3. Without Spring
+
+Core artifact only:
 
 ```xml
 <dependency>
@@ -14,31 +130,7 @@
 </dependency>
 ```
 
-It depends on `jkit` and `jkit-sql`. The host supplies the JDBC driver (MySQL / PostgreSQL / Oracle, …); this module only uses `java.sql`.
-
-Spring Boot apps add a starter and run once when the application is ready (uses the app `DataSource`):
-
-```xml
-<!-- Boot 2.x / JDK 8+ -->
-<dependency>
-    <groupId>com.alianga</groupId>
-    <artifactId>jkit-sql-auto-spring-boot-2</artifactId>
-    <version>2.0.1</version>
-</dependency>
-```
-
-```xml
-<!-- Boot 3.x / JDK 17+ -->
-<dependency>
-    <groupId>com.alianga</groupId>
-    <artifactId>jkit-sql-auto-spring-boot-3</artifactId>
-    <version>2.0.1</version>
-</dependency>
-```
-
-## Run at startup
-
-Call it once from `main`, a servlet listener, or a Spring `ApplicationRunner`. There is **no** Spring compile dependency:
+Supply a JDBC driver yourself. Call **once** from `main`, a servlet listener, or any other startup hook:
 
 ```java
 import com.alianga.jkit.sql.auto.SqlAuto;
@@ -64,23 +156,89 @@ SqlAuto.run(SqlAutoOptions.defaults()
         .packages("com.example.entity"));
 ```
 
-With an open `Connection`:
+With an open `Connection` (the caller opens and closes it):
 
 ```java
 SqlAuto.run(connection, SqlAutoOptions.defaults().entities(User.class, Order.class));
 ```
 
-Dry-run (plan only, do not change the database). `run(options)` with `dryRun(true)` **does not open JDBC** (the URL is only used to infer the dialect) and plans a full `CREATE` as if the schema were empty, so the database does not need to be running. To preview `ALTER` against live tables, pass an open `Connection` to `run(connection, options)`:
+### Config file, no fluent API
+
+`SqlAuto.run()` / `SqlAutoOptions.fromConfig()` read `jkit.sql.auto.*`. If `jkit.sql.auto.url` is missing they fall back to `spring.datasource.*` (a plain Java app can still use a Spring-style yaml).
+
+```yaml
+jkit:
+  sql:
+    auto:
+      url: jdbc:mysql://localhost:3306/shop
+      username: root
+      password: secret
+      packages: com.example.entity
+      mode: update
+```
+
+```java
+public static void main(String[] args) {
+    SqlAuto.run(); // = SqlAuto.run(SqlAutoOptions.fromConfig())
+}
+```
+
+Standalone process (`jkit-sql-auto`, `jkit-sql`, a JDBC driver and config on the classpath):
+
+```text
+java com.alianga.jkit.sql.auto.SqlAuto
+```
+
+---
+
+## 4. Plan only, do not change the database
+
+`SqlAuto.run(options)` with `dryRun(true)` **does not open JDBC**. The URL is only used to infer the dialect. It plans a full `CREATE TABLE` as if the schema were empty, so the database does not need to be running:
 
 ```java
 SqlAutoPlan plan = SqlAuto.run(SqlAutoOptions.defaults()
-        .url(url).packages("com.example.entity").dryRun(true));
-plan.sql(); // List<String>
+        .dialect(SqlDialect.POSTGRES)   // or .url("jdbc:postgresql://...")
+        .packages("com.example.entity")
+        .mode(SqlAutoMode.CREATE_DROP)
+        .dryRun(true));
+List<String> sqls = plan.sql();
 ```
 
-Entity discovery is the same as `SqlEntities.scan`: `@SqlTable`, JPA `@Entity`, MyBatis-Plus `@TableName` (detected by FQCN, no compile dependency). See [entity scan](./sql.md#entity-scan-ddl--dml).
+To preview `ALTER` against **live** tables, pass an open `Connection` to `run(connection, options)` (still with `dryRun(true)` if you only want the plan).
 
-## Modes
+Config key: `jkit.sql.auto.dry-run: true`.
+
+---
+
+## 5. Configuration keys
+
+Prefix is always `jkit.sql.auto.`. The Spring Boot starters bind the same set; non-Spring `fromConfig()` reads the same set.
+
+| key | default | meaning |
+| --- | --- | --- |
+| `enabled` | `true` | `false` makes `run()` a no-op |
+| `mode` | `update` | `none` / `validate` / `update` / `create` / `create-drop`; also `ddl-auto` |
+| `packages` | empty | scan roots (list or comma-separated); aliases `package` / `base-package` / `base-packages` |
+| `entities` | empty | entity FQCNs |
+| `dialect` | inferred from URL / `DatabaseMetaData` | `mysql` / `postgres` / `oracle` / `oracle12` / `h2` / `dm` … (`SqlDialect.fromName`) |
+| `url` | `spring.datasource.url` | JDBC URL |
+| `username` | `spring.datasource.username` | username |
+| `password` | `spring.datasource.password` | password |
+| `driver` | guessed from URL | driver class; also `driver-class-name` |
+| `fail-fast` | `true` | abort on the first failed DDL |
+| `alter-column` | `false` | `ALTER`/`MODIFY` on type mismatch |
+| `drop-extra-columns` | `false` | drop columns not on the entity |
+| `create-index` | `true` | emit `CREATE INDEX` |
+| `quote-identifiers` | `false` | quote identifiers in the dialect |
+| `show-sql` | `true` | log SQL |
+| `dry-run` | `false` | plan only |
+| `catalog` / `schema` | JDBC default | `DatabaseMetaData` lookup scope |
+
+The fluent API matches these keys (`.mode(SqlAutoMode.UPDATE)`, `.packages("a","b")`, `.alterColumn(true)`). Code-only switches: `postgresIdentityStyle(SERIAL)`, `foreignKeys(false)`, `autoIncrement(false)`.
+
+---
+
+## 6. Modes
 
 Mirrors JPA `spring.jpa.hibernate.ddl-auto`:
 
@@ -92,90 +250,7 @@ Mirrors JPA `spring.jpa.hibernate.ddl-auto`:
 | `CREATE` | Drop managed tables then recreate (dev) |
 | `CREATE_DROP` | Same as `CREATE` at startup, then drop on JVM shutdown |
 
-`UPDATE` is the production default: expand only, never shrink. Type mismatches are skipped unless `alterColumn(true)`. Extra columns stay unless `dropExtraColumns(true)`.
-
-## Configuration
-
-`SqlAutoOptions.fromConfig()` reads `jkit.sql.auto.*`, falling back to `spring.datasource.*` for the URL/user/password (handy if the app already has Spring config). You can also use the fluent API and skip files.
-
-| key | default | meaning |
-| --- | --- | --- |
-| `jkit.sql.auto.enabled` | `true` | `false` makes `run()` a no-op |
-| `jkit.sql.auto.mode` | `update` | `none` / `validate` / `update` / `create` / `create-drop` |
-| `jkit.sql.auto.packages` | empty | comma-separated scan roots; also `package` / `base-package` |
-| `jkit.sql.auto.entities` | empty | entity FQCNs |
-| `jkit.sql.auto.dialect` | inferred from URL / `DatabaseMetaData` | `mysql` / `postgres` / `h2` / `oracle` … (`SqlDialect.fromName`) |
-| `jkit.sql.auto.url` | `spring.datasource.url` | JDBC URL |
-| `jkit.sql.auto.username` | `spring.datasource.username` | username |
-| `jkit.sql.auto.password` | `spring.datasource.password` | password |
-| `jkit.sql.auto.driver` | guessed from URL | driver class; also `driver-class-name` |
-| `jkit.sql.auto.fail-fast` | `true` | abort on the first failed DDL |
-| `jkit.sql.auto.alter-column` | `false` | `ALTER`/`MODIFY` on type mismatch |
-| `jkit.sql.auto.drop-extra-columns` | `false` | drop columns not on the entity |
-| `jkit.sql.auto.create-index` | `true` | emit `CREATE INDEX` |
-| `jkit.sql.auto.quote-identifiers` | `false` | quote identifiers in the dialect |
-| `jkit.sql.auto.show-sql` | `true` | log SQL |
-| `jkit.sql.auto.dry-run` | `false` | plan only; `run(options)` does not open JDBC (URL is only used to infer dialect) |
-| `jkit.sql.auto.catalog` / `schema` | JDBC default | `DatabaseMetaData` lookup scope |
-
-`application.yml` example:
-
-```yaml
-spring:
-  datasource:
-    url: jdbc:postgresql://localhost:5432/shop
-    username: shop
-    password: secret
-
-jkit:
-  sql:
-    auto:
-      enabled: true
-      mode: update
-      packages: com.example.entity
-```
-
-```java
-public static void main(String[] args) {
-    SqlAuto.run(); // fromConfig()
-}
-```
-
-Or as a standalone process (`jkit-sql-auto`, `jkit-sql`, a JDBC driver and config on the classpath):
-
-```text
-java com.alianga.jkit.sql.auto.SqlAuto
-```
-
-## Dialects
-
-When `dialect` is unset:
-
-1. JDBC URL prefix (`jdbc:mysql:` → MYSQL, `jdbc:postgresql:` → POSTGRES, `jdbc:h2:` → H2, `jdbc:oracle:` → ORACLE, Dameng `jdbc:dm:` → DAMENG, …)
-2. `DatabaseMetaData.getDatabaseProductName()` (Oracle 12+ uses `ORACLE12`)
-3. otherwise MYSQL
-
-`CREATE TABLE` / column types go through `SqlEntities` and the canonical type table — the same MySQL / PostgreSQL / Oracle / SQL Server / H2 / SQLite forms as the parser module.
-
-## What it does / does not
-
-Does:
-
-- Scan packages or an explicit entity list; referenced tables come first by foreign key
-- Missing table → `CREATE TABLE` (optional `CREATE INDEX`, comment extras, SEQUENCE on dialects without IDENTITY)
-- Table exists, column missing → `ALTER TABLE … ADD [COLUMN]` (column comments as extras)
-- Missing index → `CREATE INDEX`
-- `VALIDATE` turns missing tables/columns / type mismatches into an exception
-- `CREATE` / `CREATE_DROP` drop then rebuild
-- `SqlAuto.drop(...)` drops managed tables in reverse FK order
-
-Default **does not**:
-
-- Change existing column types (unless `alterColumn=true`)
-- Drop columns or tables not on the entity (unless `dropExtraColumns` / `CREATE`)
-- Migrate data, rename columns, or change primary keys
-- Convert procedures / views / triggers
-- Bundle a JDBC driver
+`UPDATE` is the production default: expand only. Type mismatches are skipped unless `alter-column: true`. Extra columns stay unless `drop-extra-columns: true`.
 
 Drop managed tables explicitly (reverse FK order):
 
@@ -183,21 +258,53 @@ Drop managed tables explicitly (reverse FK order):
 SqlAuto.drop(SqlAutoOptions.defaults().url(url).entities(User.class));
 ```
 
-Table / column comments (`@SqlTable(comment)` / `@SqlColumn(comment)`) follow the dialect: MySQL / Hive / ClickHouse inline `COMMENT`; H2 inlines column comments and uses `COMMENT ON TABLE`; PostgreSQL / Oracle / DB2 / ANSI emit `COMMENT ON`; SQL Server uses `sp_addextendedproperty`; Presto table-level `WITH (comment=…)`; SQLite skips comments. Auto-DDL runs extras as separate statements (`CREATE TABLE` itself does not include them).
+---
 
-Oracle ≤11g (`ORACLE`) has no IDENTITY: auto-increment PKs become `CREATE SEQUENCE {table}_{column}_seq` plus a `BEFORE INSERT` trigger. `CREATE_DROP` / `drop` drop the sequence before the table. Dameng (`DAMENG`) uses column `IDENTITY`. Oracle 12c+ still uses `GENERATED … AS IDENTITY`.
+## 7. Dialects
 
-Unnamed indexes default to `{table}_{col}_idx`. Classic Oracle identifiers are capped at 30 characters; longer names are truncated and given a 4-hex hash (`ORACLE12` allows 128, so they usually stay intact). Explicit `name:` values that still overflow are fitted the same way. Sequence and trigger names use the same rule.
+When `dialect` is unset:
 
-UUID / string primary keys (`@GeneratedValue(generator="system-uuid")`, `GenerationType.UUID`, non-integer `@SqlGenerated`) do not emit `IDENTITY` / `AUTO_INCREMENT` / `SERIAL` — only `PRIMARY KEY`. PostgreSQL rejects `VARCHAR … GENERATED ALWAYS AS IDENTITY`.
+1. JDBC URL prefix (`jdbc:mysql:` → MYSQL, `jdbc:postgresql:` → POSTGRES, `jdbc:oracle:` → ORACLE, Dameng `jdbc:dm:` → DAMENG, …)
+2. `DatabaseMetaData.getDatabaseProductName()` (Oracle 12c+ product names map to `ORACLE12`)
+3. otherwise MYSQL
 
-If a subclass restates a superclass / `MappedSuperclass` column such as `create_time`, the name is emitted once to avoid `column specified more than once`.
+`jdbc:oracle:` infers classic `ORACLE` (30-character identifiers, SEQUENCE + TRIGGER for autoincrement). For 12c `IDENTITY` / `OFFSET FETCH`, set `dialect: oracle12`.
 
-Some products are narrower than the first-class dialect. Turn the matching DDL off:
+---
 
-- Old OpenGauss rejects `GENERATED … IDENTITY`: `postgresIdentityStyle(SERIAL)`
-- GBase 8a may reject in-table `FOREIGN KEY` / standalone `CREATE INDEX` (`unsupported key algorithm`): `foreignKeys(false).createIndex(false)`
-- DuckDB rejects `AUTOINCREMENT` / `IDENTITY` / in-table FK: `autoIncrement(false).foreignKeys(false).createIndex(false)`
-- Oracle ≤11g: SEQUENCE + TRIGGER is generated; Dameng uses IDENTITY
+## 8. Behaviour and pitfalls
 
-For H2 in-memory `CREATE_DROP`, put `DB_CLOSE_DELAY=-1` on the URL so the database survives the startup connection closing.
+**Does**
+
+- Scan packages or an explicit entity list; referenced tables come first by foreign key
+- Missing table → `CREATE TABLE` (then optional `CREATE INDEX`, comment extras, Oracle 11g SEQUENCE)
+- Table exists, column missing → `ALTER TABLE … ADD`
+- Missing index → `CREATE INDEX`
+- Table/column comments as extra statements (MySQL inline `COMMENT`, PG/Oracle `COMMENT ON`, SQL Server `sp_addextendedproperty`)
+
+**Default does not**
+
+- Change existing column types, drop extra columns/tables, rename columns, change primary keys, migrate data
+- Touch procedures / views / triggers (except the Oracle 11g autoincrement trigger)
+- Bundle a JDBC driver
+
+**Primary keys / identity**
+
+- Integer + `@SqlGenerated` / `@GeneratedValue(IDENTITY|AUTO)` → `AUTO_INCREMENT` / `GENERATED … AS IDENTITY` / `SERIAL`
+- String, UUID, `@GeneratedValue(generator="system-uuid")`, `GenerationType.UUID` → **`PRIMARY KEY` only** (PostgreSQL rejects `VARCHAR … IDENTITY`)
+- Classic Oracle (`ORACLE`) integer autoincrement: `CREATE SEQUENCE {table}_{column}_seq` plus a `BEFORE INSERT` trigger; `CREATE_DROP` / `drop` drop the sequence first
+
+**Index names / identifier length**
+
+Unnamed indexes are `{table}_{col}_idx`. Classic Oracle caps identifiers at 30 characters and truncates with a 4-hex hash; `ORACLE12` allows 128. Sequence and trigger names use the same rule.
+
+**Inherited columns**
+
+If a subclass restates a superclass / `MappedSuperclass` column such as `create_time`, the name is emitted once (avoids PostgreSQL `column specified more than once`).
+
+**Narrow products**
+
+- Old OpenGauss: `.postgresIdentityStyle(SERIAL)`
+- GBase 8a: `.foreignKeys(false).createIndex(false)`
+- DuckDB: `.autoIncrement(false).foreignKeys(false).createIndex(false)`
+- H2 in-memory `CREATE_DROP`: put `DB_CLOSE_DELAY=-1` on the URL so the database survives the startup connection closing
