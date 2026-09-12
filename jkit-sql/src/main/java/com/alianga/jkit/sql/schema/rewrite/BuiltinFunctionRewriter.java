@@ -262,6 +262,17 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
     }
 
     private static SqlExpr rewriteNullCoalesce(SqlFunctionExpr fn, String name, SqlDialect family) {
+        List<SqlExpr> args = fn.arguments();
+        // SQL Server 的 ISNULL、Oracle/DAMENG 的 NVL 都只接受 2 个参数；
+        // 多参数（≥3）的 COALESCE/IFNULL/NVL 必须保留 ANSI COALESCE，否则真库报语法错。
+        if (args.size() >= 3 && (family == SqlDialect.SQLSERVER
+                || family == SqlDialect.ORACLE || family == SqlDialect.ORACLE12
+                || family == SqlDialect.DAMENG)) {
+            if (!"COALESCE".equalsIgnoreCase(name)) {
+                fn.setName(SqlIdentifier.of("COALESCE"));
+            }
+            return fn;
+        }
         String want = coalesceName(family);
         if (want.equals(name)) {
             return fn;
