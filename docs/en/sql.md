@@ -344,9 +344,11 @@ Supported first-class dialects (MySQL, PostgreSQL, Oracle 11g/12c, SQL Server, H
 
 ## Entity scan → DDL / DML
 
-Like data-set `EntityScanner`, without Spring: scan classes annotated with `@SqlTable`, JPA `@Entity`, or MyBatis-Plus `@TableName`/`@TableId` (resolved by FQCN via reflection — no compile dependency on Spring / JPA / MyBatis), then generate DDL and CRUD per dialect. Also honours `@TableField` (`exist=false` skips the column), JPA `@Index`/`@Enumerated`/`@Embedded`; `List`/`Set`/`@OneToMany` fields are skipped unless annotated. `createTables` orders referenced tables first. Java types go through the canonical type registry.
+Like data-set `EntityScanner`, without Spring: scan classes annotated with `@SqlTable`, JPA `@Entity`, or MyBatis-Plus `@TableName`/`@TableId` (resolved by FQCN via reflection — no compile dependency on Spring / JPA / MyBatis / Hibernate), then generate DDL and CRUD per dialect. Also honours `@TableField` (`exist=false` skips the column), JPA `@Index`/`@Enumerated`/`@Embedded`, and Hibernate `@Comment`/`@ColumnDefault`; `List`/`Set`/`@OneToMany` fields are skipped unless annotated. `createTables` orders referenced tables first. Java types go through the canonical type registry.
 
-Table / column comments (`@SqlTable(comment=…)`, `@SqlColumn(comment=…)`): MySQL / Hive / ClickHouse inline `COMMENT '…'`; H2 inlines column comments and uses `COMMENT ON TABLE` for the table; PostgreSQL / Oracle / DB2 / ANSI emit `COMMENT ON TABLE|COLUMN`; SQL Server uses `sp_addextendedproperty`; Presto table-level `WITH (comment=…)`; SQLite has no comment syntax, so comments are skipped. Auto-DDL runs these as extra statements after `CREATE TABLE`.
+Table / column comments (`@SqlTable(comment=…)`, `@SqlColumn(comment=…)`, and Hibernate `@Comment` on the type or field; jkit annotations win): MySQL / Hive / ClickHouse inline `COMMENT '…'`; H2 inlines column comments and uses `COMMENT ON TABLE` for the table; PostgreSQL / Oracle / DB2 / ANSI emit `COMMENT ON TABLE|COLUMN`; SQL Server uses `sp_addextendedproperty`; Presto table-level `WITH (comment=…)`; SQLite has no comment syntax, so comments are skipped. Auto-DDL runs these as extra statements after `CREATE TABLE`.
+
+Column defaults: Hibernate `@ColumnDefault` `value` is a **SQL fragment** (no `DEFAULT` keyword) written as-is, e.g. `@ColumnDefault("0")` → `DEFAULT 0`, `@ColumnDefault("'guest'")` → `DEFAULT 'guest'`. If `columnDefinition` already contains `DEFAULT`, it is not repeated.
 
 Dialects without IDENTITY (Oracle ≤11g, enum `ORACLE`) get `CREATE SEQUENCE {table}_{column}_seq` plus a `BEFORE INSERT` trigger; Dameng (`DAMENG`) uses column `IDENTITY`; Oracle 12c+ still uses `GENERATED … AS IDENTITY`. `SqlEntities.extraSql` / `sequenceSql` expose the extras on their own.
 
@@ -373,7 +375,7 @@ String del = SqlEntities.deleteById(DemoUser.class, 1L, SqlDialect.MYSQL);
 String sel = SqlEntities.selectById(DemoUser.class, 1L, SqlDialect.MYSQL);
 ```
 
-`javax.persistence` / `jakarta.persistence` annotations (`@Entity` `@Table` `@Column` `@Id` `@GeneratedValue` `@Transient` `@Lob`) are recognised the same way.
+`javax.persistence` / `jakarta.persistence` annotations (`@Entity` `@Table` `@Column` `@Id` `@GeneratedValue` `@Transient` `@Lob`) are recognised the same way. So are Hibernate `@Comment` / `@ColumnDefault`.
 
 ### API
 

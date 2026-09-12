@@ -18,7 +18,8 @@ import java.util.Map;
 /**
  * 把实体类解析成 {@link SqlEntityModel}。认 jkit 注解，并用反射认（无编译依赖）：
  * JPA {@code javax/jakarta.persistence}、MyBatis-Plus {@code com.baomidou.mybatisplus.annotation}、
- * MyBatis {@code org.apache.ibatis.type.Alias}（仅作表名回退）。
+ * MyBatis {@code org.apache.ibatis.type.Alias}（仅作表名回退）、
+ * Hibernate {@code org.hibernate.annotations.Comment} / {@code ColumnDefault}。
  *
  * @author 郑明亮
  * @since 2.0.1
@@ -217,9 +218,13 @@ public final class SqlEntityMapper {
         String comment = null;
         if (col != null && col.comment() != null && col.comment().length() > 0) {
             comment = col.comment();
+        } else {
+            comment = hibernateValue(namedAnnotation(field, "org.hibernate.annotations.Comment"));
         }
+        String defaultValue = hibernateValue(
+                namedAnnotation(field, "org.hibernate.annotations.ColumnDefault"));
         return new SqlEntityColumn(name, canonical, prec, sc, nullable, id, generated, unique,
-                rawType, refTable, refCol, comment, field);
+                rawType, refTable, refCol, comment, defaultValue, field);
     }
 
     private static String tableComment(Class<?> type) {
@@ -227,7 +232,19 @@ public final class SqlEntityMapper {
         if (sqlTable != null && sqlTable.comment() != null && sqlTable.comment().length() > 0) {
             return sqlTable.comment();
         }
-        return null;
+        return hibernateValue(namedAnnotation(type, "org.hibernate.annotations.Comment"));
+    }
+
+    private static String hibernateValue(Object annotation) {
+        if (annotation == null) {
+            return null;
+        }
+        String v = stringAttr(annotation, "value");
+        if (v == null) {
+            return null;
+        }
+        v = v.trim();
+        return v.length() == 0 ? null : v;
     }
 
     private static List<String> tableIndexes(Class<?> type) {

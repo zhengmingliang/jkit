@@ -20,6 +20,7 @@
 - **新增**：`postgresIdentityStyle` / `foreignKeys` / `autoIncrement` 选项，给 OpenGauss / GBase 8a / DuckDB 等能力较窄的产品关掉对应 DDL。
 
 ### jkit-sql
+- **新增**：实体扫描反射认 Hibernate `@Comment`（类=表注释、字段=列注释）与 `@ColumnDefault`（值作为 SQL 片段写入 `DEFAULT`，如 `0` / `'guest'` / `CURRENT_TIMESTAMP`）。无 Hibernate 编译依赖；`@SqlTable`/`@SqlColumn` 的 comment 优先。
 - **修复**：`@Index` / `@SqlTable(indexes)` 未写名字时不再一律用 `{table}_idx`。改为 `{table}_{col}_idx`（多列用下划线拼接），同表多个未命名索引不再撞名。公开 `SqlEntities.indexName`。
 - **修复**：`SQL.format` pretty 模式对 `CREATE TABLE` 按列换行缩进（此前列清单始终单行，看起来像没 format）。`toSqlString` / compact 仍单行。
 - **实体**：公开 `columnSql` / `columnTypeSql` / `createIndex` / `orderByForeignKeys` / `extraSql` / `sequenceSql`，`createTable(..., includeIndexes)` 可供自动建表拆开索引与附录。

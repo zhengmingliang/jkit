@@ -10,6 +10,9 @@ import com.alianga.jkit.sql.entity.fixture.MpUser;
 import com.alianga.jkit.sql.entity.sample.DemoUser;
 import com.alianga.jkit.sql.schema.model.CanonicalType;
 
+import org.hibernate.annotations.ColumnDefault;
+import org.hibernate.annotations.Comment;
+
 import org.junit.Test;
 
 import java.math.BigDecimal;
@@ -93,6 +96,41 @@ public class SqlEntitiesTest {
                 SqlDialect.ORACLE).contains("CREATE SEQUENCE"));
         assertNull(SqlEntities.sequenceSql("cmt", SqlEntities.inspect(Cmt.class).idColumn(),
                 SqlDialect.MYSQL));
+    }
+
+    @Test
+    public void hibernateCommentAndColumnDefault() {
+        @Comment("授权表")
+        class HbAuth {
+            @SqlId
+            String id;
+            @Comment("资源id")
+            @ColumnDefault("''")
+            String resourceId;
+            @ColumnDefault("0")
+            Integer status;
+            @ColumnDefault("CURRENT_TIMESTAMP")
+            java.util.Date createdAt;
+        }
+        SqlEntityModel model = SqlEntities.inspect(HbAuth.class);
+        assertEquals("授权表", model.comment());
+        SqlEntityColumn resource = model.columns().get(1);
+        assertEquals("资源id", resource.comment());
+        assertEquals("''", resource.defaultValue());
+        assertEquals("0", model.columns().get(2).defaultValue());
+        assertEquals("CURRENT_TIMESTAMP", model.columns().get(3).defaultValue());
+
+        String mysql = SqlEntities.createTable(HbAuth.class, SqlDialect.MYSQL);
+        assertTrue(mysql, mysql.contains("COMMENT '授权表'"));
+        assertTrue(mysql, mysql.contains("COMMENT '资源id'"));
+        assertTrue(mysql, mysql.contains("DEFAULT ''"));
+        assertTrue(mysql, mysql.contains("DEFAULT 0"));
+        assertTrue(mysql, mysql.contains("DEFAULT CURRENT_TIMESTAMP"));
+
+        String pg = SqlEntities.createTable(HbAuth.class, SqlDialect.POSTGRES);
+        assertTrue(pg, pg.contains("COMMENT ON TABLE"));
+        assertTrue(pg, pg.contains("DEFAULT ''"));
+        assertTrue(pg, pg.contains("COMMENT ON COLUMN"));
     }
 
     @Test

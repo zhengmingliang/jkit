@@ -773,6 +773,7 @@ public final class SqlEntities {
                 if (auto.clause() != null) {
                     sb.append(' ').append(auto.clause());
                 }
+                appendDefault(sb, col);
                 appendComment(sb, col, dialect);
                 return sb.toString();
             }
@@ -785,6 +786,7 @@ public final class SqlEntities {
             if (inlinePk && col.primaryKey()) {
                 sb.append(" PRIMARY KEY");
             }
+            appendDefault(sb, col);
             appendComment(sb, col, dialect);
             return sb.toString();
         }
@@ -798,8 +800,21 @@ public final class SqlEntities {
         } else if (col.unique()) {
             sb.append(" UNIQUE");
         }
+        appendDefault(sb, col);
         appendComment(sb, col, dialect);
         return sb.toString();
+    }
+
+    private static void appendDefault(StringBuilder sb, SqlEntityColumn col) {
+        String dv = col.defaultValue();
+        if (dv == null || dv.isEmpty()) {
+            return;
+        }
+        String raw = col.rawType();
+        if (raw != null && raw.toUpperCase().indexOf("DEFAULT") >= 0) {
+            return;
+        }
+        sb.append(" DEFAULT ").append(dv);
     }
 
     private static void appendComment(StringBuilder sb, SqlEntityColumn col, SqlDialect dialect) {

@@ -464,9 +464,11 @@ java -jar target/benchmarks.jar com.alianga.test.sql.jmh.SqlSchemaConvertBenchma
 
 ## 实体扫描生成 DDL / DML
 
-对标 data-set `EntityScanner`：扫描包下带 `@SqlTable`、JPA `@Entity`、MyBatis-Plus `@TableName`/`@TableId` 的类（不依赖 Spring / JPA / MyBatis 编译），再按方言生成建表与增删改查。也认 `@TableField`（`exist=false` 跳过）、JPA `@Index`/`@Enumerated`/`@Embedded`；`List`/`Set`/`@OneToMany` 默认不建列。`createTables` 按外键把被引用表排在前面。Java 类型走 canonical 类型表。
+对标 data-set `EntityScanner`：扫描包下带 `@SqlTable`、JPA `@Entity`、MyBatis-Plus `@TableName`/`@TableId` 的类（不依赖 Spring / JPA / MyBatis / Hibernate 编译），再按方言生成建表与增删改查。也认 `@TableField`（`exist=false` 跳过）、JPA `@Index`/`@Enumerated`/`@Embedded`、Hibernate `@Comment`/`@ColumnDefault`；`List`/`Set`/`@OneToMany` 默认不建列。`createTables` 按外键把被引用表排在前面。Java 类型走 canonical 类型表。
 
-表 / 列注释：`@SqlTable(comment=…)`、`@SqlColumn(comment=…)`。MySQL / Hive / ClickHouse 写成列内 / 表尾 `COMMENT '…'`；H2 列内 `COMMENT`，表级走 `COMMENT ON TABLE`；PostgreSQL / Oracle / DB2 / ANSI 走 `COMMENT ON TABLE|COLUMN`；SQL Server 走 `sp_addextendedproperty`；Presto 表级 `WITH (comment=…)`；SQLite 无注释语法，忽略。自动建表把这些附录拆成独立变更执行。
+表 / 列注释：`@SqlTable(comment=…)`、`@SqlColumn(comment=…)`，以及 Hibernate `@Comment`（标在类上=表注释，标在字段上=列注释；jkit 注解优先）。MySQL / Hive / ClickHouse 写成列内 / 表尾 `COMMENT '…'`；H2 列内 `COMMENT`，表级走 `COMMENT ON TABLE`；PostgreSQL / Oracle / DB2 / ANSI 走 `COMMENT ON TABLE|COLUMN`；SQL Server 走 `sp_addextendedproperty`；Presto 表级 `WITH (comment=…)`；SQLite 无注释语法，忽略。自动建表把这些附录拆成独立变更执行。
+
+列默认值：Hibernate `@ColumnDefault` 的 `value` 是 **SQL 片段**（不含 `DEFAULT` 关键字），原样写入列定义，例如 `@ColumnDefault("0")` → `DEFAULT 0`，`@ColumnDefault("'guest'")` → `DEFAULT 'guest'`，`@ColumnDefault("CURRENT_TIMESTAMP")` → `DEFAULT CURRENT_TIMESTAMP`。`columnDefinition` 里已有 `DEFAULT` 时不再重复。
 
 无 IDENTITY 的方言（Oracle ≤11g，枚举 `ORACLE`）用 `CREATE SEQUENCE {table}_{column}_seq` + `BEFORE INSERT` 触发器代替自增主键；达梦（`DAMENG`）列上写 `IDENTITY`；Oracle 12c+ 仍用 `GENERATED … AS IDENTITY`。`SqlEntities.extraSql` / `sequenceSql` 可单独取附录。
 
@@ -545,7 +547,7 @@ String all = SqlEntities.createTables(ordered, SqlDialect.POSTGRES);
 SqlEntities.dropTable(DemoUser.class, SqlDialect.MYSQL);   // DROP TABLE demo_user
 ```
 
-有 `javax.persistence` / `jakarta.persistence` 时同样识别 `@Entity` `@Table` `@Column` `@Id` `@GeneratedValue` `@Transient` `@Lob`（反射按类名，无编译依赖）。
+有 `javax.persistence` / `jakarta.persistence` 时同样识别 `@Entity` `@Table` `@Column` `@Id` `@GeneratedValue` `@Transient` `@Lob`（反射按类名，无编译依赖）。Hibernate `@Comment` / `@ColumnDefault` 同此。
 
 `jkit-sql` 只生成 SQL。启动时连库建表 / 加列见独立模块 [jkit-sql-auto](./sql-auto.md)。
 
