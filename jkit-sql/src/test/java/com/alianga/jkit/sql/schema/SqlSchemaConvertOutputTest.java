@@ -117,7 +117,7 @@ public class SqlSchemaConvertOutputTest {
         // PG 的 interval 字面量必须是带引号字符串，INTERVAL 3 day 会报语法错
         String pg = SQL.convert("SELECT DATE_ADD(a, INTERVAL 3 DAY) FROM t",
                 SqlDialect.MYSQL, SqlDialect.POSTGRES);
-        assertEquals(pg, "SELECT (a + INTERVAL '3 day') FROM t", norm(pg));
+        assertEquals(pg, "SELECT (CAST(a AS DATE) + INTERVAL '3 day') FROM t", norm(pg));
         assertReparsable(pg, SqlDialect.POSTGRES);
     }
 
@@ -125,7 +125,7 @@ public class SqlSchemaConvertOutputTest {
     public void dateAddOnOracleUsesStandardIntervalLiteral() {
         String ora = SQL.convert("SELECT DATE_ADD(a, INTERVAL 3 DAY) FROM t",
                 SqlDialect.MYSQL, SqlDialect.ORACLE);
-        assertEquals(ora, "SELECT (a + INTERVAL '3' DAY) FROM t", norm(ora));
+        assertEquals(ora, "SELECT (CAST(a AS DATE) + INTERVAL '3' DAY) FROM t", norm(ora));
     }
 
     @Test
@@ -184,7 +184,7 @@ public class SqlSchemaConvertOutputTest {
         String pg = SQL.convert("SELECT DATE_ADD(a, INTERVAL 1 DAY) * 2 FROM t",
                 SqlDialect.MYSQL, SqlDialect.POSTGRES);
         String n = norm(pg);
-        assertTrue(pg, n.startsWith("SELECT (a +"));
+        assertTrue(pg, n.startsWith("SELECT (CAST(a AS DATE) +"));
         assertTrue(pg, n.contains(") * 2"));
         assertReparsable(pg, SqlDialect.POSTGRES);
     }
@@ -194,7 +194,7 @@ public class SqlSchemaConvertOutputTest {
         String pg = SQL.convert("SELECT DATE_SUB(a, INTERVAL 1 DAY) + 1 FROM t",
                 SqlDialect.MYSQL, SqlDialect.POSTGRES);
         String n = norm(pg);
-        assertTrue(pg, n.startsWith("SELECT (a -"));
+        assertTrue(pg, n.startsWith("SELECT (CAST(a AS DATE) -"));
         assertReparsable(pg, SqlDialect.POSTGRES);
     }
 

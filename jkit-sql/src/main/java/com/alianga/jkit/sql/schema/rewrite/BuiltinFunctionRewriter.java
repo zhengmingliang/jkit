@@ -428,7 +428,9 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
         }
         SqlBinaryExpr bin = new SqlBinaryExpr();
         bin.setOperator(sub ? SqlBinaryOp.MINUS : SqlBinaryOp.PLUS);
-        bin.setLeft(base);
+        // PG/ANSI 等对裸字符串字面量做 + INTERVAL 时不会隐式转 date，会反过来把左边当
+        // interval 解析而报语法错；统一把 base 显式 CAST AS DATE，保证类型正确
+        bin.setLeft(castToDate(base));
         bin.setRight(interval);
         // 函数调用是最高优先级，展开成运算符后必须整体套括号：
         // DATE_ADD(a, INTERVAL 1 DAY) * 2 若写成 a + INTERVAL ... * 2 会被乘法抢走优先级

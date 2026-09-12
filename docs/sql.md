@@ -442,12 +442,13 @@ Oracle ≤11g 的自增默认给出 `MANUAL_ACTION_REQUIRED`；`generateOracleSe
 
 `SQL.convertBatch` 批量转换。`ALTER TABLE ADD/MODIFY/CHANGE` 会转换列类型；转到 PG/H2 时改成 `ALTER COLUMN … TYPE`，`NOT NULL`/`DEFAULT` 进附录。
 
-转换结果会按目标方言再 parse 一遍作为语料回归。真实建表验证在上级目录 `tools-test`：
+转换结果会按目标方言再 parse 一遍作为语料回归。真实建表与表达式执行验证在上级目录 `tools-test`（jkit 自己的 parser 比真库宽松，复解析抓不到的问题由真库执行兜底）：
 
 ```text
 cd ../tools-test
-mvn -Dtest=CrossDialectDdlExecutionTest test   # 需要 Docker；没有则 skip
-mvn -Dtest=LocalDatasourceConvertTest test     # 读 src/test/resources/datasource，连本机 MySQL/PG/Oracle
+mvn -Dtest=CrossDialectDdlExecutionTest test      # MySQL→PG 建表；需要 Docker+本地 postgres 镜像，没有则 skip
+mvn -Dtest=CrossDialectExprExecutionTest test     # DDL+表达式真库执行：PG 上 DATE_ADD→INTERVAL、DATEDIFF→CAST 减法、MySQL 上 ||→CONCAT、SQLite 上 AUTOINCREMENT、NUMERIC(10,2) 不截断；PG/MySQL 走 Docker，SQLite 走内存库
+mvn -Dtest=LocalDatasourceConvertTest test        # 读 src/test/resources/datasource，连本机 MySQL/PG/Oracle
 java -jar target/benchmarks.jar com.alianga.test.sql.jmh.SqlSchemaConvertBenchmark -f 1 -wi 1 -i 1
 ```
 
