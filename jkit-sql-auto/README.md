@@ -1,8 +1,6 @@
 # jkit-sql-auto
 
-启动时按实体自动建表 / 更新表结构。扫描 `jkit-sql` 的 `@SqlTable`、JPA `@Entity`、MyBatis-Plus `@TableName`，对照 `DatabaseMetaData` 执行 `CREATE TABLE` / `ALTER TABLE ADD`。
-
-`jkit-sql` **不执行 SQL**；本模块才走 JDBC。运行时仍零第三方依赖（测试用 H2）。
+启动时按实体建表 / 加列。非 Spring 项目用本模块；Spring Boot 请改用 starter。
 
 ```xml
 <dependency>
@@ -19,4 +17,12 @@ SqlAuto.run(SqlAutoOptions.defaults()
         .mode(SqlAutoMode.UPDATE));
 ```
 
-完整说明见 [docs/sql-auto.md](../docs/sql-auto.md)。
+或 `SqlAuto.run()` 读 `jkit.sql.auto.*`（URL 可回落 `spring.datasource.*`）。
+
+| 项目 | 坐标 |
+| --- | --- |
+| 普通 Java | `jkit-sql-auto`（本模块） |
+| Spring Boot 2.x | `jkit-sql-auto-spring-boot-2` |
+| Spring Boot 3.x | `jkit-sql-auto-spring-boot-3` |
+
+完整说明：[docs/sql-auto.md](../docs/sql-auto.md)（[English](../docs/en/sql-auto.md)）。

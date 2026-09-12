@@ -13,6 +13,7 @@
   依赖本机 `~/.m2/toolchains.xml` 已声明 jdk 8/9/11/17/21。`mvn` 启动 JDK：`JAVA_HOME=$(jdk8) mvn -o clean install`。
 
 ### jkit-sql-auto
+- **文档**：`docs/sql-auto.md`（及英文）按「选包 → 写实体 → Spring Boot / 非 Spring → 配置项」重排。Spring Boot starter 与普通 Java 分开写清依赖、yml 和是否需要启动代码。模块 README、快速开始页同步。
 - **修复**：`SqlDialect.ORACLE` 下自动生成的 `CREATE INDEX` 名超过 30 字符时截断（保留前缀 + 4 位散列），避免 ORA-00972。
 - **变更**：`dryRun(true)` 的 `SqlAuto.run(options)` / `plan(options)` 不再打开 JDBC / DataSource。URL 仅用于推断方言，按空库规划全量 `CREATE TABLE`（库没启动也能打印 SQL）。已传入 `Connection` 的重载仍对照活表，只是不执行。
 - **新增**：启动时按实体自动建表 / 更新表结构（`com.alianga:jkit-sql-auto`）。扫描 `@SqlTable` / JPA / MyBatis-Plus 实体，对照 `DatabaseMetaData` 执行 `CREATE TABLE` / `ALTER TABLE ADD` / `CREATE INDEX`。模式：`none` / `validate` / `update`（默认，只追加）/ `create` / `create-drop`。配置前缀 `jkit.sql.auto.*`，数据源可回落 `spring.datasource.*`。运行时零第三方依赖。

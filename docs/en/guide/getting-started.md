@@ -103,6 +103,31 @@ Optional modules:
 
 :::
 
+## Auto schema (optional)
+
+`jkit-sql` only generates SQL. To create / update tables at startup, pick one artifact. Full guide: [Auto schema](../sql-auto.md).
+
+| Project | Artifact | Startup code |
+| --- | --- | --- |
+| Plain Java | `jkit-sql-auto` | Call `SqlAuto.run(...)` once |
+| Spring Boot 2 | `jkit-sql-auto-spring-boot-2` | None. Set `jkit.sql.auto.packages` |
+| Spring Boot 3 | `jkit-sql-auto-spring-boot-3` | Same |
+
+Minimal Spring Boot config:
+
+```yaml
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/shop
+    username: shop
+    password: secret
+jkit:
+  sql:
+    auto:
+      packages: com.example.entity
+      mode: update
+```
+
 ## Your first program
 
 The basic utilities are static-method based — no setup objects required:

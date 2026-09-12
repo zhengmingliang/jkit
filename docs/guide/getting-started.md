@@ -103,6 +103,31 @@ jkit 是**纯 JDK、零第三方依赖**的 Java 通用工具库，由 [ZmlTools
 
 :::
 
+## 自动建表（可选）
+
+`jkit-sql` 只生成 SQL。要在启动时连库建表 / 加列，按项目类型选一个包，细节见 [自动建表](../sql-auto.md)。
+
+| 项目 | 坐标 | 启动代码 |
+| --- | --- | --- |
+| 普通 Java | `jkit-sql-auto` | `SqlAuto.run(...)` 调一次 |
+| Spring Boot 2 | `jkit-sql-auto-spring-boot-2` | 不用写。配 `jkit.sql.auto.packages` 即可 |
+| Spring Boot 3 | `jkit-sql-auto-spring-boot-3` | 同上 |
+
+Spring Boot 最小配置：
+
+```yaml
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/shop
+    username: shop
+    password: secret
+jkit:
+  sql:
+    auto:
+      packages: com.example.entity
+      mode: update
+```
+
 ## 第一个程序
 
 基础工具类均为静态方法，不需要初始化对象：

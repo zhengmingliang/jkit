@@ -1,6 +1,6 @@
 # jkit-sql-auto-spring-boot-2
 
-Spring Boot **2.x** 自动配置：应用就绪后按实体调用 `jkit-sql-auto` 建表 / 加列。
+Spring Boot **2.x**（JDK 8+）适配包：应用就绪后自动按实体建表 / 加列，使用容器里的 `DataSource`。**不必**在 `main` 里调 `SqlAuto.run`。
 
 ```xml
 <dependency>
@@ -11,6 +11,12 @@ Spring Boot **2.x** 自动配置：应用就绪后按实体调用 `jkit-sql-auto
 ```
 
 ```yaml
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:3306/shop
+    username: root
+    password: secret
+
 jkit:
   sql:
     auto:
@@ -19,4 +25,4 @@ jkit:
       packages: com.example.entity
 ```
 
-数据源用应用里的 `DataSource`（通常是 `spring.datasource.*`）。说明见 [docs/sql-auto.md](../docs/sql-auto.md)。
+`packages` 或 `entities` 至少配一项。Boot 3 请用 `jkit-sql-auto-spring-boot-3`。完整说明：[docs/sql-auto.md](../docs/sql-auto.md)。
