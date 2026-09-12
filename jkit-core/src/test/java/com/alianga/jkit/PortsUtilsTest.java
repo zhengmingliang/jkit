@@ -163,30 +163,32 @@ public class PortsUtilsTest {
 
     /**
      * 探针丢失应折半退避，且不低于下限；探针恢复后线性回升，不得越过给定上限。
+     * 上限必须明显高于下限 MIN_SYN_PER_SECOND(400)，折半退避才不会被下限顶死，
+     * 这样本用例才能验证「丢探针折半」与「恢复后线性回升」的语义。
      */
     @Test
     public void adaptiveRate_halvesOnLossAndRecoversLinearly() {
-        PortsUtils.AdaptiveRate governor = new PortsUtils.AdaptiveRate(500);
-        assertEquals("初始速率就是调用方给的上限", 500, governor.current());
+        PortsUtils.AdaptiveRate governor = new PortsUtils.AdaptiveRate(1600);
+        assertEquals("初始速率就是调用方给的上限", 1600, governor.current());
 
         governor.onCanaryLost();
-        assertEquals(250, governor.current());
+        assertEquals(800, governor.current());
         governor.onCanaryLost();
-        assertEquals(125, governor.current());
+        assertEquals(400, governor.current());   // 第二次折半正好落到下限
         assertEquals(2, governor.backoffCount());
 
         // 回升步长是上限的 1/10，必须比退避慢得多，否则会在限速线上振荡
         governor.onCanaryOk();
-        assertEquals(175, governor.current());
+        assertEquals(560, governor.current());   // 400 + 160
 
         for (int i = 0; i < 100; i++) {
             governor.onCanaryOk();
         }
-        assertEquals("回升不得越过调用方给的上限", 500, governor.current());
+        assertEquals("回升不得越过调用方给的上限", 1600, governor.current());
     }
 
     /**
-     * 退避不得跌破下限，否则扫描会慢到没有实用价值。
+     * 退避不得跌破下限 MIN_SYN_PER_SECOND(400)，否则扫描会慢到没有实用价值。
      */
     @Test
     public void adaptiveRate_neverDropsBelowFloor() {
@@ -194,7 +196,8 @@ public class PortsUtilsTest {
         for (int i = 0; i < 50; i++) {
             governor.onCanaryLost();
         }
-        assertTrue("速率不应跌到 20 SYN/s 以下，实际=" + governor.current(), governor.current() >= 20);
+        assertTrue("速率不应跌到下限 MIN_SYN_PER_SECOND(400) 以下，实际=" + governor.current(),
+                governor.current() >= 400);
         assertEquals(50, governor.lossCount());
     }
 
