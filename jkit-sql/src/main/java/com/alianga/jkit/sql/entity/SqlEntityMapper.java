@@ -12,8 +12,11 @@ import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Collection;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 把实体类解析成 {@link SqlEntityModel}。认 jkit 注解，并用反射认（无编译依赖）：
@@ -40,16 +43,20 @@ public final class SqlEntityMapper {
         String table = tableName(type);
         List<Field> fields = declaredFields(type);
         List<SqlEntityColumn> columns = new ArrayList<SqlEntityColumn>(fields.size());
+        Set<String> seen = new HashSet<String>();
         for (int i = 0; i < fields.size(); i++) {
             Field f = fields.get(i);
             if (skip(f)) {
                 continue;
             }
             if (isEmbedded(f)) {
-                columns.addAll(expandEmbedded(f));
+                List<SqlEntityColumn> nested = expandEmbedded(f);
+                for (int n = 0; n < nested.size(); n++) {
+                    addUniqueColumn(columns, seen, nested.get(n));
+                }
                 continue;
             }
-            columns.add(column(f));
+            addUniqueColumn(columns, seen, column(f));
         }
         return new SqlEntityModel(type, table, columns, tableIndexes(type), tableComment(type));
     }
@@ -119,8 +126,7 @@ public final class SqlEntityMapper {
                 || namedAnnotation(field, "jakarta.persistence.Id") != null
                 || tableId != null;
         boolean generated = field.getAnnotation(SqlGenerated.class) != null
-                || namedAnnotation(field, "javax.persistence.GeneratedValue") != null
-                || namedAnnotation(field, "jakarta.persistence.GeneratedValue") != null
+                || isJpaDbGenerated(field)
                 || isMpAutoId(tableId);
         SqlColumn col = field.getAnnotation(SqlColumn.class);
         Object jpaCol = namedAnnotation(field, "javax.persistence.Column");
@@ -215,6 +221,10 @@ public final class SqlEntityMapper {
         }
         if (id) {
             nullable = false;
+        }
+        if (generated && !canonical.integerFamily()) {
+            // UUID / 字符串主键由应用赋值，不能写成 AUTO_INCREMENT / IDENTITY
+            generated = false;
         }
         String comment = null;
         if (col != null && col.comment() != null && col.comment().length() > 0) {
@@ -428,6 +438,25 @@ public final class SqlEntityMapper {
         return out;
     }
 
+    private static boolean isJpaDbGenerated(Field field) {
+        Object gv = namedAnnotation(field, "javax.persistence.GeneratedValue");
+        if (gv == null) {
+            gv = namedAnnotation(field, "jakarta.persistence.GeneratedValue");
+        }
+        if (gv == null) {
+            return false;
+        }
+        String strategy = enumName(invoke(gv, "strategy"));
+        if ("UUID".equals(strategy) || "TABLE".equals(strategy)) {
+            return false;
+        }
+        String generator = stringAttr(gv, "generator");
+        if (generator != null && generator.toLowerCase().indexOf("uuid") >= 0) {
+            return false;
+        }
+        return true;
+    }
+
     private static boolean isMpAutoId(Object tableId) {
         if (tableId == null) {
             return false;
@@ -448,6 +477,21 @@ public final class SqlEntityMapper {
             return ((Enum<?>) value).name();
         }
         return String.valueOf(value);
+    }
+
+    /**
+     * 子类字段优先；同名列（忽略大小写）只保留第一次，避免 MappedSuperclass
+     * 与子类重复声明 {@code create_time} 导致建表失败。
+     */
+    private static void addUniqueColumn(List<SqlEntityColumn> columns, Set<String> seen,
+                                        SqlEntityColumn col) {
+        if (col == null || col.columnName() == null || col.columnName().isEmpty()) {
+            return;
+        }
+        if (!seen.add(col.columnName().toLowerCase(Locale.ROOT))) {
+            return;
+        }
+        columns.add(col);
     }
 
     private static List<Field> declaredFields(Class<?> type) {

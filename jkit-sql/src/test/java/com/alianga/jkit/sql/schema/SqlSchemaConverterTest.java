@@ -111,6 +111,18 @@ public class SqlSchemaConverterTest {
     }
 
     @Test
+    public void varcharAutoIncrementDroppedOnPostgres() {
+        ConversionResult r = SqlSchemaConverter.convert(
+                "CREATE TABLE t (id VARCHAR(32) NOT NULL AUTO_INCREMENT PRIMARY KEY)",
+                SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        String u = r.sql().toUpperCase();
+        assertTrue(r.sql(), u.contains("VARCHAR(32)"));
+        assertFalse(r.sql(), u.contains("IDENTITY"));
+        assertFalse(r.sql(), u.contains("SERIAL"));
+        assertFalse(r.sql(), u.contains("AUTO_INCREMENT"));
+    }
+
+    @Test
     public void mysqlAutoIncrementToPostgresIdentity() {
         ConversionResult r = SqlSchemaConverter.convert(
                 "CREATE TABLE t (id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, name VARCHAR(32))",

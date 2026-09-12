@@ -86,6 +86,11 @@ public final class AutoIncrementStrategy {
             return new Result(null, null, false);
         }
         String loc = columnName == null ? "" : columnName;
+        if (type != null && !type.integerFamily()) {
+            report.warn(ConversionWarning.Severity.INFO, loc,
+                    "非整数列无法使用 AUTO_INCREMENT/IDENTITY，已去掉自增子句");
+            return new Result(null, null, true);
+        }
         SqlDialect family = target == null ? SqlDialect.MYSQL : target.typeFamily();
         switch (family) {
             case MYSQL:

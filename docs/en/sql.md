@@ -375,7 +375,7 @@ String del = SqlEntities.deleteById(DemoUser.class, 1L, SqlDialect.MYSQL);
 String sel = SqlEntities.selectById(DemoUser.class, 1L, SqlDialect.MYSQL);
 ```
 
-`javax.persistence` / `jakarta.persistence` annotations (`@Entity` `@Table` `@Column` `@Id` `@GeneratedValue` `@Transient` `@Lob`) are recognised the same way. So is any `@Comment` (by simple name) and Hibernate `@ColumnDefault`.
+`javax.persistence` / `jakarta.persistence` annotations (`@Entity` `@Table` `@Column` `@Id` `@GeneratedValue` `@Transient` `@Lob`) are recognised the same way. So is any `@Comment` (by simple name) and Hibernate `@ColumnDefault`. `@GeneratedValue` becomes database identity only for integer columns and non-UUID strategies; `generator="system-uuid"` / `GenerationType.UUID` / string PKs keep `PRIMARY KEY` only. Duplicate column names inherited from a superclass / `MappedSuperclass` keep the subclass declaration.
 
 ### API
 

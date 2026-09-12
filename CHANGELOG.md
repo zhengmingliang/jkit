@@ -22,6 +22,8 @@
 
 ### jkit-sql
 - **新增**：实体扫描认任意简单名为 `Comment` 的注解（不绑定包名；类=表注释、字段=列注释，读 `value`/`comment`），以及 Hibernate `@ColumnDefault`（值作为 SQL 片段写入 `DEFAULT`）。无第三方编译依赖；`@SqlTable`/`@SqlColumn` 的 comment 优先。
+- **修复**：子类与 `MappedSuperclass` / 父类重复声明同名列（如 `create_time`）时只保留子类字段，避免 PostgreSQL `column specified more than once`。
+- **修复**：`@GeneratedValue(generator="system-uuid")` / `GenerationType.UUID` / 非整数 `@SqlGenerated` 不再生成 `AUTO_INCREMENT`/`IDENTITY`。PostgreSQL 对 `VARCHAR` 主键写 `GENERATED ALWAYS AS IDENTITY` 会语法错误。
 - **修复**：自动生成的索引名 / 序列名 / 触发器名按方言标识符长度上限截断。经典 Oracle（`ORACLE`）上限 30 字符，超长时保留前缀并追加 4 位十六进制散列，同表多个未命名索引仍不撞名。新增 `SqlDialectSpec.maxIdentifierLength` / `fitIdentifier`；`SqlEntities.indexName` / `createIndex` / `sequenceName` 增加方言重载。
 - **修复**：`@Index` / `@SqlTable(indexes)` 未写名字时不再一律用 `{table}_idx`。改为 `{table}_{col}_idx`（多列用下划线拼接），同表多个未命名索引不再撞名。公开 `SqlEntities.indexName`。
 - **修复**：`SQL.format` pretty 模式对 `CREATE TABLE` 按列换行缩进（此前列清单始终单行，看起来像没 format）。`toSqlString` / compact 仍单行。

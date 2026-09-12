@@ -551,7 +551,7 @@ String all = SqlEntities.createTables(ordered, SqlDialect.POSTGRES);
 SqlEntities.dropTable(DemoUser.class, SqlDialect.MYSQL);   // DROP TABLE demo_user
 ```
 
-有 `javax.persistence` / `jakarta.persistence` 时同样识别 `@Entity` `@Table` `@Column` `@Id` `@GeneratedValue` `@Transient` `@Lob`（反射按类名，无编译依赖）。任意 `@Comment`、Hibernate `@ColumnDefault` 同此。
+有 `javax.persistence` / `jakarta.persistence` 时同样识别 `@Entity` `@Table` `@Column` `@Id` `@GeneratedValue` `@Transient` `@Lob`（反射按类名，无编译依赖）。任意 `@Comment`、Hibernate `@ColumnDefault` 同此。`@GeneratedValue` 仅在整数列且策略不是 UUID 时写成数据库自增；`generator="system-uuid"` / `GenerationType.UUID` / 字符串主键只保留 `PRIMARY KEY`。子类与父类（含 JPA `MappedSuperclass`）重复的列名只保留子类声明。
 
 `jkit-sql` 只生成 SQL。启动时连库建表 / 加列见独立模块 [jkit-sql-auto](./sql-auto.md)。
 

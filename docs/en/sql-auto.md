@@ -189,6 +189,10 @@ Oracle ≤11g (`ORACLE`) has no IDENTITY: auto-increment PKs become `CREATE SEQU
 
 Unnamed indexes default to `{table}_{col}_idx`. Classic Oracle identifiers are capped at 30 characters; longer names are truncated and given a 4-hex hash (`ORACLE12` allows 128, so they usually stay intact). Explicit `name:` values that still overflow are fitted the same way. Sequence and trigger names use the same rule.
 
+UUID / string primary keys (`@GeneratedValue(generator="system-uuid")`, `GenerationType.UUID`, non-integer `@SqlGenerated`) do not emit `IDENTITY` / `AUTO_INCREMENT` / `SERIAL` — only `PRIMARY KEY`. PostgreSQL rejects `VARCHAR … GENERATED ALWAYS AS IDENTITY`.
+
+If a subclass restates a superclass / `MappedSuperclass` column such as `create_time`, the name is emitted once to avoid `column specified more than once`.
+
 Some products are narrower than the first-class dialect. Turn the matching DDL off:
 
 - Old OpenGauss rejects `GENERATED … IDENTITY`: `postgresIdentityStyle(SERIAL)`

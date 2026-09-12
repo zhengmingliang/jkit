@@ -4,6 +4,7 @@ import com.alianga.jkit.sql.SQL;
 import com.alianga.jkit.sql.SqlDialect;
 import com.alianga.jkit.sql.entity.fixture.AnyCommentUser;
 import com.alianga.jkit.sql.entity.fixture.JpaAuth;
+import com.alianga.jkit.sql.entity.fixture.JpaUuidFile;
 import com.alianga.jkit.sql.entity.fixture.JpaOrg;
 import com.alianga.jkit.sql.entity.fixture.JpaUser;
 import com.alianga.jkit.sql.entity.fixture.MbAliasUser;
@@ -17,6 +18,7 @@ import org.hibernate.annotations.Comment;
 import org.junit.Test;
 
 import java.math.BigDecimal;
+import java.util.Date;
 import java.util.List;
 
 import static org.junit.Assert.assertEquals;
@@ -275,6 +277,119 @@ public class SqlEntitiesTest {
         assertTrue(idx, idx.contains("idx_email"));
         assertEquals("idx_email", SqlEntities.indexName("demo_user", "idx_email:email"));
         assertEquals("demo_user_email_idx", SqlEntities.indexName("demo_user", "email"));
+    }
+
+    @Test
+    public void subclassDoesNotRepeatSuperclassColumns() {
+        class BaseDoc {
+            Date createTime;
+            Date updateTime;
+            Boolean canView;
+            String tenantId;
+        }
+        @SqlTable(name = "file_source")
+        class FileSource extends BaseDoc {
+            @SqlId
+            @SqlColumn(length = 32)
+            String id;
+            String title;
+            Date createTime;
+            Date updateTime;
+            String creatorId;
+        }
+        SqlEntityModel model = SqlEntities.inspect(FileSource.class);
+        int createTime = 0;
+        int updateTime = 0;
+        boolean tenant = false;
+        boolean canView = false;
+        boolean creator = false;
+        List<SqlEntityColumn> cols = model.columns();
+        for (int i = 0; i < cols.size(); i++) {
+            String n = cols.get(i).columnName();
+            if ("create_time".equals(n)) {
+                createTime++;
+            }
+            if ("update_time".equals(n)) {
+                updateTime++;
+            }
+            if ("tenant_id".equals(n)) {
+                tenant = true;
+            }
+            if ("can_view".equals(n)) {
+                canView = true;
+            }
+            if ("creator_id".equals(n)) {
+                creator = true;
+            }
+        }
+        assertEquals(1, createTime);
+        assertEquals(1, updateTime);
+        assertTrue(tenant);
+        assertTrue(canView);
+        assertTrue(creator);
+        String pg = SqlEntities.createTable(FileSource.class, SqlDialect.POSTGRES);
+        int first = pg.indexOf("create_time");
+        assertTrue(pg, first >= 0);
+        assertEquals(pg, -1, pg.indexOf("create_time", first + 1));
+        int u0 = pg.indexOf("update_time");
+        assertTrue(pg, u0 >= 0);
+        assertEquals(pg, -1, pg.indexOf("update_time", u0 + 1));
+    }
+
+    @Test
+    public void stringUuidGeneratedValueIsNotIdentity() {
+        SqlEntityModel model = SqlEntities.inspect(JpaUuidFile.class);
+        assertEquals("file_storage", model.tableName());
+        assertEquals("id", model.idColumn().columnName());
+        assertTrue(model.idColumn().primaryKey());
+        assertFalse(model.idColumn().autoIncrement());
+        assertEquals(CanonicalType.VARCHAR, model.idColumn().canonical());
+        assertEquals(Integer.valueOf(32), model.idColumn().precision());
+
+        String pg = SqlEntities.createTable(JpaUuidFile.class, SqlDialect.POSTGRES);
+        assertTrue(pg, pg.contains("VARCHAR(32)"));
+        assertTrue(pg.toUpperCase(), pg.toUpperCase().contains("PRIMARY KEY"));
+        assertFalse(pg, pg.toUpperCase().contains("IDENTITY"));
+        assertFalse(pg, pg.toUpperCase().contains("SERIAL"));
+        assertFalse(pg, pg.toUpperCase().contains("AUTO_INCREMENT"));
+
+        String mysql = SqlEntities.createTable(JpaUuidFile.class, SqlDialect.MYSQL);
+        assertFalse(mysql, mysql.toUpperCase().contains("AUTO_INCREMENT"));
+
+        String oracle = SqlEntities.createTable(JpaUuidFile.class, SqlDialect.ORACLE);
+        assertFalse(oracle, oracle.toUpperCase().contains("SEQUENCE"));
+        assertFalse(oracle, oracle.toUpperCase().contains("IDENTITY"));
+    }
+
+    @Test
+    public void sqlGeneratedOnStringIsNotIdentity() {
+        @SqlTable(name = "t_uuid")
+        class UuidRow {
+            @SqlId
+            @SqlGenerated
+            String id;
+            String name;
+        }
+        SqlEntityModel model = SqlEntities.inspect(UuidRow.class);
+        assertFalse(model.idColumn().autoIncrement());
+        String pg = SqlEntities.createTable(UuidRow.class, SqlDialect.POSTGRES);
+        assertFalse(pg, pg.toUpperCase().contains("IDENTITY"));
+        assertTrue(pg.toUpperCase(), pg.toUpperCase().contains("PRIMARY KEY"));
+    }
+
+    @Test
+    public void jpaUuidStrategyIsNotIdentity() {
+        @javax.persistence.Entity
+        @javax.persistence.Table(name = "t_uuid_strategy")
+        class UuidStrategy {
+            @javax.persistence.Id
+            @javax.persistence.GeneratedValue(strategy = javax.persistence.GenerationType.UUID)
+            String id;
+        }
+        SqlEntityModel model = SqlEntities.inspect(UuidStrategy.class);
+        assertFalse(model.idColumn().autoIncrement());
+        String pg = SqlEntities.createTable(UuidStrategy.class, SqlDialect.POSTGRES);
+        assertFalse(pg, pg.toUpperCase().contains("IDENTITY"));
     }
 
     @Test

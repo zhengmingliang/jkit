@@ -212,6 +212,55 @@ public class SqlAutoDdlTest {
     }
 
     @Test
+    public void postgresDuplicateCreateTimeFromSuperclassIsDeduped() {
+        class Base {
+            java.util.Date createTime;
+            java.util.Date updateTime;
+            String tenantId;
+        }
+        @SqlTable(name = "file_source")
+        class FileSource extends Base {
+            @SqlId
+            @SqlGenerated
+            String id;
+            String title;
+            java.util.Date createTime;
+            java.util.Date updateTime;
+        }
+        SqlEntityModel model = SqlEntities.inspect(FileSource.class);
+        List<SqlAutoChange> pg = SqlAutoDdl.planTable(model, null, SqlDialect.POSTGRES,
+                SqlAutoOptions.defaults());
+        String sql = pg.get(0).sql();
+        int first = sql.indexOf("create_time");
+        assertTrue(sql, first >= 0);
+        assertEquals(sql, -1, sql.indexOf("create_time", first + 1));
+        assertTrue(sql, sql.contains("tenant_id"));
+    }
+
+    @Test
+    public void postgresVarcharUuidPkHasNoIdentity() {
+        @SqlTable(name = "file_storage")
+        class FileStorage {
+            @SqlId
+            @SqlGenerated
+            String id;
+            String sourceName;
+        }
+        SqlEntityModel model = SqlEntities.inspect(FileStorage.class);
+        List<SqlAutoChange> pg = SqlAutoDdl.planTable(model, null, SqlDialect.POSTGRES,
+                SqlAutoOptions.defaults());
+        String sql = pg.get(0).sql().toUpperCase();
+        assertTrue(pg.get(0).sql(), sql.contains("VARCHAR"));
+        assertTrue(pg.get(0).sql(), sql.contains("PRIMARY KEY"));
+        assertFalse(pg.get(0).sql(), sql.contains("IDENTITY"));
+        assertFalse(pg.get(0).sql(), sql.contains("SERIAL"));
+        List<SqlAutoChange> oracle = SqlAutoDdl.planTable(model, null, SqlDialect.ORACLE,
+                SqlAutoOptions.defaults());
+        assertFalse(kind(oracle, SqlAutoChange.Kind.SEQUENCE));
+        assertFalse(sql(oracle).toUpperCase().contains("IDENTITY"));
+    }
+
+    @Test
     public void unnamedIndexesDoNotShareName() {
         @SqlTable(name = "t_schedule_auth", indexes = {"resource_id", "permission_id"})
         class Auth {

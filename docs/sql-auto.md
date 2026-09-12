@@ -189,6 +189,10 @@ Oracle ≤11g（方言 `ORACLE`）没有 IDENTITY：自增主键改成 `CREATE S
 
 未命名索引默认 `{table}_{col}_idx`。经典 Oracle 标识符上限 30 字符，超长时自动截断并追加 4 位散列（`ORACLE12` 为 128，一般不必截）。显式写了 `name:` 且仍超长的同样截断。序列名 / 触发器名走同一规则。
 
+UUID / 字符串主键（`@GeneratedValue(generator="system-uuid")`、`GenerationType.UUID`、非整数 `@SqlGenerated`）不会写成 `IDENTITY`/`AUTO_INCREMENT`/`SERIAL`，只保留 `PRIMARY KEY`。PostgreSQL 对 `VARCHAR … GENERATED ALWAYS AS IDENTITY` 会直接语法错误。
+
+子类与父类（`MappedSuperclass`）同时声明 `create_time` 这类同名列时，只生成一次，避免 `column specified more than once`。
+
 部分产品建表能力比一等方言窄，可用选项关掉对应 DDL：
 
 - OpenGauss 老版本不认 `GENERATED … IDENTITY`：`postgresIdentityStyle(SERIAL)`
