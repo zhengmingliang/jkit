@@ -378,6 +378,21 @@ public class SqlBusinessScenarioTest {
         assertEquals(SQL.tables(first), SQL.tables(second));
     }
 
+    @Test
+    public void prettyFormatCreateTableBreaksColumnsOntoLines() {
+        String sql = "CREATE TABLE t (id INT PRIMARY KEY, name VARCHAR(32) NOT NULL, age INT)";
+        String pretty = SQL.format(sql + ";");
+        assertTrue(pretty, pretty.contains("\n"));
+        assertTrue(pretty, pretty.contains("  id INT PRIMARY KEY"));
+        assertTrue(pretty, pretty.contains("  name VARCHAR(32) NOT NULL"));
+        assertTrue(pretty, pretty.contains("  age INT"));
+        String compact = SQL.toSqlString(SQL.parse(sql));
+        assertFalse(compact, compact.contains("\n"));
+        assertTrue(compact, compact.contains("id INT PRIMARY KEY, name VARCHAR(32) NOT NULL, age INT"));
+        SqlStatement roundTrip = SQL.parse(pretty);
+        assertEquals(SQL.tables(SQL.parse(sql)), SQL.tables(roundTrip));
+    }
+
     // ------------------------------------------------------------------
     // 场景 12：遗留模板占位符迁移——@xx@ / %s 风格 SQL 收编解析
     // ------------------------------------------------------------------

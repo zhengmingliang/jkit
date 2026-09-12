@@ -218,7 +218,7 @@ stmt.accept(new SqlAstVisitor() {
 `format` / `toSqlString` write the AST back out (whitespace and comments are not preserved). **Semantic round-trip** (`parse → format → parse`) guarantees that `type()`, `tables()` (case-insensitive), and `isReadOnly()` match the original; the golden corpus `SqlGoldenCorpusTest` covers this fully. **Word-level fidelity** is additionally enforced by `SqlRoundTripFidelityTest`: the formatted text must equal the original after normalization (strip comments / strip all whitespace / drop standalone `AS` / unify case — only pure layout differences are tolerated), across 118 tricky statements covering JOIN modifiers, DDL keywords, multi-group `RENAME`, quoting styles, DML modifiers, and JDBC escapes — silently **dropped words** (e.g. `NATURAL LEFT JOIN` losing `LEFT`, `STRAIGHT_JOIN` losing `STRAIGHT`) fail the test outright. The same method is applied in batch to all 379 corpus lines by `SqlRoundTripFidelityCorpusTest` in `tools-test` (with extra semantic-equivalence normalizations and 5 justified whitelist entries, hard-asserted).
 
 ```java
-SQL.format(stmt);                           // newlines and indentation
+SQL.format(stmt);                           // newlines and indentation (SELECT clauses; CREATE TABLE columns)
 SQL.toSqlString(stmt);                      // compact single line
 SQL.format(stmt, SqlDialect.MYSQL, true);
 

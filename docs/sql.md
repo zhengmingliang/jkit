@@ -272,7 +272,7 @@ stmt.accept(new SqlAstVisitor() {
 `format` / `toSqlString` 是 AST 回写（不保留空白与注释）；指定目标方言时若分页形态不兼容会先适配再回写（见上「统计与改写」）。**语义往返**（`parse → format → parse`）保证 `type()`、`tables()`（忽略大小写）、`isReadOnly()` 与原文一致；黄金集 `SqlGoldenCorpusTest` 全覆盖。**词级保真**由 `SqlRoundTripFidelityTest` 额外保证：回写文本与原文**归一化后逐字等价**（去注释 / 去全部空白 / 去独立 `AS` / 统一大小写，只容忍纯排版差异），覆盖 JOIN 修饰符、DDL 关键字、`RENAME` 多组、引号形态、DML 修饰符、JDBC 转义等 118 条坑位语料——回写**丢词**（如 `NATURAL LEFT JOIN` 丢 `LEFT`、`STRAIGHT_JOIN` 丢 `STRAIGHT`）会直接抓出，不会静默通过。同一方法在 `tools-test` 由 `SqlRoundTripFidelityCorpusTest` 批量应用到全部 379 条文件语料（另加语义等价写法归一与 5 条有据白名单，硬断言）。
 
 ```java
-SQL.format(stmt);                           // 换行缩进
+SQL.format(stmt);                           // 换行缩进（SELECT 子句换行；CREATE TABLE 按列缩进）
 SQL.toSqlString(stmt);                      // 紧凑单行
 SQL.format(stmt, SqlDialect.MYSQL, true);
 

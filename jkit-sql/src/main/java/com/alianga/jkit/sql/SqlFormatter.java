@@ -1053,20 +1053,7 @@ public final class SqlFormatter {
         }
         if (ddl.type() == SqlStatementType.CREATE && isTableDdl(ddl) && ddl.query() == null
                 && (!ddl.columnDefinitions().isEmpty() || !ddl.columns().isEmpty())) {
-            sp();
-            out.append('(');
-            if (!ddl.columnDefinitions().isEmpty()) {
-                for (int i = 0; i < ddl.columnDefinitions().size(); i++) {
-                    if (i > 0) {
-                        out.append(',');
-                        sp();
-                    }
-                    out.append(ddl.columnDefinitions().get(i));
-                }
-            } else {
-                commaIdents(ddl.columns());
-            }
-            out.append(')');
+            writeCreateTableColumns(ddl);
         }
         if (ddl.type() == SqlStatementType.CREATE && ddl.likeTable() != null) {
             // CREATE TABLE t2 LIKE t1
@@ -1134,6 +1121,39 @@ public final class SqlFormatter {
             out.append(ddl.tail());
         }
         // ALTER 的 tail 由 writeAlterClauses 输出，避免重复
+    }
+
+    /**
+     * CREATE TABLE 列清单：pretty 时每列一行并缩进，compact 保持单行。
+     */
+    private void writeCreateTableColumns(SqlDdlStatement ddl) {
+        sp();
+        out.append('(');
+        if (!ddl.columnDefinitions().isEmpty()) {
+            if (pretty) {
+                indent++;
+                for (int i = 0; i < ddl.columnDefinitions().size(); i++) {
+                    if (i > 0) {
+                        out.append(',');
+                    }
+                    nl();
+                    out.append(ddl.columnDefinitions().get(i));
+                }
+                indent--;
+                nl();
+            } else {
+                for (int i = 0; i < ddl.columnDefinitions().size(); i++) {
+                    if (i > 0) {
+                        out.append(',');
+                        sp();
+                    }
+                    out.append(ddl.columnDefinitions().get(i));
+                }
+            }
+        } else {
+            commaIdents(ddl.columns());
+        }
+        out.append(')');
     }
 
     private void writeTriggerOrEvent(SqlDdlStatement ddl) {
