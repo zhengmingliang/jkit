@@ -155,4 +155,17 @@ public class SqlDialectWrapperTest {
         };
         assertEquals("TOP", top.preferredLimitStyle());
     }
+
+    @Test
+    public void fitIdentifierFollowsOverriddenMaxLength() {
+        SqlDialectSpec cap12 = new SqlDialectWrapper(SqlDialect.ORACLE) {
+            @Override
+            public int maxIdentifierLength() {
+                return 12;
+            }
+        };
+        String fitted = cap12.fitIdentifier("t_schedule_auth_resource_id_idx");
+        assertEquals(12, fitted.length());
+        assertEquals(30, new SqlDialectWrapper(SqlDialect.ORACLE).maxIdentifierLength());
+    }
 }

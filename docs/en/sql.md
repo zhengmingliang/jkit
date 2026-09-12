@@ -394,10 +394,11 @@ String sel = SqlEntities.selectById(DemoUser.class, 1L, SqlDialect.MYSQL);
 | `selectById(Class<?>, Object, SqlDialect)` / `selectAll(Class<?>, SqlDialect)` | Select by id / select all |
 | `columnSql(SqlEntityColumn, SqlDialect, boolean inlinePk)` | One column definition; pass `inlinePk=false` for `ALTER TABLE … ADD` |
 | `columnTypeSql(SqlEntityColumn, SqlDialect)` | Type text only, for schema comparison |
-| `createIndex(String tableName, String spec)` | A standalone `CREATE INDEX`; `spec` is `name:col1,col2` or `col1,col2` (unnamed → `{table}_{col}_idx`) |
-| `indexName(String tableName, String spec)` | Resolve / generate the index name, same rules as `createIndex` |
+| `createIndex(String tableName, String spec)` / `createIndex(..., SqlDialect)` | A standalone `CREATE INDEX`; `spec` is `name:col1,col2` or `col1,col2` (unnamed → `{table}_{col}_idx`). With a dialect, names are fitted to the identifier length limit (30 for classic Oracle) |
+| `indexName(String tableName, String spec)` / `indexName(..., SqlDialect)` | Resolve / generate the index name, same rules as `createIndex` |
 | `extraSql(SqlEntityModel, SqlDialect, SqlSchemaConvertOptions)` | Post-create extras: `COMMENT ON` / SQL Server extended properties / SEQUENCE on dialects without IDENTITY |
-| `sequenceSql(String table, SqlEntityColumn, SqlDialect)` | SEQUENCE (+ Oracle trigger) when the dialect has no IDENTITY; otherwise `null` |
+| `sequenceSql(String table, SqlEntityColumn, SqlDialect)` | SEQUENCE (+ Oracle trigger) when the dialect has no IDENTITY; otherwise `null`. Sequence / trigger names are fitted to the dialect limit |
+| `sequenceName(String table, String column)` / `sequenceName(..., SqlDialect)` | `{table}_{column}_seq`; with a dialect, fitted to the identifier limit |
 
 `columnSql` / `columnTypeSql` / `createIndex` / `extraSql` / `sequenceSql` exist for schema diffing, incremental `ALTER TABLE … ADD`, and comment / sequence extras — that is exactly what the auto-DDL module builds on:
 

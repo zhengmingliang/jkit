@@ -91,6 +91,9 @@ SqlDialect.ORACLE12.supportsFetchFirst(); // true
 SqlDialect.ORACLE.supportsRownum();       // true
 SqlDialect.POSTGRES.pipesAreConcat();     // true
 SqlDialect.MYSQL.quoteIdent("user");      // `user`
+SqlDialect.ORACLE.maxIdentifierLength();  // 30
+SqlDialect.ORACLE.fitIdentifier("t_schedule_auth_resource_id_idx");
+// 超长则保留前缀 + 4 位散列，保证 ≤30
 ```
 
 内置方言不够用时，用 `SqlDialectWrapper` 基于某个方言微调个别能力（`SQL.parse*` / `format` / `setPage` / `wall` 等所有方言参数都接受 `SqlDialectSpec`）：
@@ -106,7 +109,7 @@ SqlDialectSpec ansiQuotes = new SqlDialectWrapper(SqlDialect.MYSQL) {
 SQL.parse("SELECT \"id\" FROM t", ansiQuotes);  // "id" 按标识符解析
 ```
 
-可覆写的能力覆盖解析到改写全链路：引号（`identQuoteOpen`；`identQuoteClose` / `quoteIdent` 是派生，只改开引号为 `[` 时闭引号自动变 `]`）、`||` 语义（`pipesAsOr`；`pipesAreConcat` 派生）、反斜杠转义（`backslashEscapes`）、方括号标识符（`bracketIdentifiers`）、`~` 正则（`supportsTildeRegex`）、`#` 注释（`hashLineComment`）、分页形态（`supportsLimitOffset/Top/FetchFirst/Rownum/CommaLimitOffset`）。`preferredLimitStyle()` 是查询用派生值，**不**驱动 `setPage`。直接实现 `SqlDialectSpec` 时未覆写的方法按 ANSI 基线取默认值。
+可覆写的能力覆盖解析到改写全链路：引号（`identQuoteOpen`；`identQuoteClose` / `quoteIdent` 是派生，只改开引号为 `[` 时闭引号自动变 `]`）、`||` 语义（`pipesAsOr`；`pipesAreConcat` 派生）、反斜杠转义（`backslashEscapes`）、方括号标识符（`bracketIdentifiers`）、`~` 正则（`supportsTildeRegex`）、`#` 注释（`hashLineComment`）、分页形态（`supportsLimitOffset/Top/FetchFirst/Rownum/CommaLimitOffset`）、标识符长度（`maxIdentifierLength`；`fitIdentifier` 派生，超长保留前缀并追加 4 位散列）。`preferredLimitStyle()` 是查询用派生值，**不**驱动 `setPage`。直接实现 `SqlDialectSpec` 时未覆写的方法按 ANSI 基线取默认值。
 
 非法 SQL 抛 `SqlParseException`，带行号、列号和附近原文，不返回半棵树。
 
@@ -512,10 +515,11 @@ String sel = SqlEntities.selectById(DemoUser.class, 1L, SqlDialect.MYSQL);
 | `selectById(Class<?>, Object, SqlDialect)` / `selectAll(Class<?>, SqlDialect)` | 按主键查 / 全表查 |
 | `columnSql(SqlEntityColumn, SqlDialect, boolean inlinePk)` | 单列定义文本；`ALTER TABLE … ADD` 传 `inlinePk=false` |
 | `columnTypeSql(SqlEntityColumn, SqlDialect)` | 只取类型文本，供结构对比 |
-| `createIndex(String tableName, String spec)` | 单独一条 `CREATE INDEX`；`spec` 为 `name:col1,col2` 或 `col1,col2`（未写名字则 `{table}_{col}_idx`） |
-| `indexName(String tableName, String spec)` | 解析 / 生成索引名，与 `createIndex` 同一规则 |
+| `createIndex(String tableName, String spec)` / `createIndex(..., SqlDialect)` | 单独一条 `CREATE INDEX`；`spec` 为 `name:col1,col2` 或 `col1,col2`（未写名字则 `{table}_{col}_idx`）。带方言时按标识符长度上限截断（经典 Oracle 30 字符） |
+| `indexName(String tableName, String spec)` / `indexName(..., SqlDialect)` | 解析 / 生成索引名，与 `createIndex` 同一规则 |
 | `extraSql(SqlEntityModel, SqlDialect, SqlSchemaConvertOptions)` | 建表附录：`COMMENT ON` / SQL Server 扩展属性 / 无 IDENTITY 方言的 SEQUENCE |
-| `sequenceSql(String table, SqlEntityColumn, SqlDialect)` | 无 IDENTITY 时生成 SEQUENCE（+ Oracle 触发器）；否则 `null` |
+| `sequenceSql(String table, SqlEntityColumn, SqlDialect)` | 无 IDENTITY 时生成 SEQUENCE（+ Oracle 触发器）；否则 `null`。序列名 / 触发器名同样按方言上限截断 |
+| `sequenceName(String table, String column)` / `sequenceName(..., SqlDialect)` | `{table}_{column}_seq`；带方言时按上限截断 |
 
 `columnSql` / `columnTypeSql` / `createIndex` / `extraSql` / `sequenceSql` 给「按实体做结构对比 / 增量加列 / 附录注释与序列」用——自动建表模块靠它们拼 `ALTER TABLE … ADD` 和附录：
 

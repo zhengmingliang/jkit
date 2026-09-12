@@ -123,7 +123,7 @@ public final class SqlAutoDdl {
             if (SqlEntities.sequenceSql(model.tableName(), col, dialect) == null) {
                 continue;
             }
-            String name = SqlEntities.sequenceName(model.tableName(), col.columnName());
+            String name = SqlEntities.sequenceName(model.tableName(), col.columnName(), dialect);
             if (dialect == SqlDialect.ORACLE || dialect == SqlDialect.ORACLE12) {
                 out.add("DROP SEQUENCE " + name);
             } else {
@@ -462,14 +462,14 @@ public final class SqlAutoDdl {
         List<String> indexes = model.indexes();
         for (int i = 0; i < indexes.size(); i++) {
             String spec = indexes.get(i);
-            String name = SqlEntities.indexName(model.tableName(), spec);
+            String name = SqlEntities.indexName(model.tableName(), spec, dialect);
             if (coveredByUniqueColumn(model, spec)) {
                 continue;
             }
             if (live != null && indexPresent(live, name, spec)) {
                 continue;
             }
-            String sql = SqlEntities.createIndex(model.tableName(), spec);
+            String sql = SqlEntities.createIndex(model.tableName(), spec, dialect);
             if (options.quoteIdentifiers() && dialect != null) {
                 sql = sql.replace(" ON " + model.tableName() + " ",
                         " ON " + dialect.quoteIdent(model.tableName()) + " ");

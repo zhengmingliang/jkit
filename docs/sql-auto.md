@@ -187,6 +187,8 @@ SqlAuto.drop(SqlAutoOptions.defaults().url(url).entities(User.class));
 
 Oracle ≤11g（方言 `ORACLE`）没有 IDENTITY：自增主键改成 `CREATE SEQUENCE {table}_{column}_seq` + `BEFORE INSERT` 触发器；`CREATE_DROP` / `drop` 会先 `DROP SEQUENCE` 再删表。达梦（`DAMENG`）列上写 `IDENTITY`。Oracle 12c+ 仍用 `GENERATED … AS IDENTITY`。
 
+未命名索引默认 `{table}_{col}_idx`。经典 Oracle 标识符上限 30 字符，超长时自动截断并追加 4 位散列（`ORACLE12` 为 128，一般不必截）。显式写了 `name:` 且仍超长的同样截断。序列名 / 触发器名走同一规则。
+
 部分产品建表能力比一等方言窄，可用选项关掉对应 DDL：
 
 - OpenGauss 老版本不认 `GENERATED … IDENTITY`：`postgresIdentityStyle(SERIAL)`

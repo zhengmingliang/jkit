@@ -139,6 +139,32 @@ public class SqlDialectTest {
     }
 
     @Test
+    public void maxIdentifierLengthByDialect() {
+        assertEquals(30, SqlDialect.ORACLE.maxIdentifierLength());
+        assertEquals(128, SqlDialect.ORACLE12.maxIdentifierLength());
+        assertEquals(64, SqlDialect.MYSQL.maxIdentifierLength());
+        assertEquals(63, SqlDialect.POSTGRES.maxIdentifierLength());
+        assertEquals(128, SqlDialect.SQLSERVER.maxIdentifierLength());
+        assertEquals(128, SqlDialect.DAMENG.maxIdentifierLength());
+        assertEquals(128, SqlDialect.ANSI.maxIdentifierLength());
+        assertEquals(Integer.MAX_VALUE, SqlDialect.SQLITE.maxIdentifierLength());
+    }
+
+    @Test
+    public void fitIdentifierTruncatesWithStableHash() {
+        assertEquals("short_idx", SqlDialect.ORACLE.fitIdentifier("short_idx"));
+        String raw = "t_schedule_auth_resource_id_idx";
+        assertEquals(31, raw.length());
+        assertEquals("t_schedule_auth_resource_2870", SqlDialect.ORACLE.fitIdentifier(raw));
+        assertEquals("t_schedule_auth_permissio_920f",
+                SqlDialect.ORACLE.fitIdentifier("t_schedule_auth_permission_id_idx"));
+        assertFalse(SqlDialect.ORACLE.fitIdentifier(raw)
+                .equals(SqlDialect.ORACLE.fitIdentifier("t_schedule_auth_permission_id_idx")));
+        assertEquals(raw, SqlDialect.MYSQL.fitIdentifier(raw));
+        assertEquals(raw, SqlDialect.ORACLE12.fitIdentifier(raw));
+    }
+
+    @Test
     public void quoteIdentIsSingleSource() {
         assertEquals("`user`", SqlDialect.MYSQL.quoteIdent("user"));
         assertEquals("\"user\"", SqlDialect.POSTGRES.quoteIdent("user"));

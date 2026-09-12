@@ -86,7 +86,7 @@ public final class ColumnDefinitionConverter {
             if (auto.dropped() && options.generateOracleSequence()
                     && target.typeFamily() == SqlDialect.ORACLE
                     && tableName != null && !tableName.isEmpty()) {
-                report.extraSql(oracleSequenceSql(tableName, column.columnName()));
+                report.extraSql(oracleSequenceSql(tableName, column.columnName(), target));
             }
         }
         String rendered = render(column, typeText, afterUnsigned, auto, source, target, options, report);
@@ -124,9 +124,9 @@ public final class ColumnDefinitionConverter {
         }
     }
 
-    private static String oracleSequenceSql(String table, String column) {
-        String seq = table + "_" + column + "_seq";
-        String trg = table + "_" + column + "_bi";
+    private static String oracleSequenceSql(String table, String column, SqlDialectSpec target) {
+        String seq = target.fitIdentifier(table + "_" + column + "_seq");
+        String trg = target.fitIdentifier(table + "_" + column + "_bi");
         return "CREATE SEQUENCE " + seq
                 + "; CREATE OR REPLACE TRIGGER " + trg
                 + " BEFORE INSERT ON " + table
@@ -307,7 +307,7 @@ public final class ColumnDefinitionConverter {
             }
         }
         if (mysqlOnlyTableConstraint(raw) && !supportsMysqlIndex(target.typeFamily())) {
-            String idx = toCreateIndex(raw, tableName);
+            String idx = toCreateIndex(raw, tableName, target);
             if (idx != null) {
                 report.extraSql(idx);
                 report.warn(ConversionWarning.Severity.INFO, tableName,
@@ -324,6 +324,10 @@ public final class ColumnDefinitionConverter {
     }
 
     static String toCreateIndex(String raw, String tableName) {
+        return toCreateIndex(raw, tableName, null);
+    }
+
+    static String toCreateIndex(String raw, String tableName, SqlDialectSpec target) {
         if (tableName == null || tableName.isEmpty() || raw == null) {
             return null;
         }
@@ -354,6 +358,9 @@ public final class ColumnDefinitionConverter {
         }
         if (idxName.isEmpty() || idxName.startsWith("(")) {
             idxName = tableName + "_idx";
+        }
+        if (target != null) {
+            idxName = target.fitIdentifier(idxName);
         }
         return "CREATE INDEX " + idxName + " ON " + tableName + " " + cols;
     }

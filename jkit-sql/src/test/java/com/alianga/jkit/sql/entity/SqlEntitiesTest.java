@@ -93,6 +93,11 @@ public class SqlEntitiesTest {
         assertFalse(SqlEntities.needsSequenceFallback(SqlDialect.DAMENG));
         assertFalse(SqlEntities.needsSequenceFallback(SqlDialect.MYSQL));
         assertEquals("cmt_id_seq", SqlEntities.sequenceName("cmt", "id"));
+        assertEquals("cmt_id_seq", SqlEntities.sequenceName("cmt", "id", SqlDialect.ORACLE));
+        String longSeq = SqlEntities.sequenceName("t_schedule_auth", "permission_id", SqlDialect.ORACLE);
+        assertTrue(longSeq, longSeq.length() <= 30);
+        assertEquals("t_schedule_auth_permission_id_seq",
+                SqlEntities.sequenceName("t_schedule_auth", "permission_id"));
         assertTrue(SqlEntities.sequenceSql("cmt", SqlEntities.inspect(Cmt.class).idColumn(),
                 SqlDialect.ORACLE).contains("CREATE SEQUENCE"));
         assertNull(SqlEntities.sequenceSql("cmt", SqlEntities.inspect(Cmt.class).idColumn(),
@@ -285,6 +290,22 @@ public class SqlEntitiesTest {
         assertTrue(ddl, ddl.contains("t_schedule_auth_resource_id_idx"));
         assertTrue(ddl, ddl.contains("t_schedule_auth_permission_id_idx"));
         assertFalse(ddl, ddl.contains("t_schedule_auth_idx ON"));
+        String oracle = SqlEntities.createTable(JpaAuth.class, SqlDialect.ORACLE);
+        String o0 = SqlEntities.indexName(model.tableName(), model.indexes().get(0), SqlDialect.ORACLE);
+        String o1 = SqlEntities.indexName(model.tableName(), model.indexes().get(1), SqlDialect.ORACLE);
+        assertEquals("t_schedule_auth_resource_2870", o0);
+        assertEquals("t_schedule_auth_permissio_920f", o1);
+        assertTrue(o0.length() <= 30);
+        assertTrue(o1.length() <= 30);
+        assertFalse(o0.equals(o1));
+        assertFalse(oracle, oracle.contains("t_schedule_auth_resource_id_idx"));
+        assertFalse(oracle, oracle.contains("t_schedule_auth_permission_id_idx"));
+        assertTrue(oracle, oracle.contains("CREATE INDEX " + o0 + " ON t_schedule_auth (resource_id)"));
+        assertTrue(oracle, oracle.contains("CREATE INDEX " + o1 + " ON t_schedule_auth (permission_id)"));
+        assertEquals("t_schedule_auth_resource_id_idx",
+                SqlEntities.indexName(model.tableName(), model.indexes().get(0)));
+        assertEquals("t_schedule_auth_resource_id_idx",
+                SqlEntities.indexName(model.tableName(), model.indexes().get(0), SqlDialect.MYSQL));
     }
 
     @Test

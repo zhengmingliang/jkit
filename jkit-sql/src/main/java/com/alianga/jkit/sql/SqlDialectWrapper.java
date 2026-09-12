@@ -17,9 +17,11 @@ package com.alianga.jkit.sql;
  * SqlStatement stmt = SQL.parse("SELECT 'a\\'b'", noBackslash);
  * }</pre>
  *
- * <p>原语能力（引号开闭以外的开关、分页形态、{@link #dialectId()} / {@link #typeFamily()}）
+ * <p>原语能力（引号开闭以外的开关、分页形态、{@link #maxIdentifierLength()}、
+ * {@link #dialectId()} / {@link #typeFamily()}）
  * 单次委托给基方言。派生方法不要在本类覆写：{@link #identQuoteClose()}、
- * {@link #quoteIdent(String)}、{@link #pipesAreConcat()}、{@link #preferredLimitStyle()}
+ * {@link #quoteIdent(String)}、{@link #pipesAreConcat()}、{@link #preferredLimitStyle()}、
+ * {@link #fitIdentifier(String)}
  * 走接口默认实现，会读到子类已覆写的原语（例如只改 {@link #identQuoteOpen()} 为 {@code '['}
  * 时，闭引号自动变成 {@code ']'}）。</p>
  *
@@ -104,6 +106,11 @@ public class SqlDialectWrapper implements SqlDialectSpec {
     @Override
     public boolean supportsCommaLimitOffset() {
         return base.supportsCommaLimitOffset();
+    }
+
+    @Override
+    public int maxIdentifierLength() {
+        return base.maxIdentifierLength();
     }
 
     @Override

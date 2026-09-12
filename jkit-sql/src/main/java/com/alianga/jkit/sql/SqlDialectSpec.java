@@ -175,6 +175,27 @@ public interface SqlDialectSpec {
     }
 
     /**
+     * 未加引号标识符的长度上限（字符数）。ANSI 基线 128；经典 Oracle 30、MySQL 64、
+     * PostgreSQL 63。生成索引名等自动标识符时应先 {@link #fitIdentifier(String)}。
+     *
+     * @return 上限
+     */
+    default int maxIdentifierLength() {
+        return 128;
+    }
+
+    /**
+     * 把标识符压进 {@link #maxIdentifierLength()}：未超长原样返回；超长则保留前缀并追加
+     * 4 位十六进制散列。派生方法，覆写 {@link #maxIdentifierLength()} 即可改变行为。
+     *
+     * @param name 裸标识符，null 原样返回
+     * @return 长度不超过上限的标识符
+     */
+    default String fitIdentifier(String name) {
+        return SqlDialect.fitIdentifier(name, maxIdentifierLength());
+    }
+
+    /**
      * 方言稳定 id，类型表 / SPI 按此登记。内置枚举为 {@link SqlDialect#name()}。
      *
      * <p>自定义方言请返回自己的 id（如 {@code gauss-lite}）；若只想复用某内置类型表、

@@ -234,6 +234,21 @@ public class SqlSchemaConverterTest {
     }
 
     @Test
+    public void mysqlLongKeyNameFitsOracleIdentifierLimit() {
+        ConversionResult r = SqlSchemaConverter.convert(
+                "CREATE TABLE t_schedule_auth (id INT, "
+                        + "KEY t_schedule_auth_resource_id_idx (resource_id))",
+                SqlDialect.MYSQL, SqlDialect.ORACLE);
+        assertFalse(r.report().extraSql().isEmpty());
+        String idx = r.report().extraSql().get(0);
+        assertTrue(idx, idx.toUpperCase().startsWith("CREATE INDEX "));
+        assertFalse(idx, idx.contains("t_schedule_auth_resource_id_idx"));
+        String name = idx.substring("CREATE INDEX ".length(), idx.indexOf(" ON "));
+        assertTrue(name, name.length() <= 30);
+        assertTrue(idx, idx.contains(" ON t_schedule_auth "));
+    }
+
+    @Test
     public void uniqueKeyBecomesUnique() {
         String pg = SQL.convert(
                 "CREATE TABLE t (id INT, email VARCHAR(64), UNIQUE KEY uk_email (email))",

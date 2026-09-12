@@ -187,6 +187,8 @@ Table / column comments (`@SqlTable(comment)` / `@SqlColumn(comment)`) follow th
 
 Oracle ≤11g (`ORACLE`) has no IDENTITY: auto-increment PKs become `CREATE SEQUENCE {table}_{column}_seq` plus a `BEFORE INSERT` trigger. `CREATE_DROP` / `drop` drop the sequence before the table. Dameng (`DAMENG`) uses column `IDENTITY`. Oracle 12c+ still uses `GENERATED … AS IDENTITY`.
 
+Unnamed indexes default to `{table}_{col}_idx`. Classic Oracle identifiers are capped at 30 characters; longer names are truncated and given a 4-hex hash (`ORACLE12` allows 128, so they usually stay intact). Explicit `name:` values that still overflow are fitted the same way. Sequence and trigger names use the same rule.
+
 Some products are narrower than the first-class dialect. Turn the matching DDL off:
 
 - Old OpenGauss rejects `GENERATED … IDENTITY`: `postgresIdentityStyle(SERIAL)`

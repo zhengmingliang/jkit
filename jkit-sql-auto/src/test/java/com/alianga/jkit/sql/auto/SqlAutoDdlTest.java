@@ -228,6 +228,27 @@ public class SqlAutoDdlTest {
         assertFalse(idxs.get(0).sql().equals(idxs.get(1).sql()));
     }
 
+    @Test
+    public void oracleIndexNamesFitThirtyChars() {
+        @SqlTable(name = "t_schedule_auth", indexes = {"resource_id", "permission_id"})
+        class Auth {
+            @SqlId
+            String id;
+        }
+        SqlEntityModel model = SqlEntities.inspect(Auth.class);
+        List<SqlAutoChange> changes = SqlAutoDdl.planTable(model, null, SqlDialect.ORACLE,
+                SqlAutoOptions.defaults());
+        List<SqlAutoChange> idxs = new SqlAutoPlan(changes).ofKind(SqlAutoChange.Kind.CREATE_INDEX);
+        assertEquals(2, idxs.size());
+        assertTrue(idxs.get(0).detail().length() <= 30);
+        assertTrue(idxs.get(1).detail().length() <= 30);
+        assertFalse(idxs.get(0).detail().equals(idxs.get(1).detail()));
+        assertFalse(idxs.get(0).sql(), idxs.get(0).sql().contains("t_schedule_auth_resource_id_idx"));
+        assertFalse(idxs.get(1).sql(), idxs.get(1).sql().contains("t_schedule_auth_permission_id_idx"));
+        assertTrue(idxs.get(0).sql(), idxs.get(0).sql().startsWith("CREATE INDEX "));
+        assertTrue(idxs.get(1).sql(), idxs.get(1).sql().startsWith("CREATE INDEX "));
+    }
+
     private static boolean kind(List<SqlAutoChange> changes, SqlAutoChange.Kind kind) {
         for (int i = 0; i < changes.size(); i++) {
             if (changes.get(i).kind() == kind) {

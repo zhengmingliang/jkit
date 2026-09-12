@@ -13,6 +13,7 @@
   依赖本机 `~/.m2/toolchains.xml` 已声明 jdk 8/9/11/17/21。`mvn` 启动 JDK：`JAVA_HOME=$(jdk8) mvn -o clean install`。
 
 ### jkit-sql-auto
+- **修复**：`SqlDialect.ORACLE` 下自动生成的 `CREATE INDEX` 名超过 30 字符时截断（保留前缀 + 4 位散列），避免 ORA-00972。
 - **变更**：`dryRun(true)` 的 `SqlAuto.run(options)` / `plan(options)` 不再打开 JDBC / DataSource。URL 仅用于推断方言，按空库规划全量 `CREATE TABLE`（库没启动也能打印 SQL）。已传入 `Connection` 的重载仍对照活表，只是不执行。
 - **新增**：启动时按实体自动建表 / 更新表结构（`com.alianga:jkit-sql-auto`）。扫描 `@SqlTable` / JPA / MyBatis-Plus 实体，对照 `DatabaseMetaData` 执行 `CREATE TABLE` / `ALTER TABLE ADD` / `CREATE INDEX`。模式：`none` / `validate` / `update`（默认，只追加）/ `create` / `create-drop`。配置前缀 `jkit.sql.auto.*`，数据源可回落 `spring.datasource.*`。运行时零第三方依赖。
 - **新增**：`SqlAuto.drop` 按外键逆序删托管表；Spring Boot 2 / 3 自动配置模块 `jkit-sql-auto-spring-boot-2`、`jkit-sql-auto-spring-boot-3`。
@@ -21,6 +22,7 @@
 
 ### jkit-sql
 - **新增**：实体扫描认任意简单名为 `Comment` 的注解（不绑定包名；类=表注释、字段=列注释，读 `value`/`comment`），以及 Hibernate `@ColumnDefault`（值作为 SQL 片段写入 `DEFAULT`）。无第三方编译依赖；`@SqlTable`/`@SqlColumn` 的 comment 优先。
+- **修复**：自动生成的索引名 / 序列名 / 触发器名按方言标识符长度上限截断。经典 Oracle（`ORACLE`）上限 30 字符，超长时保留前缀并追加 4 位十六进制散列，同表多个未命名索引仍不撞名。新增 `SqlDialectSpec.maxIdentifierLength` / `fitIdentifier`；`SqlEntities.indexName` / `createIndex` / `sequenceName` 增加方言重载。
 - **修复**：`@Index` / `@SqlTable(indexes)` 未写名字时不再一律用 `{table}_idx`。改为 `{table}_{col}_idx`（多列用下划线拼接），同表多个未命名索引不再撞名。公开 `SqlEntities.indexName`。
 - **修复**：`SQL.format` pretty 模式对 `CREATE TABLE` 按列换行缩进（此前列清单始终单行，看起来像没 format）。`toSqlString` / compact 仍单行。
 - **实体**：公开 `columnSql` / `columnTypeSql` / `createIndex` / `orderByForeignKeys` / `extraSql` / `sequenceSql`，`createTable(..., includeIndexes)` 可供自动建表拆开索引与附录。

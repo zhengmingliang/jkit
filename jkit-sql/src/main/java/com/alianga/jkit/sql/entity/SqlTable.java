@@ -25,7 +25,8 @@ public @interface SqlTable {
     String comment() default "";
 
     /**
-     * 索引，元素为 {@code col} 或 {@code name:col1,col2}。未写名字时生成 {@code {table}_{col}_idx}。
+     * 索引，元素为 {@code col} 或 {@code name:col1,col2}。未写名字时生成 {@code {table}_{col}_idx}；
+     * 超过目标方言标识符长度上限（经典 Oracle 30 字符）时截断并追加短散列。
      *
      * @return 索引定义
      */

@@ -145,7 +145,7 @@ public final class SqlEntities {
         if (includeIndexes) {
             List<String> indexes = model.indexes();
             for (int i = 0; i < indexes.size(); i++) {
-                sb.append("; ").append(indexSql(model.tableName(), indexes.get(i)));
+                sb.append("; ").append(indexSql(model.tableName(), indexes.get(i), d));
             }
             List<String> extras = extraSql(model, d, options);
             for (int i = 0; i < extras.size(); i++) {
@@ -236,9 +236,9 @@ public final class SqlEntities {
             return null;
         }
         String col = column.columnName();
-        String seq = sequenceName(table, col);
+        String seq = sequenceName(table, col, d);
         if (d == SqlDialect.ORACLE) {
-            String trg = table + "_" + col + "_bi";
+            String trg = d.fitIdentifier(table + "_" + col + "_bi");
             return "CREATE SEQUENCE " + seq
                     + "\n/\nCREATE OR REPLACE TRIGGER " + trg
                     + " BEFORE INSERT ON " + table
@@ -267,7 +267,20 @@ public final class SqlEntities {
      * @return 序列名
      */
     public static String sequenceName(String table, String column) {
-        return table + "_" + column + "_seq";
+        return sequenceName(table, column, null);
+    }
+
+    /**
+     * 自增序列名 {@code {table}_{column}_seq}，按方言标识符长度上限截断。
+     *
+     * @param table 表名
+     * @param column 列名
+     * @param dialect 方言，null 则不截断
+     * @return 序列名
+     */
+    public static String sequenceName(String table, String column, SqlDialect dialect) {
+        String name = table + "_" + column + "_seq";
+        return dialect == null ? name : dialect.fitIdentifier(name);
     }
 
     private static boolean inlinesTableComment(SqlDialect dialect) {
@@ -405,10 +418,22 @@ public final class SqlEntities {
      * @return DDL；spec 空则空串
      */
     public static String createIndex(String tableName, String spec) {
+        return createIndex(tableName, spec, null);
+    }
+
+    /**
+     * {@code CREATE INDEX}，索引名按方言标识符长度上限截断（经典 Oracle 30 字符）。
+     *
+     * @param tableName 表名
+     * @param spec 索引定义
+     * @param dialect 方言，null 则不截断
+     * @return DDL；spec 空则空串
+     */
+    public static String createIndex(String tableName, String spec, SqlDialect dialect) {
         if (tableName == null || tableName.isEmpty() || spec == null || spec.trim().isEmpty()) {
             return "";
         }
-        return indexSql(tableName, spec.trim());
+        return indexSql(tableName, spec.trim(), dialect);
     }
 
     /**
@@ -420,24 +445,41 @@ public final class SqlEntities {
      * @since 2.0.1
      */
     public static String indexName(String tableName, String spec) {
-        String table = tableName == null ? "" : tableName;
-        if (spec == null || spec.trim().isEmpty()) {
-            return table + "_idx";
-        }
-        String trimmed = spec.trim();
-        int colon = trimmed.indexOf(':');
-        if (colon > 0) {
-            String name = trimmed.substring(0, colon).trim();
-            if (name.length() > 0) {
-                return name;
-            }
-        }
-        String cols = colon > 0 ? trimmed.substring(colon + 1) : trimmed;
-        return defaultIndexName(table, cols);
+        return indexName(tableName, spec, null);
     }
 
-    private static String indexSql(String table, String spec) {
-        String name = indexName(table, spec);
+    /**
+     * 索引名，按方言标识符长度上限截断（经典 Oracle 30 字符）。
+     *
+     * @param tableName 表名
+     * @param spec {@code name:col1,col2} 或 {@code col1,col2}
+     * @param dialect 方言，null 则不截断
+     * @return 索引名；spec 空则 {@code {table}_idx}
+     */
+    public static String indexName(String tableName, String spec, SqlDialect dialect) {
+        String table = tableName == null ? "" : tableName;
+        String name;
+        if (spec == null || spec.trim().isEmpty()) {
+            name = table + "_idx";
+        } else {
+            String trimmed = spec.trim();
+            int colon = trimmed.indexOf(':');
+            if (colon > 0) {
+                String explicit = trimmed.substring(0, colon).trim();
+                if (explicit.length() > 0) {
+                    name = explicit;
+                } else {
+                    name = defaultIndexName(table, trimmed.substring(colon + 1));
+                }
+            } else {
+                name = defaultIndexName(table, trimmed);
+            }
+        }
+        return dialect == null ? name : dialect.fitIdentifier(name);
+    }
+
+    private static String indexSql(String table, String spec, SqlDialect dialect) {
+        String name = indexName(table, spec, dialect);
         int colon = spec.indexOf(':');
         String cols = colon > 0 ? spec.substring(colon + 1).trim() : spec;
         if (!cols.startsWith("(")) {

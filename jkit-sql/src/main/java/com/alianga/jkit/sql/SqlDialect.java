@@ -229,6 +229,77 @@ public enum SqlDialect implements SqlDialectSpec {
     }
 
     /**
+     * 未加引号标识符的长度上限（字符数）。经典 Oracle 为 30；生成索引 / 序列 / 触发器名时
+     * 用 {@link #fitIdentifier(String)} 压进此上限。
+     *
+     * @return 上限；无实用限制时为 {@link Integer#MAX_VALUE}
+     */
+    public int maxIdentifierLength() {
+        switch (this) {
+            case ORACLE:
+                return 30;
+            case MYSQL:
+                return 64;
+            case POSTGRES:
+                return 63;
+            case H2:
+                return 256;
+            case SQLITE:
+            case CLICKHOUSE:
+                return Integer.MAX_VALUE;
+            default:
+                return 128;
+        }
+    }
+
+    /**
+     * 把本方言的标识符压进 {@link #maxIdentifierLength()}。
+     *
+     * @param name 裸标识符，null 原样返回
+     * @return 长度不超过上限的标识符
+     */
+    public String fitIdentifier(String name) {
+        return fitIdentifier(name, maxIdentifierLength());
+    }
+
+    /**
+     * 把标识符压进长度上限：未超长原样返回；超长则保留前缀并追加 {@code _} + 4 位十六进制散列
+     *（取 {@link String#hashCode()} 低 16 位），同前缀不同原名几乎不撞。
+     *
+     * @param name 裸标识符，null 原样返回
+     * @param maxLength 上限；≤0 视为不限制
+     * @return 长度不超过上限的标识符
+     */
+    public static String fitIdentifier(String name, int maxLength) {
+        if (name == null || maxLength <= 0 || name.length() <= maxLength) {
+            return name;
+        }
+        String suffix = Integer.toHexString(name.hashCode() & 0xffff);
+        while (suffix.length() < 4) {
+            suffix = "0" + suffix;
+        }
+        int keep = maxLength - 1 - suffix.length();
+        if (keep < 1) {
+            if (suffix.length() >= maxLength) {
+                return suffix.substring(0, maxLength);
+            }
+            String hex = Integer.toHexString(name.hashCode());
+            while (hex.length() < 8) {
+                hex = "0" + hex;
+            }
+            return hex.length() <= maxLength ? hex : hex.substring(0, maxLength);
+        }
+        String prefix = name.substring(0, keep);
+        while (prefix.length() > 0 && prefix.charAt(prefix.length() - 1) == '_') {
+            prefix = prefix.substring(0, prefix.length() - 1);
+        }
+        if (prefix.isEmpty()) {
+            return suffix.length() <= maxLength ? suffix : suffix.substring(0, maxLength);
+        }
+        return prefix + "_" + suffix;
+    }
+
+    /**
      * MySQL 默认把 {@code ||} 当 OR；其余方言当拼接。
      *
      * @return 是否把 {@code ||} 解析为逻辑或
