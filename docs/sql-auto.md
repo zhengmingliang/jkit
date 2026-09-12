@@ -1,10 +1,132 @@
-# 自动建表模块
+# 自动建表
 
-`com.alianga:jkit-sql-auto` 在应用启动时扫描实体、对照现有库表，执行 `CREATE TABLE` / `ALTER TABLE ADD`。DDL 文本由 [jkit-sql](./sql.md) 的 `SqlEntities` 按方言生成；本模块只负责 JDBC 元数据对比和执行。
+启动时扫描实体，对照现有库表，执行 `CREATE TABLE` / `ALTER TABLE ADD` / `CREATE INDEX`。
 
-`jkit-sql` **不执行 SQL、不引 JDBC 驱动**。需要连库改结构时加本模块。运行时仍零第三方依赖（测试用 H2）。JDK 8+。
+DDL 文本由 [jkit-sql](./sql.md) 的 `SqlEntities` 按方言生成；本模块只做 JDBC 元数据对比和执行。`jkit-sql` **不执行 SQL、不带 JDBC 驱动**。运行时零第三方依赖。JDK 8+（Boot 3 starter 要 JDK 17+）。
 
-## 引入
+按你的项目选一条路：
+
+| 项目类型 | 加哪个包 | 还要写启动代码吗 |
+| --- | --- | --- |
+| Spring Boot **2.x** | `jkit-sql-auto-spring-boot-2` | 不用。就绪后自动跑，用应用里的 `DataSource` |
+| Spring Boot **3.x** | `jkit-sql-auto-spring-boot-3` | 同上 |
+| 普通 Java / Servlet / 自己管 `main` | `jkit-sql-auto` | 要。在启动入口调一次 `SqlAuto.run(...)` |
+
+三个 starter / 核心包都会带上 `jkit` 与 `jkit-sql`。JDBC 驱动仍由宿主提供。
+
+---
+
+## 1. 写实体
+
+扫描认三种标记（反射按类名，**没有** JPA / MyBatis-Plus 编译依赖）：
+
+- jkit `@SqlTable` / `@SqlId` / `@SqlColumn` / `@SqlGenerated`
+- JPA `@Entity` / `@Table` / `@Id` / `@Column` / `@GeneratedValue`（`javax` 或 `jakarta`）
+- MyBatis-Plus `@TableName` / `@TableId`
+
+```java
+import com.alianga.jkit.sql.entity.SqlColumn;
+import com.alianga.jkit.sql.entity.SqlGenerated;
+import com.alianga.jkit.sql.entity.SqlId;
+import com.alianga.jkit.sql.entity.SqlTable;
+
+@SqlTable(name = "demo_user", comment = "用户", indexes = {"idx_email:email"})
+public class User {
+    @SqlId
+    @SqlGenerated          // 整数列 → AUTO_INCREMENT / IDENTITY；字符串/UUID 只当主键
+    private Long id;
+
+    @SqlColumn(name = "user_name", length = 32, nullable = false, comment = "用户名")
+    private String name;
+
+    @SqlColumn(length = 64, unique = true)
+    private String email;
+}
+```
+
+已经在用 JPA 的类不用改注解，例如：
+
+```java
+@Entity
+@Table(name = "file_storage")
+public class FileStorage {
+    @Id
+    @Column(name = "id", length = 32)
+    @GeneratedValue(generator = "system-uuid")  // 字符串 UUID，不会写成 IDENTITY
+    private String id;
+    // ...
+}
+```
+
+索引：`@SqlTable(indexes = {"col"})` 或 `"name:col1,col2"`；JPA `@Table(indexes = @Index(...))` 同样认。未写名字时生成 `{table}_{col}_idx`。
+
+更细的类型映射、注释、外键见 [实体扫描](./sql.md#实体扫描生成-ddl--dml)。
+
+---
+
+## 2. Spring Boot 怎么用
+
+加对应 starter，配 `jkit.sql.auto.packages`（或 `entities`），**不必**在 `main` 里调 `SqlAuto.run`。`ApplicationReadyEvent` 时自动执行一次，数据源用容器里的 `DataSource`（通常就是 `spring.datasource.*`）。
+
+### Boot 2.x（JDK 8+）
+
+```xml
+<dependency>
+    <groupId>com.alianga</groupId>
+    <artifactId>jkit-sql-auto-spring-boot-2</artifactId>
+    <version>2.0.1</version>
+</dependency>
+```
+
+### Boot 3.x（JDK 17+）
+
+```xml
+<dependency>
+    <groupId>com.alianga</groupId>
+    <artifactId>jkit-sql-auto-spring-boot-3</artifactId>
+    <version>2.0.1</version>
+</dependency>
+```
+
+### `application.yml`
+
+```yaml
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/shop
+    username: shop
+    password: secret
+
+jkit:
+  sql:
+    auto:
+      enabled: true          # 默认 true；false 则整段跳过
+      mode: update           # none / validate / update / create / create-drop
+      packages: com.example.entity
+      # entities:            # 不想扫包时，列出全限定名
+      #   - com.example.entity.User
+      show-sql: true
+```
+
+`packages` 与 `entities` 至少配一项，否则启动日志会是 `no entities, skip`。
+
+生产建议保持 `mode: update`（只加表/列/索引，不改已有列、不删列）。开发可以 `create` / `create-drop`。
+
+关掉：
+
+```yaml
+jkit.sql.auto.enabled: false
+```
+
+或 `mode: none`。
+
+Boot 2 注册走 `spring.factories`，Boot 3 走 `AutoConfiguration.imports`，引入坐标即可，不用 `@Import`。
+
+---
+
+## 3. 非 Spring 怎么用
+
+只加核心包：
 
 ```xml
 <dependency>
@@ -14,31 +136,7 @@
 </dependency>
 ```
 
-会传递依赖 `jkit` 与 `jkit-sql`。JDBC 驱动由宿主提供（MySQL / PostgreSQL / Oracle 等）；本模块只调用 `java.sql`。
-
-Spring Boot 应用加对应 starter，就绪后自动跑一次（仍用应用里的 `DataSource`）：
-
-```xml
-<!-- Boot 2.x / JDK 8+ -->
-<dependency>
-    <groupId>com.alianga</groupId>
-    <artifactId>jkit-sql-auto-spring-boot-2</artifactId>
-    <version>2.0.1</version>
-</dependency>
-```
-
-```xml
-<!-- Boot 3.x / JDK 17+ -->
-<dependency>
-    <groupId>com.alianga</groupId>
-    <artifactId>jkit-sql-auto-spring-boot-3</artifactId>
-    <version>2.0.1</version>
-</dependency>
-```
-
-## 启动时执行
-
-在 `main`、Servlet 监听器或 Spring `ApplicationRunner` 里调一次即可，**没有** Spring 编译依赖：
+再自己提供 JDBC 驱动。在 `main`、Servlet 监听器等启动入口调 **一次**：
 
 ```java
 import com.alianga.jkit.sql.auto.SqlAuto;
@@ -56,7 +154,7 @@ public static void main(String[] args) {
 }
 ```
 
-已有 `DataSource` 时：
+已有 `DataSource`：
 
 ```java
 SqlAuto.run(SqlAutoOptions.defaults()
@@ -64,23 +162,90 @@ SqlAuto.run(SqlAutoOptions.defaults()
         .packages("com.example.entity"));
 ```
 
-已有 `Connection`：
+已有 `Connection`（调用方负责开关连接）：
 
 ```java
 SqlAuto.run(connection, SqlAutoOptions.defaults().entities(User.class, Order.class));
 ```
 
-只看将要执行的 SQL、不改库。`run(options)` 在 `dryRun(true)` 时**不打开 JDBC**（URL 只用来推断方言），按空库规划全量 `CREATE`，库没启动也能打印 SQL。若要对照现有表看 `ALTER`，把已打开的 `Connection` 传给 `run(connection, options)`：
+### 用配置文件、不写链式 API
+
+`SqlAuto.run()` / `SqlAutoOptions.fromConfig()` 读 `jkit.sql.auto.*`。没有 `jkit.sql.auto.url` 时回落 `spring.datasource.*`（普通 Java 也可以把 Spring 风格的 yml 当配置用）。
+
+```yaml
+# application.yml，放在工作目录或 classpath
+jkit:
+  sql:
+    auto:
+      url: jdbc:mysql://localhost:3306/shop
+      username: root
+      password: secret
+      packages: com.example.entity
+      mode: update
+```
+
+```java
+public static void main(String[] args) {
+    SqlAuto.run(); // = SqlAuto.run(SqlAutoOptions.fromConfig())
+}
+```
+
+独立进程（classpath 含本模块、`jkit-sql`、JDBC 驱动和配置文件）：
+
+```text
+java com.alianga.jkit.sql.auto.SqlAuto
+```
+
+---
+
+## 4. 只看 SQL、不改库
+
+`dryRun(true)` 的 `SqlAuto.run(options)` **不打开 JDBC**。URL 只用来推断方言，按空库规划全量 `CREATE TABLE`，库没启动也能打印：
 
 ```java
 SqlAutoPlan plan = SqlAuto.run(SqlAutoOptions.defaults()
-        .url(url).packages("com.example.entity").dryRun(true));
-plan.sql(); // List<String>
+        .dialect(SqlDialect.POSTGRES)   // 或 .url("jdbc:postgresql://...")
+        .packages("com.example.entity")
+        .mode(SqlAutoMode.CREATE_DROP)
+        .dryRun(true));
+List<String> sqls = plan.sql();
 ```
 
-实体注解与 `SqlEntities.scan` 相同：`@SqlTable`、JPA `@Entity`、MyBatis-Plus `@TableName`（反射认 FQCN，无编译依赖）。见 [实体扫描](./sql.md#实体扫描生成-ddl--dml)。
+要对照**现有表**看 `ALTER`，把已打开的 `Connection` 传给 `run(connection, options)`，同样可以 `dryRun(true)`（只规划不执行）。
 
-## 模式
+配置项：`jkit.sql.auto.dry-run: true`。
+
+---
+
+## 5. 配置项
+
+前缀一律 `jkit.sql.auto.`。Spring Boot starter 绑同一套；非 Spring 的 `fromConfig()` 也读这一套。
+
+| key | 默认 | 说明 |
+| --- | --- | --- |
+| `enabled` | `true` | `false` 时 `run()` 直接返回 |
+| `mode` | `update` | `none` / `validate` / `update` / `create` / `create-drop`；也认 `ddl-auto` |
+| `packages` | （空） | 扫描包，列表或逗号分隔；别名 `package` / `base-package` / `base-packages` |
+| `entities` | （空） | 实体 FQCN 列表 |
+| `dialect` | 从 URL / `DatabaseMetaData` 推断 | `mysql` / `postgres` / `oracle` / `oracle12` / `h2` / `dm` …（`SqlDialect.fromName`） |
+| `url` | `spring.datasource.url` | JDBC URL |
+| `username` | `spring.datasource.username` | 用户名 |
+| `password` | `spring.datasource.password` | 密码 |
+| `driver` | 按 URL 猜 | 驱动类；也认 `driver-class-name` |
+| `fail-fast` | `true` | 一条 DDL 失败是否立即抛错 |
+| `alter-column` | `false` | 类型不一致时是否 `ALTER`/`MODIFY` |
+| `drop-extra-columns` | `false` | 是否删除实体里没有的列 |
+| `create-index` | `true` | 是否补 `CREATE INDEX` |
+| `quote-identifiers` | `false` | 标识符加方言引号 |
+| `show-sql` | `true` | 打日志 |
+| `dry-run` | `false` | 只规划不执行 |
+| `catalog` / `schema` | JDBC 默认 | `DatabaseMetaData` 查找范围 |
+
+链式 API 与配置一一对应，例如 `.mode(SqlAutoMode.UPDATE)`、`.packages("a","b")`、`.alterColumn(true)`。另有只在代码里设的项：`postgresIdentityStyle(SERIAL)`、`foreignKeys(false)`、`autoIncrement(false)`。
+
+---
+
+## 6. 模式
 
 对标 JPA `spring.jpa.hibernate.ddl-auto`：
 
@@ -92,90 +257,7 @@ plan.sql(); // List<String>
 | `CREATE` | 先 `DROP` 托管表再按实体重建（开发用） |
 | `CREATE_DROP` | 启动同 `CREATE`，JVM 退出时再删表 |
 
-`UPDATE` 是生产默认：只追加，不收缩。已有列类型变窄或对不上时默认跳过；要改列需显式 `alterColumn(true)`。实体里没有的列默认保留；要删需 `dropExtraColumns(true)`。
-
-## 配置项
-
-`SqlAutoOptions.fromConfig()` 读 `jkit.sql.auto.*`，数据源回落 `spring.datasource.*`（方便已经在用 Spring 配置的应用）。也可用链式 API，不必走配置文件。
-
-| key | 默认 | 说明 |
-| --- | --- | --- |
-| `jkit.sql.auto.enabled` | `true` | `false` 时 `run()` 直接返回 |
-| `jkit.sql.auto.mode` | `update` | `none` / `validate` / `update` / `create` / `create-drop` |
-| `jkit.sql.auto.packages` | （空） | 扫描包，逗号分隔；也可用 `package` / `base-package` |
-| `jkit.sql.auto.entities` | （空） | 实体 FQCN 列表 |
-| `jkit.sql.auto.dialect` | 从 URL / `DatabaseMetaData` 推断 | `mysql` / `postgres` / `h2` / `oracle` …（`SqlDialect.fromName`） |
-| `jkit.sql.auto.url` | `spring.datasource.url` | JDBC URL |
-| `jkit.sql.auto.username` | `spring.datasource.username` | 用户名 |
-| `jkit.sql.auto.password` | `spring.datasource.password` | 密码 |
-| `jkit.sql.auto.driver` | 按 URL 猜测 | 驱动类；也可 `driver-class-name` |
-| `jkit.sql.auto.fail-fast` | `true` | 一条 DDL 失败是否立即抛错 |
-| `jkit.sql.auto.alter-column` | `false` | 类型不一致时是否 `ALTER`/`MODIFY` |
-| `jkit.sql.auto.drop-extra-columns` | `false` | 是否删除实体中没有的列 |
-| `jkit.sql.auto.create-index` | `true` | 是否补 `CREATE INDEX` |
-| `jkit.sql.auto.quote-identifiers` | `false` | 标识符加方言引号 |
-| `jkit.sql.auto.show-sql` | `true` | 打日志 |
-| `jkit.sql.auto.dry-run` | `false` | 只规划不执行；`run(options)` 时不打开 JDBC，URL 仅用于推断方言 |
-| `jkit.sql.auto.catalog` / `schema` | JDBC 默认 | `DatabaseMetaData` 查找范围 |
-
-`application.yml` 示例：
-
-```yaml
-spring:
-  datasource:
-    url: jdbc:postgresql://localhost:5432/shop
-    username: shop
-    password: secret
-
-jkit:
-  sql:
-    auto:
-      enabled: true
-      mode: update
-      packages: com.example.entity
-```
-
-```java
-public static void main(String[] args) {
-    SqlAuto.run(); // fromConfig()
-}
-```
-
-也可以当独立进程跑（classpath 含本模块、`jkit-sql`、JDBC 驱动和配置文件）：
-
-```text
-java com.alianga.jkit.sql.auto.SqlAuto
-```
-
-## 方言
-
-未配置 `dialect` 时：
-
-1. JDBC URL 前缀（`jdbc:mysql:` → MYSQL，`jdbc:postgresql:` → POSTGRES，`jdbc:h2:` → H2，`jdbc:oracle:` → ORACLE，达梦 `jdbc:dm:` → DAMENG …）
-2. `DatabaseMetaData.getDatabaseProductName()`（Oracle 12+ 用 `ORACLE12`）
-3. 再不行默认 MYSQL
-
-`CREATE TABLE` / 列类型走 `SqlEntities` + canonical 类型表，与解析模块同一套 MySQL / PostgreSQL / Oracle / SQL Server / H2 / SQLite 等写法。
-
-## 会做什么、不做什么
-
-做：
-
-- 扫描包或显式实体列表，按外键把被引用表排在前面
-- 表不存在 → `CREATE TABLE`（可选随后 `CREATE INDEX`、注释附录、无 IDENTITY 方言的 SEQUENCE）
-- 表在、列缺 → `ALTER TABLE … ADD [COLUMN]`（列注释同样按方言附录）
-- 索引缺 → `CREATE INDEX`
-- `VALIDATE` 把缺表/缺列/类型不兼容收成异常
-- `CREATE` / `CREATE_DROP` 先删再建模
-- `SqlAuto.drop(...)` 按外键逆序删托管表
-
-默认**不做**：
-
-- 改已有列类型（除非 `alterColumn=true`）
-- 删实体里没有的列或表（除非 `dropExtraColumns` / `CREATE`）
-- 数据迁移、改列名、改主键
-- 存储过程 / 视图 / 触发器
-- 把 JDBC 驱动打进本模块
+`UPDATE` 是生产默认：只追加，不收缩。已有列类型对不上时默认跳过，要改列需 `alter-column: true`。实体里没有的列默认保留，要删需 `drop-extra-columns: true`。
 
 显式删托管表（按外键逆序）：
 
@@ -183,21 +265,53 @@ java com.alianga.jkit.sql.auto.SqlAuto
 SqlAuto.drop(SqlAutoOptions.defaults().url(url).entities(User.class));
 ```
 
-表 / 列注释（`@SqlTable(comment)` / `@SqlColumn(comment)`）按方言生成：MySQL / Hive / ClickHouse 内联 `COMMENT`；H2 列内 `COMMENT`、表级 `COMMENT ON TABLE`；PostgreSQL / Oracle / DB2 / ANSI 为 `COMMENT ON`；SQL Server 为 `sp_addextendedproperty`；Presto 表级 `WITH (comment=…)`；SQLite 忽略。自动建表把附录拆成独立语句执行（`CREATE TABLE` 本身不含这些附录）。
+---
 
-Oracle ≤11g（方言 `ORACLE`）没有 IDENTITY：自增主键改成 `CREATE SEQUENCE {table}_{column}_seq` + `BEFORE INSERT` 触发器；`CREATE_DROP` / `drop` 会先 `DROP SEQUENCE` 再删表。达梦（`DAMENG`）列上写 `IDENTITY`。Oracle 12c+ 仍用 `GENERATED … AS IDENTITY`。
+## 7. 方言
 
-未命名索引默认 `{table}_{col}_idx`。经典 Oracle 标识符上限 30 字符，超长时自动截断并追加 4 位散列（`ORACLE12` 为 128，一般不必截）。显式写了 `name:` 且仍超长的同样截断。序列名 / 触发器名走同一规则。
+未配置 `dialect` 时：
 
-UUID / 字符串主键（`@GeneratedValue(generator="system-uuid")`、`GenerationType.UUID`、非整数 `@SqlGenerated`）不会写成 `IDENTITY`/`AUTO_INCREMENT`/`SERIAL`，只保留 `PRIMARY KEY`。PostgreSQL 对 `VARCHAR … GENERATED ALWAYS AS IDENTITY` 会直接语法错误。
+1. JDBC URL 前缀（`jdbc:mysql:` → MYSQL，`jdbc:postgresql:` → POSTGRES，`jdbc:oracle:` → ORACLE，达梦 `jdbc:dm:` → DAMENG …）
+2. `DatabaseMetaData.getDatabaseProductName()`（Oracle 12c+ 产品名会落到 `ORACLE12`）
+3. 再不行默认 MYSQL
 
-子类与父类（`MappedSuperclass`）同时声明 `create_time` 这类同名列时，只生成一次，避免 `column specified more than once`。
+`jdbc:oracle:` 推断的是经典 `ORACLE`（标识符 30 字符，自增走 SEQUENCE + TRIGGER）。要用 12c 的 `IDENTITY` / `OFFSET FETCH`，显式 `dialect: oracle12`。
 
-部分产品建表能力比一等方言窄，可用选项关掉对应 DDL：
+---
 
-- OpenGauss 老版本不认 `GENERATED … IDENTITY`：`postgresIdentityStyle(SERIAL)`
-- GBase 8a 表内 `FOREIGN KEY` / 独立 `CREATE INDEX` 可能报 `unsupported key algorithm`：`foreignKeys(false).createIndex(false)`
-- DuckDB 不认 `AUTOINCREMENT` / `IDENTITY` / 表内 FK：`autoIncrement(false).foreignKeys(false).createIndex(false)`
-- Oracle ≤11g：自动生成 SEQUENCE + TRIGGER；达梦列上写 IDENTITY
+## 8. 行为细节与常见坑
 
-H2 内存库做 `CREATE_DROP` 关机删表时，URL 需带 `DB_CLOSE_DELAY=-1`，否则连接一关库就没了。
+**会做**
+
+- 扫描包或显式实体列表，按外键把被引用表排在前面
+- 表不存在 → `CREATE TABLE`（随后可跟 `CREATE INDEX`、注释附录、Oracle 11g SEQUENCE）
+- 表在、列缺 → `ALTER TABLE … ADD`
+- 索引缺 → `CREATE INDEX`
+- 表/列注释按方言拆成独立语句（MySQL 内联 `COMMENT`，PG/Oracle `COMMENT ON`，SQL Server `sp_addextendedproperty`）
+
+**默认不做**
+
+- 改已有列类型、删多余列/表、改列名、改主键、迁数据
+- 存储过程 / 视图 / 触发器（Oracle 11g 自增触发器除外）
+- 把 JDBC 驱动打进本模块
+
+**主键 / 自增**
+
+- 整数 + `@SqlGenerated` / `@GeneratedValue(IDENTITY|AUTO)` → `AUTO_INCREMENT` / `GENERATED … AS IDENTITY` / `SERIAL`
+- 字符串、UUID、`@GeneratedValue(generator="system-uuid")`、`GenerationType.UUID` → **只写 `PRIMARY KEY`**，不会给 PostgreSQL 生成 `VARCHAR … IDENTITY`（会语法错误）
+- 经典 Oracle（`ORACLE`）整数自增：`CREATE SEQUENCE {table}_{column}_seq` + `BEFORE INSERT` 触发器；`CREATE_DROP` / `drop` 会先 `DROP SEQUENCE`
+
+**索引名 / 标识符长度**
+
+未命名索引 `{table}_{col}_idx`。经典 Oracle 上限 30 字符，超长截断并追加 4 位散列；`ORACLE12` 为 128。序列名、触发器名同一规则。
+
+**继承列**
+
+子类与 `MappedSuperclass` / 父类同时声明 `create_time` 时只生成一次，避免 PostgreSQL `column specified more than once`。
+
+**窄产品**
+
+- OpenGauss 老版本：`.postgresIdentityStyle(SERIAL)`
+- GBase 8a：`.foreignKeys(false).createIndex(false)`
+- DuckDB：`.autoIncrement(false).foreignKeys(false).createIndex(false)`
+- H2 内存库 `CREATE_DROP`：URL 加 `DB_CLOSE_DELAY=-1`，否则连接一关库就没了
