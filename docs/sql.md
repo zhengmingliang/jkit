@@ -438,6 +438,7 @@ Oracle ≤11g 的自增默认给出 `MANUAL_ACTION_REQUIRED`；`generateOracleSe
 - MySQL `CONVERT(expr USING charset)` **不会**误映射成 CAST，只告警并保留原文
 - `DATE_ADD`/`DATE_SUB` → 加减 `INTERVAL`；`DATEDIFF` → 日期相减；`FROM_UNIXTIME` → `TO_TIMESTAMP`
 - `SUBSTRING`/`LEFT`/`RIGHT`/`MID`：Oracle/达梦 `SUBSTR`；SQL Server 两参数补 `LEN`、负起点改 `RIGHT`；SQLite/Hive 的 `LEFT`/`RIGHT` 展开成 `SUBSTR`。回写按方言：PG/MySQL 用 `FROM n FOR m`，SQL Server/SQLite 用逗号
+- `UCASE`/`LCASE`→`UPPER`/`LOWER`；`CONCAT_WS`；`LPAD`/`RPAD`；`SPACE`；`CEIL`/`CEILING`；`POW`/`POWER`；`MOD`；`YEAR`/`MONTH`/`DAY`/`HOUR`/`MINUTE`/`SECOND`；`SYSDATE`；`LAST_DAY`；`CHAR`/`CHR`
 - `DECODE`/`NVL2` → `CASE`；`FIND_IN_SET`/`SUBSTRING_INDEX` 无干净等价则告警并保留
 
 目标方言不支持的 MySQL 表内 `KEY`/`INDEX` 会改成附录 `CREATE INDEX`；`FULLTEXT`/`SPATIAL` 去掉并 `MANUAL_ACTION_REQUIRED`。`UNIQUE KEY` 改写为可移植的 `UNIQUE (...)`。独立 `CREATE INDEX … USING BTREE` 转到非 MySQL 时去掉 `USING`。

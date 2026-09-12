@@ -534,6 +534,84 @@ public class SqlSchemaConverterTest {
     }
 
     @Test
+    public void commonFunctionRewriteAcrossDialects() {
+        assertEquals("SELECT UPPER(a) FROM t",
+                oneLine(SQL.convert("SELECT UCASE(a) FROM t",
+                        SqlDialect.MYSQL, SqlDialect.POSTGRES)));
+        assertEquals("SELECT LOWER(a) FROM t",
+                oneLine(SQL.convert("SELECT LCASE(a) FROM t",
+                        SqlDialect.MYSQL, SqlDialect.SQLSERVER)));
+
+        String oraWs = SQL.convert("SELECT CONCAT_WS(',', a, b) FROM t",
+                SqlDialect.MYSQL, SqlDialect.ORACLE);
+        assertTrue(oraWs, oraWs.contains("||"));
+        assertFalse(oraWs, oraWs.toUpperCase().contains("CONCAT_WS"));
+
+        String ssPad = SQL.convert("SELECT LPAD(a, 3, '0') FROM t",
+                SqlDialect.MYSQL, SqlDialect.SQLSERVER);
+        assertTrue(ssPad, ssPad.toUpperCase().contains("REPLICATE"));
+        assertTrue(ssPad, ssPad.toUpperCase().contains("CONCAT"));
+        assertFalse(ssPad, ssPad.toUpperCase().contains("LPAD"));
+
+        assertEquals("SELECT REPEAT(' ', 3) FROM t",
+                oneLine(SQL.convert("SELECT SPACE(3) FROM t",
+                        SqlDialect.MYSQL, SqlDialect.POSTGRES)));
+        assertTrue(SQL.convert("SELECT SPACE(3) FROM t", SqlDialect.MYSQL, SqlDialect.ORACLE)
+                .toUpperCase().contains("RPAD"));
+
+        assertEquals("SELECT CEILING(a) FROM t",
+                oneLine(SQL.convert("SELECT CEIL(a) FROM t",
+                        SqlDialect.MYSQL, SqlDialect.SQLSERVER)));
+        assertEquals("SELECT CEIL(a) FROM t",
+                oneLine(SQL.convert("SELECT CEILING(a) FROM t",
+                        SqlDialect.MYSQL, SqlDialect.ORACLE)));
+
+        assertEquals("SELECT POWER(2, 3) FROM t",
+                oneLine(SQL.convert("SELECT POW(2, 3) FROM t",
+                        SqlDialect.MYSQL, SqlDialect.SQLSERVER)));
+
+        assertEquals("SELECT (10 % 3) FROM t",
+                oneLine(SQL.convert("SELECT MOD(10, 3) FROM t",
+                        SqlDialect.MYSQL, SqlDialect.SQLSERVER)));
+        assertEquals("SELECT MOD(10, 3) FROM t",
+                oneLine(SQL.convert("SELECT MOD(10, 3) FROM t",
+                        SqlDialect.MYSQL, SqlDialect.ORACLE)));
+
+        String pgYear = SQL.convert("SELECT YEAR('2024-03-15') FROM t",
+                SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        assertTrue(pgYear, pgYear.toUpperCase().contains("EXTRACT"));
+        assertTrue(pgYear, pgYear.toUpperCase().contains("YEAR"));
+
+        String ssHour = SQL.convert("SELECT HOUR(ts) FROM t",
+                SqlDialect.MYSQL, SqlDialect.SQLSERVER);
+        assertTrue(ssHour, ssHour.toUpperCase().contains("DATEPART"));
+
+        String oraSys = SQL.convert("SELECT SYSDATE()", SqlDialect.MYSQL, SqlDialect.ORACLE);
+        assertTrue(oraSys, oraSys.toUpperCase().contains("SYSDATE"));
+        assertFalse(oraSys, oraSys.contains("SYSDATE()"));
+
+        String ssLast = SQL.convert("SELECT LAST_DAY(d) FROM t",
+                SqlDialect.MYSQL, SqlDialect.SQLSERVER);
+        assertTrue(ssLast, ssLast.toUpperCase().contains("EOMONTH"));
+
+        String h2Last = SQL.convert("SELECT LAST_DAY(d) FROM t",
+                SqlDialect.MYSQL, SqlDialect.H2);
+        assertTrue(h2Last, h2Last.toUpperCase().contains("DATEADD"));
+        assertTrue(h2Last, h2Last.toUpperCase().contains("DATE_TRUNC"));
+
+        String pgLast = SQL.convert("SELECT LAST_DAY(d) FROM t",
+                SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        assertTrue(pgLast, pgLast.toLowerCase().contains("date_trunc"));
+
+        assertEquals("SELECT CHR(65) FROM t",
+                oneLine(SQL.convert("SELECT CHAR(65) FROM t",
+                        SqlDialect.MYSQL, SqlDialect.ORACLE)));
+        assertEquals("SELECT CHAR(65) FROM t",
+                oneLine(SQL.convert("SELECT CHR(65) FROM t",
+                        SqlDialect.ORACLE, SqlDialect.SQLSERVER)));
+    }
+
+    @Test
     public void findInSetWarnsAndKeeps() {
         ConversionResult r = SqlSchemaConverter.convert(
                 "SELECT FIND_IN_SET('a', list) FROM t", SqlDialect.MYSQL, SqlDialect.POSTGRES);

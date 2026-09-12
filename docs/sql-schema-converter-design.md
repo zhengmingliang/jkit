@@ -213,6 +213,17 @@ SQL.convert(sql, SqlDialect.fromName("dm"), SqlDialect.MYSQL);
 | `DATEDIFF` | PG/Oracle 改为日期相减 |
 | `FROM_UNIXTIME` | PG `TO_TIMESTAMP` |
 | `DECODE` / `NVL2` | 非 Oracle → `CASE` |
+| `UCASE` / `LCASE` | `UPPER` / `LOWER` |
+| `CONCAT_WS` | Oracle/达梦展开 `\|\|`（NULL 跳过语义有损，告警） |
+| `LPAD` / `RPAD` | SQL Server 用 `REPLICATE`+`CONCAT`；SQLite 告警保留 |
+| `SPACE` | PG `REPEAT(' ', n)`；Oracle `RPAD(' ', n)` |
+| `CEIL` / `CEILING` | SQL Server `CEILING`，其余 `CEIL` |
+| `POW` / `POWER` | 统一 `POWER`；SQLite 告警保留 |
+| `MOD` | SQL Server / SQLite 改 `%` |
+| `YEAR` / `MONTH` / `DAY` / `HOUR`… | PG/Oracle `EXTRACT`；SQL Server `YEAR`/`DATEPART`；SQLite `strftime` |
+| `SYSDATE` | Oracle 去括号；PG `CURRENT_TIMESTAMP`；SQL Server `GETDATE()` |
+| `LAST_DAY` | SQL Server `EOMONTH`；PG `date_trunc`；SQLite `date(..., 'start of month', …)` |
+| `CHAR` / `CHR` | Oracle/PG `CHR`，其余 `CHAR` |
 | `FIND_IN_SET` / `SUBSTRING_INDEX` | 无干净等价：告警并保留 |
 
 ## 九、如何扩展

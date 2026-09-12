@@ -114,7 +114,11 @@ public final class SqlFunctionRegistry {
                 "DECODE", "NVL2",
                 "SUBSTRING_INDEX", "FIND_IN_SET",
                 "UUID", "RAND", "LAST_INSERT_ID",
-                "REPEAT", "REPLICATE", "RPAD", "TO_CHAR"
+                "REPEAT", "REPLICATE", "RPAD", "LPAD", "TO_CHAR",
+                "UCASE", "LCASE", "CONCAT_WS", "SPACE",
+                "CEIL", "CEILING", "POW", "POWER", "MOD",
+                "YEAR", "MONTH", "DAY", "DAYOFMONTH", "HOUR", "MINUTE", "SECOND",
+                "SYSDATE", "LAST_DAY", "CHAR", "CHR"
         };
         for (int i = 0; i < names.length; i++) {
             r.register(names[i], builtin);

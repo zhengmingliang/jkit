@@ -142,11 +142,47 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
         if ("UUID".equals(name) || "RAND".equals(name) || "LAST_INSERT_ID".equals(name)) {
             return rewriteMysqlBuiltin(fn, name, family, report);
         }
-        if ("REPEAT".equals(name) || "REPLICATE".equals(name) || "RPAD".equals(name)) {
+        if ("REPEAT".equals(name) || "REPLICATE".equals(name)) {
             return rewriteRepeat(fn, name, family, report);
+        }
+        if ("LPAD".equals(name) || "RPAD".equals(name)) {
+            return rewritePad(fn, name, family, report);
         }
         if ("TO_CHAR".equals(name)) {
             return rewriteToChar(fn, family);
+        }
+        if ("UCASE".equals(name) || "LCASE".equals(name)) {
+            fn.setName(SqlIdentifier.of("UCASE".equals(name) ? "UPPER" : "LOWER"));
+            return fn;
+        }
+        if ("CONCAT_WS".equals(name)) {
+            return rewriteConcatWs(fn, family, report);
+        }
+        if ("SPACE".equals(name)) {
+            return rewriteSpace(fn, family, report);
+        }
+        if ("CEIL".equals(name) || "CEILING".equals(name)) {
+            return rewriteCeil(fn, family, report);
+        }
+        if ("POW".equals(name) || "POWER".equals(name)) {
+            return rewritePower(fn, family, report);
+        }
+        if ("MOD".equals(name) && args.size() >= 2) {
+            return rewriteMod(fn, family);
+        }
+        if ("YEAR".equals(name) || "MONTH".equals(name) || "DAY".equals(name)
+                || "DAYOFMONTH".equals(name) || "HOUR".equals(name)
+                || "MINUTE".equals(name) || "SECOND".equals(name)) {
+            return rewriteDatePart(fn, name, family, report);
+        }
+        if ("SYSDATE".equals(name)) {
+            return rewriteSysDate(fn, family);
+        }
+        if ("LAST_DAY".equals(name)) {
+            return rewriteLastDay(fn, family, report);
+        }
+        if ("CHAR".equals(name) || "CHR".equals(name)) {
+            return rewriteChar(fn, name, family, report);
         }
         return fn;
     }
@@ -1035,6 +1071,311 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
                 args.get(1));
         cse.setElseExpr(args.get(2));
         return cse;
+    }
+
+    private static SqlExpr rewriteConcatWs(SqlFunctionExpr fn, SqlDialect family,
+                                           ConversionReport.Builder report) {
+        List<SqlExpr> args = fn.arguments();
+        if (args.size() < 2) {
+            return fn;
+        }
+        if (family != SqlDialect.ORACLE && family != SqlDialect.ORACLE12
+                && family != SqlDialect.DAMENG) {
+            return fn;
+        }
+        report.warn(ConversionWarning.Severity.SEMANTIC_RISK, "CONCAT_WS",
+                "Oracle/达梦无 CONCAT_WS，已展开为 ||（NULL 传播与跳过空参数语义有损）");
+        SqlExpr sep = args.get(0);
+        SqlExpr acc = args.get(1);
+        for (int i = 2; i < args.size(); i++) {
+            SqlBinaryExpr join = SqlBinaryExpr.of(acc, SqlBinaryOp.CONCAT, sep);
+            acc = SqlBinaryExpr.of(join, SqlBinaryOp.CONCAT, args.get(i));
+        }
+        if (acc instanceof SqlBinaryExpr) {
+            ((SqlBinaryExpr) acc).setParenthesized(true);
+        }
+        return acc;
+    }
+
+    private static SqlExpr rewritePad(SqlFunctionExpr fn, String name, SqlDialect family,
+                                      ConversionReport.Builder report) {
+        if (family == SqlDialect.SQLSERVER) {
+            return rewriteSqlServerPad(fn, "LPAD".equals(name));
+        }
+        if (family == SqlDialect.SQLITE) {
+            report.warn(ConversionWarning.Severity.SEMANTIC_RISK, name,
+                    "SQLite 无 LPAD/RPAD，已保留原文");
+            return fn;
+        }
+        return fn;
+    }
+
+    /**
+     * SQL Server 无 LPAD/RPAD：{@code LPAD(s,n,p) = RIGHT(CONCAT(REPLICATE(p,n), LEFT(s,n)), n)}，
+     * {@code RPAD(s,n,p) = LEFT(CONCAT(s, REPLICATE(p,n)), n)}。
+     */
+    private static SqlExpr rewriteSqlServerPad(SqlFunctionExpr fn, boolean left) {
+        List<SqlExpr> args = fn.arguments();
+        if (args.size() < 2) {
+            return fn;
+        }
+        SqlExpr str = args.get(0);
+        SqlExpr n = args.get(1);
+        SqlExpr pad = args.size() >= 3 ? args.get(2)
+                : SqlLiteral.of(SqlLiteral.Kind.STRING, "' '");
+        SqlFunctionExpr rep = call("REPLICATE", pad, n);
+        SqlFunctionExpr cut = call(left ? "LEFT" : "RIGHT", str, n);
+        SqlFunctionExpr cat = left ? call("CONCAT", rep, cut) : call("CONCAT", str, rep);
+        return call(left ? "RIGHT" : "LEFT", cat, n);
+    }
+
+    private static SqlExpr rewriteSpace(SqlFunctionExpr fn, SqlDialect family,
+                                        ConversionReport.Builder report) {
+        if (fn.arguments().isEmpty()) {
+            return fn;
+        }
+        SqlExpr n = fn.arguments().get(0);
+        if (family == SqlDialect.MYSQL || family == SqlDialect.SQLSERVER
+                || family == SqlDialect.H2) {
+            return fn;
+        }
+        if (family == SqlDialect.POSTGRES || family == SqlDialect.ANSI
+                || family == SqlDialect.PRESTO || family == SqlDialect.HIVE
+                || family == SqlDialect.CLICKHOUSE) {
+            return call("REPEAT", SqlLiteral.of(SqlLiteral.Kind.STRING, "' '"), n);
+        }
+        if (family == SqlDialect.ORACLE || family == SqlDialect.ORACLE12
+                || family == SqlDialect.DAMENG) {
+            return call("RPAD", SqlLiteral.of(SqlLiteral.Kind.STRING, "' '"), n);
+        }
+        report.warn(ConversionWarning.Severity.SEMANTIC_RISK, "SPACE",
+                "SPACE 在 " + family + " 无通用映射，已保留原文");
+        return fn;
+    }
+
+    private static SqlExpr rewriteCeil(SqlFunctionExpr fn, SqlDialect family,
+                                       ConversionReport.Builder report) {
+        if (family == SqlDialect.SQLSERVER) {
+            fn.setName(SqlIdentifier.of("CEILING"));
+            return fn;
+        }
+        if (family == SqlDialect.SQLITE) {
+            report.warn(ConversionWarning.Severity.SEMANTIC_RISK, "CEIL",
+                    "SQLite 无 CEIL/CEILING，已保留原文");
+            return fn;
+        }
+        fn.setName(SqlIdentifier.of("CEIL"));
+        return fn;
+    }
+
+    private static SqlExpr rewritePower(SqlFunctionExpr fn, SqlDialect family,
+                                        ConversionReport.Builder report) {
+        if (family == SqlDialect.SQLITE) {
+            report.warn(ConversionWarning.Severity.SEMANTIC_RISK, "POWER",
+                    "SQLite 无 POWER/POW，已保留原文");
+            return fn;
+        }
+        fn.setName(SqlIdentifier.of("POWER"));
+        return fn;
+    }
+
+    private static SqlExpr rewriteMod(SqlFunctionExpr fn, SqlDialect family) {
+        if (family == SqlDialect.SQLSERVER || family == SqlDialect.SQLITE) {
+            SqlBinaryExpr bin = SqlBinaryExpr.of(fn.arguments().get(0), SqlBinaryOp.MOD,
+                    fn.arguments().get(1));
+            bin.setParenthesized(true);
+            return bin;
+        }
+        fn.setName(SqlIdentifier.of("MOD"));
+        return fn;
+    }
+
+    private static SqlExpr rewriteDatePart(SqlFunctionExpr fn, String name, SqlDialect family,
+                                           ConversionReport.Builder report) {
+        if (fn.arguments().isEmpty()) {
+            return fn;
+        }
+        if ("DAYOFMONTH".equals(name)) {
+            name = "DAY";
+        }
+        SqlExpr arg = fn.arguments().get(0);
+        if (family == SqlDialect.MYSQL || family == SqlDialect.H2 || family == SqlDialect.HIVE) {
+            fn.setName(SqlIdentifier.of(name));
+            return fn;
+        }
+        if (family == SqlDialect.SQLSERVER) {
+            if ("YEAR".equals(name) || "MONTH".equals(name) || "DAY".equals(name)) {
+                fn.setName(SqlIdentifier.of(name));
+                return fn;
+            }
+            return call("DATEPART", SqlIdentifier.of(name.toLowerCase(Locale.ROOT)), arg);
+        }
+        if (family == SqlDialect.ORACLE || family == SqlDialect.ORACLE12
+                || family == SqlDialect.DAMENG
+                || family == SqlDialect.POSTGRES || family == SqlDialect.ANSI
+                || family == SqlDialect.PRESTO) {
+            SqlExpr date = dateArg(arg, family);
+            return call("EXTRACT", SqlIdentifier.of(name), date);
+        }
+        if (family == SqlDialect.SQLITE) {
+            String fmt = sqliteDateFmt(name);
+            if (fmt == null) {
+                report.warn(ConversionWarning.Severity.SEMANTIC_RISK, name,
+                        "SQLite 无 " + name + "，已保留原文");
+                return fn;
+            }
+            SqlFunctionExpr strftime = call("strftime",
+                    SqlLiteral.of(SqlLiteral.Kind.STRING, "'" + fmt + "'"), arg);
+            return castTo(strftime, "INTEGER");
+        }
+        report.warn(ConversionWarning.Severity.SEMANTIC_RISK, name,
+                name + " 在 " + family + " 无通用映射，已保留原文");
+        return fn;
+    }
+
+    private static String sqliteDateFmt(String name) {
+        if ("YEAR".equals(name)) {
+            return "%Y";
+        }
+        if ("MONTH".equals(name)) {
+            return "%m";
+        }
+        if ("DAY".equals(name)) {
+            return "%d";
+        }
+        if ("HOUR".equals(name)) {
+            return "%H";
+        }
+        if ("MINUTE".equals(name)) {
+            return "%M";
+        }
+        if ("SECOND".equals(name)) {
+            return "%S";
+        }
+        return null;
+    }
+
+    private static SqlExpr dateArg(SqlExpr expr, SqlDialect family) {
+        if (family == SqlDialect.ORACLE || family == SqlDialect.ORACLE12
+                || family == SqlDialect.DAMENG) {
+            if (expr instanceof SqlLiteral
+                    && ((SqlLiteral) expr).kind() == SqlLiteral.Kind.STRING) {
+                return toDateLiteral(expr);
+            }
+            return expr;
+        }
+        return castToDate(expr);
+    }
+
+    private static SqlExpr rewriteSysDate(SqlFunctionExpr fn, SqlDialect family) {
+        if (family == SqlDialect.MYSQL) {
+            return fn;
+        }
+        if (family == SqlDialect.ORACLE || family == SqlDialect.ORACLE12
+                || family == SqlDialect.DAMENG) {
+            return SqlIdentifier.of("SYSDATE");
+        }
+        if (family == SqlDialect.SQLSERVER) {
+            return call("GETDATE");
+        }
+        if (family == SqlDialect.SQLITE) {
+            return call("datetime", SqlLiteral.of(SqlLiteral.Kind.STRING, "'now'"));
+        }
+        return SqlIdentifier.of("CURRENT_TIMESTAMP");
+    }
+
+    private static SqlExpr rewriteLastDay(SqlFunctionExpr fn, SqlDialect family,
+                                          ConversionReport.Builder report) {
+        if (fn.arguments().isEmpty()) {
+            return fn;
+        }
+        SqlExpr arg = fn.arguments().get(0);
+        if (family == SqlDialect.MYSQL
+                || family == SqlDialect.ORACLE || family == SqlDialect.ORACLE12
+                || family == SqlDialect.DAMENG) {
+            if ((family == SqlDialect.ORACLE || family == SqlDialect.ORACLE12
+                    || family == SqlDialect.DAMENG)
+                    && arg instanceof SqlLiteral
+                    && ((SqlLiteral) arg).kind() == SqlLiteral.Kind.STRING) {
+                SqlFunctionExpr out = call("LAST_DAY", toDateLiteral(arg));
+                return out;
+            }
+            return fn;
+        }
+        if (family == SqlDialect.SQLSERVER) {
+            return call("EOMONTH", arg);
+        }
+        if (family == SqlDialect.H2) {
+            SqlExpr ts = castTo(arg, "TIMESTAMP");
+            SqlFunctionExpr trunc = call("DATE_TRUNC",
+                    SqlLiteral.of(SqlLiteral.Kind.STRING, "'MONTH'"), ts);
+            SqlFunctionExpr add = call("DATEADD",
+                    SqlLiteral.of(SqlLiteral.Kind.STRING, "'MONTH'"),
+                    SqlLiteral.of(SqlLiteral.Kind.NUMBER, "1"), trunc);
+            return call("DATEADD",
+                    SqlLiteral.of(SqlLiteral.Kind.STRING, "'DAY'"),
+                    SqlLiteral.of(SqlLiteral.Kind.NUMBER, "-1"), add);
+        }
+        if (family == SqlDialect.POSTGRES || family == SqlDialect.ANSI
+                || family == SqlDialect.PRESTO) {
+            SqlFunctionExpr trunc = call("date_trunc",
+                    SqlLiteral.of(SqlLiteral.Kind.STRING, "'month'"),
+                    castTo(arg, "TIMESTAMP"));
+            SqlBinaryExpr plus = SqlBinaryExpr.of(trunc, SqlBinaryOp.PLUS,
+                    pgInterval("1 month"));
+            SqlBinaryExpr minus = SqlBinaryExpr.of(plus, SqlBinaryOp.MINUS,
+                    pgInterval("1 day"));
+            minus.setParenthesized(true);
+            return castTo(minus, "DATE");
+        }
+        if (family == SqlDialect.SQLITE) {
+            return call("date", arg,
+                    SqlLiteral.of(SqlLiteral.Kind.STRING, "'start of month'"),
+                    SqlLiteral.of(SqlLiteral.Kind.STRING, "'+1 month'"),
+                    SqlLiteral.of(SqlLiteral.Kind.STRING, "'-1 day'"));
+        }
+        report.warn(ConversionWarning.Severity.SEMANTIC_RISK, "LAST_DAY",
+                "LAST_DAY 在 " + family + " 无通用映射，已保留原文");
+        return fn;
+    }
+
+    private static SqlFunctionExpr pgInterval(String body) {
+        return call("INTERVAL", SqlLiteral.of(SqlLiteral.Kind.STRING, "'" + body + "'"));
+    }
+
+    private static SqlExpr rewriteChar(SqlFunctionExpr fn, String name, SqlDialect family,
+                                       ConversionReport.Builder report) {
+        if (fn.arguments().size() != 1) {
+            if (family != SqlDialect.MYSQL && family != SqlDialect.H2
+                    && family != SqlDialect.SQLSERVER && family != SqlDialect.SQLITE) {
+                report.warn(ConversionWarning.Severity.SEMANTIC_RISK, name,
+                        "多参数 CHAR/CHR 在 " + family + " 无干净等价，已保留原文");
+            }
+            return fn;
+        }
+        boolean chr = family == SqlDialect.ORACLE || family == SqlDialect.ORACLE12
+                || family == SqlDialect.DAMENG || family == SqlDialect.POSTGRES
+                || family == SqlDialect.ANSI || family == SqlDialect.PRESTO;
+        fn.setName(SqlIdentifier.of(chr ? "CHR" : "CHAR"));
+        return fn;
+    }
+
+    private static SqlFunctionExpr call(String name, SqlExpr... args) {
+        SqlFunctionExpr out = new SqlFunctionExpr();
+        out.setName(SqlIdentifier.of(name));
+        if (args != null) {
+            for (int i = 0; i < args.length; i++) {
+                out.addArgument(args[i]);
+            }
+        }
+        return out;
+    }
+
+    private static SqlCastExpr castTo(SqlExpr expr, String type) {
+        SqlCastExpr cast = new SqlCastExpr();
+        cast.setExpr(expr);
+        cast.setDataType(type);
+        return cast;
     }
 
     private static String typeText(SqlExpr expr) {
