@@ -75,6 +75,32 @@
 
     <build>
         <plugins>
+            <!--
+                本模块必须按 JDK 17 编译（Spring Boot 3 要求），但整条 reactor 可能用 JDK 8 启动。
+                用与父工程同 id 的 provide-toolchains 执行覆盖父工程的 9/11 选择，只提供 jdk 17：
+                这样本模块的 compiler（fork + <jdkToolchain>）与 surefire 测试 JVM 都走 JDK 17，
+                而其余模块仍用 JDK 8 编译、jkit-core 的版本化源码走 JDK 9/11。
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-toolchains-plugin</artifactId>
+                <version>3.0.0</version>
+                <executions>
+                    <execution>
+                        <id>provide-toolchains</id>
+                        <goals>
+                            <goal>toolchain</goal>
+                        </goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <toolchains>
+                        <jdk>
+                            <version>17</version>
+                        </jdk>
+                    </toolchains>
+                </configuration>
+            </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
@@ -82,6 +108,11 @@
                 <configuration>
                     <encoding>UTF-8</encoding>
                     <release>17</release>
+                    <!-- 用 JDK 17 工具链编译，而不是启动 Maven 的那个 JDK（可能是 8） -->
+                    <fork>true</fork>
+                    <jdkToolchain>
+                        <version>17</version>
+                    </jdkToolchain>
                     <compilerArgs>
                         <arg>-Xlint:-options</arg>
                     </compilerArgs>

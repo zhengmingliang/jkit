@@ -4,7 +4,16 @@
 
 ## 2.0.1 / unreleased
 
+### jkit-core
+- **修复**：`gzip` 解码在 JDK 8 下正文为空（响应声明 `Content-Encoding: gzip` 但未发送任何字节）时抛 `EOFException`，导致 `HttpP1PerformanceTest#emptyBodyWithGzipEncodingDoesNotFail` 失败。`GzipContentEncoding.decode` 改用单字节回推探测：首字节即 EOF 时返回空流（关闭时仍回收底层连接），跨 JDK 8/9+ 行为一致；JDK 11 HttpClient 引擎原有同类兜底可保留。
+
+### 构建
+- **多 JDK 构建**：整条 reactor 现在可用 JDK 8 启动 Maven，其余模块按 JDK 8 编译（jkit-core 的多版本 `META-INF/versions/9`、`/11` 源码经 toolchain 走 JDK 9 / 11），仅 `jkit-sql-auto-spring-boot-3` 经 toolchain 走 JDK 17 编译与测试（Spring Boot 3 要求）。
+  父工程新增 `maven-toolchains-plugin`（提供 jdk 9、11）；`jkit-sql-auto-spring-boot-3` 用同名 `provide-toolchains` 执行覆盖为 jdk 17，且其 `maven-compiler-plugin` 改为 `<fork>true</fork>` + `<jdkToolchain><version>17</version></jdkToolchain>`（保留 `<release>17</release>`）。
+  依赖本机 `~/.m2/toolchains.xml` 已声明 jdk 8/9/11/17/21。`mvn` 启动 JDK：`JAVA_HOME=$(jdk8) mvn -o clean install`。
+
 ### jkit-sql-auto
+- **变更**：`dryRun(true)` 的 `SqlAuto.run(options)` / `plan(options)` 不再打开 JDBC / DataSource。URL 仅用于推断方言，按空库规划全量 `CREATE TABLE`（库没启动也能打印 SQL）。已传入 `Connection` 的重载仍对照活表，只是不执行。
 - **新增**：启动时按实体自动建表 / 更新表结构（`com.alianga:jkit-sql-auto`）。扫描 `@SqlTable` / JPA / MyBatis-Plus 实体，对照 `DatabaseMetaData` 执行 `CREATE TABLE` / `ALTER TABLE ADD` / `CREATE INDEX`。模式：`none` / `validate` / `update`（默认，只追加）/ `create` / `create-drop`。配置前缀 `jkit.sql.auto.*`，数据源可回落 `spring.datasource.*`。运行时零第三方依赖。
 - **新增**：`SqlAuto.drop` 按外键逆序删托管表；Spring Boot 2 / 3 自动配置模块 `jkit-sql-auto-spring-boot-2`、`jkit-sql-auto-spring-boot-3`。
 - **新增**：表 / 列注释按方言执行（`COMMENT` / `COMMENT ON` / `sp_addextendedproperty`）；Oracle ≤11g 自增主键用 SEQUENCE + TRIGGER，达梦列上写 IDENTITY。
