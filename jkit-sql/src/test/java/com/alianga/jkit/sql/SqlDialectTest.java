@@ -24,13 +24,15 @@ public class SqlDialectTest {
         assertEquals(SqlDialect.POSTGRES, SqlDialect.fromName("cockroachdb"));
         assertEquals(SqlDialect.POSTGRES, SqlDialect.fromName("redshift"));
         assertEquals(SqlDialect.POSTGRES, SqlDialect.fromName("opengauss"));
-        assertEquals(SqlDialect.ORACLE, SqlDialect.fromName("dameng"));
+        assertEquals(SqlDialect.DAMENG, SqlDialect.fromName("dameng"));
         assertEquals(SqlDialect.ORACLE, SqlDialect.fromName("oceanbase_oracle"));
         assertEquals(SqlDialect.ORACLE, SqlDialect.fromName("oracle11"));
         assertEquals(SqlDialect.ORACLE, SqlDialect.fromName("11g"));
         assertEquals(SqlDialect.ORACLE12, SqlDialect.fromName("oracle12"));
         assertEquals(SqlDialect.ORACLE12, SqlDialect.fromName("oracle12c"));
         assertEquals(SqlDialect.ORACLE12, SqlDialect.fromName("19c"));
+        assertEquals(SqlDialect.DAMENG, SqlDialect.fromName("dm"));
+        assertEquals(SqlDialect.DAMENG, SqlDialect.fromName("dm8"));
         assertEquals(SqlDialect.SQLSERVER, SqlDialect.fromName("sybase"));
         assertEquals(SqlDialect.SQLSERVER, SqlDialect.fromName("azuresql"));
         assertEquals(SqlDialect.H2, SqlDialect.fromName("h2"));
@@ -89,6 +91,13 @@ public class SqlDialectTest {
         assertTrue(SqlDialect.ORACLE12.supportsFetchFirst());
         assertTrue(SqlDialect.ORACLE12.supportsRownum());
         assertEquals("LIMIT", SqlDialect.ORACLE12.preferredLimitStyle());
+
+        assertTrue(SqlDialect.DAMENG.supportsLimitOffset());
+        assertFalse(SqlDialect.DAMENG.supportsRownum());
+        assertFalse(SqlDialect.DAMENG.supportsFetchFirst());
+        assertTrue(SqlDialect.DAMENG.pipesAreConcat());
+        assertEquals("LIMIT", SqlDialect.DAMENG.preferredLimitStyle());
+        assertEquals('"', SqlDialect.DAMENG.identQuoteOpen());
 
         assertTrue(SqlDialect.SQLSERVER.supportsTop());
         assertFalse(SqlDialect.SQLSERVER.supportsLimitOffset());

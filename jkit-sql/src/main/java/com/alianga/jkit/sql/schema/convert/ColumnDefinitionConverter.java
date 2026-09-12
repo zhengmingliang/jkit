@@ -115,6 +115,7 @@ public final class ColumnDefinitionConverter {
             case MYSQL:
             case ORACLE:
             case ORACLE12:
+            case DAMENG:
                 return 4000;
             case SQLSERVER:
                 return 8000;
@@ -254,7 +255,7 @@ public final class ColumnDefinitionConverter {
             }
         } else if (auto != null && auto.clause() != null && auto.afterPrimaryKey()) {
             report.warn(ConversionWarning.Severity.MANUAL_ACTION_REQUIRED, column.columnName(),
-                    "AUTOINCREMENT 在 SQLite 只能用于 INTEGER PRIMARY KEY，该列无主键约束，已去掉");
+                    "该方言的自增子句必须排在 PRIMARY KEY 之后，该列无主键约束，已去掉");
         }
         if (unique) {
             sb.append(" UNIQUE");

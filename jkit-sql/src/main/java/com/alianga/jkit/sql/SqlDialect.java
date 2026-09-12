@@ -9,8 +9,9 @@ package com.alianga.jkit.sql;
  * <ul>
  *   <li>{@link #MYSQL}：反引号、{@code ||}=OR、LIMIT/OFFSET；别名含 MariaDB/GBase/TiDB 等</li>
  *   <li>{@link #POSTGRES}：双引号、{@code ||}=拼接、LIMIT/OFFSET 与 FETCH；别名含 Gauss/Greenplum</li>
- *   <li>{@link #ORACLE}：经典 Oracle ≤11g / 达梦 / Oscar — 双引号、拼接、仅 ROWNUM 分页（无 OFFSET/FETCH）</li>
+ *   <li>{@link #ORACLE}：经典 Oracle ≤11g / Oscar — 双引号、拼接、仅 ROWNUM 分页（无 OFFSET/FETCH）</li>
  *   <li>{@link #ORACLE12}：Oracle 12c+ — 同引号/拼接，裸 SELECT 可用 OFFSET/FETCH，仍识别 ROWNUM 包装</li>
+ *   <li>{@link #DAMENG}：达梦 — 双引号、拼接、LIMIT/OFFSET，列自增用 IDENTITY</li>
  *   <li>{@link #SQLSERVER}：方括号、TOP 与 OFFSET FETCH；别名含 mssql/tsql</li>
  *   <li>{@link #ANSI} / {@link #H2}：双引号、拼接、LIMIT/OFFSET（H2 兼认 {@code #} 注释）</li>
  *   <li>{@link #DB2}：双引号、拼接、仅 {@code FETCH FIRST} 分页（无 LIMIT/ROWNUM）</li>
@@ -41,7 +42,7 @@ public enum SqlDialect implements SqlDialectSpec {
      */
     POSTGRES,
     /**
-     * 经典 Oracle（11g 及以下）/ 达梦 / Oscar：双引号标识符，{@code ||} 拼接；
+     * 经典 Oracle（11g 及以下）/ Oscar：双引号标识符，{@code ||} 拼接；
      * 分页一律 ROWNUM 包装，不生成 {@code OFFSET … FETCH}。
      */
     ORACLE,
@@ -82,7 +83,12 @@ public enum SqlDialect implements SqlDialectSpec {
      * Presto / Trino：双引号标识符，{@code ||} 拼接，LIMIT；
      * 不支持 {@code FETCH FIRST}（Trino 部分版本有 OFFSET）。
      */
-    PRESTO;
+    PRESTO,
+    /**
+     * 达梦：双引号标识符，{@code ||} 拼接；分页用 {@code LIMIT/OFFSET}；
+     * 列自增写 {@code IDENTITY}（不是 Oracle 11g 的 SEQUENCE）。
+     */
+    DAMENG;
 
     /**
      * 按名称解析方言，无法识别时返回 {@link #MYSQL}。
@@ -120,9 +126,11 @@ public enum SqlDialect implements SqlDialectSpec {
             return ORACLE12;
         }
         if ("oracle".equals(n) || "oracle11".equals(n) || "oracle10".equals(n) || "11g".equals(n)
-                || "dm".equals(n) || "dameng".equals(n) || "oscar".equals(n)
-                || "oceanbase_oracle".equals(n)) {
+                || "oscar".equals(n) || "oceanbase_oracle".equals(n)) {
             return ORACLE;
+        }
+        if ("dm".equals(n) || "dameng".equals(n) || "dm8".equals(n) || "dm7".equals(n)) {
+            return DAMENG;
         }
         if ("sqlserver".equals(n) || "mssql".equals(n) || "sqlserver2012".equals(n)
                 || "tsql".equals(n) || "sybase".equals(n) || "azure".equals(n)
@@ -187,6 +195,7 @@ public enum SqlDialect implements SqlDialectSpec {
             case POSTGRES:
             case ORACLE:
             case ORACLE12:
+            case DAMENG:
             case H2:
             case DB2:
             case SQLITE:
@@ -279,7 +288,8 @@ public enum SqlDialect implements SqlDialectSpec {
      */
     public boolean supportsLimitOffset() {
         return this == MYSQL || this == POSTGRES || this == H2 || this == ANSI
-                || this == SQLITE || this == HIVE || this == CLICKHOUSE || this == PRESTO;
+                || this == SQLITE || this == HIVE || this == CLICKHOUSE || this == PRESTO
+                || this == DAMENG;
     }
 
     /**

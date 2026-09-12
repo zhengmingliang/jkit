@@ -24,7 +24,7 @@ public class SqlAutoDialectsTest {
         assertEquals(SqlDialect.SQLSERVER, SqlAutoDialects.fromUrl("jdbc:sqlserver://localhost;database=db"));
         assertEquals(SqlDialect.H2, SqlAutoDialects.fromUrl("jdbc:h2:mem:demo"));
         assertEquals(SqlDialect.SQLITE, SqlAutoDialects.fromUrl("jdbc:sqlite:file.db"));
-        assertEquals(SqlDialect.ORACLE, SqlAutoDialects.fromUrl("jdbc:dm://localhost:5236"));
+        assertEquals(SqlDialect.DAMENG, SqlAutoDialects.fromUrl("jdbc:dm://localhost:5236"));
         assertNull(SqlAutoDialects.fromUrl(null));
         assertNull(SqlAutoDialects.fromUrl("not-jdbc"));
     }

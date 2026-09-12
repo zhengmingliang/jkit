@@ -65,10 +65,11 @@ SQL.parse(sql, SqlDialect.SQLITE);      // LIMIT 族，无 FETCH FIRST
 SQL.parse(sql, SqlDialect.HIVE);        // 反引号、|| 拼接；别名 maxcompute/odps
 SQL.parse(sql, SqlDialect.CLICKHOUSE);  // 反引号、双引号也是标识符、逗号 LIMIT
 SQL.parse(sql, SqlDialect.PRESTO);      // 双引号、|| 拼接；别名 trino
+SQL.parse(sql, SqlDialect.DAMENG);      // 达梦：双引号、LIMIT/OFFSET、IDENTITY
 
 SqlDialect.fromName("gbase");     // MYSQL
 SqlDialect.fromName("gaussdb");   // POSTGRES
-SqlDialect.fromName("dm");        // ORACLE（ROWNUM）
+SqlDialect.fromName("dm");        // DAMENG
 SqlDialect.fromName("oracle12");  // ORACLE12
 SqlDialect.fromName("19c");       // ORACLE12
 SqlDialect.fromName("tidb");      // MYSQL
@@ -78,7 +79,7 @@ SqlDialect.fromName("hive");      // HIVE
 SqlDialect.fromName("clickhouse");// CLICKHOUSE
 SqlDialect.fromName("trino");     // PRESTO
 // 国产与主流别名：goldendb/selectdb/analyticdb/matrixone/stonedb/oceanbase/polardb/tdsql/starrocks/doris → MYSQL；
-// highgo/uxdb/mogdb/vastbase/antdb/ivorysql/kingbase/opengauss/greenplum → POSTGRES；dm/oscar → ORACLE
+// highgo/uxdb/mogdb/vastbase/antdb/ivorysql/kingbase/opengauss/greenplum → POSTGRES；oscar → ORACLE；dm/dameng → DAMENG
 // common-model（icell）数据源对齐：argo/argodb → HIVE（Transwarp Hive JDBC）、xcloud → POSTGRES（行云）、
 // gbase8a → MYSQL、gbase8s → SQLITE（双引号、LIMIT、无 FETCH）
 
@@ -464,7 +465,7 @@ java -jar target/benchmarks.jar com.alianga.test.sql.jmh.SqlSchemaConvertBenchma
 
 表 / 列注释：`@SqlTable(comment=…)`、`@SqlColumn(comment=…)`。MySQL / Hive / ClickHouse 写成列内 / 表尾 `COMMENT '…'`；H2 列内 `COMMENT`，表级走 `COMMENT ON TABLE`；PostgreSQL / Oracle / DB2 / ANSI 走 `COMMENT ON TABLE|COLUMN`；SQL Server 走 `sp_addextendedproperty`；Presto 表级 `WITH (comment=…)`；SQLite 无注释语法，忽略。自动建表把这些附录拆成独立变更执行。
 
-无 IDENTITY 的方言（Oracle ≤11g / 达梦，枚举 `ORACLE`）用 `CREATE SEQUENCE {table}_{column}_seq` + `BEFORE INSERT` 触发器代替自增主键；Oracle 12c+ 仍用 `GENERATED … AS IDENTITY`。`SqlEntities.extraSql` / `sequenceSql` 可单独取附录。
+无 IDENTITY 的方言（Oracle ≤11g，枚举 `ORACLE`）用 `CREATE SEQUENCE {table}_{column}_seq` + `BEFORE INSERT` 触发器代替自增主键；达梦（`DAMENG`）列上写 `IDENTITY`；Oracle 12c+ 仍用 `GENERATED … AS IDENTITY`。`SqlEntities.extraSql` / `sequenceSql` 可单独取附录。
 
 ```java
 import com.alianga.jkit.sql.entity.SqlEntities;

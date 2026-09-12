@@ -1673,8 +1673,8 @@ public class SqlParserTest {
                 "INSERT INTO t (id) OUTPUT INSERTED.id VALUES (1)", SqlDialect.SQLSERVER);
         assertEquals(1, out.output().size());
 
-        assertEquals(SqlDialect.ORACLE, SqlDialect.fromName("dameng"));
-        assertEquals(SqlDialect.ORACLE, SqlDialect.fromName("dm"));
+        assertEquals(SqlDialect.DAMENG, SqlDialect.fromName("dameng"));
+        assertEquals(SqlDialect.DAMENG, SqlDialect.fromName("dm"));
         assertEquals(SqlDialect.MYSQL, SqlDialect.fromName("gbase"));
     }
 

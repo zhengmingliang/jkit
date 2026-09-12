@@ -439,6 +439,25 @@ public class SqlSchemaConverterTest {
     }
 
     @Test
+    public void damengIdentityAndOracleStyleFunctions() {
+        String ddl = SQL.convert(
+                "CREATE TABLE t (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(32))",
+                SqlDialect.MYSQL, SqlDialect.DAMENG);
+        String u = ddl.toUpperCase();
+        assertTrue(ddl, u.contains("IDENTITY"));
+        assertTrue(ddl, u.contains("INT") || u.contains("BIGINT"));
+        assertFalse(ddl, u.contains("GENERATED"));
+        assertFalse(ddl, u.contains("SEQUENCE"));
+        SQL.parse(ddl, SqlDialect.DAMENG);
+
+        String nvl = SQL.convert("SELECT IFNULL(a, 0) FROM t", SqlDialect.MYSQL, SqlDialect.DAMENG);
+        assertTrue(nvl, nvl.toUpperCase().contains("NVL"));
+        String unix = SQL.convert("SELECT FROM_UNIXTIME(ts) FROM t", SqlDialect.MYSQL, SqlDialect.DAMENG);
+        assertTrue(unix, unix.toUpperCase().contains("NUMTODSINTERVAL"));
+        assertTrue(unix, unix.toUpperCase().contains("TO_DATE"));
+    }
+
+    @Test
     public void findInSetWarnsAndKeeps() {
         ConversionResult r = SqlSchemaConverter.convert(
                 "SELECT FIND_IN_SET('a', list) FROM t", SqlDialect.MYSQL, SqlDialect.POSTGRES);

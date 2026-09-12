@@ -26,7 +26,8 @@ public final class DateFormatRewriteRule implements FunctionRewriteRule {
             return fn;
         }
         if (family == SqlDialect.POSTGRES || family == SqlDialect.ORACLE
-                || family == SqlDialect.ORACLE12 || family == SqlDialect.ANSI) {
+                || family == SqlDialect.ORACLE12 || family == SqlDialect.DAMENG
+                || family == SqlDialect.ANSI) {
             report.warn(ConversionWarning.Severity.SEMANTIC_RISK, "DATE_FORMAT",
                     "DATE_FORMAT 格式符与 TO_CHAR 不完全等价");
             fn.setName(SqlIdentifier.of("TO_CHAR"));

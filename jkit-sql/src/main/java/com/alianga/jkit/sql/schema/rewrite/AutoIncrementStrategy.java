@@ -97,6 +97,9 @@ public final class AutoIncrementStrategy {
             case ANSI:
             case DB2:
                 return generated(auto);
+            case DAMENG:
+                // 达梦：IDENTITY 必须写在 PRIMARY KEY 之后，写成 NOT NULL IDENTITY PRIMARY KEY 会语法错
+                return new Result("IDENTITY", null, false, true);
             case ORACLE:
                 report.warn(ConversionWarning.Severity.MANUAL_ACTION_REQUIRED, loc,
                         "Oracle \u226411g 无法自动生成 IDENTITY，需手工创建 SEQUENCE + TRIGGER");

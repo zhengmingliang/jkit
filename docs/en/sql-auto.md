@@ -151,7 +151,7 @@ java com.alianga.jkit.sql.auto.SqlAuto
 
 When `dialect` is unset:
 
-1. JDBC URL prefix (`jdbc:mysql:` → MYSQL, `jdbc:postgresql:` → POSTGRES, `jdbc:h2:` → H2, `jdbc:oracle:` → ORACLE, Dameng `jdbc:dm:` maps to ORACLE, …)
+1. JDBC URL prefix (`jdbc:mysql:` → MYSQL, `jdbc:postgresql:` → POSTGRES, `jdbc:h2:` → H2, `jdbc:oracle:` → ORACLE, Dameng `jdbc:dm:` → DAMENG, …)
 2. `DatabaseMetaData.getDatabaseProductName()` (Oracle 12+ uses `ORACLE12`)
 3. otherwise MYSQL
 
@@ -185,13 +185,13 @@ SqlAuto.drop(SqlAutoOptions.defaults().url(url).entities(User.class));
 
 Table / column comments (`@SqlTable(comment)` / `@SqlColumn(comment)`) follow the dialect: MySQL / Hive / ClickHouse inline `COMMENT`; H2 inlines column comments and uses `COMMENT ON TABLE`; PostgreSQL / Oracle / DB2 / ANSI emit `COMMENT ON`; SQL Server uses `sp_addextendedproperty`; Presto table-level `WITH (comment=…)`; SQLite skips comments. Auto-DDL runs extras as separate statements (`CREATE TABLE` itself does not include them).
 
-Oracle ≤11g / Dameng (`ORACLE`) have no IDENTITY: auto-increment PKs become `CREATE SEQUENCE {table}_{column}_seq` plus a `BEFORE INSERT` trigger. `CREATE_DROP` / `drop` drop the sequence before the table. Oracle 12c+ still uses `GENERATED … AS IDENTITY`.
+Oracle ≤11g (`ORACLE`) has no IDENTITY: auto-increment PKs become `CREATE SEQUENCE {table}_{column}_seq` plus a `BEFORE INSERT` trigger. `CREATE_DROP` / `drop` drop the sequence before the table. Dameng (`DAMENG`) uses column `IDENTITY`. Oracle 12c+ still uses `GENERATED … AS IDENTITY`.
 
 Some products are narrower than the first-class dialect. Turn the matching DDL off:
 
 - Old OpenGauss rejects `GENERATED … IDENTITY`: `postgresIdentityStyle(SERIAL)`
 - GBase 8a may reject in-table `FOREIGN KEY` / standalone `CREATE INDEX` (`unsupported key algorithm`): `foreignKeys(false).createIndex(false)`
 - DuckDB rejects `AUTOINCREMENT` / `IDENTITY` / in-table FK: `autoIncrement(false).foreignKeys(false).createIndex(false)`
-- Oracle ≤11g / Dameng: SEQUENCE + TRIGGER is generated (no longer manual)
+- Oracle ≤11g: SEQUENCE + TRIGGER is generated; Dameng uses IDENTITY
 
 For H2 in-memory `CREATE_DROP`, put `DB_CLOSE_DELAY=-1` on the URL so the database survives the startup connection closing.

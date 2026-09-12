@@ -89,7 +89,10 @@ public final class SqlAutoDialects {
         if (u.startsWith("jdbc:presto:") || u.startsWith("jdbc:trino:")) {
             return SqlDialect.PRESTO;
         }
-        if (u.startsWith("jdbc:dm:") || u.startsWith("jdbc:oscar:")) {
+        if (u.startsWith("jdbc:dm:")) {
+            return SqlDialect.DAMENG;
+        }
+        if (u.startsWith("jdbc:oscar:")) {
             return SqlDialect.ORACLE;
         }
         return null;
@@ -125,6 +128,10 @@ public final class SqlAutoDialects {
     public static SqlDialect fromProduct(String product) {
         if (product == null || product.isEmpty()) {
             return SqlDialect.MYSQL;
+        }
+        String n = product.toLowerCase(Locale.ROOT);
+        if (n.contains("dm dbms") || n.contains("dameng") || n.contains("dm database")) {
+            return SqlDialect.DAMENG;
         }
         return SqlDialect.fromName(product);
     }

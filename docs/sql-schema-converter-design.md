@@ -82,7 +82,8 @@ SQL.convertBatch(sqls, SqlDialect.MYSQL, SqlDialect.POSTGRES);
 |---|---|---|---|---|
 | `MYSQL` | MySQL / MariaDB / TiDB / OceanBase MySQL 模式 / PolarDB-MySQL / GBase 8a / StarRocks / Doris 等 | `LIMIT`/`OFFSET` | `AUTO_INCREMENT` | 默认方言；`TINYINT(1)`↔布尔 |
 | `POSTGRES` | PostgreSQL / GaussDB / openGauss / Greenplum / Kingbase / MogDB / Highgo / Cockroach / Redshift 等 | `LIMIT`/`OFFSET`，亦认 FETCH | `GENERATED … IDENTITY` 或 `SERIAL` | 真库验证过（本机 PG 13、容器 PG 16） |
-| `ORACLE` | Oracle ≤11g / 达梦 / Oscar / OceanBase Oracle 模式 | 仅 `ROWNUM` | **不生成**，`MANUAL_ACTION_REQUIRED` | 真库验证过（本机 Oracle 11g） |
+| `ORACLE` | Oracle ≤11g / Oscar / OceanBase Oracle 模式 | 仅 `ROWNUM` | **不生成**，`MANUAL_ACTION_REQUIRED` | 真库验证过（本机 Oracle 11g） |
+| `DAMENG` | 达梦 | `LIMIT`/`OFFSET` | `IDENTITY` | 真库验证过（本机达梦 5236） |
 | `ORACLE12` | Oracle 12c / 18c / 19c / 21c | 裸 SELECT 可用 `OFFSET/FETCH` | `GENERATED … IDENTITY` | 类型写法与 `ORACLE` 相同，只是自增和分页不同 |
 | `SQLSERVER` | SQL Server / Azure SQL / 别名 mssql、tsql、sybase | 第 1 页 `TOP`，其后 `OFFSET FETCH` | `IDENTITY(s,i)` | |
 | `H2` | H2 | `LIMIT`/`OFFSET` | `AUTO_INCREMENT` | 内存库验证过 |
@@ -101,7 +102,8 @@ SQL.convertBatch(sqls, SqlDialect.MYSQL, SqlDialect.POSTGRES);
 |---|---|
 | `MYSQL` | mysql、mariadb、tidb、gbase、gbase8a、oceanbase、polardb、starrocks、doris、percona、singlestore、memsql、tdsql、greatsql、goldendb、adb、analyticdb、ads、selectdb、matrixone、stonedb |
 | `POSTGRES` | postgres、postgresql、pgsql、gauss、gaussdb、opengauss、greenplum、kingbase、cockroach、redshift、highgo、uxdb、mogdb、vastbase、antdb、ivorysql、xcloud |
-| `ORACLE` | oracle、oracle11、11g、dm、dameng、oscar、oceanbase_oracle |
+| `ORACLE` | oracle、oracle11、11g、oscar、oceanbase_oracle |
+| `DAMENG` | dm、dameng、dm8、dm7 |
 | `ORACLE12` | oracle12、oracle12c、12c、oracle18、oracle19、oracle21、19c、21c |
 | `SQLSERVER` | sqlserver、mssql、tsql、sybase、azure、azuresql、sqlserver2012 |
 | `HIVE` | hive、hive2、hive3、maxcompute、odps、argo、argodb |
@@ -118,9 +120,9 @@ SQL.convertBatch(sqls, SqlDialect.MYSQL, SqlDialect.POSTGRES);
 
 | 能力 | 覆盖 |
 |---|---|
-| 列类型（20 个 canonical × 12 方言） | 全登记，CI `RegistryValidationTest` |
-| `CREATE TABLE` 列约束 / 自增 | 12 方言均有策略；Hive/CH/Presto/Oracle11g 自增只告警不瞎生成 |
-| SELECT/DML 函数 | 见第八节；按目标方言分支，不是 12×12 张函数表 |
+| 列类型（20 个 canonical × 全部一等方言） | 全登记，CI `RegistryValidationTest` |
+| `CREATE TABLE` 列约束 / 自增 | 各方言均有策略；Hive/CH/Presto/Oracle11g 自增只告警不瞎生成；达梦写 IDENTITY |
+| SELECT/DML 函数 | 见第八节；按目标方言分支，不是 pairwise 函数表 |
 | 分页 | 随 `format(stmt, target)`，与 `SQL.convert` 同一条链路 |
 | 真库建表回归 | MySQL 8、PostgreSQL 13/16、Oracle 11g、H2（`tools-test`） |
 
@@ -129,7 +131,7 @@ SQL.convert(sql, SqlDialect.fromName("gbase8a"), SqlDialect.fromName("opengauss"
 // 等价 MYSQL → POSTGRES
 
 SQL.convert(sql, SqlDialect.fromName("dm"), SqlDialect.MYSQL);
-// 达梦按 ORACLE（11g 分页/自增）→ MYSQL
+// 达梦按 DAMENG（LIMIT 分页 / IDENTITY）→ MYSQL
 ```
 
 ## 五、列模型与解析
@@ -312,7 +314,7 @@ mvn -pl jkit-sql -Dtest=RegistryValidationTest,SqlDataTypeRegistryTest test
 
 `SqlDialectSpec` 就是外部扩展点。解析、分页、format、`SQL.convert` 全链路吃规约，**不要为新产品去改 `SqlDialect` 枚举**（除非它会成为全仓库一等公民，并愿意维护 12×canonical 全表）。
 
-达梦 / openGauss / GBase 若只是「和某内置方言同一套类型」，用 `fromName` 别名或下面的 `typeFamily()` 即可。
+openGauss / GBase 若只是「和某内置方言同一套类型」，用 `fromName` 别名或下面的 `typeFamily()` 即可。达梦已是一等枚举 `DAMENG`。
 
 ```java
 // 1) 接近 PostgreSQL：包装后只改能力，类型表自动复用 POSTGRES

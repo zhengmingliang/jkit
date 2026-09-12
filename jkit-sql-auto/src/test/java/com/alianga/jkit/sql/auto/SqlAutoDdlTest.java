@@ -116,6 +116,28 @@ public class SqlAutoDdlTest {
         assertEquals(1, drops.size());
         assertTrue(drops.get(0), drops.get(0).contains("DROP SEQUENCE seq_t_id_seq"));
         assertTrue(SqlAutoDdl.dropSequenceSql(model, SqlDialect.MYSQL).isEmpty());
+        assertTrue(SqlAutoDdl.dropSequenceSql(model, SqlDialect.DAMENG).isEmpty());
+    }
+
+    @Test
+    public void damengUsesIdentityNotSequence() {
+        @SqlTable(name = "seq_t")
+        class SeqT {
+            @SqlId
+            @SqlGenerated
+            long id;
+            String name;
+        }
+        SqlEntityModel model = SqlEntities.inspect(SeqT.class);
+        List<SqlAutoChange> changes = SqlAutoDdl.planTable(model, null, SqlDialect.DAMENG,
+                SqlAutoOptions.defaults().createIndex(false));
+        assertFalse(kind(changes, SqlAutoChange.Kind.SEQUENCE));
+        String create = changes.get(0).sql().toUpperCase();
+        assertTrue(changes.get(0).sql(), create.contains("IDENTITY"));
+        assertFalse(changes.get(0).sql(), create.contains("GENERATED"));
+        int pk = create.indexOf("PRIMARY KEY");
+        int idn = create.indexOf("IDENTITY");
+        assertTrue(changes.get(0).sql(), pk >= 0 && idn > pk);
     }
 
     @Test

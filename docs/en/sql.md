@@ -63,10 +63,11 @@ SQL.parse(sql, SqlDialect.SQLITE);      // LIMIT family, no FETCH FIRST
 SQL.parse(sql, SqlDialect.HIVE);        // backticks, || is concat; aliases maxcompute/odps
 SQL.parse(sql, SqlDialect.CLICKHOUSE);  // backticks, double quotes are identifiers, comma-style LIMIT
 SQL.parse(sql, SqlDialect.PRESTO);      // double quotes, || is concat; alias trino
+SQL.parse(sql, SqlDialect.DAMENG);      // Dameng: double quotes, LIMIT/OFFSET, IDENTITY
 
 SqlDialect.fromName("gbase");     // MYSQL
 SqlDialect.fromName("gaussdb");   // POSTGRES
-SqlDialect.fromName("dm");        // ORACLE (ROWNUM)
+SqlDialect.fromName("dm");        // DAMENG
 SqlDialect.fromName("oracle12");  // ORACLE12
 SqlDialect.fromName("19c");       // ORACLE12
 SqlDialect.fromName("tidb");      // MYSQL
@@ -76,7 +77,7 @@ SqlDialect.fromName("hive");      // HIVE
 SqlDialect.fromName("clickhouse");// CLICKHOUSE
 SqlDialect.fromName("trino");     // PRESTO
 // Domestic & mainstream aliases: goldendb/selectdb/analyticdb/matrixone/stonedb/oceanbase/polardb/tdsql/starrocks/doris → MYSQL;
-// highgo/uxdb/mogdb/vastbase/antdb/ivorysql/kingbase/opengauss/greenplum → POSTGRES; dm/oscar → ORACLE
+// highgo/uxdb/mogdb/vastbase/antdb/ivorysql/kingbase/opengauss/greenplum → POSTGRES; oscar → ORACLE; dm/dameng → DAMENG
 // Aligned with icell common-model data sources: argo/argodb → HIVE (Transwarp Hive JDBC),
 // xcloud → POSTGRES (XCloud), gbase8a → MYSQL, gbase8s → SQLITE (double quotes, LIMIT, no FETCH)
 
@@ -347,7 +348,7 @@ Like data-set `EntityScanner`, without Spring: scan classes annotated with `@Sql
 
 Table / column comments (`@SqlTable(comment=…)`, `@SqlColumn(comment=…)`): MySQL / Hive / ClickHouse inline `COMMENT '…'`; H2 inlines column comments and uses `COMMENT ON TABLE` for the table; PostgreSQL / Oracle / DB2 / ANSI emit `COMMENT ON TABLE|COLUMN`; SQL Server uses `sp_addextendedproperty`; Presto table-level `WITH (comment=…)`; SQLite has no comment syntax, so comments are skipped. Auto-DDL runs these as extra statements after `CREATE TABLE`.
 
-Dialects without IDENTITY (Oracle ≤11g / Dameng, enum `ORACLE`) get `CREATE SEQUENCE {table}_{column}_seq` plus a `BEFORE INSERT` trigger instead of an identity column; Oracle 12c+ still uses `GENERATED … AS IDENTITY`. `SqlEntities.extraSql` / `sequenceSql` expose the extras on their own.
+Dialects without IDENTITY (Oracle ≤11g, enum `ORACLE`) get `CREATE SEQUENCE {table}_{column}_seq` plus a `BEFORE INSERT` trigger; Dameng (`DAMENG`) uses column `IDENTITY`; Oracle 12c+ still uses `GENERATED … AS IDENTITY`. `SqlEntities.extraSql` / `sequenceSql` expose the extras on their own.
 
 ```java
 import com.alianga.jkit.sql.entity.SqlEntities;

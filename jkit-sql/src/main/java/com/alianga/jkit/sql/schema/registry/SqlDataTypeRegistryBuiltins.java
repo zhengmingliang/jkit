@@ -9,7 +9,7 @@ import java.util.EnumSet;
 import java.util.List;
 
 /**
- * 内置 12 种方言的 canonical 类型声明、别名与有损映射。
+ * 内置方言的 canonical 类型声明、别名与有损映射。
  *
  * @author 郑明亮
  * @since 2.0.1
@@ -111,7 +111,7 @@ final class SqlDataTypeRegistryBuiltins {
     /**
      * @param mysql 同时用于 MYSQL
      * @param postgres POSTGRES
-     * @param oracle ORACLE 与 ORACLE12
+     * @param oracle ORACLE、ORACLE12 与 DAMENG
      * @param sqlserver SQLSERVER
      * @param ansi ANSI 与 H2
      * @param db2 DB2
@@ -128,6 +128,7 @@ final class SqlDataTypeRegistryBuiltins {
         r.register(type, SqlDialect.POSTGRES, DialectTypeForm.of(postgres));
         r.register(type, SqlDialect.ORACLE, DialectTypeForm.of(oracle));
         r.register(type, SqlDialect.ORACLE12, DialectTypeForm.of(oracle));
+        r.register(type, SqlDialect.DAMENG, DialectTypeForm.of(damengForm(type, oracle)));
         r.register(type, SqlDialect.SQLSERVER, DialectTypeForm.of(sqlserver));
         r.register(type, SqlDialect.ANSI, DialectTypeForm.of(ansi));
         r.register(type, SqlDialect.H2, DialectTypeForm.of(ansi));
@@ -136,6 +137,25 @@ final class SqlDataTypeRegistryBuiltins {
         r.register(type, SqlDialect.HIVE, DialectTypeForm.of(hive));
         r.register(type, SqlDialect.CLICKHOUSE, DialectTypeForm.of(clickhouse));
         r.register(type, SqlDialect.PRESTO, DialectTypeForm.of(presto));
+    }
+
+    /**
+     * 达梦整数用 TINYINT/INT/BIGINT（IDENTITY 不能配 NUMBER）；其余类型跟 Oracle。
+     */
+    private static String damengForm(CanonicalType type, String oracle) {
+        if (type == CanonicalType.TINYINT || type == CanonicalType.YEAR) {
+            return "TINYINT";
+        }
+        if (type == CanonicalType.SMALLINT) {
+            return "SMALLINT";
+        }
+        if (type == CanonicalType.MEDIUMINT || type == CanonicalType.INT) {
+            return "INT";
+        }
+        if (type == CanonicalType.BIGINT) {
+            return "BIGINT";
+        }
+        return oracle;
     }
 
     private static void registerAliases(SqlDataTypeRegistry r) {
@@ -204,6 +224,13 @@ final class SqlDataTypeRegistryBuiltins {
         lossy(r, oracle, "TIMESTAMP", CanonicalType.TIMESTAMP,
                 CanonicalType.DATETIME, CanonicalType.TIME);
         lossy(r, oracle, "CLOB", CanonicalType.TEXT, CanonicalType.JSON);
+
+        SqlDialect[] dameng = {SqlDialect.DAMENG};
+        lossy(r, dameng, "TINYINT", CanonicalType.TINYINT, CanonicalType.YEAR);
+        lossy(r, dameng, "INT", CanonicalType.INT, CanonicalType.MEDIUMINT);
+        lossy(r, dameng, "TIMESTAMP", CanonicalType.TIMESTAMP,
+                CanonicalType.DATETIME, CanonicalType.TIME);
+        lossy(r, dameng, "CLOB", CanonicalType.TEXT, CanonicalType.JSON);
 
         lossy(r, new SqlDialect[] {SqlDialect.SQLSERVER}, "INT", CanonicalType.INT,
                 CanonicalType.MEDIUMINT);

@@ -85,6 +85,7 @@ public class SqlEntitiesTest {
 
         assertTrue(SqlEntities.needsSequenceFallback(SqlDialect.ORACLE));
         assertFalse(SqlEntities.needsSequenceFallback(SqlDialect.ORACLE12));
+        assertFalse(SqlEntities.needsSequenceFallback(SqlDialect.DAMENG));
         assertFalse(SqlEntities.needsSequenceFallback(SqlDialect.MYSQL));
         assertEquals("cmt_id_seq", SqlEntities.sequenceName("cmt", "id"));
         assertTrue(SqlEntities.sequenceSql("cmt", SqlEntities.inspect(Cmt.class).idColumn(),

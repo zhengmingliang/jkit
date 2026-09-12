@@ -145,7 +145,7 @@ public final class SqlAutoDdl {
     public static String dropTableSql(String tableName, SqlDialect dialect, SqlAutoOptions options) {
         String name = ident(tableName, dialect, options);
         SqlDialect d = dialect == null ? SqlDialect.MYSQL : dialect;
-        if (d == SqlDialect.ORACLE || d == SqlDialect.ORACLE12) {
+        if (d == SqlDialect.ORACLE || d == SqlDialect.ORACLE12 || d == SqlDialect.DAMENG) {
             return "DROP TABLE " + name;
         }
         return "DROP TABLE IF EXISTS " + name;
@@ -389,7 +389,8 @@ public final class SqlAutoDdl {
         if (dialect == SqlDialect.SQLSERVER) {
             return "ALTER TABLE " + t + " ALTER COLUMN " + SqlEntities.columnSql(col, dialect, false);
         }
-        if (dialect == SqlDialect.ORACLE || dialect == SqlDialect.ORACLE12) {
+        if (dialect == SqlDialect.ORACLE || dialect == SqlDialect.ORACLE12
+                || dialect == SqlDialect.DAMENG) {
             return "ALTER TABLE " + t + " MODIFY (" + c + " " + type + ")";
         }
         return "ALTER TABLE " + t + " ALTER COLUMN " + c + " TYPE " + type;

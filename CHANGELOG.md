@@ -7,12 +7,13 @@
 ### jkit-sql-auto
 - **新增**：启动时按实体自动建表 / 更新表结构（`com.alianga:jkit-sql-auto`）。扫描 `@SqlTable` / JPA / MyBatis-Plus 实体，对照 `DatabaseMetaData` 执行 `CREATE TABLE` / `ALTER TABLE ADD` / `CREATE INDEX`。模式：`none` / `validate` / `update`（默认，只追加）/ `create` / `create-drop`。配置前缀 `jkit.sql.auto.*`，数据源可回落 `spring.datasource.*`。运行时零第三方依赖。
 - **新增**：`SqlAuto.drop` 按外键逆序删托管表；Spring Boot 2 / 3 自动配置模块 `jkit-sql-auto-spring-boot-2`、`jkit-sql-auto-spring-boot-3`。
-- **新增**：表 / 列注释按方言执行（`COMMENT` / `COMMENT ON` / `sp_addextendedproperty`）；Oracle ≤11g / 达梦自增主键用 SEQUENCE + TRIGGER，删表前先删序列。
+- **新增**：表 / 列注释按方言执行（`COMMENT` / `COMMENT ON` / `sp_addextendedproperty`）；Oracle ≤11g 自增主键用 SEQUENCE + TRIGGER，达梦列上写 IDENTITY。
 - **新增**：`postgresIdentityStyle` / `foreignKeys` / `autoIncrement` 选项，给 OpenGauss / GBase 8a / DuckDB 等能力较窄的产品关掉对应 DDL。
 
 ### jkit-sql
 - **实体**：公开 `columnSql` / `columnTypeSql` / `createIndex` / `orderByForeignKeys` / `extraSql` / `sequenceSql`，`createTable(..., includeIndexes)` 可供自动建表拆开索引与附录。
 - **实体**：`@SqlTable(comment)` / `@SqlColumn(comment)` 按方言生成表/列注释；Oracle ≤11g 无 IDENTITY 时附录 SEQUENCE + TRIGGER。
+- **方言**：新增一等枚举 `DAMENG`（`dm`/`dameng`/`jdbc:dm:`）；分页 LIMIT/OFFSET，自增 IDENTITY。函数改写对齐 common-model：`NVL`/`INSTR`/`LISTAGG`/`TO_DATE`/`DATE_FORMAT→TO_CHAR`，`FROM_UNIXTIME` → `TO_DATE('1970-01-01') + NUMTODSINTERVAL(...)`。
 - **修复**：`GROUP_CONCAT` 无显式 `SEPARATOR` 时转 `STRING_AGG`/`LISTAGG` 丢分隔符（产出 `STRING_AGG(a, ,)`）；MySQL `MODIFY`/`CHANGE` 转 PG/ANSI/H2/PRESTO 时列名重复（产出 `ALTER COLUMN c TYPE c INTEGER`）。
 - **转换**：函数改写覆盖 JOIN ON / MERGE / OVER / 列 `DEFAULT NOW()`；`DATE_ADD`/`DATEDIFF`/`FROM_UNIXTIME`/`DECODE`/`NVL2` 等内置规则；PG `ALTER COLUMN` 附录 `SET NOT NULL`/`DEFAULT`；独立 `CREATE INDEX` 去掉 `USING BTREE`；FULLTEXT 升为 `MANUAL_ACTION_REQUIRED`。
 - **SPI**：`SqlSchemaConverterProviders.loadSorted()` 一次加载，类型表与函数表共用实例。

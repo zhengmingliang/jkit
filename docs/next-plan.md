@@ -188,7 +188,7 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 - PG：`RETURNING *`、`ILIKE`、`::` 已有；补 `RETURNING` 多列列表 ✅；`ON CONFLICT ON CONSTRAINT name` ✅（P1.4 已有，本 pass 验收）
 - Oracle：`DUAL`、`ROWNUM`、`CONNECT BY` 已有；补 `FETCH FIRST n ROWS ONLY` ✅（`SqlLimit.fetchStyle` + FETCH 回写）；`MINUS` ✅（原先已有，本 pass 验收）
 - SQL Server：`TOP`、`[]` 已有；补 `OUTPUT`、`APPLY` ✅（P1.2/P1.4 已有，本 pass 验收）
-- 达梦/GBase：继续映射到 ORACLE/MYSQL ✅（未发明新方言枚举）
+- 达梦/GBase：GBase 仍映射 MYSQL；达梦已独立为 `DAMENG`（IDENTITY + LIMIT）
 
 ### P2 — 能力对标（Druid 常用 Visitor） ✅ 完成（2026-09-09）
 
@@ -606,4 +606,6 @@ P0–P2 已完成。余量：
 
 Spring Boot 2/3 starter：`jkit-sql-auto-spring-boot-2`（`spring.factories`）与 `jkit-sql-auto-spring-boot-3`（`AutoConfiguration.imports`）。`SqlAuto.drop` 显式删表。真库回归在 `tools-test` 的 `LocalDatasourceSqlAutoTest`。
 
-表 / 列注释按方言生成（MySQL/Hive/ClickHouse 内联、H2 列内 + `COMMENT ON TABLE`、PG/Oracle/DB2/ANSI `COMMENT ON`、SQL Server `sp_addextendedproperty`、Presto 表级 `WITH`、SQLite 忽略）。Oracle ≤11g / 达梦自增用 SEQUENCE + TRIGGER。`CREATE TABLE`（`includeIndexes=false`）不含附录，由 `extraSql` 单独执行。
+表 / 列注释按方言生成（MySQL/Hive/ClickHouse 内联、H2 列内 + `COMMENT ON TABLE`、PG/Oracle/DB2/ANSI `COMMENT ON`、SQL Server `sp_addextendedproperty`、Presto 表级 `WITH`、SQLite 忽略）。Oracle ≤11g 自增用 SEQUENCE + TRIGGER；达梦列上写 IDENTITY。`CREATE TABLE`（`includeIndexes=false`）不含附录，由 `extraSql` 单独执行。
+
+`SqlDialect.DAMENG` 一等方言：`fromName("dm"/"dameng")`、`jdbc:dm:`。函数改写对齐 common-model（`NVL`/`INSTR`/`LISTAGG`/`TO_DATE`/`FROM_UNIXTIME→NUMTODSINTERVAL`）。

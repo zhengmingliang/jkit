@@ -179,6 +179,7 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
                 return fn;
             case ORACLE:
             case ORACLE12:
+            case DAMENG:
                 swapFirstTwo(fn);
                 fn.setName(SqlIdentifier.of("INSTR"));
                 return fn;
@@ -192,7 +193,8 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
     }
 
     private static SqlExpr rewriteInstr(SqlFunctionExpr fn, SqlDialect family) {
-        if (family == SqlDialect.ORACLE || family == SqlDialect.ORACLE12) {
+        if (family == SqlDialect.ORACLE || family == SqlDialect.ORACLE12
+                || family == SqlDialect.DAMENG) {
             return fn;
         }
         swapFirstTwo(fn);
@@ -210,7 +212,8 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
         if (family == SqlDialect.SQLSERVER) {
             return fn;
         }
-        if (family == SqlDialect.ORACLE || family == SqlDialect.ORACLE12) {
+        if (family == SqlDialect.ORACLE || family == SqlDialect.ORACLE12
+                || family == SqlDialect.DAMENG) {
             swapFirstTwo(fn);
             fn.setName(SqlIdentifier.of("INSTR"));
             return fn;
@@ -233,7 +236,8 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
     }
 
     private static SqlExpr rewriteSubstr(SqlFunctionExpr fn, String name, SqlDialect family) {
-        if (family == SqlDialect.ORACLE || family == SqlDialect.ORACLE12) {
+        if (family == SqlDialect.ORACLE || family == SqlDialect.ORACLE12
+                || family == SqlDialect.DAMENG) {
             fn.setName(SqlIdentifier.of("SUBSTR"));
         } else if ("SUBSTR".equals(name) && family == SqlDialect.SQLSERVER) {
             fn.setName(SqlIdentifier.of("SUBSTRING"));
@@ -268,6 +272,7 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
                 return "IFNULL";
             case ORACLE:
             case ORACLE12:
+            case DAMENG:
                 return "NVL";
             case SQLSERVER:
                 return "ISNULL";
@@ -318,6 +323,7 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
                 return fn;
             case ORACLE:
             case ORACLE12:
+            case DAMENG:
                 fn.setName(SqlIdentifier.of("LISTAGG"));
                 setTwoArgs(fn, sep);
                 fn.setSeparator(null);
@@ -337,7 +343,8 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
 
     private static SqlExpr rewriteConcat(SqlFunctionExpr fn, SqlDialect family) {
         List<SqlExpr> args = fn.arguments();
-        if ((family == SqlDialect.ORACLE || family == SqlDialect.ORACLE12) && args.size() > 2) {
+        if ((family == SqlDialect.ORACLE || family == SqlDialect.ORACLE12
+                || family == SqlDialect.DAMENG) && args.size() > 2) {
             SqlExpr acc = args.get(0);
             for (int i = 1; i < args.size(); i++) {
                 SqlBinaryExpr bin = new SqlBinaryExpr();
@@ -513,7 +520,8 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
                     "'" + num + " " + unit.toLowerCase(Locale.ROOT) + "'"));
             return out;
         }
-        if (family == SqlDialect.ORACLE || family == SqlDialect.ORACLE12) {
+        if (family == SqlDialect.ORACLE || family == SqlDialect.ORACLE12
+                || family == SqlDialect.DAMENG) {
             SqlFunctionExpr out = new SqlFunctionExpr();
             out.setName(SqlIdentifier.of("INTERVAL"));
             out.addArgument(SqlLiteral.of(SqlLiteral.Kind.STRING, "'" + num + "'"));
@@ -558,7 +566,8 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
             return bin;
         }
         // Oracle 的 DATE 自带时间部分，TRUNC 去掉时间后相减即得天数
-        if (family == SqlDialect.ORACLE || family == SqlDialect.ORACLE12) {
+        if (family == SqlDialect.ORACLE || family == SqlDialect.ORACLE12
+                || family == SqlDialect.DAMENG) {
             SqlBinaryExpr bin = SqlBinaryExpr.of(truncToDate(args.get(0)), SqlBinaryOp.MINUS,
                     truncToDate(args.get(1)));
             bin.setParenthesized(true);
@@ -603,6 +612,23 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
             fn.setName(SqlIdentifier.of("TO_TIMESTAMP"));
             return fn;
         }
+        if (family == SqlDialect.ORACLE || family == SqlDialect.ORACLE12
+                || family == SqlDialect.DAMENG) {
+            // common-model：TO_DATE('1970-01-01','yyyy-MM-dd') + NUMTODSINTERVAL(ts, 'SECOND')
+            SqlFunctionExpr epoch = new SqlFunctionExpr();
+            epoch.setName(SqlIdentifier.of("TO_DATE"));
+            epoch.addArgument(SqlLiteral.of(SqlLiteral.Kind.STRING, "'1970-01-01'"));
+            epoch.addArgument(SqlLiteral.of(SqlLiteral.Kind.STRING, "'yyyy-MM-dd'"));
+            SqlFunctionExpr interval = new SqlFunctionExpr();
+            interval.setName(SqlIdentifier.of("NUMTODSINTERVAL"));
+            if (!fn.arguments().isEmpty()) {
+                interval.addArgument(fn.arguments().get(0));
+            }
+            interval.addArgument(SqlLiteral.of(SqlLiteral.Kind.STRING, "'SECOND'"));
+            SqlBinaryExpr bin = SqlBinaryExpr.of(epoch, SqlBinaryOp.PLUS, interval);
+            bin.setParenthesized(true);
+            return bin;
+        }
         report.warn(ConversionWarning.Severity.SEMANTIC_RISK, "FROM_UNIXTIME",
                 "FROM_UNIXTIME 在 " + family + " 无通用映射，已保留原文");
         return fn;
@@ -625,7 +651,8 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
                 return fn;
             }
             if (family == SqlDialect.POSTGRES || family == SqlDialect.ORACLE
-                    || family == SqlDialect.ORACLE12 || family == SqlDialect.ANSI) {
+                    || family == SqlDialect.ORACLE12 || family == SqlDialect.DAMENG
+                    || family == SqlDialect.ANSI) {
                 report.warn(ConversionWarning.Severity.SEMANTIC_RISK, name,
                         "STR_TO_DATE 格式符与 TO_DATE/TO_TIMESTAMP 不完全等价");
                 fn.setName(SqlIdentifier.of(family == SqlDialect.POSTGRES ? "TO_TIMESTAMP" : "TO_DATE"));
@@ -635,7 +662,8 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
                     "STR_TO_DATE 无映射，已保留原文");
             return fn;
         }
-        if (family == SqlDialect.ORACLE || family == SqlDialect.ORACLE12) {
+        if (family == SqlDialect.ORACLE || family == SqlDialect.ORACLE12
+                || family == SqlDialect.DAMENG) {
             return fn;
         }
         if (family == SqlDialect.MYSQL || family == SqlDialect.H2) {
@@ -654,7 +682,8 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
     }
 
     private static SqlExpr rewriteDecode(SqlFunctionExpr fn, SqlDialect family) {
-        if (family == SqlDialect.ORACLE || family == SqlDialect.ORACLE12) {
+        if (family == SqlDialect.ORACLE || family == SqlDialect.ORACLE12
+                || family == SqlDialect.DAMENG) {
             return fn;
         }
         List<SqlExpr> args = fn.arguments();
@@ -672,7 +701,8 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
     }
 
     private static SqlExpr rewriteNvl2(SqlFunctionExpr fn, SqlDialect family) {
-        if (family == SqlDialect.ORACLE || family == SqlDialect.ORACLE12) {
+        if (family == SqlDialect.ORACLE || family == SqlDialect.ORACLE12
+                || family == SqlDialect.DAMENG) {
             return fn;
         }
         List<SqlExpr> args = fn.arguments();
