@@ -30,6 +30,7 @@ public class SqlAutoSettings {
     private boolean dryRun;
     private String catalog;
     private String schema;
+    private String tablePrefix;
 
     /**
      * @return 是否启用
@@ -284,6 +285,20 @@ public class SqlAutoSettings {
     }
 
     /**
+     * @return 表名前缀
+     */
+    public String getTablePrefix() {
+        return tablePrefix;
+    }
+
+    /**
+     * @param tablePrefix 表名前缀
+     */
+    public void setTablePrefix(String tablePrefix) {
+        this.tablePrefix = tablePrefix;
+    }
+
+    /**
      * @return 选项
      */
     public SqlAutoOptions toOptions() {
@@ -303,7 +318,8 @@ public class SqlAutoSettings {
                 .password(password)
                 .driver(driver)
                 .catalog(catalog)
-                .schema(schema);
+                .schema(schema)
+                .tablePrefix(tablePrefix);
         if (dialect != null && dialect.length() > 0) {
             o.dialect(SqlDialect.fromName(dialect));
         }

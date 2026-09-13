@@ -3,6 +3,7 @@ package com.alianga.jkit.sql.auto;
 import com.alianga.jkit.log.Log;
 import com.alianga.jkit.sql.SqlDialect;
 import com.alianga.jkit.sql.entity.SqlEntities;
+import com.alianga.jkit.sql.entity.SqlEntityColumn;
 import com.alianga.jkit.sql.entity.SqlEntityModel;
 
 import javax.sql.DataSource;
@@ -137,6 +138,9 @@ public final class SqlAuto {
                                    SqlAutoOptions options) {
         SqlAutoOptions opt = options == null ? SqlAutoOptions.defaults() : options;
         SqlDialect d = dialect == null ? SqlAutoDialects.resolve(opt, connection) : dialect;
+        if (opt.tablePrefix() != null && opt.tablePrefix().length() > 0) {
+            LOG.info("jkit-sql-auto: 表名前缀已启用 '{}'", opt.tablePrefix());
+        }
         List<Class<?>> ordered = SqlEntities.orderByForeignKeys(types);
         SqlAutoInspector inspector = connection == null ? null : new SqlAutoInspector(connection, opt, d);
         List<SqlAutoChange> changes = new ArrayList<SqlAutoChange>(8);
@@ -145,7 +149,7 @@ public final class SqlAuto {
         List<SqlAutoLiveTable> lives = new ArrayList<SqlAutoLiveTable>(ordered.size());
         for (int i = 0; i < ordered.size(); i++) {
             Class<?> type = ordered.get(i);
-            SqlEntityModel model = SqlEntities.inspect(type);
+            SqlEntityModel model = prefixedModel(type, opt);
             String key = model.tableName().toLowerCase();
             if (seen.containsKey(key)) {
                 continue;
@@ -226,11 +230,11 @@ public final class SqlAuto {
         List<SqlAutoChange> changes = new ArrayList<SqlAutoChange>(ordered.size());
         SqlAutoInspector inspector = new SqlAutoInspector(connection, opt, dialect);
         for (int i = ordered.size() - 1; i >= 0; i--) {
-            String table = SqlEntities.inspect(ordered.get(i)).tableName();
+            SqlEntityModel model = prefixedModel(ordered.get(i), opt);
+            String table = model.tableName();
             if (inspector.inspect(table) == null) {
                 continue;
             }
-            SqlEntityModel model = SqlEntities.inspect(ordered.get(i));
             List<String> seqs = SqlAutoDdl.dropSequenceSql(model, dialect);
             for (int s = 0; s < seqs.size(); s++) {
                 changes.add(new SqlAutoChange(SqlAutoChange.Kind.SEQUENCE, table, "", seqs.get(s)));
@@ -278,6 +282,50 @@ public final class SqlAuto {
         }
         SqlAutoExecutor.execute(null, plan, opt);
         return plan;
+    }
+
+    /**
+     * 给实体映射加表名前缀。无前缀时原样返回。
+     *
+     * <p>前缀会同时作用于表名与列上的外键引用目标表（{@code referencesTable}），
+     * 保证 {@code FK t_order(user_id) REFERENCES t_user(id)} 这类引用也带前缀。</p>
+     *
+     * @param type 实体类
+     * @param opt 选项
+     * @return 带前缀的映射
+     */
+    private static SqlEntityModel prefixedModel(Class<?> type, SqlAutoOptions opt) {
+        SqlEntityModel m = SqlEntities.inspect(type);
+        String prefix = opt == null ? null : opt.tablePrefix();
+        if (prefix == null || prefix.isEmpty()) {
+            return m;
+        }
+        List<SqlEntityColumn> cols = m.columns();
+        boolean ref = false;
+        for (int i = 0; i < cols.size(); i++) {
+            String t = cols.get(i).referencesTable();
+            if (t != null && !t.isEmpty()) {
+                ref = true;
+                break;
+            }
+        }
+        if (!ref) {
+            return new SqlEntityModel(m.type(), prefix + m.tableName(), cols,
+                    m.indexes(), m.comment());
+        }
+        List<SqlEntityColumn> out = new ArrayList<SqlEntityColumn>(cols.size());
+        for (int i = 0; i < cols.size(); i++) {
+            SqlEntityColumn c = cols.get(i);
+            String rt = c.referencesTable();
+            if (rt != null && !rt.isEmpty()) {
+                out.add(new SqlEntityColumn(c.columnName(), c.canonical(), c.precision(), c.scale(),
+                        c.nullable(), c.primaryKey(), c.autoIncrement(), c.unique(), c.rawType(),
+                        prefix + rt, c.referencesColumn(), c.comment(), c.defaultValue(), c.field()));
+            } else {
+                out.add(c);
+            }
+        }
+        return new SqlEntityModel(m.type(), prefix + m.tableName(), out, m.indexes(), m.comment());
     }
 
     static List<Class<?>> collectEntities(SqlAutoOptions options) {
@@ -368,7 +416,7 @@ public final class SqlAuto {
             holder = open(options);
             List<Class<?>> ordered = SqlEntities.orderByForeignKeys(types);
             for (int i = ordered.size() - 1; i >= 0; i--) {
-                SqlEntityModel model = SqlEntities.inspect(ordered.get(i));
+                SqlEntityModel model = prefixedModel(ordered.get(i), options);
                 String table = model.tableName();
                 List<String> seqs = SqlAutoDdl.dropSequenceSql(model, dialect);
                 for (int s = 0; s < seqs.size(); s++) {

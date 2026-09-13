@@ -43,6 +43,7 @@ public final class SqlAutoOptions {
     private boolean foreignKeys = true;
     private boolean autoIncrement = true;
     private boolean gbase8a;
+    private String tablePrefix;
 
     private SqlAutoOptions() {
     }
@@ -114,6 +115,10 @@ public final class SqlAutoOptions {
         o.dryRun = bool(resolver, P + "dry-run", false);
         o.catalog = resolver.getString(P + "catalog");
         o.schema = resolver.getString(P + "schema");
+        String prefix = resolver.getString(P + "table-prefix");
+        if (prefix != null && prefix.length() > 0) {
+            o.tablePrefix(prefix);
+        }
         return o;
     }
 
@@ -519,6 +524,25 @@ public final class SqlAutoOptions {
      */
     public SqlAutoOptions gbase8a(boolean gbase8a) {
         this.gbase8a = gbase8a;
+        return this;
+    }
+
+    /**
+     * @return 表名前缀；非空时所有自动建表名统一加该前缀
+     */
+    public String tablePrefix() {
+        return tablePrefix;
+    }
+
+    /**
+     * 给自动生成的表名统一加前缀，例如 {@code t_} 让 {@code user} 落成 {@code t_user}。
+     * 作用于 CREATE / ALTER / DROP / 索引 / 序列，以及外键引用的目标表。
+     *
+     * @param tablePrefix 前缀，可空
+     * @return this
+     */
+    public SqlAutoOptions tablePrefix(String tablePrefix) {
+        this.tablePrefix = tablePrefix;
         return this;
     }
 
