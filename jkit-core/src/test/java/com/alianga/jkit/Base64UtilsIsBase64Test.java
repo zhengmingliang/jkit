@@ -12,8 +12,7 @@ import static org.junit.Assert.assertTrue;
 /**
  * {@link Base64Utils#isBase64(String)} 与 {@link Base64Utils#isBase64Format(String)} 的测试。
  *
- * <p>{@code isBase64} 是从 common-model 的 {@code com.dtsz.cm.utils.Base64Utils} 迁移过来的启发式判断，
- * 行为刻意与原实现保持一致（解码 → 要求全为可打印 ASCII → 重新编码后与原串相同）。
+ * <p>{@code isBase64} （解码 → 要求全为可打印 ASCII → 重新编码后与原串相同）。
  * 它有几处反直觉的地方（尤其是二进制内容返回 {@code false}），本类把这些行为逐条钉住，
  * 免得以后有人当成「格式校验」误用，或者「顺手修正」掉。
  */

@@ -28,3 +28,5 @@ jkit-notify-extra/src/test/resources/application-local.yml
 node_modules/
 docs/.vitepress/dist/
 docs/.vitepress/cache/
+
+.zcode

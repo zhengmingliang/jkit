@@ -5,11 +5,9 @@ import com.alianga.jkit.sql.schema.model.CanonicalType;
 import com.alianga.jkit.sql.schema.registry.SqlDataTypeRegistry;
 
 /**
- * SPI 扩展示例：补齐 icell {@code FieldConstruct} / {@code FieldTypeConverter}
- * 里当作<strong>源类型名</strong>使用、但内置表未登记的别名。
+ * SPI 扩展示例：
  *
- * <p>对照来源：{@code com.dtsz.cm.utils.FieldConstruct}、
- * {@code com.dtsz.cm.common.sql.type.*TypeConverter}。
+ * <p>
  * 只追加反向别名，不改正向写法（PG 仍输出 {@code INTEGER} 而非 {@code int4}）。</p>
  *
  * <p>复制本类 + {@code META-INF/services/} 一行即可做第三方插件；
