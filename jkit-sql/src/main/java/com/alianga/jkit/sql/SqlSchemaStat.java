@@ -16,6 +16,7 @@ import com.alianga.jkit.sql.ast.SqlMaintenanceStatement;
 import com.alianga.jkit.sql.ast.SqlNode;
 import com.alianga.jkit.sql.ast.SqlOrderByItem;
 import com.alianga.jkit.sql.ast.SqlSelect;
+import com.alianga.jkit.sql.ast.SqlSelectItem;
 import com.alianga.jkit.sql.ast.SqlShowStatement;
 import com.alianga.jkit.sql.ast.SqlSimpleStatement;
 import com.alianga.jkit.sql.ast.SqlStatement;
@@ -297,6 +298,15 @@ public final class SqlSchemaStat {
                     columns.add("*");
                 }
                 return false;
+            }
+            if (node instanceof SqlSelectItem) {
+                // 投影别名（如窗口函数 AS moving_average_7day）不是 SqlIdentifier 子节点，
+                // 但属于查询对外暴露的输出列，应纳入 getColumns()。
+                SqlSelectItem item = (SqlSelectItem) node;
+                if (item.alias() != null && !item.alias().isEmpty()) {
+                    columns.add(item.alias());
+                }
+                return true;
             }
             if (node instanceof SqlIdentifier) {
                 columns.add(((SqlIdentifier) node).qualifiedName());

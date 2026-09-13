@@ -77,6 +77,31 @@ public class SqlParserTest {
         assertTrue(formatted, formatted.contains("SELECT"));
         assertTrue(formatted, formatted.contains("users"));
     }
+    /**
+     * 基本 SELECT 与表列抽取。
+     */
+    @Test
+    public void parseSimpleSelect2() {
+        SqlStatement stmt = SQL.parse(
+                "SELECT \n" +
+                        "    date, \n" +
+                        "    sales_amount,\n" +
+                        "    AVG(sales_amount) OVER (ORDER BY date ROWS BETWEEN 6 PRECEDING AND CURRENT ROW) AS moving_average_7day\n" +
+                        "FROM sales;\n");
+        assertEquals(SqlStatementType.SELECT, stmt.type());
+        assertTrue(stmt.isReadOnly());
+        List<String> tables = SQL.tables(stmt);
+        assertEquals(1, tables.size());
+        assertEquals("sales", tables.get(0));
+        SqlSchemaStat stat = SQL.stat(stmt);
+        String formatted = SQL.toSqlString(stmt);
+        System.out.println(formatted);
+        assertTrue(formatted, formatted.contains("SELECT"));
+        assertTrue(formatted, formatted.contains("sales"));
+        assertTrue(stat.getColumns().contains("sales_amount") && stat.getColumns().contains("moving_average_7day"));
+
+
+    }
 
     /**
      * JOIN / 子查询 / IN。
