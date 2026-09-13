@@ -3,6 +3,10 @@ name: Deploy Docs to GitHub Pages
 on:
   push:
     branches: [develop]   # 你的开发分支；如需在主分支触发改为 main/master
+    # 只有 docs 内容或本工作流文件变更时才构建部署，避免每次提交都跑 Pages 构建
+    paths:
+      - 'docs/**'
+      - '.github/workflows/deploy.yml'
   workflow_dispatch:      # 允许在 Actions 页面手动触发
 
 permissions:
