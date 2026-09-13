@@ -160,16 +160,22 @@ const enSidebar: DefaultTheme.Sidebar = [
   },
 ]
 
+const isProd = process.env.NODE_ENV === 'production'
+// GitHub Pages 项目站点部署在 /jkit/ 子路径下，必须设置 base，
+// 否则所有资源/链接都会 404。本地 dev 时无需前缀（仅 production build 加）。
+const base = isProd ? '/jkit/' : '/'
+
 export default defineConfig({
   title: 'jkit',
   description: '纯 JDK、零第三方依赖的 Java 通用工具库',
+  base,
   cleanUrls: true,
   lastUpdated: true,
   // next-plan 是内部开发计划；csv/expression 尚未成文，先不构建进站点
   srcExclude: ['**/next-plan.md', '**/csv.md', '**/expression.md'],
 
   head: [
-    ['link', { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' }],
+    ['link', { rel: 'icon', type: 'image/svg+xml', href: `${base}favicon.svg` }],
     ['meta', { name: 'theme-color', content: '#ea580c' }],
     ['meta', { property: 'og:title', content: 'jkit' }],
     [
