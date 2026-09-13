@@ -160,10 +160,8 @@ const enSidebar: DefaultTheme.Sidebar = [
   },
 ]
 
-const isProd = process.env.NODE_ENV === 'production'
-// GitHub Pages 项目站点部署在 /jkit/ 子路径下，必须设置 base，
-// 否则所有资源/链接都会 404。本地 dev 时无需前缀（仅 production build 加）。
-const base = isProd ? '/jkit/' : '/'
+// 自定义域名 jkit.alianga.com 部署在根路径，base 直接设为 '/'
+const base = '/'
 
 export default defineConfig({
   title: 'jkit',
