@@ -236,6 +236,8 @@ List<String> sqls = plan.sql();
 | `alter-column` | `false` | 类型不一致时是否 `ALTER`/`MODIFY` |
 | `drop-extra-columns` | `false` | 是否删除实体里没有的列 |
 | `create-index` | `true` | 是否补 `CREATE INDEX` |
+| `table-prefix` | （空） | 表名统一前缀，如 `t_`；作用于建表 / 改表 / 删表 / 索引 / 序列 / 外键目标表 |
+| `index-prefix-enabled` | `true` | 自动派生的索引名是否也带 `table-prefix`（如 `t_user` 的索引是 `t_user_idx` 还是 `user_idx`）；实体里显式写的 `@Index(name=…)` 始终原样保留，不受此开关影响 |
 | `quote-identifiers` | `false` | 标识符加方言引号 |
 | `show-sql` | `true` | 打日志 |
 | `dry-run` | `false` | 只规划不执行 |

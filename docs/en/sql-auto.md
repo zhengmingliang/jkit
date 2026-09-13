@@ -229,6 +229,8 @@ Prefix is always `jkit.sql.auto.`. The Spring Boot starters bind the same set; n
 | `alter-column` | `false` | `ALTER`/`MODIFY` on type mismatch |
 | `drop-extra-columns` | `false` | drop columns not on the entity |
 | `create-index` | `true` | emit `CREATE INDEX` |
+| `table-prefix` | empty | uniform table-name prefix, e.g. `t_`; applies to create / alter / drop / index / sequence / FK target table |
+| `index-prefix-enabled` | `true` | whether auto-derived index names also carry `table-prefix` (so `t_user`'s index is `t_user_idx` vs `user_idx`); an explicit `@Index(name=…)` is always kept verbatim and ignores this switch |
 | `quote-identifiers` | `false` | quote identifiers in the dialect |
 | `show-sql` | `true` | log SQL |
 | `dry-run` | `false` | plan only |

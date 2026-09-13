@@ -44,6 +44,7 @@ public final class SqlAutoOptions {
     private boolean autoIncrement = true;
     private boolean gbase8a;
     private String tablePrefix;
+    private boolean indexPrefixEnabled = true;
 
     private SqlAutoOptions() {
     }
@@ -118,6 +119,10 @@ public final class SqlAutoOptions {
         String prefix = resolver.getString(P + "table-prefix");
         if (prefix != null && prefix.length() > 0) {
             o.tablePrefix(prefix);
+        }
+        if (resolver.contains(P + "index-prefix-enabled")) {
+            Boolean v = resolver.getBoolean(P + "index-prefix-enabled");
+            o.indexPrefixEnabled(v == null || v.booleanValue());
         }
         return o;
     }
@@ -543,6 +548,26 @@ public final class SqlAutoOptions {
      */
     public SqlAutoOptions tablePrefix(String tablePrefix) {
         this.tablePrefix = tablePrefix;
+        return this;
+    }
+
+    /**
+     * @return 自动生成的索引名是否带表名前缀（{@link #tablePrefix()}）；{@code true} 时
+     *         {@code t_user} 的索引名是 {@code t_user_idx}，{@code false} 时是 {@code user_idx}
+     */
+    public boolean indexPrefixEnabled() {
+        return indexPrefixEnabled;
+    }
+
+    /**
+     * 仅作用于「自动派生」的索引名（按表名 + 列名生成）；实体里显式 {@code @Index(name=...)}
+     * 写的名字始终原样保留，不受此开关影响。无表名前缀时此开关无意义。
+     *
+     * @param indexPrefixEnabled 是否给自动索引名加表名前缀
+     * @return this
+     */
+    public SqlAutoOptions indexPrefixEnabled(boolean indexPrefixEnabled) {
+        this.indexPrefixEnabled = indexPrefixEnabled;
         return this;
     }
 

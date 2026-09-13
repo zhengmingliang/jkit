@@ -464,27 +464,76 @@ public final class SqlAutoDdl {
             return;
         }
         List<String> indexes = model.indexes();
+        String table = model.tableName();
         for (int i = 0; i < indexes.size(); i++) {
             String spec = indexes.get(i);
-            String name = SqlEntities.indexName(model.tableName(), spec, dialect);
+            String name = indexNameFor(model, spec, dialect, options);
             if (coveredByUniqueColumn(model, spec)) {
                 continue;
             }
             if (live != null && indexPresent(live, name, spec)) {
                 continue;
             }
-            String sql = SqlEntities.createIndex(model.tableName(), spec, dialect);
+            String sql = createIndexSql(table, name, spec);
             if (options.quoteIdentifiers() && dialect != null) {
-                sql = sql.replace(" ON " + model.tableName() + " ",
-                        " ON " + dialect.quoteIdent(model.tableName()) + " ");
+                sql = sql.replace(" ON " + table + " ", " ON " + dialect.quoteIdent(table) + " ");
             }
             if (options.mode() == SqlAutoMode.VALIDATE) {
-                out.add(new SqlAutoChange(SqlAutoChange.Kind.VALIDATE, model.tableName(),
+                out.add(new SqlAutoChange(SqlAutoChange.Kind.VALIDATE, table,
                         "missing index " + name, ""));
             } else {
-                out.add(new SqlAutoChange(SqlAutoChange.Kind.CREATE_INDEX, model.tableName(), name, sql));
+                out.add(new SqlAutoChange(SqlAutoChange.Kind.CREATE_INDEX, table, name, sql));
             }
         }
+    }
+
+    /**
+     * 计算索引名。规则：
+     * <ul>
+     *   <li>没有表名前缀时直接用 {@link SqlEntities#indexName}；</li>
+     *   <li>有表名前缀且 spec 是显式 {@code name:cols}（写死了索引名）则原样保留，不加前缀；</li>
+     *   <li>有表名前缀且是自动派生名，按 {@code indexPrefixEnabled} 决定是否在前面拼表名前缀。</li>
+     * </ul>
+     *
+     * @param model 实体
+     * @param spec 索引定义
+     * @param dialect 方言
+     * @param options 选项
+     * @return 索引名
+     */
+    private static String indexNameFor(SqlEntityModel model, String spec, SqlDialect dialect,
+                                       SqlAutoOptions options) {
+        String table = model.tableName();
+        String prefix = options == null ? null : options.tablePrefix();
+        boolean hasPrefix = prefix != null && prefix.length() > 0;
+        if (!hasPrefix) {
+            return SqlEntities.indexName(table, spec, dialect);
+        }
+        String trimmed = spec == null ? "" : spec.trim();
+        boolean explicit = trimmed.indexOf(':') > 0
+                && trimmed.substring(0, trimmed.indexOf(':')).trim().length() > 0;
+        if (explicit) {
+            return SqlEntities.indexName(table, spec, dialect);
+        }
+        String rawTable = table.startsWith(prefix) ? table.substring(prefix.length()) : table;
+        String base = SqlEntities.indexName(rawTable, spec, dialect);
+        return (options.indexPrefixEnabled() ? prefix : "") + base;
+    }
+
+    /**
+     * {@code CREATE INDEX} 语句，索引名与建表名可独立控制（索引名可不加表前缀）。
+     *
+     * @param table 表名（已带表前缀）
+     * @param name 索引名
+     * @param spec 索引定义
+     * @return DDL
+     */
+    private static String createIndexSql(String table, String name, String spec) {
+        String cols = indexColumns(spec);
+        if (!cols.startsWith("(")) {
+            cols = "(" + cols + ")";
+        }
+        return "CREATE INDEX " + name + " ON " + table + " " + cols;
     }
 
     private static boolean coveredByUniqueColumn(SqlEntityModel model, String spec) {

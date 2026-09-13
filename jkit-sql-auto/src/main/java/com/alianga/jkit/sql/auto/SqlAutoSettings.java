@@ -31,6 +31,7 @@ public class SqlAutoSettings {
     private String catalog;
     private String schema;
     private String tablePrefix;
+    private boolean indexPrefixEnabled = true;
 
     /**
      * @return 是否启用
@@ -299,6 +300,20 @@ public class SqlAutoSettings {
     }
 
     /**
+     * @return 自动索引名是否加表名前缀
+     */
+    public boolean isIndexPrefixEnabled() {
+        return indexPrefixEnabled;
+    }
+
+    /**
+     * @param indexPrefixEnabled 自动索引名是否加表名前缀
+     */
+    public void setIndexPrefixEnabled(boolean indexPrefixEnabled) {
+        this.indexPrefixEnabled = indexPrefixEnabled;
+    }
+
+    /**
      * @return 选项
      */
     public SqlAutoOptions toOptions() {
@@ -319,7 +334,8 @@ public class SqlAutoSettings {
                 .driver(driver)
                 .catalog(catalog)
                 .schema(schema)
-                .tablePrefix(tablePrefix);
+                .tablePrefix(tablePrefix)
+                .indexPrefixEnabled(indexPrefixEnabled);
         if (dialect != null && dialect.length() > 0) {
             o.dialect(SqlDialect.fromName(dialect));
         }

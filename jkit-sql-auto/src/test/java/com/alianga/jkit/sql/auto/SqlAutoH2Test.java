@@ -3,6 +3,7 @@ package com.alianga.jkit.sql.auto;
 import com.alianga.jkit.sql.SqlDialect;
 import com.alianga.jkit.sql.auto.fixture.AutoOrg;
 import com.alianga.jkit.sql.auto.fixture.AutoStaff;
+import com.alianga.jkit.sql.auto.fixture.AutoTag;
 import com.alianga.jkit.sql.auto.fixture.AutoUser;
 
 import org.junit.After;
@@ -211,6 +212,54 @@ public class SqlAutoH2Test {
         SqlAutoPlan dropped = SqlAuto.drop(connection, options().entities(AutoUser.class));
         assertFalse(dropped.ofKind(SqlAutoChange.Kind.DROP_TABLE).isEmpty());
         assertFalse(tableExists("AUTO_USER"));
+    }
+
+    @Test
+    public void indexPrefixEnabledControlsAutoIndexName() {
+        // 默认开启：自动派生索引名带表前缀
+        SqlAutoPlan on = SqlAuto.run(SqlAutoOptions.defaults()
+                .entities(AutoUser.class, AutoTag.class)
+                .dialect(SqlDialect.MYSQL)
+                .tablePrefix("t_")
+                .indexPrefixEnabled(true)
+                .dryRun(true)
+                .showSql(false));
+        List<SqlAutoChange> idxOn = on.ofKind(SqlAutoChange.Kind.CREATE_INDEX);
+        assertTrue(idxOn.toString(), !idxOn.isEmpty());
+        boolean sawPrefixedAuto = false;
+        boolean sawExplicitUnprefixed = false;
+        for (int i = 0; i < idxOn.size(); i++) {
+            SqlAutoChange c = idxOn.get(i);
+            String sql = c.sql().toLowerCase();
+            if ("t_auto_tag".equalsIgnoreCase(c.table())) {
+                assertTrue(sql, sql.contains("t_auto_tag_code_idx"));
+                sawPrefixedAuto = true;
+            }
+            if ("t_auto_user".equalsIgnoreCase(c.table())) {
+                // 显式 @Index(name=...) 始终不加前缀
+                assertTrue(sql, sql.contains("idx_auto_name"));
+                assertFalse(sql, sql.contains("t_idx_auto_name"));
+                sawExplicitUnprefixed = true;
+            }
+        }
+        assertTrue(sawPrefixedAuto);
+        assertTrue(sawExplicitUnprefixed);
+
+        // 关闭：自动派生索引名不带表前缀（表名仍带前缀）
+        SqlAutoPlan off = SqlAuto.run(SqlAutoOptions.defaults()
+                .entities(AutoTag.class)
+                .dialect(SqlDialect.MYSQL)
+                .tablePrefix("t_")
+                .indexPrefixEnabled(false)
+                .dryRun(true)
+                .showSql(false));
+        List<SqlAutoChange> idxOff = off.ofKind(SqlAutoChange.Kind.CREATE_INDEX);
+        assertTrue(idxOff.toString(), !idxOff.isEmpty());
+        for (int i = 0; i < idxOff.size(); i++) {
+            String sql = idxOff.get(i).sql().toLowerCase();
+            assertTrue(sql, sql.contains("auto_tag_code_idx"));
+            assertFalse(sql, sql.contains("t_auto_tag_code_idx"));
+        }
     }
 
     private SqlAutoOptions options() {

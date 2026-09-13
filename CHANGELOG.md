@@ -20,6 +20,8 @@
 - **新增**：`SqlAuto.drop` 按外键逆序删托管表；Spring Boot 2 / 3 自动配置模块 `jkit-sql-auto-spring-boot-2`、`jkit-sql-auto-spring-boot-3`。
 - **新增**：表 / 列注释按方言执行（`COMMENT` / `COMMENT ON` / `sp_addextendedproperty`）；Oracle ≤11g 自增主键用 SEQUENCE + TRIGGER，达梦列上写 IDENTITY。
 - **新增**：`postgresIdentityStyle` / `foreignKeys` / `autoIncrement` 选项，给 OpenGauss / GBase 8a / DuckDB 等能力较窄的产品关掉对应 DDL。
+- **新增**：`table-prefix`（`jkit.sql.auto.table-prefix`）配置，给所有自动建表名统一加前缀（如 `t_`），作用于建表 / 改表 / 删表 / 索引 / 序列 / 外键目标表。链式 `tablePrefix(String)`、Spring Boot `jkit.sql.auto.table-prefix` 同效。
+- **新增**：`index-prefix-enabled`（`jkit.sql.auto.index-prefix-enabled`，默认 `true`）开关，控制自动派生的索引名是否也带 `table-prefix`（如 `t_user` 的索引是 `t_user_idx` 还是 `user_idx`）。实体里显式写的 `@Index(name=…)` 始终原样保留，不受此开关影响；无表名前缀时该开关无意义。链式 `indexPrefixEnabled(boolean)`。
 
 ### jkit-sql
 - **新增**：实体扫描认任意简单名为 `Comment` 的注解（不绑定包名；类=表注释、字段=列注释，读 `value`/`comment`），以及 Hibernate `@ColumnDefault`（值作为 SQL 片段写入 `DEFAULT`）。无第三方编译依赖；`@SqlTable`/`@SqlColumn` 的 comment 优先。
