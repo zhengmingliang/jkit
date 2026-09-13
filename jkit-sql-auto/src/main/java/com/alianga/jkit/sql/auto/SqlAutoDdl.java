@@ -459,6 +459,10 @@ public final class SqlAutoDdl {
         if (!options.createIndex()) {
             return;
         }
+        // GBase 8a 分析型引擎不支持二级索引，强行建会整条 CREATE INDEX 失败；识别到即跳过。
+        if (SqlAutoDialects.isGbase8a(options)) {
+            return;
+        }
         List<String> indexes = model.indexes();
         for (int i = 0; i < indexes.size(); i++) {
             String spec = indexes.get(i);

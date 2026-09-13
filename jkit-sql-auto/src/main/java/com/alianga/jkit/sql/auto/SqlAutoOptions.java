@@ -42,6 +42,7 @@ public final class SqlAutoOptions {
     private SqlSchemaConvertOptions.PostgresIdentityStyle postgresIdentityStyle;
     private boolean foreignKeys = true;
     private boolean autoIncrement = true;
+    private boolean gbase8a;
 
     private SqlAutoOptions() {
     }
@@ -499,6 +500,25 @@ public final class SqlAutoOptions {
      */
     public SqlAutoOptions autoIncrement(boolean autoIncrement) {
         this.autoIncrement = autoIncrement;
+        return this;
+    }
+
+    /**
+     * @return 数据源是否为 GBase 8a（分析型引擎不支持二级索引）
+     */
+    public boolean gbase8a() {
+        return gbase8a;
+    }
+
+    /**
+     * 标记数据源为 GBase 8a。GBase 8a 分析型引擎默认不支持二级索引，
+     * 通常由 {@link SqlAuto} 依据 JDBC URL / 连接元数据自动设置，用户一般无需配置。
+     *
+     * @param gbase8a 是否 GBase 8a
+     * @return this
+     */
+    public SqlAutoOptions gbase8a(boolean gbase8a) {
+        this.gbase8a = gbase8a;
         return this;
     }
 

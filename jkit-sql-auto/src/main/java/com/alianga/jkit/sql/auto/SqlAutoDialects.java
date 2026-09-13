@@ -192,4 +192,44 @@ public final class SqlAutoDialects {
         }
         return null;
     }
+
+    /**
+     * 是否 GBase 8a。GBase 8a 是分析型 MPP 引擎，其默认存储引擎不支持二级索引，
+     * 在 jkit 内方言归并为 {@link SqlDialect#MYSQL}，故单列此方法识别，供 DDL 规划跳过二级索引。
+     *
+     * <p>识别依据：JDBC URL 含 {@code gbase}（如 {@code jdbc:gbase:} / {@code jdbc:gbase8a:}）。
+     * GBase 8a 必须使用 {@code com.gbase.jdbc.Driver}，URL 必带此前缀，因此可稳定区分 MySQL。</p>
+     *
+     * @param options 选项
+     * @return 是否 GBase 8a
+     */
+    public static boolean isGbase8a(SqlAutoOptions options) {
+        if (options == null) {
+            return false;
+        }
+        if (options.gbase8a()) {
+            return true;
+        }
+        String url = options.url();
+        return url != null && url.toLowerCase(Locale.ROOT).contains("gbase");
+    }
+
+    /**
+     * 是否 GBase 8a，依据连接元数据产品名识别。Spring Boot 集成里选项 URL 可能为空
+     * （仅注入了 {@code DataSource}），但连接元数据可稳定取到产品名。
+     *
+     * @param connection 连接，可空
+     * @return 是否 GBase 8a
+     */
+    public static boolean isGbase8a(Connection connection) {
+        if (connection == null) {
+            return false;
+        }
+        try {
+            String product = connection.getMetaData().getDatabaseProductName();
+            return product != null && product.toLowerCase(Locale.ROOT).contains("gbase");
+        } catch (SQLException ignored) {
+            return false;
+        }
+    }
 }

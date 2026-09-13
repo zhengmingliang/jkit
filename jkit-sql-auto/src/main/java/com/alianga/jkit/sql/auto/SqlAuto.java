@@ -79,7 +79,13 @@ public final class SqlAuto {
         try {
             Connection conn = holder.connection;
             SqlDialect dialect = SqlAutoDialects.resolve(opt, conn);
+            if (SqlAutoDialects.isGbase8a(opt) || SqlAutoDialects.isGbase8a(conn)) {
+                opt.gbase8a(true);
+            }
             SqlAutoPlan plan = plan(types, conn, dialect, opt);
+            if (opt.gbase8a() && opt.createIndex()) {
+                LOG.info("jkit-sql-auto: GBase 8a 不支持二级索引，已跳过 CREATE INDEX");
+            }
             if (opt.mode() == SqlAutoMode.VALIDATE) {
                 List<SqlAutoChange> bad = plan.ofKind(SqlAutoChange.Kind.VALIDATE);
                 if (!bad.isEmpty()) {
@@ -183,7 +189,13 @@ public final class SqlAuto {
         }
         List<Class<?>> types = collectEntities(opt);
         SqlDialect dialect = SqlAutoDialects.resolve(opt, connection);
+        if (SqlAutoDialects.isGbase8a(opt) || SqlAutoDialects.isGbase8a(connection)) {
+            opt.gbase8a(true);
+        }
         SqlAutoPlan plan = plan(types, connection, dialect, opt);
+        if (opt.gbase8a() && opt.createIndex()) {
+            LOG.info("jkit-sql-auto: GBase 8a 不支持二级索引，已跳过 CREATE INDEX");
+        }
         if (opt.mode() == SqlAutoMode.VALIDATE) {
             List<SqlAutoChange> bad = plan.ofKind(SqlAutoChange.Kind.VALIDATE);
             if (!bad.isEmpty()) {
