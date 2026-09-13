@@ -200,7 +200,7 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 | 导出参数值 | `ExportParameterVisitor` | ✅ `SQL.exportParameterValues` 抽出 `'a'` / `1`（去引号）；与 `parameters()` 绑定占位符分立 |
 | 注入/危险操作 | `WallFilter` 子集 | ✅ `SQL.wall(sql)` → `SqlWallResult`：multi-statement、comment-bypass、always-true、SLEEP、DELETE/UPDATE without WHERE。默认不接入解析 |
 | 表达式求值常量折 | `EvalVisitor` 子集 | ✅ `SQL.eval(expr)` / `SqlEval`：字面量算术/比较/AND/OR/NOT，无反射 |
-| AST clone | JSqlParser `DeParser` 配套 | ✅ `SQL.clone(stmt[, dialect])`（format→parse）；`addLimit` 改为 clone-then-mutate |
+| AST clone | JSqlParser `DeParser` 配套 | ✅ `SQL.clone(stmt[, dialect])` AST 树拷贝（`SqlAstCloner`；方言参数忽略）；门面改写均为 clone-then-mutate |
 | 按类型 Visitor | Druid `visit(SQLSelect)` | ✅ `SqlAstVisitor` 类型分发；保留 `SqlVisitor` / `SqlVisitorAdapter` |
 | 列改写 | — | ✅ `SQL.replaceColumn(stmt, from, to)` 对称 `replaceTable`（跳过 `SqlTable` 子树） |
 
@@ -358,7 +358,7 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 2. **SqlWall 规则 SPI** ✅（见本轮提交）— `checkStatement` 的 if-else 拆成内置 5 条 `SqlWallRule` 规则链，`SqlWallConfig.rules(...)` 追加自定义规则；违规码收集走 `SqlWallViolations`（去重）。行为与违规码完全不变，`SqlWallTest` 全部原样通过。
 3. **语句解析注册表** ✅ — `SqlStatementParsers`（`SqlParseOptions.statementParsers()`，默认关闭）按前导关键字注册 `SqlStatementParser`，只兜内建 switch 未覆盖的 default 分支；`SqlParseContext` 暴露游标子集（token / is / match / isIdent / matchIdent / name / consumeRest（原文切片）/ error / atStmtBreak）；返回 null 或留未消费记号 → 带位置错误；内建语句不受影响（注册 SELECT 也不会覆盖）。
 4. **SqlFormatOptions 扩展** ✅ — 关键字大小写策略 `keywordCase(SqlKeywordCase.UPPER/LOWER/AS_IS)`；`SqlFormatter` 内 87 处关键字输出（含 84 处 `out.append("KEYWORD")` 直写、二元运算符 symbol、FLUSH 选项、事务 kind）统一收敛到 `kw()`，AS_IS 输出逐字节不变。pretty 缩进宽度**有意未做**：`SqlFormatter.indent` 字段是死代码（从未自增，pretty 输出本就无缩进），接 `indentSize` 前需先实现真实缩进（subquery/CTE/UNION 臂），等有真实需求再做，勿硬接死代码。
-5. **改写规则链** ✅ — `SqlRewriteHook`（函数式接口：收当前语句、返回继续传递的语句）+ `SqlRewrites`（`create`/`none`/`add` 有序链 + 内建适配器 `addLimit`/`setLimit`/`setOffset`/`setPage`/`andWhere`/`replaceTable`/`replaceColumn`）；自定义规则在内建之前即前 hook、之后即后 hook；门面 `SQL.rewrite(stmt, chain)` 先深拷贝再改，规则返回 null 抛 `IllegalArgumentException`；`SqlRewriter` 既有静态方法行为零变化。
+5. **改写规则链** ✅ — `SqlRewriteHook`（函数式接口：收当前语句、返回继续传递的语句）+ `SqlRewrites`（`create`/`none`/`add` 有序链 + 内建适配器 `addLimit`/`setLimit`/`setOffset`/`setPage`/`andWhere`/`replaceTable`/`replaceColumn`/`addSelectItem`/`removeSelectItem`/`adaptPagination`）；自定义规则在内建之前即前 hook、之后即后 hook；门面 `SQL.rewrite(stmt, chain)` 先深拷贝再改，规则返回 null 抛 `IllegalArgumentException`；`SqlRewriter` 既有静态方法行为零变化。
 
 明确不做：`SqlKeywords`/`SqlTokenType` 动态注册化（零分配哈希是性能关键路径）；visitor 重设计（双轨制够用）。
 
@@ -375,7 +375,7 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
   - jsqlparser-files（460）：**jkit 90.0%（已达目标）** / druid 81.5% / jsql 74.8%（jkitGaps=4）
   - jkitGaps 合计 **164**（128+32+4；R12 173+52+4 → R13）
   - jkit 全程 0 超时；druid 1.2.23 仍有 2 条 PG `ANALYZE` 死循环（jstack 实锤，勿追）
-- 方言：一等枚举 6+1 → 11（新增 `DB2`/`SQLITE`/`HIVE`/`CLICKHOUSE`/`PRESTO`），行为全部走
+- 方言：一等枚举现为 13（`ANSI`/`MYSQL`/`POSTGRES`/`ORACLE`/`ORACLE12`/`SQLSERVER`/`H2`/`DB2`/`SQLITE`/`HIVE`/`CLICKHOUSE`/`PRESTO`/`DAMENG`），行为全部走
   `SqlDialectSpec` 能力方法，无散落 `== SqlDialect.X`；`fromName` 国产/主流别名已全
   （含 common-model 数据源：`argo→HIVE`、`xcloud→POSTGRES`、`gbase8a→MYSQL`、`gbase8s→SQLITE`）。
 - 竞品语料对比基线表：`tools-test/src/test/resources/sql-corpora/README.md`（每轮提升后记得同步）。

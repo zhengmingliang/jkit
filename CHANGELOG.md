@@ -49,6 +49,7 @@
 - **新增**：`SQL.adaptPagination` / `addSelectItem` / `removeSelectItem`；`SqlRewrites` 对应链 hook；`SqlRewriter.adaptPagination`。
 
 ### 文档
+- `docs/sql.md` / `docs/en/sql.md` 按代码对齐跨方言分页（LIMIT / ROWNUM / OFFSET FETCH / TOP、`adaptPagination`、`format` / `toSqlString` 按需适配、经典 Oracle offset=0 单层子查询包装）、`SQL.clone` AST 深拷贝与 `SqlRewrites` 全套 hook；按「初版特性」口径写，去掉修复叙事；方言表覆盖全部一等枚举；英文补 SPI 语句解析器与 `SqlDialectWrapper`。
 - README / `docs/sql.md` / `docs/en/sql.md` / `jkit-sql/README` 去掉内部开发计划入口（该文件不进文档站）。
 - `docs/sql.md` / `docs/en/sql.md` 补齐 `SqlEntities` 全部公开方法（含新增的 `columnSql` / `columnTypeSql` / `createIndex` / `orderByForeignKeys` 与 `createTable(..., includeIndexes)`）及「拆开索引 / 增量加列」示例；英文版补 `SQL.isReadOnly` / `or` / `addSelectItem` / `removeSelectItem` / `adaptPagination` / `rewrite` 改写链，两侧 API 覆盖已对齐。
 

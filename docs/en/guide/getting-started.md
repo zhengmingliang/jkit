@@ -172,7 +172,7 @@ public class QuickStart {
 | YAML parsing, node tree, anchors, multi-documents | [YAML](/en/yaml) |
 | Spring Boot-style externalized configuration | [Configuration](/en/config) |
 | GET/POST, upload & download, SSE, load balancing | [HTTP Client](/en/http) |
-| Multi-dialect SQL parsing, formatting, rewriting | [SQL Parsing](/en/sql) |
+| Multi-dialect SQL parsing, formatting, pagination rewrite | [SQL Parsing](/en/sql) |
 | DingTalk / WeCom / Feishu / email notifications | [Notification](/en/notify) |
 
 ## Migrating from ZmlTools

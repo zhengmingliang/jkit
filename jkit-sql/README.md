@@ -1,6 +1,6 @@
 # jkit-sql
 
-零依赖 SQL 解析器。手写词法 / 语法，生成 AST，支持多方言格式化、表列统计与改写。
+零依赖 SQL 解析器。手写词法 / 语法，生成 AST，支持多方言格式化、表列统计与改写（LIMIT / TOP / OFFSET FETCH / ROWNUM；`SQL.clone` 为 AST 深拷贝）。
 
 对标 Druid SQL Parser（手写、可进生产的吞吐）和 JSqlParser（AST + Visitor + 抽表名）的常用能力。**不执行 SQL。**
 
@@ -16,7 +16,8 @@
 SqlStatement stmt = SQL.parse("SELECT id, name FROM users u WHERE u.age > 18");
 SQL.tables(stmt);          // [users]
 SQL.addLimit(stmt, 100);
-SQL.format(stmt);
+SQL.setPage(stmt, 2, 20, SqlDialect.ORACLE);   // ROWNUM wrap
+SQL.format(stmt, SqlDialect.SQLSERVER);        // adapts pagination when needed
 ```
 
 完整说明见 [docs/sql.md](../docs/sql.md)。启动时连库建表 / 加列见 [jkit-sql-auto](../jkit-sql-auto/README.md) 与 [docs/sql-auto.md](../docs/sql-auto.md)。

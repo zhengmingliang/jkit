@@ -184,6 +184,7 @@ List<SqlStatement> batch = SQL.parseAll(
 
 ## 统计与改写
 
+门面改写（`addLimit` / `setPage` / `andWhere` / `replaceTable` / `replaceColumn` / `addSelectItem` / `removeSelectItem` / `adaptPagination`）都是 **先 `SQL.clone` 再改**：返回新树，入参 AST 不变。`SQL.clone` 是 AST 深拷贝（`SqlAstCloner` / `SqlNode.copy`），与方言无关（`clone(stmt, dialect)` 的方言参数仅保留 API 兼容）。
 
 ```java
 SqlSchemaStat stat = SQL.stat(sql);
@@ -195,46 +196,92 @@ stat.getOrderByColumns();
 stat.getGroupByColumns();
 stat.getTables();           // Map<String, SqlTableAccess>，同表可 INSERT+SELECT
 
-SqlStatement limited = SQL.addLimit(stmt, 100); // clone 后再补 LIMIT，不改原树
-SQL.getLimit(stmt);                              // Long，来自 LIMIT/TOP
+SqlStatement limited = SQL.addLimit(stmt, 100); // 先 clone，再按默认 MySQL 补 LIMIT
+SQL.getLimit(stmt);                              // Long：LIMIT / TOP / ROWNUM / row_number 页大小
 SQL.getOffset(stmt);
-SqlStatement page = SQL.setPage(stmt, 2, 20, SqlDialect.MYSQL); // clone；offset=20
+SqlStatement page = SQL.setPage(stmt, 2, 20, SqlDialect.MYSQL); // offset=20
 SQL.setLimit(stmt, 50, SqlDialect.POSTGRES);
 SQL.setOffset(stmt, 10, SqlDialect.POSTGRES);
-SqlStatement w = SQL.andWhere(stmt, "tenant_id = ?"); // 内部 parseExpr + clone 后再 AND WHERE
-SqlStatement t2 = SQL.replaceTable(w, "users", "users_archive"); // clone
-SqlStatement c2 = SQL.replaceColumn(t2, "name", "user_name");   // clone；跳过表名/表别名
-SqlStatement c3 = SQL.addSelectItem(c2, "status");              // clone；追加 SELECT 列
-SqlStatement c4 = SQL.removeSelectItem(c3, "name");             // clone；按简单列名移除（不可删光）
-SqlStatement c5 = SQL.adaptPagination(c4, SqlDialect.ORACLE);   // clone；按方言适配分页
-SqlStatement copy = SQL.clone(stmt); // AST 树拷贝（SqlAstCloner），不再 format→parse
+SqlStatement w = SQL.andWhere(stmt, "tenant_id = ?"); // 内部 parseExpr
+SqlStatement t2 = SQL.replaceTable(w, "users", "users_archive");
+SqlStatement c2 = SQL.replaceColumn(t2, "name", "user_name");   // 跳过表名 / 表别名
+SqlStatement c3 = SQL.addSelectItem(c2, "status");              // 追加 SELECT 列
+SqlStatement c4 = SQL.removeSelectItem(c3, "name");             // 按简单列名或别名移除（不可删光）
+SqlStatement c5 = SQL.adaptPagination(c4, SqlDialect.ORACLE);   // 按目标方言换分页形态
+SqlStatement copy = SQL.clone(stmt);                            // AST 深拷贝
 ```
 
-`addLimit`：已有 LIMIT/TOP 时不覆盖；SQL Server 写 `TOP`，其余写 `LIMIT`。
-`andWhere` / `replaceTable` / `replaceColumn` / `addSelectItem` / `removeSelectItem` / `adaptPagination`：现与 `addLimit`/`setPage` 一样 **clone 后再改**（破坏性：旧代码若依赖就地修改需改用返回值）。
-`setLimit` / `setOffset` / `setPage`：**替换**分页；`setPage(pageNo, pageSize)` 中 pageNo 从 1 起。
+- `addLimit`：已有分页（LIMIT / TOP / ROWNUM / `row_number` 包装）时不覆盖。SQL Server 写 `TOP`；经典 Oracle 写单层 ROWNUM 包装；其余写 `LIMIT`。
+- `setLimit` / `setOffset` / `setPage`：**替换**分页；`setPage(pageNo, pageSize)` 的 pageNo 从 1 起。
+- `removeSelectItem`：忽略大小写，匹配简单列名（`t.col` 的最后一段）或显式别名；删到只剩一项时再删会抛 `IllegalArgumentException`。
+- 分页形态、Oracle 包装、`format` / `toSqlString` 按需适配见下一节。
 
 ### 改写规则链（可选）
 
-多个改写（自定义 + 内建）需要按序组合时，用 `SqlRewrites` 组链、`SQL.rewrite` 执行——
-自定义规则排在内建适配器之前即"前 hook"、之后即"后 hook"，`SQL.rewrite` 先深拷贝，原 AST 不受影响：
+多个改写（自定义 + 内建）按序组合时，用 `SqlRewrites` 组链、`SQL.rewrite` 执行。
+自定义规则排在内建适配器之前即「前 hook」、之后即「后 hook」。`SQL.rewrite` 先深拷贝，原 AST 不受影响（空链或 `null` 直接返回原语句）：
 
 ```java
 SqlStatement out = SQL.rewrite(stmt, SqlRewrites.create()
         .add(new TenantRule())                            // 前 hook：自定义规则
-        .add(SqlRewrites.replaceTable("users", "users_2026")) // 内建适配器
-        .add(SqlRewrites.andWhere(SQL.parseExpr("tenant_id = ?"))) // 内建适配器
-        .add(SqlRewrites.addLimit(100, SqlDialect.MYSQL))); // 后 hook 位置随意
+        .add(SqlRewrites.replaceTable("users", "users_2026"))
+        .add(SqlRewrites.andWhere(SQL.parseExpr("tenant_id = ?")))
+        .add(SqlRewrites.addSelectItem("status"))
+        .add(SqlRewrites.removeSelectItem("secret"))
+        .add(SqlRewrites.adaptPagination(SqlDialect.ORACLE))
+        .add(SqlRewrites.addLimit(100, SqlDialect.MYSQL)));
 ```
 
 规则是 `SqlRewriteHook` 函数式接口：收当前语句、返回继续传递的语句（就地修改返回原对象、或整体替换均可；返回 `null` 抛 `IllegalArgumentException`）。
-内建适配器与 `SqlRewriter` 对应静态方法等价（`addLimit`/`setLimit`/`setOffset`/`setPage`/`andWhere`/`replaceTable`/`replaceColumn`/`addSelectItem`/`removeSelectItem`/`adaptPagination`），就地作用于链上语句；
-只改一条且要"clone 后再改"语义时直接用 `SQL` 的对应门面方法即可，不必进链。
-方言：MySQL/PG/H2/ANSI → `LIMIT`/`OFFSET`；SQL Server 第 1 页 `TOP`，其后 `OFFSET FETCH`；**`SqlDialect.ORACLE`（12c 以下）** 裸 SELECT → **ROWNUM 包装**（单层 `WHERE ROWNUM<=n`，有 offset 时双层）；**`ORACLE12`（12c+）** → `OFFSET … FETCH FIRST … ROWS ONLY`。已存在的 Oracle `ROWNUM` 双层/`WHERE ROWNUM<=n` 与 SQL Server `row_number` 包装：`getLimit` 返回页大小，`setPage`/`setLimit` 只改数值边界（不叠 OFFSET/FETCH）。UNION 的 LIMIT 挂在集合运算链末端。`SqlBuilder.limit`/`offset`/`toSql(dialect)` 走同一套改写（`toSql` 的方言参数覆盖 builder 方言）。
+内建适配器与 `SqlRewriter` 对应静态方法等价（`addLimit` / `setLimit` / `setOffset` / `setPage` / `andWhere` / `replaceTable` / `replaceColumn` / `addSelectItem` / `removeSelectItem` / `adaptPagination`），就地作用于链上语句。
+只改一条时直接用 `SQL` 门面即可，不必进链。
 
-**`format` / `toSqlString(..., dialect)` 按目标方言适配分页**：若 AST 上已有分页（MySQL `LIMIT` / TOP / ROWNUM / row_number / FETCH）与目标方言形态不兼容（含 MySQL 逗号 `LIMIT` → PG/ANSI 等），回写前仅在 `paginationNeedsAdapt` 为 true 时 `SQL.clone` 再 `adaptPagination`（同形态零额外开销；不改入参 AST）。例如 MySQL `LIMIT 0,10000` → 经典 ORACLE 单层 ROWNUM；`LIMIT 10,20` → 双层 RN；→ ORACLE12/DB2 用 OFFSET/FETCH；→ SQLSERVER offset=0 用 TOP、有 offset 用 OFFSET FETCH；ROWNUM → POSTGRES/MYSQL 还原为 `LIMIT`（offset=0 可省略 OFFSET，不保留逗号风格）。显式 `adaptPagination` 与 format 自动路径共用 `isPaginationFormCompatible`。`setPage`/`setLimit` 转经典 ORACLE 时也会清掉子查询内残留的旧 LIMIT/TOP。
+## 跨方言分页
 
-## 参数化 / Wall / 求值（P2）
+改写与回写都以 `SqlDialect` 的能力方法为准：`supportsLimitOffset` / `supportsTop` / `supportsFetchFirst` / `supportsRownum` / `supportsCommaLimitOffset`。`preferredLimitStyle()` 只描述「只补行数」时的首选形态（`TOP` / `ROWNUM` / `LIMIT`），**不**单独驱动 `setPage`。
+
+| 方言 | 标识符 | `\|\|` | `#` 行注释 | 分页形态 |
+| --- | --- | --- | --- | --- |
+| MYSQL | 反引号 | OR | 是 | `LIMIT n` / `LIMIT offset, n` |
+| POSTGRES / H2 / ANSI | 双引号 | 拼接 | H2 是 | `LIMIT` / `OFFSET`（兼认 FETCH） |
+| DAMENG | 双引号 | 拼接 | 否 | `LIMIT` / `OFFSET` |
+| SQLITE / PRESTO | 双引号 | 拼接 | 否 | `LIMIT` / `OFFSET`，无 FETCH FIRST |
+| HIVE | 反引号（双引号当字符串） | 拼接 | 否 | `LIMIT`（`supportsLimitOffset=true`，带偏移时 AST 仍写 OFFSET；Hive 引擎通常只认 `LIMIT n`） |
+| CLICKHOUSE | 反引号（双引号亦标识符） | 拼接 | 否 | `LIMIT n` / `LIMIT offset, n` |
+| SQLSERVER | `[]` | 拼接 | 否 | offset=0 用 `TOP`，其后 `OFFSET FETCH` |
+| ORACLE（≤11g） | 双引号 | 拼接 | 否 | 裸 SELECT → ROWNUM 子查询包装 |
+| ORACLE12 | 双引号 | 拼接 | 否 | 裸 SELECT → `OFFSET … FETCH FIRST … ROWS ONLY`；已有 ROWNUM 包装仍识别 |
+| DB2 | 双引号 | 拼接 | 否 | 仅 `FETCH FIRST n ROWS ONLY` |
+
+已存在的 Oracle `ROWNUM` 双层 / `WHERE ROWNUM <= n` 与 SQL Server `row_number` 包装：`getLimit` 返回页大小，`setPage` / `setLimit` 只改数值边界（不叠 OFFSET/FETCH）。经典单层 ROWNUM 在 offset>0 时扩成双层。UNION 的分页挂在集合运算链末端。`SqlBuilder.limit` / `offset` / `toSql(dialect)` 走同一套改写（`toSql` 的方言覆盖 builder 方言）。
+
+### 经典 Oracle 的 ROWNUM 包装
+
+`SqlDialect.ORACLE`（`supportsRownum && !supportsFetchFirst`）对裸 SELECT：
+
+- **offset=0**：单层子查询  
+  `SELECT * FROM ( <原查询> ) XX WHERE ROWNUM <= n`
+- **offset>0**：双层（中层别名 `XX` 选出 `ROWNUM AS RN` 并截 `ROWNUM <= offset+n`，外层别名 `XXX` 再滤 `RN > offset`）
+
+`WITH` 留在外层。`setPage` / `setLimit` / `adaptPagination` 转经典 Oracle 时会先清掉子查询内残留的旧 LIMIT/TOP，避免包装后内层还带着源方言分页。
+
+`format` / `toSqlString(..., ORACLE)` 对「offset=0 的 LIMIT/TOP → 单层 ROWNUM」走同一语义的快路径：临时清掉 LIMIT/TOP，按上面的子查询包装回写，再恢复入参（不永久改 AST）。有 offset 时走完整 `adaptPagination`。
+
+### format / toSqlString / adaptPagination
+
+指定目标方言回写时，若 AST 上已有分页（LIMIT / TOP / ROWNUM / `row_number` / FETCH）与目标形态不兼容（含 MySQL 逗号 `LIMIT` → PG / ANSI），仅在需要时 `clone` + `adaptPagination` 再回写；同形态零额外开销，不改入参。
+
+`SQL.adaptPagination(stmt, dialect)` 是同一套适配的显式入口（同样先 clone）。
+
+常见方向：
+
+- MySQL `LIMIT 10000` / `LIMIT 0,10000` → 经典 ORACLE 单层 ROWNUM
+- MySQL `LIMIT 10,20` → 经典 ORACLE 双层 RN
+- → ORACLE12 / DB2：`OFFSET … FETCH`
+- → SQLSERVER：offset=0 用 `TOP`，有 offset 用 `OFFSET FETCH`
+- ROWNUM → POSTGRES / MYSQL：还原为 `LIMIT`（offset=0 可省略 OFFSET，不保留逗号风格）
+
+## 参数化 / Wall / 求值
 
 ```java
 String finger = SQL.parameterize("SELECT * FROM t WHERE name = 'a' AND age = 1");
@@ -272,7 +319,7 @@ stmt.accept(new SqlAstVisitor() {
 
 ## 格式化
 
-`format` / `toSqlString` 是 AST 回写（不保留空白与注释）；指定目标方言时若分页形态不兼容会先适配再回写（见上「统计与改写」）。**语义往返**（`parse → format → parse`）保证 `type()`、`tables()`（忽略大小写）、`isReadOnly()` 与原文一致；黄金集 `SqlGoldenCorpusTest` 全覆盖。**词级保真**由 `SqlRoundTripFidelityTest` 额外保证：回写文本与原文**归一化后逐字等价**（去注释 / 去全部空白 / 去独立 `AS` / 统一大小写，只容忍纯排版差异），覆盖 JOIN 修饰符、DDL 关键字、`RENAME` 多组、引号形态、DML 修饰符、JDBC 转义等 118 条坑位语料——回写**丢词**（如 `NATURAL LEFT JOIN` 丢 `LEFT`、`STRAIGHT_JOIN` 丢 `STRAIGHT`）会直接抓出，不会静默通过。同一方法在 `tools-test` 由 `SqlRoundTripFidelityCorpusTest` 批量应用到全部 379 条文件语料（另加语义等价写法归一与 5 条有据白名单，硬断言）。
+`format` / `toSqlString` 是 AST 回写（不保留空白与注释）。指定目标方言时若分页形态不兼容会先适配再回写（见「跨方言分页」）。**语义往返**（`parse → format → parse`）保证 `type()`、`tables()`（忽略大小写）、`isReadOnly()` 与原文一致；黄金集 `SqlGoldenCorpusTest` 全覆盖。**词级保真**由 `SqlRoundTripFidelityTest` 额外保证：回写文本与原文**归一化后逐字等价**（去注释 / 去全部空白 / 去独立 `AS` / 统一大小写，只容忍纯排版差异），覆盖 JOIN 修饰符、DDL 关键字、`RENAME` 多组、引号形态、DML 修饰符、JDBC 转义等 118 条坑位语料——回写**丢词**（如 `NATURAL LEFT JOIN` 丢 `LEFT`、`STRAIGHT_JOIN` 丢 `STRAIGHT`）会直接抓出，不会静默通过。同一方法在 `tools-test` 由 `SqlRoundTripFidelityCorpusTest` 批量应用到全部 379 条文件语料（另加语义等价写法归一与 5 条有据白名单，硬断言）。
 
 ```java
 SQL.format(stmt);                           // 换行缩进（SELECT 子句换行；CREATE TABLE 按列缩进）
@@ -299,14 +346,17 @@ SQL.format(stmt, SqlDialect.MYSQL, false,
 
 ## 方言差异
 
-| 点 | MYSQL | POSTGRES / ANSI / ORACLE |
-| --- | --- | --- |
-| 标识符 | 反引号 `` ` `` | 双引号 |
-| 双引号 | 默认当字符串 | 当标识符 |
-| `\|\|` | 逻辑 OR（`SqlParseOptions.pipesAsConcat(true)` 可改为拼接） | 字符串拼接 |
-| `#` 行注释 | 是 | 否 |
-| 分页 | `LIMIT` / `LIMIT off,n`（`supportsLimitOffset`） | PG/ANSI/H2：LIMIT+FETCH；**ORACLE**：ROWNUM；**ORACLE12**：OFFSET/FETCH；SQL Server：TOP + OFFSET FETCH |
-| `\|\|` 能力 | `pipesAsOr()` | `pipesAreConcat()` |
+完整分页形态见「跨方言分页」。这里只列解析/回写最容易踩的点：
+
+| 点 | MYSQL | HIVE | SQLSERVER | 其余（PG / Oracle / 达梦 / ANSI / H2 / DB2 / SQLite / Presto） |
+| --- | --- | --- | --- | --- |
+| 标识符 | 反引号 `` ` `` | 反引号 | `[]` | 双引号 |
+| 双引号 | 默认当字符串 | 当字符串 | 当标识符 | 当标识符 |
+| `\|\|` | 逻辑 OR（`SqlParseOptions.pipesAsConcat(true)` 可改为拼接） | 拼接 | 拼接 | 拼接 |
+| `#` 行注释 | 是 | 否 | 否 | 仅 H2 是 |
+| 分页能力 | `supportsLimitOffset` + 逗号风格 | `supportsLimitOffset` | `supportsTop` + FETCH | 见上一节 |
+
+ClickHouse 与 MySQL 一样用反引号，但双引号也是标识符，且分页支持逗号 `LIMIT`。
 
 ## 快速构建（SqlBuilder）
 
@@ -346,16 +396,7 @@ SQL.builder().from("t").where("id = ?").limit(5).toSql();
 
 构建结果是 AST，再经 `SQL.format` / `toSqlString` 回写。`toSql(dialect)` 的方言参数覆盖 builder 自身方言，并决定分页形态。
 
-## 参数抽取
-
-```java
-List<String> params = SQL.parameters("SELECT * FROM t WHERE id = ? AND name = :name");
-// ["?", ":name"]  —— 绑定占位符
-
-List<Object> literals = SQL.exportParameterValues("SELECT * FROM t WHERE name = 'a' AND age = 1");
-// ["a", 1]  —— 字面量值（与 parameters 分立）
-```
-
+绑定占位符与字面量抽取见「参数化 / Wall / 求值」。
 
 ## 别名 API 注意
 
@@ -366,7 +407,7 @@ SELECT 列表项与表源的别名用 **`alias()`** 读取：
 
 不要用 `SqlIdentifier.names()` 的下标去当「第几个别名」；`names()` 是限定名各段（`db.schema.table`），与别名无关。
 
-## v1 覆盖
+## 语法覆盖
 
 - SELECT：列、`*`、`t.*`、DISTINCT / DISTINCTROW / DISTINCT ON、HIGH_PRIORITY / STRAIGHT_JOIN 修饰符 / SQL_SMALL_RESULT / SQL_BIG_RESULT / SQL_BUFFER_RESULT / SQL_CACHE / SQL_NO_CACHE / SQL_CALC_FOUND_ROWS、TOP、`INTO` 表 / `@var` / 多变量 `INTO c,d` / `INTO (c,d)` / `OUTFILE`（抽目标表进 `tables`/`INSERT`）、ODPS `FORCE PARTITION / `SIGNED INTEGER` / `IGNORE NULLS` / `LIMIT BY` / jsonb `?` 'pt'` / `FORCE ALL PARTITIONS`、FROM（含 MySQL `PARTITION (p0,p1)` 表分区限定；Oracle `PARTITION BY (expr)` 分区外连接；别名后亦可 `FORCE/USE/IGNORE INDEX`）、JOIN（INNER/LEFT/RIGHT/FULL/CROSS/STRAIGHT/逗号；`LEFT|RIGHT ANTI|SEMI JOIN`；`NATURAL` 与连接类型**正交**）、SQL Server 表提示 `WITH (NOLOCK)` / `WITH (INDEX(ix))`（别名前后均可，原文保留）、`CROSS APPLY` / `OUTER APPLY`、`LATERAL` 子查询/表函数、`UNNEST(...) [WITH ORDINALITY]` / `TABLE(fn(...))` / `TABLE(SELECT…)` / `OPENJSON(...) WITH (...)` 表函数、`PIVOT` / `UNPIVOT [INCLUDE|EXCLUDE NULLS]`（含 `((SELECT…) PIVOT/UNPIVOT …)` 括号表源）、`(VALUES …) AS v(cols)`、括号集合运算子查询 `((SELECT…) UNION …)`、ON/USING、WHERE、GROUP BY [WITH ROLLUP|WITH CUBE|DISTINCT|GROUPING SETS（可多个逗号连接）]、HAVING、Teradata/Snowflake `QUALIFY` 窗口过滤、`WINDOW … AS (…)`（可继承另一窗口名）、ORDER BY、LIMIT/OFFSET/`FETCH FIRST n ROWS ONLY`、FOR UPDATE [OF cols] [NOWAIT|SKIP LOCKED]、LOCK IN SHARE MODE、UNION/UNION ALL/INTERSECT/EXCEPT/MINUS、CONNECT BY [NOCYCLE] / START WITH / PRIOR / `CONNECT_BY_ROOT`、WITH CTE（含 Oracle `SEARCH DEPTH|BREADTH FIRST BY … SET` / `CYCLE …`）；Hive UDTF 多列别名 `fn(...) AS (c0,c1)`
 - Oracle / 时态：`MODEL` → `SqlModelClause`（PARTITION/DIMENSION/MEASURES/RULES；`RULES UPSERT SEQUENTIAL ORDER`；MEASURES 字面量/`AS` 别名；可位于 WHERE 后；`RULES` → `SqlModelRule`，`cellDims`/`cellDimExprs`，失败保留 `raw`）；`MATCH_RECOGNIZE` → `SqlMatchRecognize`（`PARTITION BY`/`ORDER BY`/`MEASURES`/`PATTERN` 字符串/`DEFINE`/`SUBSET`/`WITHIN`，`ROWS PER MATCH`/`AFTER MATCH` 字段；`PATTERN` 未建 DSL 树）；表级 `AS OF TIMESTAMP|SCN`、`VERSIONS BETWEEN TIMESTAMP|SCN … AND …`、SQL Server `FOR SYSTEM_TIME AS OF`；ClickHouse 参数化函数 `fn(params)(args)`
@@ -459,7 +500,7 @@ mvn -Dtest=LocalDatasourceFunctionRewriteTest test  # 同上，真库执行 SUBS
 java -jar target/benchmarks.jar com.alianga.test.sql.jmh.SqlSchemaConvertBenchmark -f 1 -wi 1 -i 1
 ```
 
-当前 12 个一等方言见 [设计文档第四节](./sql-schema-converter-design.md)。**新产品不必改 `SqlDialect` 枚举**：实现 `SqlDialectSpec`（或 `SqlDialectWrapper`），用 `typeFamily()` 复用内置类型表，用 `dialectId()` + SPI 覆盖个别写法。`SQL.convert` / `SQL.parse` 都吃 `SqlDialectSpec`。
+当前 13 个一等方言（含 `DAMENG` / `ORACLE12`）见 [设计文档第四节](./sql-schema-converter-design.md)。**新产品不必改 `SqlDialect` 枚举**：实现 `SqlDialectSpec`（或 `SqlDialectWrapper`），用 `typeFamily()` 复用内置类型表，用 `dialectId()` + SPI 覆盖个别写法。`SQL.convert` / `SQL.parse` 都吃 `SqlDialectSpec`。
 
 `ConversionResult.sqlWithExtras()` 含附录 `CREATE INDEX` / Oracle SEQUENCE。内置 `DATE_FORMAT` → `TO_CHAR` 走 `SqlFunctionRegistry`；第三方用 `SqlSchemaConverterProvider.registerFunctions` 追加或覆盖（返回 `null` 回落内置），**不必改** `FunctionAstRewriter`。`VARCHAR` 超长默认提升为 TEXT/CLOB。
 
@@ -620,7 +661,7 @@ mvn -pl jkit-sql test -Dtest=SqlBusinessScenarioTest
 | 3 | SQL 注入防护 | `SQL.parameterize` / `SQL.exportParameterValues` | 字面量收编、绑定值导出 |
 | 4 | SQL 防火墙 | `SQL.wall` / `SqlWallConfig` | 危险语句拦截、按通道放行 DDL |
 | 5 | 跨方言数据库迁移 | `SQL.convertBatch` / `SqlSchemaConverter.convert` | DDL 翻译闭环、批量 DML 函数改写 |
-| 6 | 多方言分页 | `SQL.setPage` / `SQL.getLimit` / `SQL.getOffset` | MySQL/PG 的 LIMIT OFFSET、Oracle 经典 ROWNUM |
+| 6 | 多方言分页 | `SQL.setPage` / `SQL.adaptPagination` / `SQL.toSqlString` | LIMIT/TOP/FETCH/ROWNUM、offset=0 单层包装、回写按需适配 |
 | 7 | 多租户改写 | `SqlRewrites.replaceTable` / `SqlRewrites.andWhere` | 分表路由、租户条件注入 |
 | 8 | 数据脱敏与列级权限 | `SQL.removeSelectItem` / `SqlRewrites.replaceColumn` | 敏感列裁剪、物理列改名映射 |
 | 9 | 动态 SQL 构建 | `SqlBuilder` | 条件查询组装、INSERT/UPDATE |
@@ -744,7 +785,7 @@ List<ConversionResult> rs = SQL.convertBatch(
 
 ### 6. 多方言分页适配
 
-同一份业务查询按目标方言生成分页语句。
+同一份业务查询按目标方言生成分页语句。`setPage` / `adaptPagination` / `format` / `toSqlString` 共用同一套形态判断。
 
 **案例 1：MySQL / PostgreSQL 的 LIMIT OFFSET**
 
@@ -755,13 +796,24 @@ SQL.getLimit(page);                                      // 10
 SQL.getOffset(page);                                     // 10
 ```
 
-**案例 2：Oracle 12c 之前的 ROWNUM 两层子查询**
+**案例 2：经典 Oracle offset=0 单层包装，以及跨页双层**
 
 ```java
+SqlStatement first = SQL.setPage(
+        SQL.parse("SELECT * FROM emp"), 1, 8, SqlDialect.ORACLE);
+SQL.toSqlString(first, SqlDialect.ORACLE);
+// SELECT * FROM (SELECT * FROM emp) XX WHERE ROWNUM <= 8
+
 SqlStatement page = SQL.setPage(
-        SQL.parse("SELECT * FROM emp", SqlDialect.ORACLE), 2, 8, SqlDialect.ORACLE);
-// 输出含 ROWNUM，不含 OFFSET/FETCH
+        SQL.parse("SELECT * FROM emp"), 2, 8, SqlDialect.ORACLE);
+// 双层 RN，不含 OFFSET/FETCH
 SQL.parse(SQL.toSqlString(page, SqlDialect.ORACLE), SqlDialect.ORACLE);
+
+// 已有 MySQL LIMIT 的 AST，按目标方言回写或显式适配
+SqlStatement mysql = SQL.parse("SELECT * FROM emp LIMIT 10");
+SQL.toSqlString(mysql, SqlDialect.ORACLE);               // 单层 ROWNUM
+SQL.toSqlString(mysql, SqlDialect.SQLSERVER);            // SELECT TOP 10 ...
+SQL.adaptPagination(mysql, SqlDialect.ORACLE12);         // OFFSET 0 FETCH FIRST 10 ROWS ONLY
 ```
 
 ### 7. 多租户改写
@@ -794,7 +846,7 @@ SQL.toSqlString(stmt);                                   // 原语句未被改�
 
 ```java
 SqlStatement stmt = SQL.parse("SELECT id, name, phone, id_card FROM t_customer WHERE id = 1");
-SqlStatement out = SQL.removeSelectItem(SQL.clone(stmt), "phone");
+SqlStatement out = SQL.removeSelectItem(stmt, "phone");   // 已 clone，不必再包一层
 out = SQL.removeSelectItem(out, "id_card");
 // SELECT id, name FROM t_customer WHERE id = 1
 ```

@@ -172,7 +172,7 @@ public class QuickStart {
 | YAML 解析、节点树、锚点、多文档 | [YAML 模块](/yaml) |
 | Spring Boot 风格的外部化配置读取 | [配置读取](/config) |
 | GET/POST/上传下载/SSE/负载均衡 | [HTTP 客户端](/http) |
-| 多方言 SQL 解析、格式化、统计改写 | [SQL 解析](/sql) |
+| 多方言 SQL 解析、格式化、分页改写 | [SQL 解析](/sql) |
 | 钉钉 / 企微 / 飞书 / 邮件等消息通知 | [消息通知](/notify) |
 
 ## 从 ZmlTools 迁移

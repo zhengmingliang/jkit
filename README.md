@@ -59,7 +59,7 @@ Slack / Telegram / ntfy / 短信（阿里云、腾讯云、云片、华为云）
 
 用法见 [docs/notify.md](docs/notify.md)。
 
-需要解析 / 格式化 / 抽表列 / 给 SELECT 补 LIMIT 时，另加：
+需要解析 / 格式化 / 抽表列 / 跨方言分页改写（LIMIT / TOP / FETCH / ROWNUM）时，另加：
 
 ```xml
 <dependency>
@@ -69,7 +69,7 @@ Slack / Telegram / ntfy / 短信（阿里云、腾讯云、云片、华为云）
 </dependency>
 ```
 
-零依赖手写 SQL 解析器，对标 Druid SQL Parser 与 JSqlParser 的常用入口。用法见 [docs/sql.md](docs/sql.md)。
+零依赖手写 SQL 解析器，对标 Druid SQL Parser 与 JSqlParser 的常用入口。`SQL.clone` 为 AST 深拷贝；`format` / `toSqlString` / `adaptPagination` 按目标方言适配分页。用法见 [docs/sql.md](docs/sql.md)。
 
 需要启动时按实体自动建表 / 更新表结构时，另加：
 
@@ -149,6 +149,8 @@ public class QuickStart {
 | `com.alianga.jkit.config` | **配置读取**：Spring Boot 优先级、profile、占位符、前缀绑定到对象、文件热加载（详见 [docs/config.md](docs/config.md)） |
 | `com.alianga.jkit.expression` / `template` | **表达式求值与模板渲染**：运算符、内置函数、自定义函数、求值环境、表达式缓存、字符串模板（详见 [docs/expression.md](docs/expression.md)） |
 | `com.alianga.jkit.csv` | **CSV 读写**：`CSVUtils`（字符串行）与 `CSV`/`CSVTable`（表格模型、按列名取值、列类型转换、POJO 映射），两个门面共用同一个解析器，都支持流式读写，详见 [docs/csv.md](docs/csv.md) |
+| `com.alianga.jkit.sql` | **SQL 解析与改写**（模块 `jkit-sql`）：多方言 parse/format、统计、分页（LIMIT/TOP/FETCH/ROWNUM）、改写链，详见 [docs/sql.md](docs/sql.md) |
+| `com.alianga.jkit.sql.auto` | **自动建表**（模块 `jkit-sql-auto`）：按实体对照库表执行 CREATE/ALTER，详见 [docs/sql-auto.md](docs/sql-auto.md) |
 | 其它 | convert / collection / log / valid / crypto / image / thread / reflect / 根包杂项工具，见 [docs/toolkit.md](docs/toolkit.md) |
 
 ## 使用指南
