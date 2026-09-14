@@ -294,6 +294,7 @@ SqlAuto.drop(SqlAutoOptions.defaults().url(url).entities(User.class));
 - 表在、列缺 → `ALTER TABLE … ADD`
 - 索引缺 → `CREATE INDEX`
 - 表/列注释按方言拆成独立语句（MySQL 内联 `COMMENT`，PG/Oracle `COMMENT ON`，SQL Server `sp_addextendedproperty`）
+- 表已存在时：实体注释非空且与 `DatabaseMetaData.REMARKS` 不一致 → `COMMENT ON` / `ALTER TABLE … COMMENT` / MySQL `MODIFY … COMMENT`。实体没写注释时不覆盖库里已有注释
 
 **默认不做**
 

@@ -22,6 +22,10 @@
 - `jkit-sql-auto`：`SqlAutoDialects.fromUrl` / `driverForUrl` 委托 `JdbcUrlUtils`（覆盖 Gauss / Kingbase / Hive / ClickHouse / Trino 等更多 URL）。
 - `jkit-sql-auto`：已有表对照实体注释。`DatabaseMetaData.REMARKS` 读入活表/列；实体注释非空且与库不一致时发出 `COMMENT ON` / `ALTER TABLE … COMMENT` / MySQL `MODIFY … COMMENT`。实体未写注释时不覆盖库里已有注释。
 
+### 文档
+
+- `docs/sql.md` / `docs/en/sql.md`：跨方言转换去掉「进行中」口径；补齐 `injectTenant` / `expandStar` / `replaceSelectItem` / `bind` / Wall 表策略 / `DATE_FORMAT` 格式符。英文转换章节与中文对齐。`sql-auto` 补充已有表注释同步。
+
 ### 修复
 
 - `jkit-sql-auto`：`SqlAutoInspector` 判断表是否存在时补上 schema。未配置时从 `Connection.getSchema()` 取；无连接（dry-run）或驱动不支持时从 JDBC URL 解析。PostgreSQL / Gauss 缺省 `public`，SQL Server 缺省 `dbo`，Oracle / 达梦回落用户名。避免把其它 schema 下的同名表误判为已存在，或对本库缺失表发出 ALTER。

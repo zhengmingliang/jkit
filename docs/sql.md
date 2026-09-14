@@ -186,7 +186,7 @@ List<SqlStatement> batch = SQL.parseAll(
 
 ## 统计与改写
 
-门面改写（`addLimit` / `setPage` / `andWhere` / `replaceTable` / `replaceColumn` / `addSelectItem` / `removeSelectItem` / `adaptPagination`）都是 **先 `SQL.clone` 再改**：返回新树，入参 AST 不变。`SQL.clone` 是 AST 深拷贝（`SqlAstCloner` / `SqlNode.copy`），与方言无关（`clone(stmt, dialect)` 的方言参数仅保留 API 兼容）。
+门面改写（`addLimit` / `setPage` / `andWhere` / `injectTenant` / `replaceTable` / `replaceColumn` / `addSelectItem` / `removeSelectItem` / `replaceSelectItem` / `expandStar` / `adaptPagination` / `bind`）都是 **先 `SQL.clone` 再改**：返回新树，入参 AST 不变。`SQL.clone` 是 AST 深拷贝（`SqlAstCloner` / `SqlNode.copy`），与方言无关（`clone(stmt, dialect)` 的方言参数仅保留 API 兼容）。
 
 ```java
 SqlSchemaStat stat = SQL.stat(sql);
@@ -211,11 +211,24 @@ SqlStatement c3 = SQL.addSelectItem(c2, "status");              // 追加 SELECT
 SqlStatement c4 = SQL.removeSelectItem(c3, "name");             // 按简单列名或别名移除（不可删光）
 SqlStatement c5 = SQL.adaptPagination(c4, SqlDialect.ORACLE);   // 按目标方言换分页形态
 SqlStatement copy = SQL.clone(stmt);                            // AST 深拷贝
+
+// 多租户：按表白名单注入，下钻 UNION / 子查询 / CTE；JOIN 用别名限定列
+SqlStatement ten = SQL.injectTenant(stmt, "tenant_id", 100, "t_order", "t_item");
+
+// 列级脱敏：先展开 *，再替换投影（默认保留输出列名）
+Map<String, List<String>> cols = new LinkedHashMap<String, List<String>>();
+cols.put("t_customer", Arrays.asList("id", "name", "phone"));
+SqlStatement masked = SQL.replaceSelectItem(
+        SQL.expandStar(SQL.parse("SELECT * FROM t_customer"), cols),
+        "phone", "CONCAT(LEFT(phone, 3), '****')");
 ```
 
 - `addLimit`：已有分页（LIMIT / TOP / ROWNUM / `row_number` 包装）时不覆盖。SQL Server 写 `TOP`；经典 Oracle 写单层 ROWNUM 包装；其余写 `LIMIT`。
 - `setLimit` / `setOffset` / `setPage`：**替换**分页；`setPage(pageNo, pageSize)` 的 pageNo 从 1 起。
-- `removeSelectItem`：忽略大小写，匹配简单列名（`t.col` 的最后一段）或显式别名；删到只剩一项时再删会抛 `IllegalArgumentException`。
+- `removeSelectItem`：忽略大小写，匹配简单列名（`t.col` 的最后一段）或显式别名；删到只剩一项时再删会抛 `IllegalArgumentException`。只改**外层** SELECT。
+- `injectTenant`：给匹配的物理表 AND `alias.col = value`（CTE 名与 `DUAL` 跳过；无表白名单则全部物理表）。INSERT 补列 / SET；MERGE 补 ON。字符串值按 SQL 单引号转义，不当表达式解析。
+- `expandStar`：按表列清单把 `*` / `t.*` 展开；解析不到的星号保持原样。子查询 `*` 用内层投影。
+- `replaceSelectItem`：整树替换 SELECT 投影（UNION / 子查询），匹配别名或 `t.col`；`SELECT *` 请先 `expandStar`。
 - 分页形态、Oracle 包装、`format` / `toSqlString` 按需适配见下一节。
 
 ### 改写规则链（可选）
@@ -230,6 +243,7 @@ SqlStatement out = SQL.rewrite(stmt, SqlRewrites.create()
         .add(SqlRewrites.andWhere(SQL.parseExpr("tenant_id = ?")))
         .add(SqlRewrites.addSelectItem("status"))
         .add(SqlRewrites.removeSelectItem("secret"))
+        .add(SqlRewrites.injectTenant("tenant_id", SqlTenantRewriter.literalValue(100), "t_order"))
         .add(SqlRewrites.adaptPagination(SqlDialect.ORACLE))
         .add(SqlRewrites.addLimit(100, SqlDialect.MYSQL)));
 ```
@@ -292,6 +306,11 @@ String finger = SQL.parameterize("SELECT * FROM t WHERE name = 'a' AND age = 1")
 List<Object> litValues = SQL.exportParameterValues(sql); // "a", 1 —— 不是 ?/:name
 List<String> binds = SQL.parameters(sql);                 // "?", ":name"
 
+// 把 ? / :name 换成字面量（字符串只加倍单引号，不用反斜杠）
+String filled = SQL.bind("SELECT * FROM t WHERE name = ?", "'; DROP TABLE t; --");
+// SELECT * FROM t WHERE name = '''; DROP TABLE t; --'   —— 仍是一条语句
+SQL.bindNamed("SELECT * FROM t WHERE id = :id", Collections.singletonMap("id", 1));
+
 SqlWallResult wall = SQL.wall(sql); // 默认不拦截解析；显式调用
 wall.passed();
 wall.violations(); // multi-statement / comment-bypass / always-true-condition / sleep-function / delete-without-where / update-without-where
@@ -301,7 +320,11 @@ SqlWallConfig cfg = SqlWallConfig.defaults()
         .denyDdl(true)
         .denyDangerousFunctions(true)  // SLEEP / BENCHMARK / LOAD_FILE …
         .denyIntoOutfile(true)
-        .selectOnly(false);
+        .selectOnly(false)
+        .denyTables("mysql.user", "secret")   // deny-table
+        .allowTables("t_order", "t_item")     // 非空则只允许这些表；allow-table
+        .requireWhereColumns("tenant_id")     // 触及物理表时 WHERE/JOIN ON 必须出现；missing-where-column
+        .maxTables(8);                        // too-many-tables
 SqlWallResult w2 = SQL.wall(sql, SqlDialect.MYSQL, cfg);
 
 // 自定义规则（SqlWallRule SPI）：在全部内置检查之后、按注册顺序执行，违规码自动去重
@@ -456,7 +479,7 @@ SELECT 列表项与表源的别名用 **`alias()`** 读取：
 
 明确未做：过程体**执行引擎**（AST 结构化已覆盖 DECLARE/HANDLER/控制流/TRIGGER/EVENT 等，但不解释执行）、完整 Wall 规则集（`SqlWallConfig` 提供可配置子集，非 Druid WallFilter 全量）、`MATCH_RECOGNIZE.PATTERN` 的 DSL 树（仍为字符串）。CREATE TABLE 列类型/约束已进 `columnDefinitions` 并可 format 往返。未知函数按普通函数调用解析，不失败。
 
-## 跨方言类型转换（进行中）
+## 跨方言类型转换
 
 表结构 / SQL 跨方言转换走 **Normal Form 中转**（canonical 类型，避免 N² pairwise 映射）。设计见 [sql-schema-converter-design.md](./sql-schema-converter-design.md)。
 
@@ -508,6 +531,7 @@ Oracle ≤11g 的自增默认给出 `MANUAL_ACTION_REQUIRED`；`generateOracleSe
 - `CAST` / `CONVERT(expr, type)` 的类型走 canonical 表
 - MySQL `CONVERT(expr USING charset)` **不会**误映射成 CAST，只告警并保留原文
 - `DATE_ADD`/`DATE_SUB` → 加减 `INTERVAL`；`DATEDIFF` → 日期相减；`FROM_UNIXTIME` → `TO_TIMESTAMP`
+- `DATE_FORMAT`：常见格式符会改写（`%Y-%m-%d %H:%i:%s` → PG/Oracle `TO_CHAR(..., 'YYYY-MM-DD HH24:MI:SS')`；SQLite `strftime` 交换参数并把 `%i` 改成 `%M`）。对不上的格式符保留并 `SEMANTIC_RISK`
 - `SUBSTRING`/`LEFT`/`RIGHT`/`MID`：Oracle/达梦 `SUBSTR`；SQL Server 两参数补 `LEN`、负起点改 `RIGHT`；SQLite/Hive 的 `LEFT`/`RIGHT` 展开成 `SUBSTR`。回写按方言：PG/MySQL 用 `FROM n FOR m`，SQL Server/SQLite 用逗号
 - `UCASE`/`LCASE`→`UPPER`/`LOWER`；`CONCAT_WS`；`LPAD`/`RPAD`；`SPACE`；`CEIL`/`CEILING`；`POW`/`POWER`；`MOD`；`YEAR`/`MONTH`/`DAY`/`HOUR`/`MINUTE`/`SECOND`；`SYSDATE`；`LAST_DAY`；`CHAR`/`CHR`
 - `DECODE`/`NVL2` → `CASE`；`FIND_IN_SET`/`SUBSTRING_INDEX` 无干净等价则告警并保留
@@ -685,12 +709,12 @@ mvn -pl jkit-sql test -Dtest=SqlBusinessScenarioTest
 | --- | --- | --- | --- |
 | 1 | SQL 审计与依赖分析 | `SQL.tables` / `SQL.stat` / `SqlStatement.isReadOnly` | 依赖提取、写操作标记 |
 | 2 | 读写分离路由 | `SqlStatement.isReadOnly` | 只读走从库、持锁 SELECT 走主库 |
-| 3 | SQL 注入防护 | `SQL.parameterize` / `SQL.exportParameterValues` | 字面量收编、绑定值导出 |
-| 4 | SQL 防火墙 | `SQL.wall` / `SqlWallConfig` | 危险语句拦截、按通道放行 DDL |
+| 3 | SQL 注入防护 | `SQL.parameterize` / `SQL.bind` / `SQL.exportParameterValues` | 字面量收编、安全回填、绑定值导出 |
+| 4 | SQL 防火墙 | `SQL.wall` / `SqlWallConfig` | 表黑白名单、WHERE 必含列、表数上限 |
 | 5 | 跨方言数据库迁移 | `SQL.convertBatch` / `SqlSchemaConverter.convert` | DDL 翻译闭环、批量 DML 函数改写 |
 | 6 | 多方言分页 | `SQL.setPage` / `SQL.adaptPagination` / `SQL.toSqlString` | LIMIT/TOP/FETCH/ROWNUM、offset=0 单层包装、回写按需适配 |
-| 7 | 多租户改写 | `SqlRewrites.replaceTable` / `SqlRewrites.andWhere` | 分表路由、租户条件注入 |
-| 8 | 数据脱敏与列级权限 | `SQL.removeSelectItem` / `SqlRewrites.replaceColumn` | 敏感列裁剪、物理列改名映射 |
+| 7 | 多租户改写 | `SQL.injectTenant` / `SqlRewrites.replaceTable` | 按表白名单注入（含 UNION/子查询）、分表路由 |
+| 8 | 数据脱敏与列级权限 | `SQL.expandStar` / `SQL.replaceSelectItem` / `SQL.removeSelectItem` | 展开 `*`、掩码替换、裁敏感列 |
 | 9 | 动态 SQL 构建 | `SqlBuilder` | 条件查询组装、INSERT/UPDATE |
 | 10 | 实体驱动多方言建表 | `SqlEntities.createTable` | MySQL 内联注释、PG 的 COMMENT ON |
 | 11 | SQL 格式化与规范统一 | `SQL.format` / `SqlFormatOptions` | 关键字大小写归一、pretty 多行 |

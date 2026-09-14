@@ -287,6 +287,7 @@ When `dialect` is unset:
 - Table exists, column missing → `ALTER TABLE … ADD`
 - Missing index → `CREATE INDEX`
 - Table/column comments as extra statements (MySQL inline `COMMENT`, PG/Oracle `COMMENT ON`, SQL Server `sp_addextendedproperty`)
+- When the table already exists: if the entity comment is non-empty and differs from `DatabaseMetaData.REMARKS`, emit `COMMENT ON` / `ALTER TABLE … COMMENT` / MySQL `MODIFY … COMMENT`. An entity with no comment does not overwrite comments already in the database
 
 **Default does not**
 
