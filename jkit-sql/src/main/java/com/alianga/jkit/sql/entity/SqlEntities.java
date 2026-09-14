@@ -220,6 +220,66 @@ public final class SqlEntities {
     }
 
     /**
+     * 已有表更新表注释。MySQL / Hive / ClickHouse 为 {@code ALTER TABLE … COMMENT}；
+     * PostgreSQL / Oracle / DB2 / ANSI / H2 为 {@code COMMENT ON TABLE}；
+     * SQL Server 为 {@code sp_updateextendedproperty}。SQLite 无注释语法返回 null。
+     *
+     * @param table 表名
+     * @param comment 注释
+     * @param dialect 方言
+     * @return DDL，无法表达时 null
+     * @since 2.0.2
+     */
+    public static String tableCommentSql(String table, String comment, SqlDialect dialect) {
+        if (table == null || table.isEmpty() || comment == null || comment.isEmpty()) {
+            return null;
+        }
+        SqlDialect d = dialect == null ? SqlDialect.MYSQL : dialect;
+        String body = escapeComment(comment);
+        if (d == SqlDialect.MYSQL || d == SqlDialect.HIVE || d == SqlDialect.CLICKHOUSE) {
+            return "ALTER TABLE " + table + " COMMENT '" + body + "'";
+        }
+        if (d == SqlDialect.PRESTO) {
+            return null;
+        }
+        String on = commentOnSql(d, "TABLE", table, null, comment);
+        if (on == null) {
+            return null;
+        }
+        if (d == SqlDialect.SQLSERVER) {
+            return on.replace("sp_addextendedproperty", "sp_updateextendedproperty");
+        }
+        return on;
+    }
+
+    /**
+     * 已有列更新注释。内联注释方言走 {@code ALTER TABLE … MODIFY/ALTER}；其余走 {@code COMMENT ON COLUMN}。
+     *
+     * @param table 表名
+     * @param column 列
+     * @param dialect 方言
+     * @return DDL，无法表达时 null
+     * @since 2.0.2
+     */
+    public static String columnCommentSql(String table, SqlEntityColumn column, SqlDialect dialect) {
+        if (table == null || column == null || column.comment() == null || column.comment().isEmpty()) {
+            return null;
+        }
+        SqlDialect d = dialect == null ? SqlDialect.MYSQL : dialect;
+        if (d == SqlDialect.MYSQL || d == SqlDialect.HIVE || d == SqlDialect.CLICKHOUSE) {
+            return "ALTER TABLE " + table + " MODIFY " + columnSql(column, d, false);
+        }
+        String on = commentOnSql(d, "COLUMN", table, column.columnName(), column.comment());
+        if (on == null) {
+            return null;
+        }
+        if (d == SqlDialect.SQLSERVER) {
+            return on.replace("sp_addextendedproperty", "sp_updateextendedproperty");
+        }
+        return on;
+    }
+
+    /**
      * 无 IDENTITY 的方言用序列代替自增。支持的返回 SQL，否则 null。
      *
      * @param table 表名

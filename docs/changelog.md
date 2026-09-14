@@ -14,10 +14,12 @@
 - `SQL.injectTenant` / `SqlRewrites.injectTenant`：按表白名单注入租户条件。下钻 UNION 臂、FROM 子查询、CTE 体、EXISTS / IN 标量子查询；JOIN 按别名限定列；INSERT 补列或改 SET；MERGE 补 ON。字符串值按 SQL 单引号转义，不当表达式解析。CTE 名与 `DUAL` 跳过。
 - `SQL.replaceSelectItem` / `SQL.expandStar`：列级脱敏。整树替换 SELECT 投影（保留输出列名）；`expandStar` 按表列清单把 `*` / `t.*` 展开后再裁列或改写成掩码表达式。解析不到的星号保持原样。
 - `SqlWallConfig`：`denyTables` / `allowTables` / `requireWhereColumns` / `maxTables`。违规码 `deny-table`、`allow-table`、`missing-where-column`、`too-many-tables`。恒真再拦 `LIKE '%'` 与 `XOR 1=1`。
+- `DATE_FORMAT` 跨方言转换会改写常见格式符：`%Y-%m-%d %H:%i:%s` → PG/Oracle `TO_CHAR(..., 'YYYY-MM-DD HH24:MI:SS')`，SQLite `strftime` 会交换参数并把 `%i` 改成 `%M`。对不上的格式符保留并 `SEMANTIC_RISK`。
 
 ### 变更
 
 - `jkit-sql-auto`：`SqlAutoDialects.fromUrl` / `driverForUrl` 委托 `JdbcUrlUtils`（覆盖 Gauss / Kingbase / Hive / ClickHouse / Trino 等更多 URL）。
+- `jkit-sql-auto`：已有表对照实体注释。`DatabaseMetaData.REMARKS` 读入活表/列；实体注释非空且与库不一致时发出 `COMMENT ON` / `ALTER TABLE … COMMENT` / MySQL `MODIFY … COMMENT`。实体未写注释时不覆盖库里已有注释。
 
 ### 修复
 

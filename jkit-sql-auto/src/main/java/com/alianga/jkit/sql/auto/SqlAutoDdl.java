@@ -101,6 +101,9 @@ public final class SqlAutoDdl {
                 }
             }
         }
+        if (mode != SqlAutoMode.VALIDATE) {
+            addCommentSync(out, model, live, d);
+        }
         addIndexChanges(out, model, live, d, opt);
         return out;
     }
@@ -400,6 +403,51 @@ public final class SqlAutoDdl {
                                         SqlAutoOptions options) {
         return "ALTER TABLE " + ident(table, dialect, options)
                 + " DROP COLUMN " + ident(column, dialect, options);
+    }
+
+    /**
+     * 已有表：实体注释非空且与活表 REMARKS 不同时补 COMMENT / ALTER COMMENT。
+     * 实体未写注释时不覆盖库里已有注释。
+     */
+    private static void addCommentSync(List<SqlAutoChange> out, SqlEntityModel model,
+                                       SqlAutoLiveTable live, SqlDialect dialect) {
+        if (model == null || live == null) {
+            return;
+        }
+        String table = model.tableName();
+        if (!sameComment(model.comment(), live.comment())) {
+            String sql = SqlEntities.tableCommentSql(table, model.comment(), dialect);
+            if (sql != null) {
+                out.add(new SqlAutoChange(SqlAutoChange.Kind.COMMENT, table, "", sql));
+            }
+        }
+        List<SqlEntityColumn> cols = model.columns();
+        for (int i = 0; i < cols.size(); i++) {
+            SqlEntityColumn col = cols.get(i);
+            if (col.comment() == null || col.comment().isEmpty()) {
+                continue;
+            }
+            SqlAutoLiveColumn existing = live.column(col.columnName());
+            if (existing == null) {
+                continue;
+            }
+            if (sameComment(col.comment(), existing.comment())) {
+                continue;
+            }
+            String sql = SqlEntities.columnCommentSql(table, col, dialect);
+            if (sql != null) {
+                out.add(new SqlAutoChange(SqlAutoChange.Kind.COMMENT, table, col.columnName(), sql));
+            }
+        }
+    }
+
+    private static boolean sameComment(String wanted, String live) {
+        String a = wanted == null ? "" : wanted.trim();
+        if (a.isEmpty()) {
+            return true;
+        }
+        String b = live == null ? "" : live.trim();
+        return a.equals(b);
     }
 
     private static void addExtraChanges(List<SqlAutoChange> out, SqlEntityModel model,

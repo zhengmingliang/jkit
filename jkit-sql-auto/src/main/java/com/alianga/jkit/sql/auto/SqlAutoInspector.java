@@ -118,7 +118,11 @@ public final class SqlAutoInspector {
             if (indexes.isEmpty() && !lookup.equals(tableName)) {
                 indexes = readIndexes(meta, catalogName, schemaName, tableName);
             }
-            return new SqlAutoLiveTable(lookup, columns, indexes);
+            String remark = readTableRemark(meta, catalogName, schemaName, lookup);
+            if ((remark == null || remark.isEmpty()) && !lookup.equals(tableName)) {
+                remark = readTableRemark(meta, catalogName, schemaName, tableName);
+            }
+            return new SqlAutoLiveTable(lookup, columns, indexes, remark);
         } catch (SQLException e) {
             throw new SqlAutoException("inspect table failed: " + tableName, e);
         }
@@ -142,6 +146,19 @@ public final class SqlAutoInspector {
         }
     }
 
+    private String readTableRemark(DatabaseMetaData meta, String catalogName, String schemaName,
+                                   String table) throws SQLException {
+        ResultSet rs = meta.getTables(catalogName, schemaName, table, new String[] {"TABLE", "BASE TABLE"});
+        try {
+            if (rs.next()) {
+                return rs.getString("REMARKS");
+            }
+            return null;
+        } finally {
+            rs.close();
+        }
+    }
+
     private Map<String, SqlAutoLiveColumn> readColumns(DatabaseMetaData meta, String catalogName,
                                                        String schemaName, String table) throws SQLException {
         Map<String, SqlAutoLiveColumn> out = new LinkedHashMap<String, SqlAutoLiveColumn>(8);
@@ -157,8 +174,9 @@ public final class SqlAutoInspector {
                 int size = rs.getInt("COLUMN_SIZE");
                 int digits = rs.getInt("DECIMAL_DIGITS");
                 int nullable = rs.getInt("NULLABLE");
+                String remark = rs.getString("REMARKS");
                 out.put(name.toLowerCase(Locale.ROOT),
-                        new SqlAutoLiveColumn(name, typeName, dataType, size, digits, nullable));
+                        new SqlAutoLiveColumn(name, typeName, dataType, size, digits, nullable, remark));
             }
         } finally {
             rs.close();

@@ -160,6 +160,72 @@ public class SqlAutoDdlTest {
     }
 
     @Test
+    public void existingTableSyncsCommentsWhenDifferent() {
+        @SqlTable(name = "cmt_t", comment = "users")
+        class CmtT {
+            @SqlId
+            long id;
+            @SqlColumn(comment = "name")
+            String name;
+        }
+        SqlEntityModel model = SqlEntities.inspect(CmtT.class);
+        Map<String, SqlAutoLiveColumn> cols = new LinkedHashMap<String, SqlAutoLiveColumn>();
+        cols.put("id", new SqlAutoLiveColumn("id", "BIGINT", Types.BIGINT, 19, 0, 0, null));
+        cols.put("name", new SqlAutoLiveColumn("name", "VARCHAR", Types.VARCHAR, 255, 0, 1, "old"));
+        SqlAutoLiveTable live = new SqlAutoLiveTable("cmt_t", cols,
+                Collections.<String, SqlAutoLiveIndex>emptyMap(), "old-table");
+        List<SqlAutoChange> pg = SqlAutoDdl.planTable(model, live, SqlDialect.POSTGRES,
+                SqlAutoOptions.defaults().createIndex(false));
+        assertTrue(sql(pg), kind(pg, SqlAutoChange.Kind.COMMENT));
+        assertTrue(sql(pg), sql(pg).contains("COMMENT ON TABLE cmt_t IS 'users'"));
+        assertTrue(sql(pg), sql(pg).contains("COMMENT ON COLUMN cmt_t.name IS 'name'"));
+
+        List<SqlAutoChange> mysql = SqlAutoDdl.planTable(model, live, SqlDialect.MYSQL,
+                SqlAutoOptions.defaults().createIndex(false));
+        assertTrue(sql(mysql), sql(mysql).contains("ALTER TABLE cmt_t COMMENT 'users'"));
+        assertTrue(sql(mysql), sql(mysql).toUpperCase().contains("MODIFY"));
+    }
+
+    @Test
+    public void existingTableSkipsCommentWhenAlreadyEqual() {
+        @SqlTable(name = "cmt_t", comment = "users")
+        class CmtT {
+            @SqlId
+            long id;
+            @SqlColumn(comment = "name")
+            String name;
+        }
+        SqlEntityModel model = SqlEntities.inspect(CmtT.class);
+        Map<String, SqlAutoLiveColumn> cols = new LinkedHashMap<String, SqlAutoLiveColumn>();
+        cols.put("id", new SqlAutoLiveColumn("id", "BIGINT", Types.BIGINT, 19, 0, 0, null));
+        cols.put("name", new SqlAutoLiveColumn("name", "VARCHAR", Types.VARCHAR, 255, 0, 1, "name"));
+        SqlAutoLiveTable live = new SqlAutoLiveTable("cmt_t", cols,
+                Collections.<String, SqlAutoLiveIndex>emptyMap(), "users");
+        List<SqlAutoChange> changes = SqlAutoDdl.planTable(model, live, SqlDialect.POSTGRES,
+                SqlAutoOptions.defaults().createIndex(false));
+        assertFalse(sql(changes), kind(changes, SqlAutoChange.Kind.COMMENT));
+    }
+
+    @Test
+    public void existingTableDoesNotWipeLiveCommentWhenEntityHasNone() {
+        @SqlTable(name = "cmt_t")
+        class CmtT {
+            @SqlId
+            long id;
+            String name;
+        }
+        SqlEntityModel model = SqlEntities.inspect(CmtT.class);
+        Map<String, SqlAutoLiveColumn> cols = new LinkedHashMap<String, SqlAutoLiveColumn>();
+        cols.put("id", new SqlAutoLiveColumn("id", "BIGINT", Types.BIGINT, 19, 0, 0, "pk"));
+        cols.put("name", new SqlAutoLiveColumn("name", "VARCHAR", Types.VARCHAR, 255, 0, 1, "n"));
+        SqlAutoLiveTable live = new SqlAutoLiveTable("cmt_t", cols,
+                Collections.<String, SqlAutoLiveIndex>emptyMap(), "keep-me");
+        List<SqlAutoChange> changes = SqlAutoDdl.planTable(model, live, SqlDialect.POSTGRES,
+                SqlAutoOptions.defaults().createIndex(false));
+        assertFalse(sql(changes), kind(changes, SqlAutoChange.Kind.COMMENT));
+    }
+
+    @Test
     public void addMissingColumn() {
         SqlEntityModel model = SqlEntities.inspect(AutoUser.class);
         Map<String, SqlAutoLiveColumn> cols = new LinkedHashMap<String, SqlAutoLiveColumn>();
