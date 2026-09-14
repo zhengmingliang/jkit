@@ -305,7 +305,7 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 4. 余量（可选）：其它聚合的 WITHIN GROUP/`aggOption`。~~OUTPUT INTO~~ ✅；~~SqlBuilder rightJoin/union/with/distinct~~ ✅。
 5. 对比工程：语料成功率 ✅；~~表名集合差分~~ ✅；改解析器后记得 `install` 再跑 tools-test。
 
-**发版叙事已定（sql-only）**：`jkit-sql` 随父 POM **2.0.1** 收口（`CHANGELOG` 顶栏 `## 2.0.1 - 2026-09-09`，javadoc `@since 2.0.1`）。每完成一块：补 `@since 2.0.1`（仅 sql 模块）、更新 `docs/sql.md` 覆盖表、在 `CHANGELOG.md` 的 `2.0.1 - 2026-09-09` 追加条目。父 POM 保持 2.0.1，不要擅自升版。
+**发版叙事已定（sql-only）**：`jkit-sql` 随父 POM **2.0.1** 收口（`CHANGELOG` 顶栏 `## 2.0.1 - 2026-09-13`，javadoc `@since 2.0.1`）。每完成一块：补 `@since 2.0.1`（仅 sql 模块）、更新 `docs/sql.md` 覆盖表、在 `CHANGELOG.md` 的 `2.0.1 - 2026-09-13` 追加条目。父 POM 保持 2.0.1，不要擅自升版。
 
 ---
 
@@ -486,7 +486,7 @@ cd ../tools-test && mvn -Dtest='SqlParserCompareTest,SqlRoundTripFidelityCorpusT
    `jkit-core/.../JSONTest.java` 的 M 是历史遗留，**永远别带进提交**。
 2. **发版叙事**：父 POM `2.0.1`；jkit-sql 新公开 API 一律 `@since 2.0.1`；用户明确要求
    **docs/sql.md 按"初版特性"口径写，不写修复叙事**（f44f30e 已按此同步，后续照此办理）。
-3. **每完成一块**：`@since` + `docs/sql.md`（中英同步）+ CHANGELOG 顶部 `2.0.1 - 2026-09-09` 追加条目。
+3. **每完成一块**：`@since` + `docs/sql.md`（中英同步）+ CHANGELOG 顶部 `2.0.1 - 2026-09-13` 追加条目。
    文档站构建：`npx vitepress build docs`（预览 `npx vitepress preview docs --port 4173`）。
 4. **邮件通知**：每轮完成后用 jkit-notify SMTP 发 `mpro@vip.qq.com`。
    脚本 `/tmp/jkit-mail-send/SendNotify.java`（/tmp 易失需重建）；凭证在

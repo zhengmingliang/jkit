@@ -1,5 +1,5 @@
 import { defineConfig, type DefaultTheme } from 'vitepress'
-import { currentVersion, repoUrl, releasesUrl } from './data/versions'
+import { repoUrl } from './data/versions'
 
 // 中文没有空格分词，用 Intl.Segmenter 按词切分（对英文同样有效），
 // 让 minisearch 的本地索引能命中中文词。
@@ -52,14 +52,6 @@ const zhNav: DefaultTheme.NavItem[] = [
     ],
   },
   { text: '更新日志', link: '/changelog' },
-  {
-    text: `v${currentVersion}`,
-    items: [
-      { text: `${currentVersion}（当前版本）`, link: '/changelog' },
-      { text: '多版本说明', link: '/versions' },
-      { text: 'GitHub Releases', link: releasesUrl },
-    ],
-  },
 ]
 
 const zhSidebar: DefaultTheme.Sidebar = [
@@ -115,14 +107,6 @@ const enNav: DefaultTheme.NavItem[] = [
     ],
   },
   { text: 'Changelog', link: '/en/changelog' },
-  {
-    text: `v${currentVersion}`,
-    items: [
-      { text: `${currentVersion} (current)`, link: '/en/changelog' },
-      { text: 'Versioned docs', link: '/en/versions' },
-      { text: 'GitHub Releases', link: releasesUrl },
-    ],
-  },
 ]
 
 const enSidebar: DefaultTheme.Sidebar = [
@@ -169,6 +153,8 @@ export default defineConfig({
   base,
   cleanUrls: true,
   lastUpdated: true,
+  // /v2.0.1/ 是 CI 从 tag 嵌进来的另一份站点，当前构建里还不存在
+  ignoreDeadLinks: [(url) => /\/v\d+\.\d+\.\d+(\/|$)/.test(url)],
   // next-plan 是内部开发计划；csv/expression 尚未成文，先不构建进站点
   srcExclude: ['**/next-plan.md', '**/csv.md', '**/expression.md'],
 
