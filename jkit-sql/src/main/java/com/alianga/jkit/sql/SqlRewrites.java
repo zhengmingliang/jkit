@@ -8,6 +8,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 改写规则链：按 {@link #add} 顺序依次执行 {@link SqlRewriteHook}。
@@ -281,6 +282,46 @@ public final class SqlRewrites {
             @Override
             public SqlStatement apply(SqlStatement statement) {
                 return SqlRewriter.removeSelectItem(statement, columnSimpleName);
+            }
+        };
+    }
+
+    /**
+     * 内建适配器：整树替换 SELECT 投影，等价 {@link SqlSelectListRewriter#replaceSelectItem}。
+     *
+     * @param column 列简单名或 {@code t.col}
+     * @param expr 新表达式
+     * @return 规则
+     * @since 2.0.2
+     */
+    public static SqlRewriteHook replaceSelectItem(final String column, final SqlExpr expr) {
+        return new SqlRewriteHook() {
+            /**
+             * {@inheritDoc}
+             */
+            @Override
+            public SqlStatement apply(SqlStatement statement) {
+                return SqlSelectListRewriter.replaceSelectItem(statement, column, expr, null);
+            }
+        };
+    }
+
+    /**
+     * 内建适配器：整树展开 {@code *} / {@code t.*}。
+     *
+     * @param columnsByTable 物理表简单名 → 列
+     * @return 规则
+     * @since 2.0.2
+     */
+    public static SqlRewriteHook expandStar(final Map<String, ? extends List<String>> columnsByTable) {
+        final SqlColumnResolver resolver = SqlSelectListRewriter.mapResolver(columnsByTable);
+        return new SqlRewriteHook() {
+            /**
+             * {@inheritDoc}
+             */
+            @Override
+            public SqlStatement apply(SqlStatement statement) {
+                return SqlSelectListRewriter.expandStar(statement, resolver);
             }
         };
     }

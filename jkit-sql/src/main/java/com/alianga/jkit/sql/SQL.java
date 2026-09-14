@@ -18,6 +18,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 /**
  * SQL 解析门面，对标 Druid {@code SQLUtils} 与 JSqlParser {@code CCJSqlParserUtil}
@@ -820,6 +821,86 @@ public final class SQL {
     public static SqlStatement removeSelectItem(SqlStatement statement, String columnSimpleName) {
         SqlStatement copy = clone(statement);
         return SqlRewriter.removeSelectItem(copy, columnSimpleName);
+    }
+
+    /**
+     * 整树替换 SELECT 投影（先深拷贝再改）。匹配别名或标识符最后一段；{@code t.col} 按限定名匹配。
+     * 所有命中项都会替换。默认把输出别名设成列简单名，对外列名不变。
+     *
+     * <p>{@code SELECT *} 匹配不到具名列，请先 {@link #expandStar}。</p>
+     *
+     * @param statement 语句
+     * @param column 列简单名或 {@code t.col}
+     * @param exprSql 新表达式 SQL，如 {@code CONCAT(LEFT(phone,3),'****')}
+     * @return 新语句
+     * @since 2.0.2
+     */
+    public static SqlStatement replaceSelectItem(SqlStatement statement, String column, String exprSql) {
+        if (exprSql == null || exprSql.trim().isEmpty()) {
+            return statement;
+        }
+        return replaceSelectItem(statement, column, parseExpr(exprSql), null);
+    }
+
+    /**
+     * 整树替换 SELECT 投影（先深拷贝再改）。
+     *
+     * @param statement 语句
+     * @param column 列简单名或 {@code t.col}
+     * @param expr 新表达式
+     * @return 新语句
+     * @since 2.0.2
+     */
+    public static SqlStatement replaceSelectItem(SqlStatement statement, String column, SqlExpr expr) {
+        return replaceSelectItem(statement, column, expr, null);
+    }
+
+    /**
+     * 整树替换 SELECT 投影（先深拷贝再改）。
+     *
+     * @param statement 语句
+     * @param column 列简单名或 {@code t.col}
+     * @param expr 新表达式
+     * @param alias 新别名；{@code null} 保留/补列简单名，空串去掉别名
+     * @return 新语句
+     * @since 2.0.2
+     */
+    public static SqlStatement replaceSelectItem(SqlStatement statement, String column, SqlExpr expr,
+            String alias) {
+        if (statement == null) {
+            return statement;
+        }
+        SqlStatement copy = clone(statement);
+        return SqlSelectListRewriter.replaceSelectItem(copy, column, expr, alias);
+    }
+
+    /**
+     * 整树展开 {@code *} / {@code t.*}（先深拷贝再改）。解析不到列的星号保持原样。
+     *
+     * @param statement 语句
+     * @param columnsByTable 物理表简单名 → 列简单名
+     * @return 新语句
+     * @since 2.0.2
+     */
+    public static SqlStatement expandStar(SqlStatement statement,
+            Map<String, ? extends List<String>> columnsByTable) {
+        return expandStar(statement, SqlSelectListRewriter.mapResolver(columnsByTable));
+    }
+
+    /**
+     * 整树展开 {@code *} / {@code t.*}（先深拷贝再改）。
+     *
+     * @param statement 语句
+     * @param resolver 表 → 列；某表返回 null 时该星号不展开
+     * @return 新语句
+     * @since 2.0.2
+     */
+    public static SqlStatement expandStar(SqlStatement statement, SqlColumnResolver resolver) {
+        if (statement == null) {
+            return statement;
+        }
+        SqlStatement copy = clone(statement);
+        return SqlSelectListRewriter.expandStar(copy, resolver);
     }
 
     /**
