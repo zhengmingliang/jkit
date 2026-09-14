@@ -86,6 +86,27 @@ public class SqlAutoH2Test {
     }
 
     @Test
+    public void inspectIgnoresTableInOtherSchema() throws SQLException {
+        exec("CREATE SCHEMA OTHER");
+        exec("CREATE TABLE OTHER.AUTO_USER (ID BIGINT PRIMARY KEY, USER_NAME VARCHAR(32) NOT NULL)");
+        SqlAutoPlan plan = SqlAuto.run(connection, options().entities(AutoUser.class));
+        assertTrue(plan.toString(), !plan.ofKind(SqlAutoChange.Kind.CREATE_TABLE).isEmpty());
+        assertTrue(tableExistsInSchema("PUBLIC", "AUTO_USER"));
+        assertTrue(columnExistsInSchema("PUBLIC", "AUTO_USER", "EMAIL"));
+        assertFalse(columnExistsInSchema("OTHER", "AUTO_USER", "EMAIL"));
+    }
+
+    @Test
+    public void inspectHonorsConfiguredSchema() throws SQLException {
+        exec("CREATE SCHEMA OTHER");
+        exec("CREATE TABLE OTHER.AUTO_USER (ID BIGINT PRIMARY KEY, USER_NAME VARCHAR(32) NOT NULL)");
+        SqlAutoPlan plan = SqlAuto.plan(Arrays.<Class<?>>asList(AutoUser.class), connection, SqlDialect.H2,
+                options().entities(AutoUser.class).schema("OTHER"));
+        assertTrue(plan.ofKind(SqlAutoChange.Kind.CREATE_TABLE).isEmpty());
+        assertTrue(plan.toString(), !plan.ofKind(SqlAutoChange.Kind.ADD_COLUMN).isEmpty());
+    }
+
+    @Test
     public void validateMissingTableThrows() {
         try {
             SqlAuto.run(connection, options().entities(AutoUser.class).mode(SqlAutoMode.VALIDATE));
@@ -272,8 +293,12 @@ public class SqlAutoH2Test {
     }
 
     private boolean tableExists(String table) {
+        return tableExistsInSchema(null, table);
+    }
+
+    private boolean tableExistsInSchema(String schema, String table) {
         try {
-            ResultSet rs = connection.getMetaData().getTables(null, null, table, new String[] {"TABLE"});
+            ResultSet rs = connection.getMetaData().getTables(null, schema, table, new String[] {"TABLE"});
             try {
                 return rs.next();
             } finally {
@@ -285,8 +310,12 @@ public class SqlAutoH2Test {
     }
 
     private boolean columnExists(String table, String column) {
+        return columnExistsInSchema(null, table, column);
+    }
+
+    private boolean columnExistsInSchema(String schema, String table, String column) {
         try {
-            ResultSet rs = connection.getMetaData().getColumns(null, null, table, column);
+            ResultSet rs = connection.getMetaData().getColumns(null, schema, table, column);
             try {
                 return rs.next();
             } finally {
