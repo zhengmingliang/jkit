@@ -4,7 +4,7 @@
 
 当前待办从 **第 11 节** 读起。第 1–10 节是已完成历史，不要重做、不要推翻。不要把第三方库引进 `jkit-sql` / `jkit-core`。
 
-- 仓库：`/opt/workspace/zml/jkit`，父 POM `jkit-parent` **2.0.1**
+- 仓库：`/opt/workspace/zml/jkit`，父 POM `jkit-parent` **2.0.2**
 - 对比测试工程：`/opt/workspace/zml/tools-test`（可以引 Druid / JSqlParser）
 - 用户要求：每次回复用 `jkit-notify` SMTP 再发一封到 `mpro@vip.qq.com`（凭证在 `/opt/workspace/zml/z-notify-hub/z-notify.db` 的 `email-aliyun`，收件人历史测试为 `mpro@vip.qq.com`）。发信脚本曾放在 `/tmp/jkit-mail-send/`，不在 git 里。
 
@@ -15,7 +15,7 @@
 1. **零第三方依赖**：`jkit-core`、`jkit-sql`、`jkit-notify` 的运行时 `<dependencies>` 不得引入 Druid、JSqlParser、POI、Hibernate Validator 等。JUnit 仅 test。
 2. **JDK 8**：无 `var`、`List.of`、`String.isBlank`、switch 表达式。
 3. Checkstyle：`checkstyle/check-style.xml`。行宽 160 error / 120 warning；ImportOrder 组 `*,javax,java`；禁止 tab；NeedBraces；字段不要显式赋默认值（`= null` / `= 0` / `= false`）。
-4. 公开 API 中文 javadoc，`@author 郑明亮`。**`jkit-sql` 收口为 `@since 2.0.1`**（新模块随父 POM 2.0.1 交付，勿改标其它版本号）。其它模块在已发布的 2.0.1 之上若再加未发布公开 API，等真正升版时再标对应 `@since`，不要回写进历史 2.0.1。
+4. 公开 API 中文 javadoc，`@author 郑明亮`。已随 2.0.1 交付的 API 保持 `@since 2.0.1`。**本轮新增公开 API 标 `@since 2.0.2`**，不要回写进历史 2.0.1。
 5. 对比测试、JMH、引入 Druid/JSqlParser **只允许**在 `/opt/workspace/zml/tools-test`，禁止写进 `jkit-sql` 的 POM。
 6. 改 SQL 解析器后：`mvn -pl jkit-sql test` 必须绿；再 `mvn -pl jkit-sql,jkit-core install -DskipTests`，然后 `cd ../tools-test && mvn -Dtest=SqlParserCompareTest test`。
 

@@ -74,7 +74,7 @@ public class FileStorage {
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit-sql-auto-spring-boot-2</artifactId>
-    <version>2.0.1</version>
+    <version>2.0.2</version>
 </dependency>
 ```
 
@@ -84,7 +84,7 @@ public class FileStorage {
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit-sql-auto-spring-boot-3</artifactId>
-    <version>2.0.1</version>
+    <version>2.0.2</version>
 </dependency>
 ```
 
@@ -132,7 +132,7 @@ Boot 2 注册走 `spring.factories`，Boot 3 走 `AutoConfiguration.imports`，�
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit-sql-auto</artifactId>
-    <version>2.0.1</version>
+    <version>2.0.2</version>
 </dependency>
 ```
 
@@ -241,7 +241,7 @@ List<String> sqls = plan.sql();
 | `quote-identifiers` | `false` | 标识符加方言引号 |
 | `show-sql` | `true` | 打日志 |
 | `dry-run` | `false` | 只规划不执行 |
-| `catalog` / `schema` | JDBC 默认 | `DatabaseMetaData` 查找范围 |
+| `catalog` / `schema` | JDBC 默认 | `DatabaseMetaData` 查找范围。未配 `catalog` 时用连接 `getCatalog()`；未配 `schema` 时用 `getSchema()`，再不行从 JDBC URL 解析（PG 系 `currentSchema` 缺省 `public`，SQL Server `dbo`）。dry-run 无连接时同样从 URL 取 |
 
 链式 API 与配置一一对应，例如 `.mode(SqlAutoMode.UPDATE)`、`.packages("a","b")`、`.alterColumn(true)`。另有只在代码里设的项：`postgresIdentityStyle(SERIAL)`、`foreignKeys(false)`、`autoIncrement(false)`。
 

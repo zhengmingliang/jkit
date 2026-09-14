@@ -6,7 +6,8 @@ This documentation site always tracks the **current release** (see the version d
 
 | Version | Date | Docs |
 | --- | --- | --- |
-| 2.0.1 | 2026-09-09 | This site |
+| 2.0.2 | 2026-09-14 | This site |
+| 2.0.1 | 2026-09-09 | [Source archive on GitHub](https://github.com/zhengmingliang/jkit/releases) |
 | 2.0.0 | — | [Source archive on GitHub](https://github.com/zhengmingliang/jkit/releases) |
 
 ## How versioning works

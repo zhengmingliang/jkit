@@ -6,7 +6,7 @@ Spring Boot **3.x**（JDK 17+）适配包：应用就绪后自动按实体建表
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit-sql-auto-spring-boot-3</artifactId>
-    <version>2.0.1</version>
+    <version>2.0.2</version>
 </dependency>
 ```
 

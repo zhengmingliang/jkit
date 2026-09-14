@@ -6,7 +6,8 @@
 
 | 版本 | 发布日期 | 文档 |
 | --- | --- | --- |
-| 2.0.1 | 2026-09-09 | 当前站点 |
+| 2.0.2 | 2026-09-14 | 当前站点 |
+| 2.0.1 | 2026-09-09 | [GitHub 源码归档](https://github.com/zhengmingliang/jkit/releases) |
 | 2.0.0 | — | [GitHub 源码归档](https://github.com/zhengmingliang/jkit/releases) |
 
 ## 版本切换是如何工作的

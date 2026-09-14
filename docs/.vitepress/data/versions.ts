@@ -8,14 +8,15 @@ export interface DocVersion {
 }
 
 /** 当前站点对应的发布版本（与根 pom.xml 一致） */
-export const currentVersion = '2.0.1'
+export const currentVersion = '2.0.2'
 
 /**
  * 已发布版本列表，新版本追加到最上方。
  * 历史版本文档站点的部署方式见 docs/versions.md。
  */
 export const versions: DocVersion[] = [
-  { version: '2.0.1', date: '2026-09-09', current: true },
+  { version: '2.0.2', date: '2026-09-14', current: true },
+  { version: '2.0.1', date: '2026-09-09' },
   { version: '2.0.0', date: '' },
 ]
 

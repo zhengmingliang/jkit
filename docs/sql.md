@@ -15,7 +15,7 @@
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit-sql</artifactId>
-    <version>2.0.1</version>
+    <version>2.0.2</version>
 </dependency>
 ```
 
@@ -357,6 +357,31 @@ SQL.format(stmt, SqlDialect.MYSQL, false,
 | 分页能力 | `supportsLimitOffset` + 逗号风格 | `supportsLimitOffset` | `supportsTop` + FETCH | 见上一节 |
 
 ClickHouse 与 MySQL 一样用反引号，但双引号也是标识符，且分页支持逗号 `LIMIT`。
+
+## JDBC URL
+
+`JdbcUrlUtils` 从 JDBC URL 解析主机 / 库名 / schema，并推断方言与驱动类名，不打开连接。
+
+```java
+import com.alianga.jkit.sql.jdbc.JdbcUrlUtils;
+import com.alianga.jkit.sql.jdbc.JdbcUrlInfo;
+
+JdbcUrlInfo info = JdbcUrlUtils.parse(
+        "jdbc:postgresql://primary:5432,standby:5432/orders?currentSchema=sales");
+info.getDbType();          // postgresql
+info.getDatabaseName();    // orders
+info.getSchema();          // sales
+info.getNodes().size();    // 2
+
+JdbcUrlUtils.fromUrl("jdbc:gaussdb://localhost:5433/postgres");  // POSTGRES
+JdbcUrlUtils.getDbType("jdbc:kingbase8://h/db");                 // kingbase
+JdbcUrlUtils.driverForUrl("jdbc:dm://localhost:5236");           // dm.jdbc.driver.DmDriver
+JdbcUrlUtils.schema("jdbc:postgresql://h/db");                   // public
+```
+
+- `fromUrl` 无法识别时返回 `null`（不像 `SqlDialect.fromName` 回落 MySQL）。
+- PostgreSQL / Gauss / openGauss / Kingbase 读 `currentSchema`（缺省 `public`）；SQL Server 缺省 `dbo`；达梦读 `schema` 参数。
+- `tryParse` 失败返回 null，不抛错。`jkit-sql-auto` 的 `SqlAutoDialects.fromUrl` / `driverForUrl` 委托本工具。
 
 ## 快速构建（SqlBuilder）
 

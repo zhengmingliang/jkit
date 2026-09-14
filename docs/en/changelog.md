@@ -4,7 +4,23 @@
 
 This document records user-visible changes in each jkit release. Each version number appears once, listed from newest to oldest.
 
-Unreleased changes are appended to the **current version** section (currently 2.0.1); once released, that section is frozen and a new version section is added above it. Do not rewrite frozen historical versions, and do not open a new `unreleased` heading for the same version number.
+Unreleased changes are appended to the **current version** section (currently 2.0.2); once released, that section is frozen and a new version section is added above it. Do not rewrite frozen historical versions, and do not open a new `unreleased` heading for the same version number.
+
+## 2.0.2 - 2026-09-14
+
+### Added
+
+**jkit-sql**
+
+- `JdbcUrlUtils`: parse JDBC URLs (host / cluster nodes / database / schema / parameters), infer `SqlDialect` via `fromUrl`, return a short type name via `getDbType`, and guess the driver class via `driverForUrl` / `getDriverClassName`. Covers MySQL replication and load-balance, PostgreSQL HA, Oracle SID/Service/RAC, SQL Server, H2, Gauss/openGauss, Dameng, and more. PostgreSQL-family URLs read schema from `currentSchema` (default `public`).
+
+### Changed
+
+- `jkit-sql-auto`: `SqlAutoDialects.fromUrl` / `driverForUrl` now delegate to `JdbcUrlUtils` (more URL prefixes: Gauss, Kingbase, Hive, ClickHouse, Trino, …).
+
+### Fixed
+
+- `jkit-sql-auto`: `SqlAutoInspector` now resolves schema when checking whether a table exists. If unset, it uses `Connection.getSchema()`; with no connection (dry-run) or an unsupported driver, it parses the JDBC URL. PostgreSQL / Gauss default to `public`, SQL Server to `dbo`, Oracle / Dameng fall back to the username. This avoids treating a same-named table in another schema as present, or emitting ALTER for a table missing from the current schema.
 
 ## 2.0.1 - 2026-09-13
 

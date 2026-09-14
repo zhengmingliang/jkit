@@ -15,7 +15,7 @@ It does not execute SQL and does not pull in any JDBC driver.
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit-sql</artifactId>
-    <version>2.0.1</version>
+    <version>2.0.2</version>
 </dependency>
 ```
 
@@ -347,6 +347,31 @@ Full pagination shapes are in "Cross-dialect pagination". This table only lists 
 | Pagination | `supportsLimitOffset` + comma style | `supportsLimitOffset` | `supportsTop` + FETCH | see previous section |
 
 ClickHouse uses backticks like MySQL, but double quotes are identifiers too, and pagination accepts comma `LIMIT`.
+
+## JDBC URL
+
+`JdbcUrlUtils` parses host / database / schema from a JDBC URL and infers the dialect and driver class, without opening a connection.
+
+```java
+import com.alianga.jkit.sql.jdbc.JdbcUrlUtils;
+import com.alianga.jkit.sql.jdbc.JdbcUrlInfo;
+
+JdbcUrlInfo info = JdbcUrlUtils.parse(
+        "jdbc:postgresql://primary:5432,standby:5432/orders?currentSchema=sales");
+info.getDbType();          // postgresql
+info.getDatabaseName();    // orders
+info.getSchema();          // sales
+info.getNodes().size();    // 2
+
+JdbcUrlUtils.fromUrl("jdbc:gaussdb://localhost:5433/postgres");  // POSTGRES
+JdbcUrlUtils.getDbType("jdbc:kingbase8://h/db");                 // kingbase
+JdbcUrlUtils.driverForUrl("jdbc:dm://localhost:5236");           // dm.jdbc.driver.DmDriver
+JdbcUrlUtils.schema("jdbc:postgresql://h/db");                   // public
+```
+
+- `fromUrl` returns `null` when the URL is unknown (unlike `SqlDialect.fromName`, which falls back to MySQL).
+- PostgreSQL / Gauss / openGauss / Kingbase read `currentSchema` (default `public`); SQL Server defaults to `dbo`; Dameng reads the `schema` parameter.
+- `tryParse` returns null on failure instead of throwing. `jkit-sql-auto`'s `SqlAutoDialects.fromUrl` / `driverForUrl` delegate here.
 
 ## Quick Building (SqlBuilder)
 

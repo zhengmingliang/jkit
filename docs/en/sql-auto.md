@@ -74,7 +74,7 @@ Add the matching starter, set `jkit.sql.auto.packages` (or `entities`), and **do
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit-sql-auto-spring-boot-2</artifactId>
-    <version>2.0.1</version>
+    <version>2.0.2</version>
 </dependency>
 ```
 
@@ -84,7 +84,7 @@ Add the matching starter, set `jkit.sql.auto.packages` (or `entities`), and **do
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit-sql-auto-spring-boot-3</artifactId>
-    <version>2.0.1</version>
+    <version>2.0.2</version>
 </dependency>
 ```
 
@@ -126,7 +126,7 @@ Core artifact only:
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit-sql-auto</artifactId>
-    <version>2.0.1</version>
+    <version>2.0.2</version>
 </dependency>
 ```
 
@@ -234,7 +234,7 @@ Prefix is always `jkit.sql.auto.`. The Spring Boot starters bind the same set; n
 | `quote-identifiers` | `false` | quote identifiers in the dialect |
 | `show-sql` | `true` | log SQL |
 | `dry-run` | `false` | plan only |
-| `catalog` / `schema` | JDBC default | `DatabaseMetaData` lookup scope |
+| `catalog` / `schema` | JDBC default | `DatabaseMetaData` lookup scope. If `catalog` is unset, uses `Connection.getCatalog()`; if `schema` is unset, uses `getSchema()`, then the JDBC URL (`currentSchema` on PostgreSQL-family URLs, default `public`; SQL Server `dbo`). Dry-run (no connection) also reads the URL |
 
 The fluent API matches these keys (`.mode(SqlAutoMode.UPDATE)`, `.packages("a","b")`, `.alterColumn(true)`). Code-only switches: `postgresIdentityStyle(SERIAL)`, `foreignKeys(false)`, `autoIncrement(false)`.
 
