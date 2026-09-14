@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * {@link SqlWall} 可配置规则（对标 Druid WallFilter 子集）。
@@ -27,6 +28,10 @@ public final class SqlWallConfig {
     private boolean denyUnion;
     private boolean denyInformationSchema;
     private boolean selectOnly;
+    private List<String> denyTables = Collections.emptyList();
+    private List<String> allowTables = Collections.emptyList();
+    private List<String> requireWhereColumns = Collections.emptyList();
+    private int maxTables;
     private List<SqlWallRule> rules = Collections.emptyList();
 
     /**
@@ -51,6 +56,10 @@ public final class SqlWallConfig {
         c.denyUnion = false;
         c.denyInformationSchema = false;
         c.selectOnly = false;
+        c.denyTables = Collections.emptyList();
+        c.allowTables = Collections.emptyList();
+        c.requireWhereColumns = Collections.emptyList();
+        c.maxTables = 0;
         return c;
     }
 
@@ -189,6 +198,87 @@ public final class SqlWallConfig {
     }
 
     /**
+     * 表黑名单（简单名或 {@code db.table}，忽略大小写）。命中则 {@code deny-table}。
+     *
+     * @return 黑名单，只读
+     * @since 2.0.2
+     */
+    public List<String> denyTables() {
+        return denyTables;
+    }
+
+    /**
+     * @param tables 黑名单表名
+     * @return this
+     * @since 2.0.2
+     */
+    public SqlWallConfig denyTables(String... tables) {
+        this.denyTables = copyLower(tables);
+        return this;
+    }
+
+    /**
+     * 表白名单。非空时，语句中每个物理表都必须在名单里，否则 {@code allow-table}。
+     *
+     * @return 白名单，只读
+     * @since 2.0.2
+     */
+    public List<String> allowTables() {
+        return allowTables;
+    }
+
+    /**
+     * @param tables 白名单表名
+     * @return this
+     * @since 2.0.2
+     */
+    public SqlWallConfig allowTables(String... tables) {
+        this.allowTables = copyLower(tables);
+        return this;
+    }
+
+    /**
+     * SELECT / UPDATE / DELETE 在触及物理表时，WHERE 或 JOIN ON 必须出现这些列（简单名，忽略大小写）。
+     * 缺列记 {@code missing-where-column}。
+     *
+     * @return 必须出现的列
+     * @since 2.0.2
+     */
+    public List<String> requireWhereColumns() {
+        return requireWhereColumns;
+    }
+
+    /**
+     * @param columns 必须出现在 WHERE / JOIN ON 的列简单名
+     * @return this
+     * @since 2.0.2
+     */
+    public SqlWallConfig requireWhereColumns(String... columns) {
+        this.requireWhereColumns = copyLower(columns);
+        return this;
+    }
+
+    /**
+     * 单条语句（含嵌套）物理表数量上限；{@code 0} 表示不限制。超限 {@code too-many-tables}。
+     *
+     * @return 上限
+     * @since 2.0.2
+     */
+    public int maxTables() {
+        return maxTables;
+    }
+
+    /**
+     * @param maxTables 上限，0 不限制
+     * @return this
+     * @since 2.0.2
+     */
+    public SqlWallConfig maxTables(int maxTables) {
+        this.maxTables = maxTables < 0 ? 0 : maxTables;
+        return this;
+    }
+
+    /**
      * @return 自定义规则（默认空列表，只读）
      */
     public List<SqlWallRule> rules() {
@@ -208,5 +298,18 @@ public final class SqlWallConfig {
             this.rules = Collections.unmodifiableList(new ArrayList<SqlWallRule>(Arrays.asList(rules)));
         }
         return this;
+    }
+
+    private static List<String> copyLower(String... names) {
+        if (names == null || names.length == 0) {
+            return Collections.emptyList();
+        }
+        List<String> out = new ArrayList<String>(names.length);
+        for (int i = 0; i < names.length; i++) {
+            if (names[i] != null && names[i].trim().length() > 0) {
+                out.add(names[i].trim().toLowerCase(Locale.ROOT));
+            }
+        }
+        return Collections.unmodifiableList(out);
     }
 }

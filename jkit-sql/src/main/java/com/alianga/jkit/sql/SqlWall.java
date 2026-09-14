@@ -6,37 +6,45 @@ import com.alianga.jkit.sql.ast.SqlDelete;
 import com.alianga.jkit.sql.ast.SqlExpr;
 import com.alianga.jkit.sql.ast.SqlFunctionExpr;
 import com.alianga.jkit.sql.ast.SqlIdentifier;
+import com.alianga.jkit.sql.ast.SqlJoin;
+import com.alianga.jkit.sql.ast.SqlLiteral;
 import com.alianga.jkit.sql.ast.SqlNode;
 import com.alianga.jkit.sql.ast.SqlSelect;
 import com.alianga.jkit.sql.ast.SqlStatement;
 import com.alianga.jkit.sql.ast.SqlStatementType;
 import com.alianga.jkit.sql.ast.SqlTable;
+import com.alianga.jkit.sql.ast.SqlTableSource;
 import com.alianga.jkit.sql.ast.SqlUpdate;
+import com.alianga.jkit.sql.ast.SqlWithItem;
 import com.alianga.jkit.sql.visitor.SqlVisitorAdapter;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 /**
  * WallFilter 子集：多语句、注释绕过、永远真条件、危险函数、无 WHERE 的 DELETE/UPDATE、
  * DDL、INTO OUTFILE、可选 UNION / information_schema、selectOnly。
  *
  * <p>默认不接入解析路径，仅显式 {@link SQL#wall(String)} 调用。规则由 {@link SqlWallConfig} 控制；
- * 语句级检查实现为 {@link SqlWallRule} 规则链（内置 5 条 + {@link SqlWallConfig#rules(SqlWallRule...)}
+ * 语句级检查实现为 {@link SqlWallRule} 规则链（内置 6 条 + {@link SqlWallConfig#rules(SqlWallRule...)}
  * 自定义追加），新增检查项只需实现接口，不必改本类。</p>
  *
  * @author 郑明亮
  * @since 2.0.1
  */
 public final class SqlWall {
-    /** 内置规则链（顺序：语句类型 → DDL → 无 WHERE 写 → SELECT 特性 → AST 扫描）。 */
+    /** 内置规则链（顺序：语句类型 → DDL → 无 WHERE 写 → SELECT 特性 → AST 扫描 → 表策略）。 */
     private static final List<SqlWallRule> BUILTIN_RULES = Arrays.asList(
             new SelectOnlyRule(),
             new DenyDdlRule(),
             new WriteWithoutWhereRule(),
             new SelectFeatureRule(),
-            new AstScanRule());
+            new AstScanRule(),
+            new TablePolicyRule());
 
     private SqlWall() {
     }
@@ -201,10 +209,13 @@ public final class SqlWall {
                     }
                     if (checkAlways && node instanceof SqlBinaryExpr) {
                         SqlBinaryExpr bin = (SqlBinaryExpr) node;
-                        if (bin.operator() == SqlBinaryOp.OR) {
+                        if (bin.operator() == SqlBinaryOp.OR || bin.operator() == SqlBinaryOp.XOR) {
                             if (SqlEval.isAlwaysTrue(bin.left()) || SqlEval.isAlwaysTrue(bin.right())) {
                                 violations.add("always-true-condition");
                             }
+                        }
+                        if (isTautologyLike(bin)) {
+                            violations.add("always-true-condition");
                         }
                     }
                     if (checkInfo && node instanceof SqlTable) {
@@ -257,6 +268,236 @@ public final class SqlWall {
         return lower.startsWith("information_schema.")
                 || "information_schema".equals(lower)
                 || lower.contains(".information_schema.");
+    }
+
+    /** 表黑名单 / 白名单 / WHERE 必含列 / 表数量上限。 */
+    private static final class TablePolicyRule implements SqlWallRule {
+        @Override
+        public void check(SqlStatement statement, SqlWallConfig cfg, SqlWallViolations violations) {
+            boolean checkDeny = !cfg.denyTables().isEmpty();
+            boolean checkAllow = !cfg.allowTables().isEmpty();
+            boolean checkReq = !cfg.requireWhereColumns().isEmpty();
+            int max = cfg.maxTables();
+            if (!checkDeny && !checkAllow && !checkReq && max <= 0) {
+                return;
+            }
+            Set<String> cte = collectCteNames(statement);
+            List<SqlTable> physical = collectPhysicalTables(statement, cte);
+            if (max > 0 && physical.size() > max) {
+                violations.add("too-many-tables");
+            }
+            for (int i = 0; i < physical.size(); i++) {
+                SqlTable table = physical.get(i);
+                String simple = tableName(table);
+                String qualified = table.name() == null ? "" : table.name().qualifiedName();
+                if (checkDeny && (inList(cfg.denyTables(), simple) || inList(cfg.denyTables(), qualified))) {
+                    violations.add("deny-table");
+                }
+                if (checkAllow && !inList(cfg.allowTables(), simple) && !inList(cfg.allowTables(), qualified)) {
+                    violations.add("allow-table");
+                }
+            }
+            if (checkReq) {
+                checkRequiredColumns(statement, cte, cfg.requireWhereColumns(), violations);
+            }
+        }
+    }
+
+    private static void checkRequiredColumns(SqlStatement statement, final Set<String> cte,
+            final List<String> required, final SqlWallViolations violations) {
+        statement.accept(new SqlVisitorAdapter() {
+            /**
+             * {@inheritDoc}
+             */
+            @Override
+            public boolean visit(SqlNode node) {
+                if (node instanceof SqlSelect) {
+                    SqlSelect select = (SqlSelect) node;
+                    if (hasPhysicalFrom(select.from(), cte)) {
+                        Set<String> found = new HashSet<String>(4);
+                        collectWhereColumns(select.where(), found);
+                        collectJoinOnColumns(select.from(), found);
+                        collectWhereColumns(select.having(), found);
+                        addMissing(required, found, violations);
+                    }
+                } else if (node instanceof SqlUpdate) {
+                    SqlUpdate update = (SqlUpdate) node;
+                    if (hasPhysicalFrom(update.table(), cte) || hasPhysicalFrom(update.from(), cte)) {
+                        Set<String> found = new HashSet<String>(4);
+                        collectWhereColumns(update.where(), found);
+                        collectJoinOnColumns(update.table(), found);
+                        collectJoinOnColumns(update.from(), found);
+                        addMissing(required, found, violations);
+                    }
+                } else if (node instanceof SqlDelete) {
+                    SqlDelete delete = (SqlDelete) node;
+                    if (hasPhysicalFrom(delete.table(), cte) || hasPhysicalFrom(delete.from(), cte)) {
+                        Set<String> found = new HashSet<String>(4);
+                        collectWhereColumns(delete.where(), found);
+                        collectJoinOnColumns(delete.table(), found);
+                        collectJoinOnColumns(delete.from(), found);
+                        addMissing(required, found, violations);
+                    }
+                }
+                return true;
+            }
+        });
+    }
+
+    private static void addMissing(List<String> required, Set<String> found, SqlWallViolations violations) {
+        for (int i = 0; i < required.size(); i++) {
+            if (!found.contains(required.get(i))) {
+                violations.add("missing-where-column");
+                return;
+            }
+        }
+    }
+
+    private static boolean hasPhysicalFrom(SqlTableSource src, Set<String> cte) {
+        List<SqlTable> tables = new ArrayList<SqlTable>(2);
+        collectPhysical(src, tables);
+        for (int i = 0; i < tables.size(); i++) {
+            if (!isSkippedTable(tables.get(i), cte)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static void collectJoinOnColumns(SqlTableSource src, Set<String> found) {
+        if (src instanceof SqlJoin) {
+            SqlJoin join = (SqlJoin) src;
+            collectWhereColumns(join.condition(), found);
+            collectJoinOnColumns(join.left(), found);
+            collectJoinOnColumns(join.right(), found);
+        }
+    }
+
+    private static void collectWhereColumns(SqlExpr expr, final Set<String> found) {
+        if (expr == null) {
+            return;
+        }
+        expr.accept(new SqlVisitorAdapter() {
+            /**
+             * {@inheritDoc}
+             */
+            @Override
+            public boolean visit(SqlNode node) {
+                if (node instanceof SqlIdentifier) {
+                    String simple = ((SqlIdentifier) node).simpleName();
+                    if (simple != null && simple.length() > 0) {
+                        found.add(simple.toLowerCase(Locale.ROOT));
+                    }
+                }
+                return true;
+            }
+        });
+    }
+
+    private static List<SqlTable> collectPhysicalTables(SqlStatement statement, final Set<String> cte) {
+        final List<SqlTable> out = new ArrayList<SqlTable>(4);
+        statement.accept(new SqlVisitorAdapter() {
+            /**
+             * {@inheritDoc}
+             */
+            @Override
+            public boolean visit(SqlNode node) {
+                if (node instanceof SqlTable && !isSkippedTable((SqlTable) node, cte)) {
+                    out.add((SqlTable) node);
+                }
+                return true;
+            }
+        });
+        return out;
+    }
+
+    private static void collectPhysical(SqlTableSource src, List<SqlTable> out) {
+        if (src == null) {
+            return;
+        }
+        if (src instanceof SqlTable) {
+            out.add((SqlTable) src);
+        } else if (src instanceof SqlJoin) {
+            SqlJoin join = (SqlJoin) src;
+            collectPhysical(join.left(), out);
+            collectPhysical(join.right(), out);
+        }
+    }
+
+    private static Set<String> collectCteNames(SqlStatement statement) {
+        final Set<String> names = new HashSet<String>(4);
+        statement.accept(new SqlVisitorAdapter() {
+            /**
+             * {@inheritDoc}
+             */
+            @Override
+            public boolean visit(SqlNode node) {
+                if (node instanceof SqlWithItem) {
+                    SqlIdentifier name = ((SqlWithItem) node).name();
+                    if (name != null && name.simpleName().length() > 0) {
+                        names.add(name.simpleName().toLowerCase(Locale.ROOT));
+                    }
+                }
+                return true;
+            }
+        });
+        return names;
+    }
+
+    private static boolean isSkippedTable(SqlTable table, Set<String> cte) {
+        String simple = tableName(table);
+        if (simple.isEmpty() || "dual".equals(simple)) {
+            return true;
+        }
+        return cte.contains(simple);
+    }
+
+    private static String tableName(SqlTable table) {
+        if (table == null || table.name() == null) {
+            return "";
+        }
+        String simple = table.name().simpleName();
+        return simple == null ? "" : simple.toLowerCase(Locale.ROOT);
+    }
+
+    private static boolean inList(List<String> names, String value) {
+        if (value == null || value.isEmpty() || names == null || names.isEmpty()) {
+            return false;
+        }
+        String lower = value.toLowerCase(Locale.ROOT);
+        for (int i = 0; i < names.size(); i++) {
+            if (lower.equals(names.get(i))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isTautologyLike(SqlBinaryExpr bin) {
+        if (bin.operator() != SqlBinaryOp.LIKE && bin.operator() != SqlBinaryOp.ILIKE) {
+            return false;
+        }
+        if (!(bin.right() instanceof SqlLiteral)) {
+            return false;
+        }
+        SqlLiteral lit = (SqlLiteral) bin.right();
+        if (lit.kind() != SqlLiteral.Kind.STRING || lit.value() == null) {
+            return false;
+        }
+        String raw = lit.value();
+        if (raw.length() >= 2 && raw.charAt(0) == '\'' && raw.charAt(raw.length() - 1) == '\'') {
+            raw = raw.substring(1, raw.length() - 1);
+        }
+        if (raw.isEmpty()) {
+            return false;
+        }
+        for (int i = 0; i < raw.length(); i++) {
+            char c = raw.charAt(i);
+            if (c != '%' && c != '_') {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static void checkAlwaysTrue(SqlExpr where, SqlWallViolations violations) {
