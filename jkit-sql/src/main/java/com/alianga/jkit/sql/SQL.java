@@ -994,6 +994,114 @@ public final class SQL {
     }
 
     /**
+     * 把 {@code ?} 换成字面量，按默认 MySQL 方言回写。字符串只加倍单引号，不会拆成多语句。
+     *
+     * @param sql SQL
+     * @param values 位置参数
+     * @return 填充后的紧凑 SQL
+     * @since 2.0.2
+     */
+    public static String bind(String sql, Object... values) {
+        return bind(sql, SqlDialect.MYSQL, values);
+    }
+
+    /**
+     * 把 {@code ?} 换成字面量后按方言回写。
+     *
+     * @param sql SQL
+     * @param dialect 方言
+     * @param values 位置参数
+     * @return 填充后的紧凑 SQL
+     * @since 2.0.2
+     */
+    public static String bind(String sql, SqlDialectSpec dialect, Object... values) {
+        SqlDialectSpec d = dialect == null ? SqlDialect.MYSQL : dialect;
+        SqlStatement stmt = parse(sql, d);
+        return toSqlString(bind(stmt, d, values), d);
+    }
+
+    /**
+     * 填充位置参数（先深拷贝再改）。
+     *
+     * @param statement 语句
+     * @param dialect 方言
+     * @param values 位置参数
+     * @return 新语句
+     * @since 2.0.2
+     */
+    public static SqlStatement bind(SqlStatement statement, SqlDialectSpec dialect, Object... values) {
+        if (statement == null) {
+            return statement;
+        }
+        SqlStatement copy = clone(statement);
+        return SqlBinder.bind(copy, dialect, values, null);
+    }
+
+    /**
+     * 把 {@code :name} 换成字面量。
+     *
+     * @param sql SQL
+     * @param values 命名参数（不含冒号）
+     * @return 填充后的紧凑 SQL
+     * @since 2.0.2
+     */
+    public static String bindNamed(String sql, Map<String, ?> values) {
+        return bindNamed(sql, SqlDialect.MYSQL, values);
+    }
+
+    /**
+     * 把 {@code :name} 换成字面量后按方言回写。
+     *
+     * @param sql SQL
+     * @param dialect 方言
+     * @param values 命名参数（不含冒号）
+     * @return 填充后的紧凑 SQL
+     * @since 2.0.2
+     */
+    public static String bindNamed(String sql, SqlDialectSpec dialect, Map<String, ?> values) {
+        SqlDialectSpec d = dialect == null ? SqlDialect.MYSQL : dialect;
+        SqlStatement stmt = parse(sql, d);
+        return toSqlString(bindNamed(stmt, d, values), d);
+    }
+
+    /**
+     * 填充命名参数（先深拷贝再改）。
+     *
+     * @param statement 语句
+     * @param dialect 方言
+     * @param values 命名参数
+     * @return 新语句
+     * @since 2.0.2
+     */
+    public static SqlStatement bindNamed(SqlStatement statement, SqlDialectSpec dialect,
+            Map<String, ?> values) {
+        if (statement == null) {
+            return statement;
+        }
+        SqlStatement copy = clone(statement);
+        return SqlBinder.bind(copy, dialect, null, values);
+    }
+
+    /**
+     * 同时填充位置参数与命名参数（先深拷贝再改）。
+     *
+     * @param statement 语句
+     * @param dialect 方言
+     * @param positional 位置参数
+     * @param named 命名参数
+     * @return 新语句
+     * @since 2.0.2
+     */
+    public static SqlStatement bind(SqlStatement statement, SqlDialectSpec dialect,
+            Object[] positional, Map<String, ?> named) {
+        if (statement == null) {
+            return statement;
+        }
+        SqlStatement copy = clone(statement);
+        return SqlBinder.bind(copy, dialect, positional, named);
+    }
+
+    /**
      * 深拷贝语句（AST 树拷贝；方言参数保留兼容，忽略）。
      *
      * @param statement 语句
