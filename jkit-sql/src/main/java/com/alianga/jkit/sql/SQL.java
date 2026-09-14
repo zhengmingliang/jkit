@@ -14,6 +14,8 @@ import com.alianga.jkit.sql.schema.convert.SqlSchemaConverter;
 import com.alianga.jkit.sql.visitor.SqlVisitorAdapter;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 
@@ -689,6 +691,59 @@ public final class SQL {
         SqlExpr predicate = parseExpr(predicateSql);
         SqlStatement copy = clone(statement);
         return SqlRewriter.andWhere(copy, predicate);
+    }
+
+    /**
+     * 按表白名单注入租户条件（先深拷贝再改）。下钻 UNION 臂、FROM 子查询、CTE 体、EXISTS 等
+     * 标量子查询；INSERT 补列 / MERGE 补 ON。无 {@code tables} 时对所有物理表注入（跳过 CTE 名与 {@code DUAL}）。
+     *
+     * @param statement 语句
+     * @param column 租户列简单名，如 {@code tenant_id}
+     * @param value 租户值（字面量或绑定）
+     * @param tables 需要隔离的表简单名；省略则全部物理表
+     * @return 新语句
+     * @since 2.0.2
+     */
+    public static SqlStatement injectTenant(SqlStatement statement, String column, SqlExpr value,
+            String... tables) {
+        Collection<String> list = tables == null || tables.length == 0 ? null : Arrays.asList(tables);
+        return injectTenant(statement, column, value, list);
+    }
+
+    /**
+     * 按表白名单注入租户条件（先深拷贝再改）。{@code value} 为 Java 值时收成字面量（字符串按 SQL
+     * 单引号转义，不会当表达式解析）；{@code "?"} 生成绑定占位。
+     *
+     * @param statement 语句
+     * @param column 租户列简单名
+     * @param value 租户值
+     * @param tables 需要隔离的表简单名；省略则全部物理表
+     * @return 新语句
+     * @since 2.0.2
+     */
+    public static SqlStatement injectTenant(SqlStatement statement, String column, Object value,
+            String... tables) {
+        Collection<String> list = tables == null || tables.length == 0 ? null : Arrays.asList(tables);
+        return injectTenant(statement, column, SqlTenantRewriter.literalValue(value), list);
+    }
+
+    /**
+     * 按表白名单注入租户条件（先深拷贝再改）。
+     *
+     * @param statement 语句
+     * @param column 租户列简单名
+     * @param value 租户值
+     * @param tables 需要隔离的表简单名；null 或空 = 全部物理表
+     * @return 新语句
+     * @since 2.0.2
+     */
+    public static SqlStatement injectTenant(SqlStatement statement, String column, SqlExpr value,
+            Collection<String> tables) {
+        if (statement == null) {
+            return statement;
+        }
+        SqlStatement copy = clone(statement);
+        return SqlTenantRewriter.inject(copy, column, value, tables);
     }
 
     /**

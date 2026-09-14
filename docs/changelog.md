@@ -11,6 +11,7 @@
 **jkit-sql**
 
 - `JdbcUrlUtils`：解析 JDBC URL（主机 / 集群节点 / 库名 / schema / 参数），`fromUrl` 推断 `SqlDialect`，`getDbType` 返回类型短名，`driverForUrl` / `getDriverClassName` 猜测驱动类。覆盖 MySQL 复制与负载、PostgreSQL HA、Oracle SID/Service/RAC、SQL Server、H2、Gauss/openGauss、达梦等。PostgreSQL 系从 `currentSchema` 取 schema（缺省 `public`）。
+- `SQL.injectTenant` / `SqlRewrites.injectTenant`：按表白名单注入租户条件。下钻 UNION 臂、FROM 子查询、CTE 体、EXISTS / IN 标量子查询；JOIN 按别名限定列；INSERT 补列或改 SET；MERGE 补 ON。字符串值按 SQL 单引号转义，不当表达式解析。CTE 名与 `DUAL` 跳过。
 
 ### 变更
 

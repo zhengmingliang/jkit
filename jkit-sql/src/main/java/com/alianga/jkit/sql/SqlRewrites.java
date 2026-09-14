@@ -4,6 +4,8 @@ import com.alianga.jkit.sql.ast.SqlExpr;
 import com.alianga.jkit.sql.ast.SqlStatement;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 
@@ -159,6 +161,30 @@ public final class SqlRewrites {
             @Override
             public SqlStatement apply(SqlStatement statement) {
                 return SqlRewriter.andWhere(statement, predicate);
+            }
+        };
+    }
+
+    /**
+     * 内建适配器：按表白名单注入租户条件，等价 {@link SqlTenantRewriter#inject}。
+     *
+     * @param column 租户列简单名
+     * @param value 租户值
+     * @param tables 需要隔离的表简单名；省略则全部物理表
+     * @return 规则
+     * @since 2.0.2
+     */
+    public static SqlRewriteHook injectTenant(final String column, final SqlExpr value,
+            final String... tables) {
+        final Collection<String> list = tables == null || tables.length == 0
+                ? null : Arrays.asList(tables);
+        return new SqlRewriteHook() {
+            /**
+             * {@inheritDoc}
+             */
+            @Override
+            public SqlStatement apply(SqlStatement statement) {
+                return SqlTenantRewriter.inject(statement, column, value, list);
             }
         };
     }
