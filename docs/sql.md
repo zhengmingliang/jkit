@@ -9,6 +9,8 @@
 
 不执行 SQL，不引 JDBC 驱动。
 
+<MavenBadge artifact="jkit-sql" />
+
 ## 引入
 
 ```xml

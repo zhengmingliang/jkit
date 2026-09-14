@@ -1,5 +1,7 @@
 # 快速开始
 
+<DocBadges />
+
 ## 什么是 jkit
 
 jkit 是**纯 JDK、零第三方依赖**的 Java 通用工具库，由 [ZmlTools](https://github.com/wuyongshi/ZmlTools) 迁移而来。在保留原有工具能力的同时，移除了全部第三方依赖（Gson、Fastjson、OkHttp、Guava、Apache Commons CSV、Jsoup、SLF4J、Logback、Lombok 等），仅使用 JDK 标准库。
@@ -30,6 +32,8 @@ jkit 是**纯 JDK、零第三方依赖**的 Java 通用工具库，由 [ZmlTools
 | `jkit-curl-codegen` | `com.alianga:jkit-curl-codegen` | 把 curl 转成 OkHttp / fetch / requests 等其它语言源码 |
 
 ## 引入依赖
+
+最新发布以 [Maven Central](https://central.sonatype.com/artifact/com.alianga/jkit) 徽章为准；下文示例使用本站文档版本。
 
 核心库：
 

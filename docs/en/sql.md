@@ -9,6 +9,8 @@ Design references:
 
 It does not execute SQL and does not pull in any JDBC driver.
 
+<MavenBadge artifact="jkit-sql" />
+
 ## Getting Started
 
 ```xml

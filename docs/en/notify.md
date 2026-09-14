@@ -2,6 +2,9 @@
 
 `jkit-notify` is a lightweight message notification module: one API adapts to multiple messaging channels with zero third-party dependencies (HTTP reuses jkit's own client, JSON uses jkit's own library, SMTP is a pure Socket implementation, and SMS signing HMAC/SHA-256 is implemented on the JDK's `javax.crypto`).
 
+<MavenBadge artifact="jkit-notify" />
+<MavenBadge artifact="jkit-notify-extra" />
+
 ```xml
 <dependency>
     <groupId>com.alianga</groupId>

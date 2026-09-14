@@ -14,6 +14,10 @@ DDL 文本由 [jkit-sql](./sql.md) 的 `SqlEntities` 按方言生成；本模块
 
 三个 starter / 核心包都会带上 `jkit` 与 `jkit-sql`。JDBC 驱动仍由宿主提供。
 
+<MavenBadge artifact="jkit-sql-auto" />
+<MavenBadge artifact="jkit-sql-auto-spring-boot-2" />
+<MavenBadge artifact="jkit-sql-auto-spring-boot-3" />
+
 ---
 
 ## 1. 写实体

@@ -18,6 +18,9 @@ hero:
       text: 更新日志
       link: /changelog
     - theme: alt
+      text: Maven Central
+      link: https://central.sonatype.com/artifact/com.alianga/jkit
+    - theme: alt
       text: GitHub
       link: https://github.com/zhengmingliang/jkit
 
@@ -51,6 +54,8 @@ features:
     link: /yaml
     linkText: 查看 YAML 文档
 ---
+
+<DocBadges />
 
 ## 三分钟上手
 

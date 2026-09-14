@@ -14,6 +14,10 @@ Pick one path:
 
 All three artifacts pull in `jkit` and `jkit-sql`. The host still supplies the JDBC driver.
 
+<MavenBadge artifact="jkit-sql-auto" />
+<MavenBadge artifact="jkit-sql-auto-spring-boot-2" />
+<MavenBadge artifact="jkit-sql-auto-spring-boot-3" />
+
 ---
 
 ## 1. Write an entity

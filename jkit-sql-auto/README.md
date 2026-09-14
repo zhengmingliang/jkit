@@ -1,5 +1,7 @@
 # jkit-sql-auto
 
+[![Maven Central](https://img.shields.io/maven-central/v/com.alianga/jkit-sql-auto?style=flat-square)](https://central.sonatype.com/artifact/com.alianga/jkit-sql-auto)
+
 启动时按实体建表 / 加列。非 Spring 项目用本模块；Spring Boot 请改用 starter。
 
 ```xml

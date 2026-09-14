@@ -1,5 +1,7 @@
 # jkit-sql
 
+[![Maven Central](https://img.shields.io/maven-central/v/com.alianga/jkit-sql?style=flat-square)](https://central.sonatype.com/artifact/com.alianga/jkit-sql)
+
 零依赖 SQL 解析器。手写词法 / 语法，生成 AST，支持多方言格式化、表列统计与改写（LIMIT / TOP / OFFSET FETCH / ROWNUM；`SQL.clone` 为 AST 深拷贝）。
 
 对标 Druid SQL Parser（手写、可进生产的吞吐）和 JSqlParser（AST + Visitor + 抽表名）的常用能力。**不执行 SQL。** `JdbcUrlUtils` 可从 JDBC URL 解析库名 / schema 并推断方言与驱动。

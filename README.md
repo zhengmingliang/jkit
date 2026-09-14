@@ -1,5 +1,10 @@
 # jkit
 
+[![Maven Central](https://img.shields.io/maven-central/v/com.alianga/jkit?style=flat-square)](https://central.sonatype.com/artifact/com.alianga/jkit)
+[![JDK](https://img.shields.io/badge/JDK-8%2B-orange?style=flat-square)](https://jkit.alianga.com/guide/getting-started)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue?style=flat-square)](LICENSE)
+[![Docs](https://img.shields.io/badge/docs-jkit.alianga.com-ea580c?style=flat-square)](https://jkit.alianga.com)
+
 **纯 JDK、零第三方依赖的 Java 通用工具库。**
 
 jkit 由 [ZmlTools](https://github.com/wuyongshi/ZmlTools) 迁移而来，在保留原有工具能力的同时，**移除了全部第三方依赖**（Gson、Fastjson、OkHttp、Guava、Apache Commons CSV、Jsoup、SLF4J、Logback、Lombok 等），仅使用 JDK 标准库（含 `java.util.logging`、`javax.crypto`、`java.awt`、`java.net` 等）。

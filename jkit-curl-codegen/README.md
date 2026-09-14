@@ -1,5 +1,7 @@
 # jkit-curl-codegen
 
+[![Maven Central](https://img.shields.io/maven-central/v/com.alianga/jkit-curl-codegen?style=flat-square)](https://central.sonatype.com/artifact/com.alianga/jkit-curl-codegen)
+
 把 curl 命令转成其它语言 / HTTP 库源码。
 
 解析与执行在 [jkit](../README.md)（`CurlParser` / `HttpUtils.curl`），本库只读 `ParsedCurlRequest` 再生成源码。

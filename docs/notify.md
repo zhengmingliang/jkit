@@ -2,6 +2,9 @@
 
 `jkit-notify` 是轻量消息通知模块：一套 API 适配多个消息渠道，零第三方依赖（HTTP 复用 jkit 自研客户端，JSON 用 jkit 自研库，SMTP 为纯 Socket 实现，短信签名 HMAC/SHA-256 用 JDK `javax.crypto` 自实现）。
 
+<MavenBadge artifact="jkit-notify" />
+<MavenBadge artifact="jkit-notify-extra" />
+
 ```xml
 <dependency>
     <groupId>com.alianga</groupId>

@@ -1,5 +1,7 @@
 # Getting Started
 
+<DocBadges />
+
 ## What is jkit
 
 jkit is a **pure-JDK, zero-dependency** general-purpose Java utility library, migrated from [ZmlTools](https://github.com/wuyongshi/ZmlTools). It keeps the original utility capabilities while removing every third-party dependency (Gson, Fastjson, OkHttp, Guava, Apache Commons CSV, Jsoup, SLF4J, Logback, Lombok, etc.) — only the JDK standard library is used.
@@ -30,6 +32,8 @@ This repository is a multi-module build rooted at `jkit-parent`. Pull in only wh
 | `jkit-curl-codegen` | `com.alianga:jkit-curl-codegen` | Convert curl commands into OkHttp / fetch / requests and other source code |
 
 ## Add the dependency
+
+The Maven Central badge above is the published latest; snippets below use this site's documented version.
 
 Core library:
 
