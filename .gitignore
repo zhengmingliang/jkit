@@ -30,3 +30,6 @@ docs/.vitepress/dist/
 docs/.vitepress/cache/
 
 .zcode
+
+# 公众号文章（本地草稿，不纳入版本库）
+articles/
