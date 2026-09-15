@@ -4,6 +4,7 @@ import com.alianga.jkit.sql.ast.SqlStatement;
 
 import org.junit.Test;
 
+import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -258,6 +259,82 @@ public class SqlBinderTest {
         }
         assertEquals("every dialect classified", SqlDialect.values().length,
                 asNumber.length + asKeyword.length);
+    }
+
+    @Test
+    public void doubleAvoidsScientificNotation() {
+        String sql = SQL.bind("SELECT * FROM t WHERE v = ?", 0.0001);
+        assertTrue("double 不应写成科学计数法", sql.contains("v = 0.0001"));
+        assertFalse(sql, sql.contains("E-"));
+        SQL.parse(sql);
+    }
+
+    @Test
+    public void floatAvoidsScientificNotation() {
+        String sql = SQL.bind("SELECT * FROM t WHERE v = ?", 0.0001f);
+        assertTrue("float 不应写成科学计数法", sql.contains("v = 0.0001"));
+        assertFalse(sql, sql.contains("E-"));
+        SQL.parse(sql);
+    }
+
+    @Test
+    public void bigDecimalUsesPlainString() {
+        String sql = SQL.bind("SELECT * FROM t WHERE v = ?", new BigDecimal("0.00000001"));
+        assertTrue(sql, sql.contains("v = 0.00000001"));
+        assertFalse(sql, sql.contains("E-"));
+        SQL.parse(sql);
+    }
+
+    @Test
+    public void largeDoubleUsesPlainString() {
+        String sql = SQL.bind("SELECT * FROM t WHERE v = ?", 1.0e20);
+        assertTrue("大数也不应写科学计数法", sql.contains("v = 100000000000000000000"));
+        SQL.parse(sql);
+    }
+
+    @Test
+    public void nonFiniteDoubleRejected() {
+        try {
+            SQL.bind("SELECT * FROM t WHERE v = ?", Double.NaN);
+            fail("NaN 无法表达为 SQL 数值字面量");
+        } catch (IllegalArgumentException expected) {
+            // ok
+        }
+        try {
+            SQL.bind("SELECT * FROM t WHERE v = ?", Double.POSITIVE_INFINITY);
+            fail("Infinity 无法表达为 SQL 数值字面量");
+        } catch (IllegalArgumentException expected) {
+            // ok
+        }
+    }
+
+    @Test
+    public void javaTimeTypesBindAsTimestampStrings() {
+        java.time.LocalDate d = java.time.LocalDate.of(2026, 9, 15);
+        java.time.LocalDateTime dt = java.time.LocalDateTime.of(2026, 9, 15, 18, 39, 5);
+        java.time.LocalTime t = java.time.LocalTime.of(18, 39, 5);
+        String sd = SQL.bind("SELECT * FROM t WHERE d = ?", d);
+        assertTrue(sd, sd.contains("d = '2026-09-15'"));
+        String sdt = SQL.bind("SELECT * FROM t WHERE ts = ?", dt);
+        assertTrue(sdt, sdt.contains("ts = '2026-09-15 18:39:05'"));
+        String st = SQL.bind("SELECT * FROM t WHERE t = ?", t);
+        assertTrue(st, st.contains("t = '18:39:05'"));
+        SQL.parse(sd);
+        SQL.parse(sdt);
+        SQL.parse(st);
+    }
+
+    @Test
+    public void javaTimeOffsetAndInstantBind() {
+        java.time.OffsetDateTime odt = java.time.OffsetDateTime.of(2026, 9, 15, 18, 39, 5, 0,
+                java.time.ZoneOffset.ofHours(8));
+        String s = SQL.bind("SELECT * FROM t WHERE ts = ?", odt);
+        assertTrue(s, s.contains("ts = '2026-09-15 18:39:05+08:00'"));
+        java.time.Instant inst = java.time.Instant.ofEpochSecond(1000000000L);
+        String si = SQL.bind("SELECT * FROM t WHERE ts = ?", inst);
+        assertTrue(si, si.contains("ts = '2001-09-09 01:46:40'"));
+        SQL.parse(s);
+        SQL.parse(si);
     }
 
     @Test

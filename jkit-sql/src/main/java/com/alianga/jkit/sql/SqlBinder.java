@@ -30,6 +30,14 @@ import com.alianga.jkit.sql.visitor.SqlAstVisitor;
 
 import java.lang.reflect.Array;
 import java.math.BigDecimal;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -207,8 +215,24 @@ public final class SqlBinder {
             return SqlLiteral.of(SqlLiteral.Kind.BOOLEAN, b ? "TRUE" : "FALSE");
         }
         if (value instanceof Number) {
-            if (value instanceof Float || value instanceof Double || value instanceof BigDecimal) {
-                return SqlLiteral.of(SqlLiteral.Kind.NUMBER, value.toString());
+            // Float / Double 用 toPlainString 避免科学计数法（0.0001 不能写成 1.0E-4）；
+            // 非有限值（NaN / Infinity）无法表达为 SQL 数值字面量，直接拒绝。
+            if (value instanceof Float) {
+                float f = ((Float) value).floatValue();
+                if (Float.isNaN(f) || Float.isInfinite(f)) {
+                    throw new IllegalArgumentException("cannot bind non-finite float: " + f);
+                }
+                return SqlLiteral.of(SqlLiteral.Kind.NUMBER, new BigDecimal(Float.toString(f)).toPlainString());
+            }
+            if (value instanceof Double) {
+                double d = ((Double) value).doubleValue();
+                if (Double.isNaN(d) || Double.isInfinite(d)) {
+                    throw new IllegalArgumentException("cannot bind non-finite double: " + d);
+                }
+                return SqlLiteral.of(SqlLiteral.Kind.NUMBER, BigDecimal.valueOf(d).toPlainString());
+            }
+            if (value instanceof BigDecimal) {
+                return SqlLiteral.of(SqlLiteral.Kind.NUMBER, ((BigDecimal) value).toPlainString());
             }
             return SqlLiteral.of(SqlLiteral.Kind.NUMBER, numberText((Number) value));
         }
@@ -218,6 +242,11 @@ public final class SqlBinder {
         if (value instanceof Date) {
             java.text.SimpleDateFormat fmt = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
             return SqlLiteral.of(SqlLiteral.Kind.STRING, quoteSqlString(fmt.format((Date) value)));
+        }
+        if (value instanceof LocalDate || value instanceof LocalDateTime || value instanceof LocalTime
+                || value instanceof OffsetDateTime || value instanceof ZonedDateTime
+                || value instanceof Instant) {
+            return SqlLiteral.of(SqlLiteral.Kind.STRING, quoteSqlString(toTemporalString(value)));
         }
         if (value instanceof Character) {
             return SqlLiteral.of(SqlLiteral.Kind.STRING, quoteSqlString(String.valueOf(value)));
@@ -287,6 +316,39 @@ public final class SqlBinder {
             return Long.toString(n);
         }
         return value.toString();
+    }
+
+    private static final DateTimeFormatter TS_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+    private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("HH:mm:ss");
+    private static final DateTimeFormatter TS_OFF_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ssXXX");
+
+    /**
+     * Java 8 时间类型 → SQL 字符串字面量（与 {@link Date} 一致走 {@link #quoteSqlString}）。
+     *
+     * @param value 时间值
+     * @return 字面量文本（不含外层引号）
+     */
+    private static String toTemporalString(Object value) {
+        if (value instanceof LocalDate) {
+            return ((LocalDate) value).format(DATE_FMT);
+        }
+        if (value instanceof LocalDateTime) {
+            return ((LocalDateTime) value).format(TS_FMT);
+        }
+        if (value instanceof LocalTime) {
+            return ((LocalTime) value).format(TIME_FMT);
+        }
+        if (value instanceof OffsetDateTime) {
+            return ((OffsetDateTime) value).format(TS_OFF_FMT);
+        }
+        if (value instanceof ZonedDateTime) {
+            return ((ZonedDateTime) value).format(TS_OFF_FMT);
+        }
+        if (value instanceof Instant) {
+            return TS_FMT.withZone(ZoneOffset.UTC).format((Instant) value);
+        }
+        throw new IllegalArgumentException("unsupported temporal type: " + value);
     }
 
     private static boolean isBind(SqlExpr expr) {
