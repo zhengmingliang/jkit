@@ -140,6 +140,30 @@ public class SqlParserTest {
         System.out.println(SQL.toSqlString(statement));
     }
     @Test
+    public void parseSimpleSql() {
+        SqlStatement statement = SQL.parse("select * from ACCOUNTS", SqlDialect.ORACLE);
+        SqlSchemaStat stat = SQL.stat(statement);
+        Set<String> columns = stat.getColumns();
+        System.out.println("columns = " + columns);
+        List<String> conditions = stat.getConditions();
+        List<String> groupByColumns = stat.getGroupByColumns();
+        List<String> orderByColumns = stat.getOrderByColumns();
+        System.out.println("conditions = " + conditions);
+        System.out.println("groupByColumns = " + groupByColumns);
+        System.out.println("orderByColumns = " + orderByColumns);
+        SqlStatement paged = SQL.setPage(statement, 2, 100, SqlDialect.ORACLE);
+        String oraclePage = SQL.toSqlString(paged, SqlDialect.ORACLE);
+        System.out.println(oraclePage);
+        String compact = oraclePage.toUpperCase().replaceAll("\\s+", "");
+        assertFalse("must not emit MySQL LIMIT for Oracle page", compact.contains("LIMIT"));
+        assertTrue(oraclePage, compact.contains("ROWNUM<=200"));
+        assertTrue(oraclePage, compact.contains("RN>100"));
+        assertTrue("SELECT * keeps star wrap", compact.contains("SELECT*FROM(SELECTXX.*"));
+        assertEquals(Long.valueOf(100L), SQL.getLimit(paged));
+        assertEquals(Long.valueOf(100L), SQL.getOffset(paged));
+        SQL.parse(oraclePage, SqlDialect.ORACLE);
+    }
+    @Test
     public void parseComplicateSql2() {
         String
         sql = "WITH ec AS (\n" +
@@ -148,7 +172,7 @@ public class SqlParserTest {
                 "           COUNT(DISTINCT o.customer_id)                                 AS cust_30d,\n" +
                 "           ROUND(SUM(o.discount_amount), 2)                              AS discount_30d\n" +
                 "    FROM orders o\n" +
-                "    WHERE o.status = 'completed' AND o.order_date >= (TRUNC(SYSDATE) - INTERVAL '30' DAY)\n" +
+                "    WHERE o.status = 'completed' AND o.order_date >= TRUNC(SYSDATE) - 30\n" +
                 "),\n" +
                 "fn AS (\n" +
                 "    SELECT ROUND(SUM(a.balance), 2)                                      AS deposit_total,\n" +
@@ -161,7 +185,7 @@ public class SqlParserTest {
                 "hr AS (\n" +
                 "    SELECT SUM(CASE WHEN e.status = 'active' THEN 1 ELSE 0 END)          AS headcount,\n" +
                 "           ROUND(AVG(CASE WHEN e.status = 'active' THEN e.salary END), 2) AS avg_salary,\n" +
-                "           SUM(CASE WHEN e.leave_date >= (TRUNC(SYSDATE) - INTERVAL '365' DAY) THEN 1 ELSE 0 END) AS left_1y\n" +
+                "           SUM(CASE WHEN e.leave_date >= TRUNC(SYSDATE) - 365 THEN 1 ELSE 0 END) AS left_1y\n" +
                 "    FROM employees e\n" +
                 "),\n" +
                 "pf AS (\n" +
@@ -200,7 +224,7 @@ public class SqlParserTest {
                 "       ROUND(e.gmv_30d / NULLIF(h.headcount, 0) * 12.0, 2)\n" +
                 "FROM ec e\n" +
                 "CROSS JOIN hr h\n" +
-                "ORDER BY metric_group, metric_name;";
+                "ORDER BY 1, 2;";
         SqlStatement statement = SQL.parse(sql, SqlDialect.ORACLE);
 
         SqlSchemaStat stat = SQL.stat(statement);
@@ -212,6 +236,8 @@ public class SqlParserTest {
         System.out.println("conditions = " + conditions);
         System.out.println("groupByColumns = " + groupByColumns);
         System.out.println("orderByColumns = " + orderByColumns);
+        assertTrue(orderByColumns.toString(), orderByColumns.contains("1") && orderByColumns.contains("2"));
+        assertTrue(conditions.toString(), conditions.toString().contains("TRUNC(SYSDATE) - 30"));
         SqlStatement paged = SQL.setPage(statement, 2, 5, SqlDialect.ORACLE);
         String oraclePage = SQL.toSqlString(paged, SqlDialect.ORACLE);
         System.out.println(oraclePage);
@@ -219,9 +245,22 @@ public class SqlParserTest {
         assertTrue(oraclePage, compact.contains("ROWNUM<=10"));
         assertTrue(oraclePage, compact.contains("RN>5"));
         assertFalse("must not emit MySQL LIMIT for Oracle page", compact.contains("LIMIT"));
-        // UNION 的 ORDER BY 必须提到 SELECT * FROM (set-op) 外包，否则 Oracle ORA-00904
+        assertFalse("INTERVAL literal removed from source SQL", compact.contains("INTERVAL"));
+        assertTrue(oraclePage, compact.contains("TRUNC(SYSDATE)-30"));
+        assertTrue(oraclePage, compact.contains("TRUNC(SYSDATE)-365"));
+        // UNION 的 ORDER BY 1,2 必须提到 SELECT * FROM (set-op) 外包
         assertTrue("ORDER BY must follow the UNION subquery close, not a UNION branch",
-                compact.contains(")ORDERBYMETRIC_GROUP"));
+                compact.contains(")ORDERBY1ASC,2ASC") || compact.contains(")ORDERBY1,2"));
+        SqlSelect pagedSelect = (SqlSelect) paged;
+        assertEquals(4, pagedSelect.selectItems().size());
+        for (SqlSelectItem item : pagedSelect.selectItems()) {
+            String name = item.alias() != null ? item.alias()
+                    : (item.expr() instanceof SqlIdentifier
+                    ? ((SqlIdentifier) item.expr()).simpleName() : "");
+            assertFalse("outer select must not project RN", "RN".equalsIgnoreCase(name));
+            assertFalse(item.expr() instanceof com.alianga.jkit.sql.ast.SqlAllColumns);
+        }
+        assertTrue(oraclePage, compact.contains("SELECTMETRIC_GROUP"));
         assertEquals(Long.valueOf(5L), SQL.getLimit(paged));
         assertEquals(Long.valueOf(5L), SQL.getOffset(paged));
         assertFalse("setPage must clone", ((SqlSelect) statement).from() instanceof SqlSubqueryTable);

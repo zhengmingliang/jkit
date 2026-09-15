@@ -305,7 +305,7 @@ For a bare SELECT, `SqlDialect.ORACLE` (`supportsRownum && !supportsFetchFirst`)
 
 - **offset=0**: single-level subquery  
   `SELECT * FROM ( <original> ) XX WHERE ROWNUM <= n`
-- **offset>0**: double wrap (middle alias `XX` projects `ROWNUM AS RN` and cuts `ROWNUM <= offset+n`; outer alias `XXX` filters `RN > offset`)
+- **offset>0**: double wrap (middle alias `XX` projects `ROWNUM AS RN` and cuts `ROWNUM <= offset+n`; outer alias `XXX` filters `RN > offset`). The outer select lists the original columns only, not `RN`; a source `SELECT *` still becomes `SELECT *` (and `RN` is included)
 
 `WITH` stays on the outer node. If a set operation (`UNION` / `INTERSECT` / `EXCEPT` / `MINUS`) has an `ORDER BY`, it is first rewritten as `SELECT * FROM (set-op) ORDER BY …` and then wrapped with ROWNUM, so Oracle does not raise `ORA-00904` when ordering a set-op by column aliases inside a subquery. `setPage` / `setLimit` / `adaptPagination` targeting classic Oracle first clear leftover LIMIT/TOP inside the select body so the wrap does not carry the source dialect's pagination. Write-back must name the target dialect: `SQL.toSqlString(page, SqlDialect.ORACLE)`. The no-dialect `toSqlString(page)` defaults to MySQL and will turn ROWNUM back into `LIMIT`.
 

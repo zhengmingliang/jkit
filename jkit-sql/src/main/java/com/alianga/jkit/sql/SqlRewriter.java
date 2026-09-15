@@ -234,6 +234,7 @@ public final class SqlRewriter {
      * 把裸 SELECT（含 UNION 链）包成 ROWNUM 分页；offset=0 用单层，否则双层。
      * WITH 留在外层。集合运算若带 ORDER BY，先提到 {@code SELECT * FROM (set-op)} 外包，
      * 避免 Oracle 在子查询里对 UNION 列别名 ORDER BY 报 ORA-00904。
+     * 双层外层只投影原查询列，不输出中间层的 {@code RN}；原查询为 {@code *} 时仍 {@code SELECT *}。
      */
     private static void wrapOracleRownum(SqlSelect root, long offset, long rowCount) {
         long off = offset < 0L ? 0L : offset;
@@ -271,11 +272,77 @@ public final class SqlRewriter {
         SqlSubqueryTable outerFrom = new SqlSubqueryTable();
         outerFrom.setQuery(middle);
         outerFrom.setAlias("XXX");
-        SqlSelectItem outerStar = new SqlSelectItem();
-        outerStar.setExpr(new SqlAllColumns());
-        root.addSelectItem(outerStar);
+        fillOracleOuterSelect(root, core);
         root.setFrom(outerFrom);
         root.setWhere(SqlBinaryExpr.of(ID_RN, SqlBinaryOp.GT, number(off)));
+    }
+
+    /**
+     * 双层 ROWNUM 外层投影：能还原列名则只选原列（去掉 RN），否则退回 {@code SELECT *}。
+     */
+    private static void fillOracleOuterSelect(SqlSelect outer, SqlSelect core) {
+        java.util.List<String> names = projectionNames(core);
+        if (names == null) {
+            SqlSelectItem star = new SqlSelectItem();
+            star.setExpr(new SqlAllColumns());
+            outer.addSelectItem(star);
+            return;
+        }
+        for (int i = 0; i < names.size(); i++) {
+            SqlSelectItem item = new SqlSelectItem();
+            item.setExpr(SqlIdentifier.of(names.get(i)));
+            outer.addSelectItem(item);
+        }
+    }
+
+    /**
+     * 原查询对外输出列名。{@code SELECT *} / 无别名表达式无法还原时返回 null。
+     */
+    private static java.util.List<String> projectionNames(SqlSelect select) {
+        if (select == null) {
+            return null;
+        }
+        if (isBareStarSelect(select) && select.from() instanceof SqlSubqueryTable) {
+            SqlStatement q = ((SqlSubqueryTable) select.from()).query();
+            if (q instanceof SqlSelect) {
+                return projectionNames((SqlSelect) q);
+            }
+            return null;
+        }
+        java.util.List<SqlSelectItem> items = select.selectItems();
+        if (items.isEmpty()) {
+            return null;
+        }
+        java.util.List<String> names = new java.util.ArrayList<String>(items.size());
+        for (int i = 0; i < items.size(); i++) {
+            String name = outputName(items.get(i));
+            if (name == null) {
+                return null;
+            }
+            names.add(name);
+        }
+        return names;
+    }
+
+    private static boolean isBareStarSelect(SqlSelect select) {
+        if (select.selectItems().size() != 1) {
+            return false;
+        }
+        SqlSelectItem item = select.selectItems().get(0);
+        if (item.alias() != null || !(item.expr() instanceof SqlAllColumns)) {
+            return false;
+        }
+        return ((SqlAllColumns) item.expr()).owner() == null;
+    }
+
+    private static String outputName(SqlSelectItem item) {
+        if (item.alias() != null && !item.alias().isEmpty()) {
+            return item.alias();
+        }
+        if (item.expr() instanceof SqlIdentifier) {
+            return ((SqlIdentifier) item.expr()).simpleName();
+        }
+        return null;
     }
 
     /**
@@ -740,9 +807,7 @@ public final class SqlRewriter {
         outerFrom.setAlias("XXX");
         outer.setFrom(outerFrom);
         outer.selectItems().clear();
-        SqlSelectItem outerStar = new SqlSelectItem();
-        outerStar.setExpr(new SqlAllColumns());
-        outer.addSelectItem(outerStar);
+        fillOracleOuterSelect(outer, core);
         outer.setWhere(SqlBinaryExpr.of(ID_RN, SqlBinaryOp.GT, number(off)));
         outer.setTop(null);
         outer.setLimit(null);

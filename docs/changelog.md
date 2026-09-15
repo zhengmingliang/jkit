@@ -34,7 +34,7 @@
 
 ### 修复
 
-- `jkit-sql`：经典 Oracle 对带 `ORDER BY` 的 UNION / INTERSECT / EXCEPT / MINUS 做 ROWNUM 分页时，先包成 `SELECT * FROM (set-op) ORDER BY …` 再套 ROWNUM，避免子查询里对集合运算列别名排序报 `ORA-00904`。
+- `jkit-sql`：经典 Oracle 对带 `ORDER BY` 的 UNION / INTERSECT / EXCEPT / MINUS 做 ROWNUM 分页时，先包成 `SELECT * FROM (set-op) ORDER BY …` 再套 ROWNUM，避免子查询里对集合运算列别名排序报 `ORA-00904`。双层包装外层只投影原查询列，不再把中间层的 `RN` 输出给调用方（原查询为 `SELECT *` 时仍会带出 `RN`）。
 - `jkit-sql`：`SqlNode.toString()` 默认按 MySQL 回写标识符引号（反引号），与 `SQL.toSqlString` 一致；不再误用 ANSI 双引号。`addComment("正文")` / 紧凑模式下的 `--` 行注释会包成合法块注释，避免把后续 SQL 拼成普通文本或整句注释掉。`addHint` 对未包装的正文补 slash-star-plus。跨方言仍用 `SQL.toSqlString(stmt, dialect)`。
 - `jkit-sql-auto`：`SqlAutoInspector` 判断表是否存在时补上 schema。未配置时从 `Connection.getSchema()` 取；无连接（dry-run）或驱动不支持时从 JDBC URL 解析。PostgreSQL / Gauss 缺省 `public`，SQL Server 缺省 `dbo`，Oracle / 达梦回落用户名。避免把其它 schema 下的同名表误判为已存在，或对本库缺失表发出 ALTER。
 - `jkit-curl-codegen`：curl 解析告警（如 `未支持的选项 --digest，已跳过`）此前在生成路径全部丢失，现合入 `GeneratedCode.notes()` 最前面，生成结果不再静默吞掉提示。

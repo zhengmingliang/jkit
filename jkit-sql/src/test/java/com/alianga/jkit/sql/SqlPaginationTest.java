@@ -138,8 +138,25 @@ public class SqlPaginationTest {
         assertTrue(sql, compact.contains("RN>5"));
         assertTrue("ORDER BY must sit on SELECT * FROM (union), not a UNION branch",
                 compact.contains(")ORDERBYMETRIC_GROUP"));
+        assertTrue("outer select must project original columns, not RN",
+                compact.startsWith("SELECTMETRIC_GROUP"));
+        assertFalse("outer select must not be SELECT * (would leak RN)",
+                compact.startsWith("SELECT*FROM"));
         assertEquals(Long.valueOf(5L), SQL.getLimit(page));
         assertEquals(Long.valueOf(5L), SQL.getOffset(page));
+        SQL.parse(sql, SqlDialect.ORACLE);
+    }
+
+    @Test
+    public void setPageOracleNestedDoesNotProjectRn() {
+        SqlStatement page = SQL.setPage(
+                SQL.parse("SELECT id, name FROM emp", SqlDialect.ORACLE), 2, 8, SqlDialect.ORACLE);
+        String sql = SQL.toSqlString(page, SqlDialect.ORACLE);
+        String compact = sql.toUpperCase().replaceAll("\\s+", "");
+        assertTrue(sql, compact.startsWith("SELECTID,NAMEFROM("));
+        assertTrue(sql, compact.contains("ROWNUMASRN") || compact.contains("ASRN"));
+        SqlSelect select = (SqlSelect) page;
+        assertEquals(2, select.selectItems().size());
         SQL.parse(sql, SqlDialect.ORACLE);
     }
 

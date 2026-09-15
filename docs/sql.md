@@ -312,7 +312,7 @@ SqlStatement out = SQL.rewrite(stmt, SqlRewrites.create()
 
 - **offset=0**：单层子查询  
   `SELECT * FROM ( <原查询> ) XX WHERE ROWNUM <= n`
-- **offset>0**：双层（中层别名 `XX` 选出 `ROWNUM AS RN` 并截 `ROWNUM <= offset+n`，外层别名 `XXX` 再滤 `RN > offset`）
+- **offset>0**：双层（中层别名 `XX` 选出 `ROWNUM AS RN` 并截 `ROWNUM <= offset+n`，外层别名 `XXX` 再滤 `RN > offset`）。外层只投影原查询列，不输出 `RN`；原查询是 `SELECT *` 时仍 `SELECT *`（会带出 `RN`）
 
 `WITH` 留在外层。集合运算（`UNION` / `INTERSECT` / `EXCEPT` / `MINUS`）若带 `ORDER BY`，会先改写成 `SELECT * FROM (set-op) ORDER BY …` 再套 ROWNUM，避免 Oracle 在子查询里对集合运算列别名排序报 `ORA-00904`。`setPage` / `setLimit` / `adaptPagination` 转经典 Oracle 时会先清掉子查询内残留的旧 LIMIT/TOP，避免包装后内层还带着源方言分页。回写请带目标方言：`SQL.toSqlString(page, SqlDialect.ORACLE)`；默认 `toSqlString(page)` 按 MySQL 会把 ROWNUM 再翻成 `LIMIT`。
 
