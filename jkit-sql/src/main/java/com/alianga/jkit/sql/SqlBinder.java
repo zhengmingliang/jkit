@@ -98,8 +98,7 @@ public final class SqlBinder {
     private static SqlPlaceholderPattern[] defaultNamedWraps() {
         SqlPlaceholders p = SqlPlaceholders.create()
                 .atWrapped()
-                .add("#{*}")
-                .add("${*}")
+                .mybatis()
                 .add("{{*}}")
                 .angle()
                 .arrowAngle();

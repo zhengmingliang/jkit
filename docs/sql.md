@@ -123,6 +123,7 @@ common-model 一类**模板 SQL**会用 `@age@`、`%s`、`<sheet>`、`<-sheet->`
 SqlParseOptions opt = SqlParseOptions.defaults()
         .placeholders(SqlPlaceholders.create()
                 .atWrapped()    // @name@
+                .mybatis()      // #{id} / ${table}
                 .printf()       // %s / %d / %f …
                 .angle()        // <sheet>
                 .arrowAngle()   // <-sheet->
@@ -133,13 +134,15 @@ SqlStatement stmt = SQL.parse(
         SqlDialect.MYSQL, opt);
 ```
 
-也可用 `SqlPlaceholders.create().commonModelTemplates()` 一次打开上述四类内置预设。
+也可用 `SqlPlaceholders.create().commonModelTemplates()` 一次打开 common-model 四类预设；
+`SqlPlaceholders.create().mybatis()` 打开 MyBatis 的 `#{property}` / `${property}`（含 `#{id,jdbcType=VARCHAR}`）。
 
 规则摘要：
 
 | 模式 | 含义 | 词法结果 |
 |------|------|----------|
 | `@*@` | 前后 `@` 包裹的标识体 | `IDENT`（可作列/值原子） |
+| `#{*}` / `${*}` | MyBatis 参数 / 字面量（`mybatis()`） | `IDENT`；bind 时 `#{id,jdbcType=…}` 按 `id` 取值 |
 | printf | `%` + 一个字母 | `IDENT` |
 | `<*>` / `<-*->` | 表名占位（允许 `.` `-`） | `IDENT`（可作表名） |
 | 自定义 <code v-pre>{{*}}</code> 等 | 非空前后缀 + 正文 | `IDENT` |
@@ -333,7 +336,7 @@ String out = SQL.bindNamed(
         "SELECT * FROM #{table} WHERE name = :name AND :nameKey > 2 OR nick = @name@",
         SqlDialect.MYSQL,
         SqlParseOptions.defaults().placeholders(
-                SqlPlaceholders.create().commonModelTemplates().add("#{*}")),
+                SqlPlaceholders.create().commonModelTemplates().mybatis()),
         vals);
 // SELECT * FROM users WHERE name = 'bob' AND LENGTH(name) > 2 OR nick = 'bob'
 

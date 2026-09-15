@@ -123,6 +123,7 @@ Invalid SQL throws `SqlParseException` with line number, column number, and near
 SqlParseOptions opt = SqlParseOptions.defaults()
         .placeholders(SqlPlaceholders.create()
                 .atWrapped()    // @name@
+                .mybatis()      // #{id} / ${table}
                 .printf()       // %s / %d / %f …
                 .angle()        // <sheet>
                 .arrowAngle()   // <-sheet->
@@ -133,13 +134,15 @@ SqlStatement stmt = SQL.parse(
         SqlDialect.MYSQL, opt);
 ```
 
-You can also use `SqlPlaceholders.create().commonModelTemplates()` to enable all four built-in presets above at once.
+You can also use `SqlPlaceholders.create().commonModelTemplates()` to enable the four common-model presets at once;
+`SqlPlaceholders.create().mybatis()` enables MyBatis `#{property}` / `${property}` (including `#{id,jdbcType=VARCHAR}`).
 
 Rule summary:
 
 | Pattern | Meaning | Lexer result |
 |------|------|----------|
 | `@*@` | identifier body wrapped in `@` on both sides | `IDENT` (usable as a column/value atom) |
+| `#{*}` / `${*}` | MyBatis parameter / literal (`mybatis()`) | `IDENT`; bind uses `id` for `#{id,jdbcType=…}` |
 | printf | `%` + one letter | `IDENT` |
 | `<*>` / `<-*->` | table-name placeholder (allows `.` and `-`) | `IDENT` (usable as a table name) |
 | custom <code v-pre>{{*}}</code> etc. | non-empty prefix/suffix + body | `IDENT` |
@@ -329,7 +332,7 @@ String out = SQL.bindNamed(
         "SELECT * FROM #{table} WHERE name = :name AND :nameKey > 2 OR nick = @name@",
         SqlDialect.MYSQL,
         SqlParseOptions.defaults().placeholders(
-                SqlPlaceholders.create().commonModelTemplates().add("#{*}")),
+                SqlPlaceholders.create().commonModelTemplates().mybatis()),
         vals);
 
 SqlWallResult wall = SQL.wall(sql); // parsing is not intercepted by default; call explicitly

@@ -64,7 +64,7 @@ public class SqlBinderTest {
         vals.put("age", 20);
         vals.put("table", "users");
         SqlParseOptions opt = SqlParseOptions.defaults()
-                .placeholders(SqlPlaceholders.create().commonModelTemplates().add("#{*}"));
+                .placeholders(SqlPlaceholders.create().commonModelTemplates().mybatis());
         String sql = SQL.bindNamed(
                 "SELECT * FROM #{table} WHERE name = :name AND age = :age AND "
                         + ":nameKey > 2 OR nick_name = @name@",
@@ -85,7 +85,7 @@ public class SqlBinderTest {
     public void numericTablePlaceholderIsQuotedIdent() {
         Map<String, Object> vals = Collections.<String, Object>singletonMap("table", 20);
         SqlParseOptions opt = SqlParseOptions.defaults()
-                .placeholders(SqlPlaceholders.create().add("#{*}"));
+                .placeholders(SqlPlaceholders.create().mybatis());
         String sql = SQL.bindNamed("SELECT * FROM #{table}", SqlDialect.MYSQL, opt, vals);
         assertTrue(sql, sql.contains("`20`"));
         assertFalse(sql, sql.contains("#{table}"));
@@ -95,11 +95,28 @@ public class SqlBinderTest {
     public void tablePlaceholderRejectsSqlInjection() {
         Map<String, Object> vals = Collections.<String, Object>singletonMap("table", "t; DROP TABLE x");
         SqlParseOptions opt = SqlParseOptions.defaults()
-                .placeholders(SqlPlaceholders.create().add("#{*}"));
+                .placeholders(SqlPlaceholders.create().mybatis());
         String sql = SQL.bindNamed("SELECT * FROM #{table}", SqlDialect.MYSQL, opt, vals);
         assertEquals(1, SQL.parseAll(sql).size());
         assertTrue(sql, sql.contains("`"));
         assertFalse(sql.toUpperCase().contains("DROP TABLE X") && !sql.contains("`"));
+    }
+
+    @Test
+    public void mybatisJdbcTypeBindsByPropertyName() {
+        Map<String, Object> vals = new LinkedHashMap<String, Object>();
+        vals.put("id", 7);
+        vals.put("table", "t_user");
+        SqlParseOptions opt = SqlParseOptions.defaults()
+                .placeholders(SqlPlaceholders.create().mybatis());
+        String sql = SQL.bindNamed(
+                "SELECT * FROM ${table} WHERE id = #{id, jdbcType=INTEGER}",
+                SqlDialect.MYSQL, opt, vals);
+        assertTrue(sql, sql.contains("FROM t_user") || sql.contains("FROM `t_user`"));
+        assertTrue(sql, sql.contains("id = 7"));
+        assertFalse(sql, sql.contains("#{id"));
+        assertFalse(sql, sql.contains("${table}"));
+        SQL.parse(sql, SqlDialect.MYSQL);
     }
 
     @Test

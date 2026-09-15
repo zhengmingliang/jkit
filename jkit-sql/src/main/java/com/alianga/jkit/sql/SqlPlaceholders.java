@@ -12,6 +12,7 @@ import java.util.List;
  * SqlParseOptions opt = SqlParseOptions.defaults()
  *         .placeholders(SqlPlaceholders.create()
  *                 .atWrapped()   // @age@
+ *                 .mybatis()     // #{id} / ${table}
  *                 .printf()      // %s / %d …
  *                 .angle()       // <sheet>
  *                 .arrowAngle()  // <-sheet->
@@ -111,6 +112,37 @@ public final class SqlPlaceholders {
     }
 
     /**
+     * 内置：MyBatis {@code #{property}}（预编译参数）。
+     * 也接受 {@code #{id,jdbcType=VARCHAR}}、{@code #{item.name}}。
+     *
+     * @return this
+     * @since 2.0.2
+     */
+    public SqlPlaceholders hashBrace() {
+        return add("#{*}");
+    }
+
+    /**
+     * 内置：MyBatis {@code ${property}}（字面量替换，常用于表名）。
+     *
+     * @return this
+     * @since 2.0.2
+     */
+    public SqlPlaceholders dollarBrace() {
+        return add("${*}");
+    }
+
+    /**
+     * MyBatis 常用组合：{@code #{*}} + {@code ${*}}。
+     *
+     * @return this
+     * @since 2.0.2
+     */
+    public SqlPlaceholders mybatis() {
+        return hashBrace().dollarBrace();
+    }
+
+    /**
      * common-model 审计 B 类常用组合：{@code @*@} + printf + {@code <*>} + {@code <-*->}。
      *
      * @return this
@@ -142,6 +174,12 @@ public final class SqlPlaceholders {
         }
         if ("<-".equals(prefix) && "->".equals(suffix)) {
             return SqlPlaceholderPattern.BodyClass.SHEET;
+        }
+        if ("#{".equals(prefix) && "}".equals(suffix)) {
+            return SqlPlaceholderPattern.BodyClass.MYBATIS;
+        }
+        if ("${".equals(prefix) && "}".equals(suffix)) {
+            return SqlPlaceholderPattern.BodyClass.MYBATIS;
         }
         return SqlPlaceholderPattern.BodyClass.ANY_NON_WS;
     }

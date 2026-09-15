@@ -103,6 +103,29 @@ public class SqlTemplatePlaceholderTest {
     }
 
     @Test
+    public void mybatisHashAndDollar() {
+        SqlPlaceholders ph = SqlPlaceholders.create().mybatis();
+        SqlStatement stmt = parseEnabled(
+                "SELECT * FROM ${table} WHERE id = #{id} AND name = #{user.name}", ph);
+        assertEquals(SqlStatementType.SELECT, stmt.type());
+        assertEquals("${table}", SQL.tables(stmt).get(0));
+    }
+
+    @Test
+    public void mybatisJdbcTypeSuffixParses() {
+        SqlStatement stmt = parseEnabled(
+                "SELECT * FROM t WHERE id = #{id, jdbcType=VARCHAR}",
+                SqlPlaceholders.create().hashBrace());
+        assertEquals(SqlStatementType.SELECT, stmt.type());
+    }
+
+    @Test
+    public void defaultRejectsMybatis() {
+        assertFails("SELECT * FROM t WHERE id = #{id}");
+        assertFails("SELECT * FROM ${table}");
+    }
+
+    @Test
     public void customMustachePattern() {
         SqlStatement stmt = parseEnabled(
                 "select id from {{users}} where name = {{name}}",
