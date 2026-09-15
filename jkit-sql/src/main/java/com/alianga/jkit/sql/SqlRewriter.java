@@ -232,7 +232,8 @@ public final class SqlRewriter {
 
     /**
      * 把裸 SELECT（含 UNION 链）包成 ROWNUM 分页；offset=0 用单层，否则双层。
-     * WITH 留在外层。
+     * WITH 留在外层。集合运算若带 ORDER BY，先提到 {@code SELECT * FROM (set-op)} 外包，
+     * 避免 Oracle 在子查询里对 UNION 列别名 ORDER BY 报 ORA-00904。
      */
     private static void wrapOracleRownum(SqlSelect root, long offset, long rowCount) {
         long off = offset < 0L ? 0L : offset;
@@ -246,6 +247,7 @@ public final class SqlRewriter {
         if (coreOwner.limit() != null || coreOwner.top() != null) {
             clearPagination(coreOwner);
         }
+        core = liftSetOpOrderBy(core);
         if (off == 0L) {
             wrapOracleRownumOffset0(root, core, end);
             return;
@@ -274,6 +276,29 @@ public final class SqlRewriter {
         root.addSelectItem(outerStar);
         root.setFrom(outerFrom);
         root.setWhere(SqlBinaryExpr.of(ID_RN, SqlBinaryOp.GT, number(off)));
+    }
+
+    /**
+     * Oracle 子查询中的 UNION/INTERSECT/EXCEPT/MINUS 不能直接 ORDER BY 列别名（ORA-00904）。
+     * 把末端 ORDER BY 提到外包一层 {@code SELECT * FROM (set-op) ORDER BY …}。
+     */
+    private static SqlSelect liftSetOpOrderBy(SqlSelect core) {
+        if (core == null || core.union() == null) {
+            return core;
+        }
+        SqlSelect owner = paginationOwner(core);
+        if (owner.orderBy().isEmpty()) {
+            return core;
+        }
+        SqlSelect lifted = new SqlSelect();
+        SqlSelectItem star = new SqlSelectItem();
+        star.setExpr(new SqlAllColumns());
+        lifted.addSelectItem(star);
+        SqlSubqueryTable from = new SqlSubqueryTable();
+        from.setQuery(core);
+        lifted.setFrom(from);
+        moveList(owner.orderBy(), lifted.orderBy());
+        return lifted;
     }
 
     /** offset=0：单层 {@code SELECT * FROM (core) XX WHERE ROWNUM <= end}。 */

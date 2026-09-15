@@ -22,6 +22,7 @@ Unreleased changes are appended to the **current version** section (currently 2.
 
 ### Fixed
 
+- `jkit-sql`: classic Oracle ROWNUM pagination of a UNION / INTERSECT / EXCEPT / MINUS that has an `ORDER BY` now wraps as `SELECT * FROM (set-op) ORDER BY …` before the ROWNUM layers, so Oracle does not raise `ORA-00904` when ordering a set-op by column aliases inside a subquery.
 - `jkit-sql`: `SqlNode.toString()` now uses MySQL identifier quotes (backticks) by default, matching `SQL.toSqlString`. `addComment("text")` and compact `--` line comments are emitted as block comments so they cannot swallow the following statement. Bare `addHint` text is wrapped as a slash-star-plus hint. Use `SQL.toSqlString(stmt, dialect)` for another dialect.
 - `jkit-sql-auto`: `SqlAutoInspector` now resolves schema when checking whether a table exists. If unset, it uses `Connection.getSchema()`; with no connection (dry-run) or an unsupported driver, it parses the JDBC URL. PostgreSQL / Gauss default to `public`, SQL Server to `dbo`, Oracle / Dameng fall back to the username. This avoids treating a same-named table in another schema as present, or emitting ALTER for a table missing from the current schema.
 - `jkit-curl-codegen`: curl parse warnings (e.g. "unsupported option --digest, skipped") were dropped on the generation path; they are now merged at the front of `GeneratedCode.notes()`, ahead of the generator's own notes.
@@ -40,6 +41,7 @@ Unreleased changes are appended to the **current version** section (currently 2.
 
 ### Documentation
 
+- `docs/sql.md` / `docs/en/sql.md`: classic Oracle ROWNUM wrapping now documents lifting `ORDER BY` off a set-op before pagination, and that `toSqlString` must name the target dialect.
 - `docs/sql.md` / `docs/en/sql.md` business-scenario section: extra copy-paste samples for `bind` / `inject` / `expandStar`+`replaceSelectItems` / `addComment`+dialect quotes / MyBatis `#{}/ ${}`. The template-placeholder section now shows the common parse+bind pattern. Samples match `SqlBusinessScenarioTest`.
 - Business scenarios expanded to 18 (2.0.2): dialect-from-URL (`JdbcUrlUtils`), report `DATE_FORMAT` rewrite, safe dynamic table-name bind, low-code query sandbox (Wall table allow/deny, required WHERE columns, max tables). Scenario 4 also covers tautology `LIKE '%'` / `XOR`.
 

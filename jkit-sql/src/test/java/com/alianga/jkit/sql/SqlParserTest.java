@@ -139,6 +139,94 @@ public class SqlParserTest {
         System.out.println(select.limit());
         System.out.println(SQL.toSqlString(statement));
     }
+    @Test
+    public void parseComplicateSql2() {
+        String
+        sql = "WITH ec AS (\n" +
+                "    SELECT ROUND(SUM(o.pay_amount), 2)                                   AS gmv_30d,\n" +
+                "           COUNT(*)                                                      AS orders_30d,\n" +
+                "           COUNT(DISTINCT o.customer_id)                                 AS cust_30d,\n" +
+                "           ROUND(SUM(o.discount_amount), 2)                              AS discount_30d\n" +
+                "    FROM orders o\n" +
+                "    WHERE o.status = 'completed' AND o.order_date >= (TRUNC(SYSDATE) - INTERVAL '30' DAY)\n" +
+                "),\n" +
+                "fn AS (\n" +
+                "    SELECT ROUND(SUM(a.balance), 2)                                      AS deposit_total,\n" +
+                "           COUNT(DISTINCT a.cust_id)                                     AS fin_cust,\n" +
+                "           ROUND(SUM(CASE WHEN l.status = 'overdue' THEN l.loan_amount ELSE 0 END) * 100.0\n" +
+                "                 / NULLIF(SUM(l.loan_amount), 0), 2)                     AS npl_pct\n" +
+                "    FROM accounts a\n" +
+                "    LEFT JOIN loans l ON a.cust_id = l.cust_id\n" +
+                "),\n" +
+                "hr AS (\n" +
+                "    SELECT SUM(CASE WHEN e.status = 'active' THEN 1 ELSE 0 END)          AS headcount,\n" +
+                "           ROUND(AVG(CASE WHEN e.status = 'active' THEN e.salary END), 2) AS avg_salary,\n" +
+                "           SUM(CASE WHEN e.leave_date >= (TRUNC(SYSDATE) - INTERVAL '365' DAY) THEN 1 ELSE 0 END) AS left_1y\n" +
+                "    FROM employees e\n" +
+                "),\n" +
+                "pf AS (\n" +
+                "    SELECT ROUND(AVG(score), 2) AS avg_perf FROM performance\n" +
+                ")\n" +
+                "SELECT 'revenue'                                                         AS metric_group,\n" +
+                "       'gmv_30d'                                                         AS metric_name,\n" +
+                "       e.gmv_30d                                                         AS metric_value,\n" +
+                "       ROUND(e.gmv_30d / NULLIF(e.orders_30d, 0), 2)                     AS derived_aov\n" +
+                "FROM ec e\n" +
+                "UNION ALL\n" +
+                "SELECT 'revenue', 'orders_30d', e.orders_30d,\n" +
+                "       ROUND(e.orders_30d * 1.0 / NULLIF(e.cust_30d, 0), 3)\n" +
+                "FROM ec e\n" +
+                "UNION ALL\n" +
+                "SELECT 'cost', 'discount_30d', e.discount_30d,\n" +
+                "       ROUND(e.discount_30d * 100.0 / NULLIF(e.gmv_30d, 0), 2)\n" +
+                "FROM ec e\n" +
+                "UNION ALL\n" +
+                "SELECT 'finance', 'deposit_total', f.deposit_total,\n" +
+                "       ROUND(f.deposit_total / NULLIF(f.fin_cust, 0), 2)\n" +
+                "FROM fn f\n" +
+                "UNION ALL\n" +
+                "SELECT 'risk', 'npl_pct', f.npl_pct, NULL FROM fn f\n" +
+                "UNION ALL\n" +
+                "SELECT 'hr', 'headcount', h.headcount, h.avg_salary FROM hr h\n" +
+                "UNION ALL\n" +
+                "SELECT 'hr', 'left_1y', h.left_1y,\n" +
+                "       ROUND(h.left_1y * 100.0 / NULLIF(h.headcount, 0), 2)\n" +
+                "FROM hr h\n" +
+                "UNION ALL\n" +
+                "SELECT 'hr', 'avg_perf', p.avg_perf, NULL FROM pf p\n" +
+                "UNION ALL\n" +
+                "SELECT 'efficiency', 'gmv_per_head',\n" +
+                "       ROUND(e.gmv_30d / NULLIF(h.headcount, 0), 2),\n" +
+                "       ROUND(e.gmv_30d / NULLIF(h.headcount, 0) * 12.0, 2)\n" +
+                "FROM ec e\n" +
+                "CROSS JOIN hr h\n" +
+                "ORDER BY metric_group, metric_name;";
+        SqlStatement statement = SQL.parse(sql, SqlDialect.ORACLE);
+
+        SqlSchemaStat stat = SQL.stat(statement);
+        Set<String> columns = stat.getColumns();
+        System.out.println("columns = " + columns);
+        List<String> conditions = stat.getConditions();
+        List<String> groupByColumns = stat.getGroupByColumns();
+        List<String> orderByColumns = stat.getOrderByColumns();
+        System.out.println("conditions = " + conditions);
+        System.out.println("groupByColumns = " + groupByColumns);
+        System.out.println("orderByColumns = " + orderByColumns);
+        SqlStatement paged = SQL.setPage(statement, 2, 5, SqlDialect.ORACLE);
+        String oraclePage = SQL.toSqlString(paged, SqlDialect.ORACLE);
+        System.out.println(oraclePage);
+        String compact = oraclePage.toUpperCase().replaceAll("\\s+", "");
+        assertTrue(oraclePage, compact.contains("ROWNUM<=10"));
+        assertTrue(oraclePage, compact.contains("RN>5"));
+        assertFalse("must not emit MySQL LIMIT for Oracle page", compact.contains("LIMIT"));
+        // UNION 的 ORDER BY 必须提到 SELECT * FROM (set-op) 外包，否则 Oracle ORA-00904
+        assertTrue("ORDER BY must follow the UNION subquery close, not a UNION branch",
+                compact.contains(")ORDERBYMETRIC_GROUP"));
+        assertEquals(Long.valueOf(5L), SQL.getLimit(paged));
+        assertEquals(Long.valueOf(5L), SQL.getOffset(paged));
+        assertFalse("setPage must clone", ((SqlSelect) statement).from() instanceof SqlSubqueryTable);
+        SQL.parse(oraclePage, SqlDialect.ORACLE);
+    }
 
     /**
      * INSERT / UPDATE / DELETE。

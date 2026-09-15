@@ -304,7 +304,7 @@ SqlStatement out = SQL.rewrite(stmt, SqlRewrites.create()
 | ORACLE12 | 双引号 | 拼接 | 否 | 裸 SELECT → `OFFSET … FETCH FIRST … ROWS ONLY`；已有 ROWNUM 包装仍识别 |
 | DB2 | 双引号 | 拼接 | 否 | 仅 `FETCH FIRST n ROWS ONLY` |
 
-已存在的 Oracle `ROWNUM` 双层 / `WHERE ROWNUM <= n` 与 SQL Server `row_number` 包装：`getLimit` 返回页大小，`setPage` / `setLimit` 只改数值边界（不叠 OFFSET/FETCH）。经典单层 ROWNUM 在 offset>0 时扩成双层。UNION 的分页挂在集合运算链末端。`SqlBuilder.limit` / `offset` / `toSql(dialect)` 走同一套改写（`toSql` 的方言覆盖 builder 方言）。
+已存在的 Oracle `ROWNUM` 双层 / `WHERE ROWNUM <= n` 与 SQL Server `row_number` 包装：`getLimit` 返回页大小，`setPage` / `setLimit` 只改数值边界（不叠 OFFSET/FETCH）。经典单层 ROWNUM 在 offset>0 时扩成双层。UNION 的分页挂在集合运算链末端（`LIMIT` / `OFFSET FETCH` 方言）；经典 Oracle 的 ROWNUM 包装见下一小节。`SqlBuilder.limit` / `offset` / `toSql(dialect)` 走同一套改写（`toSql` 的方言覆盖 builder 方言）。
 
 ### 经典 Oracle 的 ROWNUM 包装
 
@@ -314,7 +314,7 @@ SqlStatement out = SQL.rewrite(stmt, SqlRewrites.create()
   `SELECT * FROM ( <原查询> ) XX WHERE ROWNUM <= n`
 - **offset>0**：双层（中层别名 `XX` 选出 `ROWNUM AS RN` 并截 `ROWNUM <= offset+n`，外层别名 `XXX` 再滤 `RN > offset`）
 
-`WITH` 留在外层。`setPage` / `setLimit` / `adaptPagination` 转经典 Oracle 时会先清掉子查询内残留的旧 LIMIT/TOP，避免包装后内层还带着源方言分页。
+`WITH` 留在外层。集合运算（`UNION` / `INTERSECT` / `EXCEPT` / `MINUS`）若带 `ORDER BY`，会先改写成 `SELECT * FROM (set-op) ORDER BY …` 再套 ROWNUM，避免 Oracle 在子查询里对集合运算列别名排序报 `ORA-00904`。`setPage` / `setLimit` / `adaptPagination` 转经典 Oracle 时会先清掉子查询内残留的旧 LIMIT/TOP，避免包装后内层还带着源方言分页。回写请带目标方言：`SQL.toSqlString(page, SqlDialect.ORACLE)`；默认 `toSqlString(page)` 按 MySQL 会把 ROWNUM 再翻成 `LIMIT`。
 
 `format` / `toSqlString(..., ORACLE)` 对「offset=0 的 LIMIT/TOP → 单层 ROWNUM」走同一语义的快路径：临时清掉 LIMIT/TOP，按上面的子查询包装回写，再恢复入参（不永久改 AST）。有 offset 时走完整 `adaptPagination`。
 
@@ -956,6 +956,11 @@ SqlStatement page = SQL.setPage(
         SQL.parse("SELECT * FROM emp"), 2, 8, SqlDialect.ORACLE);
 // 双层 RN，不含 OFFSET/FETCH
 SQL.parse(SQL.toSqlString(page, SqlDialect.ORACLE), SqlDialect.ORACLE);
+
+// UNION + ORDER BY：先 SELECT * FROM (set-op) ORDER BY，再套 ROWNUM
+SqlStatement unionPage = SQL.setPage(SQL.parse(
+        "SELECT a FROM t1 UNION ALL SELECT a FROM t2 ORDER BY a"), 2, 5, SqlDialect.ORACLE);
+SQL.toSqlString(unionPage, SqlDialect.ORACLE);
 
 // 已有 MySQL LIMIT 的 AST，按目标方言回写或显式适配
 SqlStatement mysql = SQL.parse("SELECT * FROM emp LIMIT 10");
