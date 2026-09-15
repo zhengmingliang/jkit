@@ -7,6 +7,8 @@ import com.alianga.jkit.sql.entity.SqlEntities;
 import com.alianga.jkit.sql.entity.SqlGenerated;
 import com.alianga.jkit.sql.entity.SqlId;
 import com.alianga.jkit.sql.entity.SqlTable;
+import com.alianga.jkit.sql.jdbc.JdbcUrlInfo;
+import com.alianga.jkit.sql.jdbc.JdbcUrlUtils;
 import com.alianga.jkit.sql.schema.convert.ConversionResult;
 
 import org.junit.Test;
@@ -41,6 +43,11 @@ import static org.junit.Assert.assertTrue;
  *   <li>SQL 格式化与规范统一</li>
  *   <li>遗留模板占位符迁移（含 MyBatis）</li>
  *   <li>表达式预计算（规则引擎 / 预览）</li>
+ *   <li>安全改写不污染原语句</li>
+ *   <li>多数据源方言自动识别（JdbcUrlUtils）</li>
+ *   <li>报表函数跨方言改写（DATE_FORMAT）</li>
+ *   <li>动态表名 / 分表安全绑定</li>
+ *   <li>低代码查询沙箱（Wall 表策略）</li>
  * </ol>
  *
  * @author 郑明亮
@@ -164,6 +171,10 @@ public class SqlBusinessScenarioTest {
         assertTrue(SQL.wall("UPDATE t SET a = 1").violations().contains("update-without-where"));
         assertTrue(SQL.wall("SELECT SLEEP(5) FROM t").violations().contains("dangerous-function"));
         assertTrue(SQL.wall("SELECT * FROM t WHERE name = 'x' --").violations().contains("comment-bypass"));
+        assertTrue(SQL.wall("SELECT * FROM t WHERE name LIKE '%'").violations()
+                .contains("always-true-condition"));
+        assertTrue(SQL.wall("SELECT * FROM t WHERE id = 1 XOR 1 = 1").violations()
+                .contains("always-true-condition"));
         assertTrue("合法查询应放行", SQL.wall("SELECT * FROM t WHERE id = 1").passed());
     }
 
@@ -559,5 +570,127 @@ public class SqlBusinessScenarioTest {
         SQL.setPage(original, 2, 10, SqlDialect.MYSQL);
         assertNull("clone-then-mutate：分页改写不应改动原语句",
                 ((SqlSelect) original).limit());
+    }
+
+    // ------------------------------------------------------------------
+    // 场景 15：多数据源方言自动识别——URL 推断方言 / schema / 驱动，不硬编码
+    // ------------------------------------------------------------------
+
+    @Test
+    public void jdbcUrlPicksDialectForParseAndFormat() {
+        SqlDialect dialect = JdbcUrlUtils.fromUrl(
+                "jdbc:postgresql://primary:5432/orders?currentSchema=sales");
+        assertEquals(SqlDialect.POSTGRES, dialect);
+        SqlStatement stmt = SQL.parse("SELECT id FROM t WHERE name = 'a' || 'b'", dialect);
+        String sql = SQL.toSqlString(stmt, dialect);
+        assertTrue(sql, sql.contains("||"));
+        SQL.parse(sql, dialect);
+        assertEquals(SqlDialect.DAMENG, JdbcUrlUtils.fromUrl("jdbc:dm://localhost:5236"));
+        assertEquals(SqlDialect.MYSQL, JdbcUrlUtils.fromUrl("jdbc:tidb://127.0.0.1:4000/test"));
+        assertNull(JdbcUrlUtils.fromUrl("jdbc:unknown:foo"));
+    }
+
+    @Test
+    public void jdbcUrlExposesSchemaDriverAndHaNodes() {
+        JdbcUrlInfo info = JdbcUrlUtils.parse(
+                "jdbc:postgresql://primary:5432,standby:5432/orders?currentSchema=sales");
+        assertEquals("postgresql", info.getDbType());
+        assertEquals("orders", info.getDatabaseName());
+        assertEquals("sales", info.getSchema());
+        assertEquals(2, info.getNodes().size());
+        assertEquals("dm.jdbc.driver.DmDriver", JdbcUrlUtils.driverForUrl("jdbc:dm://localhost:5236"));
+        assertEquals("public", JdbcUrlUtils.schema("jdbc:postgresql://h/db"));
+    }
+
+    // ------------------------------------------------------------------
+    // 场景 16：报表 SQL 跨方言函数改写——DATE_FORMAT 跟目标库走
+    // ------------------------------------------------------------------
+
+    @Test
+    public void reportDateFormatConvertsToPgAndOracle() {
+        String pg = SQL.convert("SELECT DATE_FORMAT(ts, '%Y-%m-%d %H:%i:%s') FROM t",
+                SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        assertTrue(pg, pg.toUpperCase().contains("TO_CHAR"));
+        assertTrue(pg, pg.contains("YYYY-MM-DD HH24:MI:SS"));
+        SQL.parse(pg, SqlDialect.POSTGRES);
+
+        String ora = SQL.convert("SELECT DATE_FORMAT(ts, '%Y-%m-%d') FROM t",
+                SqlDialect.MYSQL, SqlDialect.ORACLE);
+        assertTrue(ora, ora.contains("TO_CHAR"));
+        assertTrue(ora, ora.contains("YYYY-MM-DD"));
+        SQL.parse(ora, SqlDialect.ORACLE);
+    }
+
+    @Test
+    public void reportDateFormatConvertsToSqliteStrftime() {
+        String sql = SQL.convert("SELECT DATE_FORMAT(ts, '%Y-%m-%d %H:%i:%s') FROM t",
+                SqlDialect.MYSQL, SqlDialect.SQLITE);
+        assertTrue(sql, sql.contains("strftime"));
+        assertTrue(sql, sql.contains("%Y-%m-%d %H:%M:%S"));
+        SQL.parse(sql, SqlDialect.SQLITE);
+    }
+
+    // ------------------------------------------------------------------
+    // 场景 17：动态表名 / 分表安全绑定——表名当标识符，不进字符串字面量
+    // ------------------------------------------------------------------
+
+    @Test
+    public void dynamicTableNameBindsAsIdentifier() {
+        SqlParseOptions opt = SqlParseOptions.defaults()
+                .placeholders(SqlPlaceholders.create().mybatis());
+        Map<String, Object> vals = new LinkedHashMap<String, Object>();
+        vals.put("table", "t_user_2026");
+        vals.put("id", Integer.valueOf(1));
+        String sql = SQL.bindNamed("SELECT * FROM ${table} WHERE id = #{id}",
+                SqlDialect.MYSQL, opt, vals);
+        assertTrue(sql, sql.contains("FROM t_user_2026") || sql.contains("FROM `t_user_2026`"));
+        assertFalse("table must not become a string literal", sql.contains("FROM 't_user_2026'"));
+        SQL.parse(sql, SqlDialect.MYSQL);
+    }
+
+    @Test
+    public void numericAndHostileTableNamesStayQuotedIdentifiers() {
+        SqlParseOptions opt = SqlParseOptions.defaults()
+                .placeholders(SqlPlaceholders.create().mybatis());
+        String numeric = SQL.bindNamed("SELECT * FROM #{table}", SqlDialect.MYSQL, opt,
+                Collections.<String, Object>singletonMap("table", Integer.valueOf(10086)));
+        assertTrue(numeric, numeric.contains("`10086`"));
+        SQL.parse(numeric, SqlDialect.MYSQL);
+
+        String hostile = SQL.bindNamed("SELECT * FROM #{table}", SqlDialect.MYSQL, opt,
+                Collections.<String, Object>singletonMap("table", "t; DROP TABLE x"));
+        assertEquals(1, SQL.parseAll(hostile).size());
+        assertTrue(hostile, hostile.contains("`"));
+        SQL.parse(hostile, SqlDialect.MYSQL);
+    }
+
+    // ------------------------------------------------------------------
+    // 场景 18：低代码查询沙箱——表白名单、WHERE 必含列、表数量上限
+    // ------------------------------------------------------------------
+
+    @Test
+    public void sandboxAllowAndDenyTables() {
+        SqlWallConfig cfg = SqlWallConfig.defaults()
+                .allowTables("t_order", "t_item")
+                .denyTables("mysql.user", "secret");
+        assertTrue(SQL.wall("SELECT id FROM t_order o JOIN t_item i ON o.id = i.oid",
+                SqlDialect.MYSQL, cfg).passed());
+        assertTrue(SQL.wall("SELECT id FROM t_user", SqlDialect.MYSQL, cfg).violations()
+                .contains("allow-table"));
+        assertTrue(SQL.wall("SELECT * FROM secret", SqlDialect.MYSQL, cfg).violations()
+                .contains("deny-table"));
+    }
+
+    @Test
+    public void sandboxRequiresTenantColumnAndCapsJoinWidth() {
+        SqlWallConfig cfg = SqlWallConfig.defaults()
+                .requireWhereColumns("tenant_id")
+                .maxTables(2);
+        assertTrue(SQL.wall("SELECT id FROM t_order WHERE tenant_id = 1",
+                SqlDialect.MYSQL, cfg).passed());
+        assertTrue(SQL.wall("SELECT id FROM t_order", SqlDialect.MYSQL, cfg).violations()
+                .contains("missing-where-column"));
+        assertTrue(SQL.wall("SELECT * FROM a JOIN b ON a.id = b.id JOIN c ON b.id = c.id",
+                SqlDialect.MYSQL, cfg).violations().contains("too-many-tables"));
     }
 }

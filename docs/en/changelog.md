@@ -26,6 +26,7 @@ Unreleased changes are appended to the **current version** section (currently 2.
 ### Documentation
 
 - `docs/sql.md` / `docs/en/sql.md` business-scenario section: extra copy-paste samples for `bind` / `inject` / `expandStar`+`replaceSelectItems` / `addComment`+dialect quotes / MyBatis `#{}/ ${}`. The template-placeholder section now shows the common parse+bind pattern. Samples match `SqlBusinessScenarioTest`.
+- Business scenarios expanded to 18 (2.0.2): dialect-from-URL (`JdbcUrlUtils`), report `DATE_FORMAT` rewrite, safe dynamic table-name bind, low-code query sandbox (Wall table allow/deny, required WHERE columns, max tables). Scenario 4 also covers tautology `LIKE '%'` / `XOR`.
 
 ## 2.0.1 - 2026-09-13
 

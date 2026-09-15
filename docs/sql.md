@@ -751,7 +751,7 @@ mvn -Dtest=ExternalSqlCorpusCompareTest test
 
 ## 业务场景与实践案例
 
-`jkit-sql` 的能力可以落在下面 14 类业务场景里，每类配至少两个最佳实践案例。所有片段都取自
+`jkit-sql` 的能力可以落在下面 18 类业务场景里，每类配至少两个最佳实践案例。所有片段都取自
 `jkit-sql/src/test/java/com/alianga/jkit/sql/SqlBusinessScenarioTest.java`，可直接运行回归：
 
 ```text
@@ -763,7 +763,7 @@ mvn -pl jkit-sql test -Dtest=SqlBusinessScenarioTest
 | 1 | SQL 审计与依赖分析 | `SQL.tables` / `SQL.stat` / `SqlStatement.isReadOnly` | 依赖提取、写操作标记 |
 | 2 | 读写分离路由 | `SqlStatement.isReadOnly` | 只读走从库、持锁 SELECT 走主库 |
 | 3 | SQL 注入防护 | `SQL.parameterize` / `SQL.bind` / `SQL.bindNamed` / `SQL.exportParameterValues` | 字面量收编、安全回填、`IN` 集合、公式 |
-| 4 | SQL 防火墙 | `SQL.wall` / `SqlWallConfig` | 表黑白名单、WHERE 必含列、表数上限 |
+| 4 | SQL 防火墙 | `SQL.wall` / `SqlWallConfig` | 危险语句、无 WHERE 写、恒真 `LIKE '%'` / `XOR` |
 | 5 | 跨方言数据库迁移 | `SQL.convertBatch` / `SqlSchemaConverter.convert` | DDL 翻译闭环、批量 DML 函数改写 |
 | 6 | 多方言分页 | `SQL.setPage` / `SQL.adaptPagination` / `SQL.toSqlString` | LIMIT/TOP/FETCH/ROWNUM、offset=0 单层包装、回写按需适配 |
 | 7 | 多租户改写 | `SQL.inject` / `SqlInjectConfig` / `SqlRewrites.replaceTable` | 全局表列配置、切面取值、分表路由 |
@@ -774,6 +774,10 @@ mvn -pl jkit-sql test -Dtest=SqlBusinessScenarioTest
 | 12 | 遗留模板占位符迁移 | `SqlPlaceholders` / `SQL.bindNamed` | `@xx@`、`%s`、MyBatis `#{}/ ${}` |
 | 13 | 表达式预计算 | `SQL.eval` | 常量折叠、列引用返回 null |
 | 14 | 安全改写不污染原语句 | `SQL.clone` / clone-then-mutate | 复用缓存原语句、分页改写不改原句 |
+| 15 | 多数据源方言自动识别 | `JdbcUrlUtils.fromUrl` / `parse` / `driverForUrl` | URL 推断方言、HA 节点 / schema / 驱动 |
+| 16 | 报表函数跨方言改写 | `SQL.convert`（`DATE_FORMAT`） | MySQL → PG/Oracle `TO_CHAR`、SQLite `strftime` |
+| 17 | 动态表名 / 分表安全绑定 | `SQL.bindNamed` + `SqlPlaceholders.mybatis()` | 表名当标识符、数字表名加引号、注入仍是一条语句 |
+| 18 | 低代码查询沙箱 | `allowTables` / `denyTables` / `requireWhereColumns` / `maxTables` | 表白名单、WHERE 必含租户列、JOIN 宽度上限 |
 
 ### 1. SQL 审计与依赖分析
 
@@ -878,6 +882,8 @@ SQL.wall("DELETE FROM t").violations();                        // [delete-withou
 SQL.wall("UPDATE t SET a = 1").violations();                   // [update-without-where]
 SQL.wall("SELECT SLEEP(5) FROM t").violations();               // [dangerous-function]
 SQL.wall("SELECT * FROM t WHERE name = 'x' --").violations();  // [comment-bypass]
+SQL.wall("SELECT * FROM t WHERE name LIKE '%'").violations();  // [always-true-condition]
+SQL.wall("SELECT * FROM t WHERE id = 1 XOR 1 = 1").violations(); // [always-true-condition]
 SQL.wall("SELECT * FROM t WHERE id = 1").passed();             // true，合法放行
 ```
 
@@ -1187,6 +1193,122 @@ SQL.toSqlString(masked).contains("name");                       // false
 SqlStatement original = SQL.parse("SELECT id FROM users WHERE status = 1");
 SQL.setPage(original, 2, 10, SqlDialect.MYSQL);
 ((SqlSelect) original).limit();                          // null，原语句无 LIMIT
+```
+
+### 15. 多数据源方言自动识别
+
+接入很多 JDBC URL 时，不要手写 `if mysql else oracle`。`JdbcUrlUtils` 不打开连接，从 URL 推断方言、库名、schema、驱动类。
+
+**案例 1：按 URL 选方言再解析 / 回写**
+
+```java
+SqlDialect dialect = JdbcUrlUtils.fromUrl(
+        "jdbc:postgresql://primary:5432/orders?currentSchema=sales");  // POSTGRES
+SqlStatement stmt = SQL.parse("SELECT id FROM t WHERE name = 'a' || 'b'", dialect);
+SQL.toSqlString(stmt, dialect);                          // PG 下 || 是拼接
+JdbcUrlUtils.fromUrl("jdbc:dm://localhost:5236");        // DAMENG
+JdbcUrlUtils.fromUrl("jdbc:tidb://127.0.0.1:4000/test"); // MYSQL
+JdbcUrlUtils.fromUrl("jdbc:unknown:foo");                // null，不会误回落 MySQL
+```
+
+**案例 2：HA 节点、schema、驱动类**
+
+```java
+JdbcUrlInfo info = JdbcUrlUtils.parse(
+        "jdbc:postgresql://primary:5432,standby:5432/orders?currentSchema=sales");
+info.getDbType();          // postgresql
+info.getDatabaseName();    // orders
+info.getSchema();          // sales
+info.getNodes().size();    // 2
+JdbcUrlUtils.driverForUrl("jdbc:dm://localhost:5236");   // dm.jdbc.driver.DmDriver
+JdbcUrlUtils.schema("jdbc:postgresql://h/db");           // public
+```
+
+### 16. 报表函数跨方言改写
+
+存量报表 SQL 里的 MySQL `DATE_FORMAT` 迁到 PG / Oracle / SQLite 时，格式符一并改写，输出可被目标方言再解析。
+
+**案例 1：MySQL → PostgreSQL / Oracle `TO_CHAR`**
+
+```java
+String pg = SQL.convert("SELECT DATE_FORMAT(ts, '%Y-%m-%d %H:%i:%s') FROM t",
+        SqlDialect.MYSQL, SqlDialect.POSTGRES);
+// SELECT TO_CHAR(ts, 'YYYY-MM-DD HH24:MI:SS') FROM t
+SQL.parse(pg, SqlDialect.POSTGRES);
+
+String ora = SQL.convert("SELECT DATE_FORMAT(ts, '%Y-%m-%d') FROM t",
+        SqlDialect.MYSQL, SqlDialect.ORACLE);
+// SELECT TO_CHAR(ts, 'YYYY-MM-DD') FROM t
+SQL.parse(ora, SqlDialect.ORACLE);
+```
+
+**案例 2：MySQL → SQLite `strftime`（参数对调，`%i` → `%M`）**
+
+```java
+String sql = SQL.convert("SELECT DATE_FORMAT(ts, '%Y-%m-%d %H:%i:%s') FROM t",
+        SqlDialect.MYSQL, SqlDialect.SQLITE);
+// SELECT strftime('%Y-%m-%d %H:%M:%S', ts) FROM t
+SQL.parse(sql, SqlDialect.SQLITE);
+```
+
+### 17. 动态表名 / 分表安全绑定
+
+按日期、租户、sheet 名拼表名时，用模板占位 + bind：表名位置写成标识符（必要时加方言引号），不会变成 `'t_user'` 字符串，恶意表名也拆不成第二条语句。
+
+**案例 1：分表名当标识符**
+
+```java
+SqlParseOptions opt = SqlParseOptions.defaults()
+        .placeholders(SqlPlaceholders.create().mybatis());
+Map<String, Object> vals = new LinkedHashMap<String, Object>();
+vals.put("table", "t_user_2026");
+vals.put("id", 1);
+String sql = SQL.bindNamed("SELECT * FROM ${table} WHERE id = #{id}",
+        SqlDialect.MYSQL, opt, vals);
+// SELECT * FROM t_user_2026 WHERE id = 1   —— 不是 FROM 't_user_2026'
+```
+
+**案例 2：数字表名加反引号；注入 payload 仍是一个标识符**
+
+```java
+SQL.bindNamed("SELECT * FROM #{table}", SqlDialect.MYSQL, opt,
+        Collections.<String, Object>singletonMap("table", 10086));
+// SELECT * FROM `10086`
+
+SQL.bindNamed("SELECT * FROM #{table}", SqlDialect.MYSQL, opt,
+        Collections.<String, Object>singletonMap("table", "t; DROP TABLE x"));
+// SELECT * FROM `t; DROP TABLE x`   —— parseAll 仍是 1 条
+```
+
+### 18. 低代码查询沙箱
+
+开放查询 / 报表设计器只能碰业务表，必须带租户列，JOIN 不能无限变宽。`SqlWallConfig.defaults()` **默认不**开表白名单（避免误杀）；沙箱显式打开。
+
+**案例 1：只允许业务表，拦截系统表**
+
+```java
+SqlWallConfig cfg = SqlWallConfig.defaults()
+        .allowTables("t_order", "t_item")
+        .denyTables("mysql.user", "secret");
+SQL.wall("SELECT id FROM t_order o JOIN t_item i ON o.id = i.oid",
+        SqlDialect.MYSQL, cfg).passed();                 // true
+SQL.wall("SELECT id FROM t_user", SqlDialect.MYSQL, cfg).violations();
+// [allow-table]
+SQL.wall("SELECT * FROM secret", SqlDialect.MYSQL, cfg).violations();
+// [deny-table]
+```
+
+**案例 2：WHERE 必含租户列，限制物理表数量**
+
+```java
+SqlWallConfig cfg = SqlWallConfig.defaults()
+        .requireWhereColumns("tenant_id")
+        .maxTables(2);
+SQL.wall("SELECT id FROM t_order WHERE tenant_id = 1", SqlDialect.MYSQL, cfg).passed();
+SQL.wall("SELECT id FROM t_order", SqlDialect.MYSQL, cfg).violations();
+// [missing-where-column]
+SQL.wall("SELECT * FROM a JOIN b ON a.id = b.id JOIN c ON b.id = c.id",
+        SqlDialect.MYSQL, cfg).violations();             // [too-many-tables]
 ```
 
 ### 新增场景的约定

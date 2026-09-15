@@ -693,7 +693,7 @@ mvn -Dtest=ExternalSqlCorpusCompareTest test
 
 ## Business Scenarios and Best Practices
 
-The capabilities of `jkit-sql` map onto the 14 business scenarios below, each with at least two best-practice
+The capabilities of `jkit-sql` map onto the 18 business scenarios below, each with at least two best-practice
 examples. Every snippet is taken from
 `jkit-sql/src/test/java/com/alianga/jkit/sql/SqlBusinessScenarioTest.java` and can be re-run directly:
 
@@ -706,7 +706,7 @@ mvn -pl jkit-sql test -Dtest=SqlBusinessScenarioTest
 | 1 | SQL auditing and dependency analysis | `SQL.tables` / `SQL.stat` / `SqlStatement.isReadOnly` | dependency extraction, write-op flagging |
 | 2 | Read/write splitting routing | `SqlStatement.isReadOnly` | read-only to replica, locking SELECT to primary |
 | 3 | SQL injection protection | `SQL.parameterize` / `SQL.bind` / `SQL.bindNamed` / `SQL.exportParameterValues` | literal harvesting, safe fill-in, `IN` lists, formulas |
-| 4 | SQL firewall | `SQL.wall` / `SqlWallConfig` | table allow/deny lists, required WHERE columns, max tables |
+| 4 | SQL firewall | `SQL.wall` / `SqlWallConfig` | dangerous statements, writes without WHERE, tautology `LIKE '%'` / `XOR` |
 | 5 | Cross-dialect database migration | `SQL.convertBatch` / `SqlSchemaConverter.convert` | DDL translation loop, batch DML function rewriting |
 | 6 | Multi-dialect pagination | `SQL.setPage` / `SQL.adaptPagination` / `SQL.toSqlString` | LIMIT/TOP/FETCH/ROWNUM, offset=0 single wrap, on-demand write-back |
 | 7 | Multi-tenant rewriting | `SQL.inject` / `SqlInjectConfig` / `SqlRewrites.replaceTable` | global table/column config, aspect values, shard routing |
@@ -717,6 +717,10 @@ mvn -pl jkit-sql test -Dtest=SqlBusinessScenarioTest
 | 12 | Legacy template placeholder migration | `SqlPlaceholders` / `SQL.bindNamed` | `@xx@`, `%s`, MyBatis `#{}/ ${}` |
 | 13 | Expression pre-evaluation | `SQL.eval` | constant folding, column refs yield null |
 | 14 | Safe rewriting without polluting the original | `SQL.clone` / clone-then-mutate | reuse cached statements, page without mutating |
+| 15 | Auto-detect dialect from datasources | `JdbcUrlUtils.fromUrl` / `parse` / `driverForUrl` | dialect from URL, HA nodes / schema / driver |
+| 16 | Report-function rewrite across dialects | `SQL.convert` (`DATE_FORMAT`) | MySQL → PG/Oracle `TO_CHAR`, SQLite `strftime` |
+| 17 | Dynamic table names / safe shard bind | `SQL.bindNamed` + `SqlPlaceholders.mybatis()` | table as identifier, quoted numeric names, injection stays one statement |
+| 18 | Low-code query sandbox | `allowTables` / `denyTables` / `requireWhereColumns` / `maxTables` | table allow-list, required tenant column, JOIN-width cap |
 
 ### 1. SQL auditing and dependency analysis
 
@@ -822,6 +826,8 @@ SQL.wall("DELETE FROM t").violations();                        // [delete-withou
 SQL.wall("UPDATE t SET a = 1").violations();                   // [update-without-where]
 SQL.wall("SELECT SLEEP(5) FROM t").violations();               // [dangerous-function]
 SQL.wall("SELECT * FROM t WHERE name = 'x' --").violations();  // [comment-bypass]
+SQL.wall("SELECT * FROM t WHERE name LIKE '%'").violations();  // [always-true-condition]
+SQL.wall("SELECT * FROM t WHERE id = 1 XOR 1 = 1").violations(); // [always-true-condition]
 SQL.wall("SELECT * FROM t WHERE id = 1").passed();             // true, legitimate query allowed
 ```
 
@@ -1131,6 +1137,122 @@ SQL.toSqlString(masked).contains("name");                       // false
 SqlStatement original = SQL.parse("SELECT id FROM users WHERE status = 1");
 SQL.setPage(original, 2, 10, SqlDialect.MYSQL);
 ((SqlSelect) original).limit();                          // null, the original has no LIMIT
+```
+
+### 15. Auto-detect dialect from datasources
+
+When you ingest many JDBC URLs, don't write `if mysql else oracle`. `JdbcUrlUtils` never opens a connection; it infers dialect, database, schema and driver class from the URL.
+
+**Example 1: pick a dialect from the URL, then parse / write back**
+
+```java
+SqlDialect dialect = JdbcUrlUtils.fromUrl(
+        "jdbc:postgresql://primary:5432/orders?currentSchema=sales");  // POSTGRES
+SqlStatement stmt = SQL.parse("SELECT id FROM t WHERE name = 'a' || 'b'", dialect);
+SQL.toSqlString(stmt, dialect);                          // || is concatenation on PG
+JdbcUrlUtils.fromUrl("jdbc:dm://localhost:5236");        // DAMENG
+JdbcUrlUtils.fromUrl("jdbc:tidb://127.0.0.1:4000/test"); // MYSQL
+JdbcUrlUtils.fromUrl("jdbc:unknown:foo");                // null — does not fall back to MySQL
+```
+
+**Example 2: HA nodes, schema, driver class**
+
+```java
+JdbcUrlInfo info = JdbcUrlUtils.parse(
+        "jdbc:postgresql://primary:5432,standby:5432/orders?currentSchema=sales");
+info.getDbType();          // postgresql
+info.getDatabaseName();    // orders
+info.getSchema();          // sales
+info.getNodes().size();    // 2
+JdbcUrlUtils.driverForUrl("jdbc:dm://localhost:5236");   // dm.jdbc.driver.DmDriver
+JdbcUrlUtils.schema("jdbc:postgresql://h/db");           // public
+```
+
+### 16. Report-function rewrite across dialects
+
+Existing report SQL that uses MySQL `DATE_FORMAT` can move to PG / Oracle / SQLite with specifiers rewritten; the output re-parses on the target dialect.
+
+**Example 1: MySQL → PostgreSQL / Oracle `TO_CHAR`**
+
+```java
+String pg = SQL.convert("SELECT DATE_FORMAT(ts, '%Y-%m-%d %H:%i:%s') FROM t",
+        SqlDialect.MYSQL, SqlDialect.POSTGRES);
+// SELECT TO_CHAR(ts, 'YYYY-MM-DD HH24:MI:SS') FROM t
+SQL.parse(pg, SqlDialect.POSTGRES);
+
+String ora = SQL.convert("SELECT DATE_FORMAT(ts, '%Y-%m-%d') FROM t",
+        SqlDialect.MYSQL, SqlDialect.ORACLE);
+// SELECT TO_CHAR(ts, 'YYYY-MM-DD') FROM t
+SQL.parse(ora, SqlDialect.ORACLE);
+```
+
+**Example 2: MySQL → SQLite `strftime` (arguments swapped, `%i` → `%M`)**
+
+```java
+String sql = SQL.convert("SELECT DATE_FORMAT(ts, '%Y-%m-%d %H:%i:%s') FROM t",
+        SqlDialect.MYSQL, SqlDialect.SQLITE);
+// SELECT strftime('%Y-%m-%d %H:%M:%S', ts) FROM t
+SQL.parse(sql, SqlDialect.SQLITE);
+```
+
+### 17. Dynamic table names / safe shard bind
+
+When the table name is a date, tenant or sheet, use a template placeholder + bind: the table slot becomes an identifier (dialect-quoted if needed), never a `'t_user'` string, and a hostile name cannot split into a second statement.
+
+**Example 1: shard table name as an identifier**
+
+```java
+SqlParseOptions opt = SqlParseOptions.defaults()
+        .placeholders(SqlPlaceholders.create().mybatis());
+Map<String, Object> vals = new LinkedHashMap<String, Object>();
+vals.put("table", "t_user_2026");
+vals.put("id", 1);
+String sql = SQL.bindNamed("SELECT * FROM ${table} WHERE id = #{id}",
+        SqlDialect.MYSQL, opt, vals);
+// SELECT * FROM t_user_2026 WHERE id = 1   — not FROM 't_user_2026'
+```
+
+**Example 2: numeric table names get backticks; injection stays one identifier**
+
+```java
+SQL.bindNamed("SELECT * FROM #{table}", SqlDialect.MYSQL, opt,
+        Collections.<String, Object>singletonMap("table", 10086));
+// SELECT * FROM `10086`
+
+SQL.bindNamed("SELECT * FROM #{table}", SqlDialect.MYSQL, opt,
+        Collections.<String, Object>singletonMap("table", "t; DROP TABLE x"));
+// SELECT * FROM `t; DROP TABLE x`   — parseAll is still 1 statement
+```
+
+### 18. Low-code query sandbox
+
+Open queries / report designers may only touch business tables, must carry a tenant column, and cannot JOIN without bound. `SqlWallConfig.defaults()` does **not** turn on table allow-lists (to avoid false positives); the sandbox enables them explicitly.
+
+**Example 1: allow business tables, deny system tables**
+
+```java
+SqlWallConfig cfg = SqlWallConfig.defaults()
+        .allowTables("t_order", "t_item")
+        .denyTables("mysql.user", "secret");
+SQL.wall("SELECT id FROM t_order o JOIN t_item i ON o.id = i.oid",
+        SqlDialect.MYSQL, cfg).passed();                 // true
+SQL.wall("SELECT id FROM t_user", SqlDialect.MYSQL, cfg).violations();
+// [allow-table]
+SQL.wall("SELECT * FROM secret", SqlDialect.MYSQL, cfg).violations();
+// [deny-table]
+```
+
+**Example 2: require a tenant column in WHERE, cap physical tables**
+
+```java
+SqlWallConfig cfg = SqlWallConfig.defaults()
+        .requireWhereColumns("tenant_id")
+        .maxTables(2);
+SQL.wall("SELECT id FROM t_order WHERE tenant_id = 1", SqlDialect.MYSQL, cfg).passed();
+SQL.wall("SELECT id FROM t_order", SqlDialect.MYSQL, cfg).violations();
+// [missing-where-column]
+SQL.wall("SELECT * FROM a JOIN b ON a.id = b.id JOIN c ON b.id = c.id",
+        SqlDialect.MYSQL, cfg).violations();             // [too-many-tables]
 ```
 
 ### Convention for adding scenarios
