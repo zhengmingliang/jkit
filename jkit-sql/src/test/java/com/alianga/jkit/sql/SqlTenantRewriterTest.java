@@ -277,6 +277,29 @@ public class SqlTenantRewriterTest {
     }
 
     @Test
+    public void orWhereIsParenthesizedSoTenantIsNotBypassed() {
+        // 高危回归：原 WHERE 含 OR 时，租户条件必须整体包住 OR，否则 (b=2 AND tenant) OR a=1 越权
+        SqlStatement out = inject(
+                "SELECT id FROM t_order WHERE status = 'X' OR owner = 'me'", 5, "t_order");
+        String n = norm(sql(out));
+        assertTrue(n, n.contains("tenant_id = 5"));
+        assertTrue("OR 分支必须整体套括号，否则租户条件被绕过", n.contains("(status = 'X' OR owner = 'me')"));
+        assertValid(out, SqlDialect.MYSQL);
+        // 重新解析后语义不变：tenant 与 (OR) 同级 AND
+        SqlStatement reparsed = SQL.parse(SQL.toSqlString(out, SqlDialect.MYSQL), SqlDialect.MYSQL);
+        assertTrue(norm(sql(reparsed)), norm(sql(reparsed)).contains("tenant_id = 5"));
+    }
+
+    @Test
+    public void xorWhereIsParenthesized() {
+        SqlStatement out = inject("SELECT id FROM t_order WHERE a = 1 XOR b = 2", 5, "t_order");
+        String n = norm(sql(out));
+        assertTrue(n, n.contains("tenant_id = 5"));
+        assertTrue(n, n.contains("(a = 1 XOR b = 2)"));
+        assertValid(out, SqlDialect.MYSQL);
+    }
+
+    @Test
     public void cloneDoesNotMutateOriginal() {
         SqlStatement orig = SQL.parse("SELECT id FROM t_order WHERE status = 1");
         String before = sql(orig);
@@ -336,6 +359,25 @@ public class SqlTenantRewriterTest {
         assertValid(mysql, SqlDialect.ORACLE);
         assertValid(mysql, SqlDialect.SQLSERVER);
         assertValid(mysql, SqlDialect.DAMENG);
+    }
+
+    @Test
+    public void oracleBooleanWrittenAsNumber() {
+        SqlInjectConfig cfg = SqlInjectConfig.create().tables("t_order")
+                .add("enabled", true).dialect(SqlDialect.ORACLE);
+        SqlStatement out = SQL.inject(SQL.parse("SELECT id FROM t_order"), cfg);
+        String n = norm(SQL.toSqlString(out, SqlDialect.ORACLE));
+        assertTrue(n, n.contains("enabled = 1"));
+        assertFalse("Oracle SQL 无 BOOLEAN 字面量，不能写 TRUE/FALSE", n.contains("TRUE"));
+        assertValid(out, SqlDialect.ORACLE);
+    }
+
+    @Test
+    public void defaultBooleanStillWrittenAsTrueFalse() {
+        SqlInjectConfig cfg = SqlInjectConfig.create().tables("t_order").add("enabled", true);
+        SqlStatement out = SQL.inject(SQL.parse("SELECT id FROM t_order"), cfg);
+        String n = norm(SQL.toSqlString(out, SqlDialect.MYSQL));
+        assertTrue(n, n.contains("enabled = TRUE"));
     }
 
     @Test

@@ -63,7 +63,7 @@ public final class SqlTenantRewriter {
         for (int i = 0; i < cols.size(); i++) {
             SqlInjectConfig.Column col = cols.get(i);
             Object raw = col.value() == null ? null : col.value().get();
-            SqlExpr expr = literalValue(raw);
+            SqlExpr expr = literalValue(raw, config.dialect());
             Set<String> tables = col.tables() == null || col.tables().isEmpty()
                     ? globalTables : toLowerSet(col.tables());
             binds.add(new Bind(col.name(), expr, tables));
@@ -101,6 +101,20 @@ public final class SqlTenantRewriter {
      * @return 表达式
      */
     public static SqlExpr literalValue(Object value) {
+        return literalValue(value, null);
+    }
+
+    /**
+     * 把 Java 值收成 AST 字面量，可指定方言以决定布尔回写形态。
+     * {@code String} 按 SQL 字符串转义（单引号加倍），不会当表达式解析。
+     * {@code "?"} 生成绑定占位；{@code SqlExpr} 原样返回。
+     *
+     * @param value Java 值
+     * @param dialect 方言；{@code null} 时布尔按 ANSI 写 {@code TRUE}/{@code FALSE}
+     * @return 表达式
+     * @since 2.0.2
+     */
+    public static SqlExpr literalValue(Object value, SqlDialectSpec dialect) {
         if (value == null) {
             return SqlLiteral.of(SqlLiteral.Kind.NULL, "NULL");
         }
@@ -108,7 +122,11 @@ public final class SqlTenantRewriter {
             return (SqlExpr) value;
         }
         if (value instanceof Boolean) {
-            return SqlLiteral.of(SqlLiteral.Kind.BOOLEAN, ((Boolean) value).booleanValue() ? "TRUE" : "FALSE");
+            boolean b = ((Boolean) value).booleanValue();
+            if (dialect != null && dialect.booleanLiteralAsNumber()) {
+                return SqlLiteral.of(SqlLiteral.Kind.NUMBER, b ? "1" : "0");
+            }
+            return SqlLiteral.of(SqlLiteral.Kind.BOOLEAN, b ? "TRUE" : "FALSE");
         }
         if (value instanceof Number) {
             return SqlLiteral.of(SqlLiteral.Kind.NUMBER, value.toString());
@@ -180,6 +198,21 @@ public final class SqlTenantRewriter {
         }
         if (right == null) {
             return left;
+        }
+        // 原 WHERE / HAVING / ON 含 OR / XOR 等低优先级运算符时，必须整体套括号：
+        // 否则 AND 优先求值会把租户条件“漏”到 OR 分支，造成越权。
+        // formatter 只在 parenthesized()==true 时才加括号（不按优先级自动加），故此处显式标记。
+        if (left instanceof SqlBinaryExpr) {
+            SqlBinaryOp op = ((SqlBinaryExpr) left).operator();
+            if (op == SqlBinaryOp.OR || op == SqlBinaryOp.XOR) {
+                ((SqlBinaryExpr) left).setParenthesized(true);
+            }
+        }
+        if (right instanceof SqlBinaryExpr) {
+            SqlBinaryOp op = ((SqlBinaryExpr) right).operator();
+            if (op == SqlBinaryOp.OR || op == SqlBinaryOp.XOR) {
+                ((SqlBinaryExpr) right).setParenthesized(true);
+            }
         }
         return SqlBinaryExpr.of(left, SqlBinaryOp.AND, right);
     }

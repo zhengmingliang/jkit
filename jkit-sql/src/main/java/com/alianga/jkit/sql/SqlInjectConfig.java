@@ -28,6 +28,7 @@ import java.util.List;
 public final class SqlInjectConfig {
     private final List<String> tables = new ArrayList<String>(4);
     private final List<Column> columns = new ArrayList<Column>(2);
+    private SqlDialectSpec dialect;
 
     private SqlInjectConfig() {
     }
@@ -130,6 +131,28 @@ public final class SqlInjectConfig {
      */
     public List<Column> columns() {
         return Collections.unmodifiableList(columns);
+    }
+
+    /**
+     * 设置注入时布尔字面量的回写方言。为 {@code null} 时按 ANSI 写 {@code TRUE}/{@code FALSE}
+     * （即当前默认行为）；设 {@link SqlDialect#ORACLE} 等时布尔写 {@code 1}/{@code 0}，
+     * 避免 Oracle SQL 无 BOOLEAN 字面量而报错。
+     *
+     * @param dialect 方言，{@code null} 表示不指定
+     * @return this
+     * @since 2.0.2
+     */
+    public SqlInjectConfig dialect(SqlDialectSpec dialect) {
+        this.dialect = dialect;
+        return this;
+    }
+
+    /**
+     * @return 注入布尔回写方言；{@code null} 表示不指定
+     * @since 2.0.2
+     */
+    public SqlDialectSpec dialect() {
+        return dialect;
     }
 
     private SqlInjectConfig addValue(String column, SqlInjectValue value, String[] tableNames) {
