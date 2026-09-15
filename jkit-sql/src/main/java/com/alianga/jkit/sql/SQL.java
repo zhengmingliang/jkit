@@ -790,51 +790,6 @@ public final class SQL {
     }
 
     /**
-     * @param statement 语句
-     * @param column 列简单名
-     * @param value 值
-     * @param tables 表白名单
-     * @return 新语句
-     * @since 2.0.2
-     * @deprecated 用 {@link #inject(SqlStatement, String, SqlExpr, String...)}，列名不限租户
-     */
-    @Deprecated
-    public static SqlStatement injectTenant(SqlStatement statement, String column, SqlExpr value,
-            String... tables) {
-        return inject(statement, column, value, tables);
-    }
-
-    /**
-     * @param statement 语句
-     * @param column 列简单名
-     * @param value Java 值
-     * @param tables 表白名单
-     * @return 新语句
-     * @since 2.0.2
-     * @deprecated 用 {@link #inject(SqlStatement, String, Object, String...)}
-     */
-    @Deprecated
-    public static SqlStatement injectTenant(SqlStatement statement, String column, Object value,
-            String... tables) {
-        return inject(statement, column, value, tables);
-    }
-
-    /**
-     * @param statement 语句
-     * @param column 列简单名
-     * @param value 值
-     * @param tables 表白名单
-     * @return 新语句
-     * @since 2.0.2
-     * @deprecated 用 {@link #inject(SqlStatement, String, SqlExpr, java.util.Collection)}
-     */
-    @Deprecated
-    public static SqlStatement injectTenant(SqlStatement statement, String column, SqlExpr value,
-            Collection<String> tables) {
-        return inject(statement, column, value, tables);
-    }
-
-    /**
      * 替换物理表名（先深拷贝再改，不污染原树）。
      *
      * <p><b>破坏性变更（2.0.1）</b>：旧实现就地修改；现返回新语句，原 AST 不变。

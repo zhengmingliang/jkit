@@ -17,7 +17,7 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 /**
- * {@link SQL#injectTenant}：按表白名单注入，下钻 UNION / 子查询 / CTE，INSERT 补列。
+ * {@link SQL#inject}：按表白名单注入，下钻 UNION / 子查询 / CTE，INSERT 补列。
  *
  * @author 郑明亮
  * @since 2.0.2
@@ -33,7 +33,7 @@ public class SqlTenantRewriterTest {
     }
 
     private static SqlStatement inject(String source, Object value, String... tables) {
-        return SQL.injectTenant(SQL.parse(source), "tenant_id", value, tables);
+        return SQL.inject(SQL.parse(source), "tenant_id", value, tables);
     }
 
     private static void assertValid(SqlStatement stmt, SqlDialect dialect) {
@@ -159,7 +159,7 @@ public class SqlTenantRewriterTest {
 
     @Test
     public void dualIsSkipped() {
-        SqlStatement out = SQL.injectTenant(
+        SqlStatement out = SQL.inject(
                 SQL.parse("SELECT 1 FROM dual", SqlDialect.ORACLE), "tenant_id", 1);
         String n = norm(SQL.toSqlString(out, SqlDialect.ORACLE));
         assertFalse(n, n.contains("tenant_id"));
@@ -280,7 +280,7 @@ public class SqlTenantRewriterTest {
     public void cloneDoesNotMutateOriginal() {
         SqlStatement orig = SQL.parse("SELECT id FROM t_order WHERE status = 1");
         String before = sql(orig);
-        SqlStatement out = SQL.injectTenant(orig, "tenant_id", 1, "t_order");
+        SqlStatement out = SQL.inject(orig, "tenant_id", 1, "t_order");
         assertNotSame(orig, out);
         assertEquals(before, sql(orig));
         assertTrue(sql(out).contains("tenant_id"));
@@ -313,7 +313,7 @@ public class SqlTenantRewriterTest {
     public void rewriteChainAdapter() {
         SqlStatement stmt = SQL.parse("SELECT id FROM t_order");
         SqlStatement out = SQL.rewrite(stmt, SqlRewrites.create()
-                .add(SqlRewrites.injectTenant("tenant_id", SqlTenantRewriter.literalValue(42),
+                .add(SqlRewrites.inject("tenant_id", SqlTenantRewriter.literalValue(42),
                         "t_order")));
         assertTrue(sql(out).contains("tenant_id = 42"));
         assertFalse(sql(stmt).contains("tenant_id"));
@@ -321,10 +321,10 @@ public class SqlTenantRewriterTest {
 
     @Test
     public void collectionOverload() {
-        SqlStatement out = SQL.injectTenant(SQL.parse("SELECT id FROM t_order"), "tenant_id",
+        SqlStatement out = SQL.inject(SQL.parse("SELECT id FROM t_order"), "tenant_id",
                 SqlTenantRewriter.literalValue(1), Collections.singletonList("t_order"));
         assertTrue(sql(out).contains("tenant_id = 1"));
-        SqlStatement none = SQL.injectTenant(SQL.parse("SELECT id FROM t_order"), "tenant_id",
+        SqlStatement none = SQL.inject(SQL.parse("SELECT id FROM t_order"), "tenant_id",
                 SqlTenantRewriter.literalValue(1), Arrays.asList("nope"));
         assertFalse(sql(none).contains("tenant_id"));
     }
@@ -340,13 +340,13 @@ public class SqlTenantRewriterTest {
 
     @Test
     public void nullStatementReturnsNull() {
-        assertEquals(null, SQL.injectTenant(null, "tenant_id", 1, "t"));
+        assertEquals(null, SQL.inject(null, "tenant_id", 1, "t"));
     }
 
     @Test
     public void blankColumnRejected() {
         try {
-            SQL.injectTenant(SQL.parse("SELECT 1"), "  ", 1);
+            SQL.inject(SQL.parse("SELECT 1"), "  ", 1);
             fail("expected IllegalArgumentException");
         } catch (IllegalArgumentException expected) {
             assertTrue(expected.getMessage().contains("inject column"));
@@ -358,7 +358,7 @@ public class SqlTenantRewriterTest {
         SqlStatement stmt = SQL.parse(
                 "INSERT ALL INTO t_order (id, name) VALUES (1, 'a') SELECT 1 FROM dual",
                 SqlDialect.ORACLE);
-        SqlStatement out = SQL.injectTenant(stmt, "tenant_id", 8, "t_order");
+        SqlStatement out = SQL.inject(stmt, "tenant_id", 8, "t_order");
         String n = SQL.toSqlString(out, SqlDialect.ORACLE);
         assertTrue(n, n.toLowerCase().contains("tenant_id"));
         assertTrue(n, n.contains("8"));

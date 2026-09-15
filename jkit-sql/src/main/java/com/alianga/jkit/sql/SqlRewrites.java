@@ -167,22 +167,6 @@ public final class SqlRewrites {
     }
 
     /**
-     * 内建适配器：按表白名单注入单列条件。
-     *
-     * @param column 列简单名
-     * @param value 值
-     * @param tables 表白名单；省略则全部物理表
-     * @return 规则
-     * @since 2.0.2
-     * @deprecated 用 {@link #inject(String, SqlExpr, String...)}
-     */
-    @Deprecated
-    public static SqlRewriteHook injectTenant(final String column, final SqlExpr value,
-            final String... tables) {
-        return inject(column, value, tables);
-    }
-
-    /**
      * 内建适配器：按配置注入行级条件，等价 {@link SqlTenantRewriter#inject(SqlStatement, SqlInjectConfig)}。
      *
      * @param config 配置

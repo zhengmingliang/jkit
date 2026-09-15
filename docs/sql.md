@@ -235,7 +235,7 @@ SqlStatement masked = SQL.replaceSelectItems(
 - `addLimit`：已有分页（LIMIT / TOP / ROWNUM / `row_number` 包装）时不覆盖。SQL Server 写 `TOP`；经典 Oracle 写单层 ROWNUM 包装；其余写 `LIMIT`。
 - `setLimit` / `setOffset` / `setPage`：**替换**分页；`setPage(pageNo, pageSize)` 的 pageNo 从 1 起。
 - `removeSelectItem`：忽略大小写，匹配简单列名（`t.col` 的最后一段）或显式别名；删到只剩一项时再删会抛 `IllegalArgumentException`。只改**外层** SELECT。
-- `inject` / `SqlInjectConfig`：给匹配的物理表 AND `alias.col = value`（CTE 名与 `DUAL` 跳过）。列名自定，租户 / 软删 / 机构号都可以。`SQL.injectConfig` 设全局表名单和列；`SqlInject.setCurrent` 覆盖本线程（切面里取值）。未配置时 `SQL.inject(stmt)` 抛 `IllegalStateException`。`injectTenant` 仍可用，已标 `@Deprecated`。
+- `inject` / `SqlInjectConfig`：给匹配的物理表 AND `alias.col = value`（CTE 名与 `DUAL` 跳过）。列名自定，租户 / 软删 / 机构号都可以。`SQL.injectConfig` 设全局表名单和列；`SqlInject.setCurrent` 覆盖本线程（切面里取值）。未配置时 `SQL.inject(stmt)` 抛 `IllegalStateException`。
 - `expandStar`：按表列清单把 `*` / `t.*` 展开；解析不到的星号保持原样。子查询 `*` 用内层投影。
 - `replaceSelectItem`：整树替换 SELECT 投影（UNION / 子查询），匹配别名或 `t.col`；`SELECT *` 请先 `expandStar`。
 - `replaceSelectItems`：一次 clone、一次遍历替换多列，避免脱敏多字段时反复改写。

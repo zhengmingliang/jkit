@@ -7,7 +7,6 @@ import org.junit.Test;
 
 import java.util.concurrent.atomic.AtomicInteger;
 
-import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
@@ -102,12 +101,9 @@ public class SqlInjectConfigTest {
     }
 
     @Test
-    public void injectAliasKeepsInjectTenant() {
+    public void injectSingleColumn() {
         SqlStatement out = SQL.inject(SQL.parse("SELECT id FROM t_order"), "tenant_id", 7, "t_order");
         assertTrue(SQL.toSqlString(out).contains("tenant_id = 7"));
-        SqlStatement old = SQL.injectTenant(SQL.parse("SELECT id FROM t_order"), "tenant_id", 7,
-                "t_order");
-        assertEquals(SQL.toSqlString(out), SQL.toSqlString(old));
     }
 
     @Test
