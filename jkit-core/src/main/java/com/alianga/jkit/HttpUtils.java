@@ -367,7 +367,8 @@ public class HttpUtils {
             throw new RuntimeException("the request URL can not be null");
         }
         url = appendQuery(url, params);
-        log.debug(url);
+        // 保留完整 URL 便于排查，但敏感参数值与路径令牌打码，避免凭证随日志落盘
+        log.debug(HttpIo.maskUrl(url));
         HttpRequest request = HttpRequest.get(url);
         if (headers != null && !headers.isEmpty()) {
             request.headers(headers);
@@ -2546,7 +2547,7 @@ public class HttpUtils {
 
     private static void checkDeadline(long deadlineNanos, String url) throws IOException {
         if (deadlineNanos != 0L && remainingMs(deadlineNanos) <= 0L) {
-            throw new IOException("total timeout exceeded for " + url);
+            throw new IOException("total timeout exceeded for " + HttpIo.maskUrl(url));
         }
     }
 
