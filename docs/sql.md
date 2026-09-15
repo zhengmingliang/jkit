@@ -258,8 +258,11 @@ SqlStatement masked = SQL.replaceSelectItems(
 - `setLimit` / `setOffset` / `setPage`：**替换**分页；`setPage(pageNo, pageSize)` 的 pageNo 从 1 起。
 - `removeSelectItem`：忽略大小写，匹配简单列名（`t.col` 的最后一段）或显式别名；删到只剩一项时再删会抛 `IllegalArgumentException`。只改**外层** SELECT。
 - `inject` / `SqlInjectConfig`：给匹配的物理表 AND `alias.col = value`（CTE 名与 `DUAL` 跳过）。列名自定，租户 / 软删 / 机构号都可以。`SQL.injectConfig` 设全局表名单和列；`SqlInject.setCurrent` 覆盖本线程（切面里取值）。未配置时 `SQL.inject(stmt)` 抛 `IllegalStateException`。
+  - **安全约束（2.0.2 修复）**：原 `WHERE` / `HAVING` / `ON` 含 `OR` / `XOR` 等低优先级运算符时，注入会整体套括号，保证租户条件不被优先级“漏”掉，即渲染成 `(a OR b) AND tenant_id = ?` 而非 `a OR b AND tenant_id = ?`。
+  - **布尔回写（2.0.2）**：`SqlInjectConfig.dialect(SqlDialect.ORACLE)`（或达梦等）时，注入的布尔值写 `1` / `0`（这些库 SQL 层无 `BOOLEAN` 字面量）；不配方言时按 ANSI 写 `TRUE` / `FALSE`。
 - `expandStar`：按表列清单把 `*` / `t.*` 展开；解析不到的星号保持原样。子查询 `*` 用内层投影。
-- `replaceSelectItem`：整树替换 SELECT 投影（UNION / 子查询），匹配别名或 `t.col`；`SELECT *` 请先 `expandStar`。
+- `replaceSelectItem`：整树替换 SELECT 投影（UNION / 子查询），匹配别名或 `t.col`；`SELECT *` 请先 `expandStar`。入参 `alias` 为显式别名时赋给命中的投影列。
+  - **共享别名去重（2.0.2 修复）**：同一 `SELECT` 内若同一列被命中多次（如 `SELECT phone, phone ...`），显式 `alias` 只赋给**首个**命中项，其余退回各列自己的列名，避免产生重复输出别名；空串 `alias` 仍对所有命中项去掉别名；UNION 各分支是独立 `SELECT`，各自正常带上该别名。
 - `replaceSelectItems`：一次 clone、一次遍历替换多列，避免脱敏多字段时反复改写。
 - 分页形态、Oracle 包装、`format` / `toSqlString` 按需适配见下一节。
 
@@ -345,6 +348,15 @@ SQL.bindNamed("SELECT * FROM t WHERE id = :id", Collections.singletonMap("id", 1
 // 公式必须传 SqlExpr；String "NOW()" 会变成 'NOW()'
 SQL.bind("SELECT * FROM t WHERE ts > ?", SQL.parseExpr("NOW()"));
 // SELECT * FROM t WHERE ts > NOW()
+
+// 浮点用普通小数（不写科学计数法）；NaN / Infinity 直接拒绝
+SQL.bind("SELECT * FROM t WHERE v = ?", 0.0001);   // v = 0.0001（不是 1.0E-4）
+SQL.bind("SELECT * FROM t WHERE v = ?", 1.0e20);   // v = 100000000000000000000
+
+// Java 8 时间类型也支持（输出 SQL 字符串字面量，与 java.util.Date 一致）
+SQL.bind("SELECT * FROM t WHERE d = ?", LocalDate.of(2026, 9, 15));   // d = '2026-09-15'
+SQL.bind("SELECT * FROM t WHERE ts = ?", LocalDateTime.of(2026, 9, 15, 18, 39, 5)); // ts = '2026-09-15 18:39:05'
+SQL.bind("SELECT * FROM t WHERE ts = ?", Instant.ofEpochSecond(1_000_000_000L));      // 按 UTC：'2001-09-09 01:46:40'
 
 // 模板占位（解析时启用 SqlPlaceholders）：#{table} 当表名，@name@ / :name 当值
 Map<String, Object> vals = new LinkedHashMap<String, Object>();
