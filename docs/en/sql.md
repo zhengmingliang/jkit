@@ -320,6 +320,18 @@ SQL.bindNamed("SELECT * FROM t WHERE id = :id", Collections.singletonMap("id", 1
 SQL.bind("SELECT * FROM t WHERE ts > ?", SQL.parseExpr("NOW()"));
 // SELECT * FROM t WHERE ts > NOW()
 
+// Template placeholders (enable SqlPlaceholders at parse): #{table} as a table name, @name@ / :name as values
+Map<String, Object> vals = new LinkedHashMap<String, Object>();
+vals.put("table", "users");
+vals.put("name", "bob");
+vals.put("nameKey", SQL.parseExpr("LENGTH(name)"));
+String out = SQL.bindNamed(
+        "SELECT * FROM #{table} WHERE name = :name AND :nameKey > 2 OR nick = @name@",
+        SqlDialect.MYSQL,
+        SqlParseOptions.defaults().placeholders(
+                SqlPlaceholders.create().commonModelTemplates().add("#{*}")),
+        vals);
+
 SqlWallResult wall = SQL.wall(sql); // parsing is not intercepted by default; call explicitly
 wall.passed();
 wall.violations(); // multi-statement / comment-bypass / always-true-condition / sleep-function / delete-without-where / update-without-where

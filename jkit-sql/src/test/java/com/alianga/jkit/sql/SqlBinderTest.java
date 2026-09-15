@@ -1,6 +1,5 @@
 package com.alianga.jkit.sql;
 
-import com.alianga.jkit.sql.ast.SqlLiteral;
 import com.alianga.jkit.sql.ast.SqlStatement;
 
 import org.junit.Test;
@@ -10,6 +9,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+import static com.alianga.jkit.sql.SQL.parseExpr;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -54,6 +54,63 @@ public class SqlBinderTest {
         String sql = SQL.bindNamed("SELECT * FROM t WHERE name = :name AND age = :age", vals);
         assertTrue(sql, sql.contains("'bob'"));
         assertTrue(sql, sql.contains("age = 20"));
+    }
+
+    @Test
+    public void namedTemplatePlaceholdersAndFormula() {
+        Map<String, Object> vals = new LinkedHashMap<String, Object>();
+        vals.put("name", "bob");
+        vals.put("nameKey", parseExpr("LENGTH(name)"));
+        vals.put("age", 20);
+        vals.put("table", "users");
+        SqlParseOptions opt = SqlParseOptions.defaults()
+                .placeholders(SqlPlaceholders.create().commonModelTemplates().add("#{*}"));
+        String sql = SQL.bindNamed(
+                "SELECT * FROM #{table} WHERE name = :name AND age = :age AND "
+                        + ":nameKey > 2 OR nick_name = @name@",
+                SqlDialect.MYSQL, opt, vals);
+        assertTrue(sql, sql.contains("FROM users") || sql.contains("FROM `users`"));
+        assertFalse("table name must not be a string literal", sql.contains("FROM 'users'"));
+        assertTrue(sql, sql.contains("name = 'bob'"));
+        assertTrue(sql, sql.contains("age = 20"));
+        assertTrue(sql, sql.contains("LENGTH(name) > 2"));
+        assertTrue(sql, sql.contains("nick_name = 'bob'"));
+        assertFalse(sql, sql.contains("#{table}"));
+        assertFalse(sql, sql.contains("@name@"));
+        assertFalse(sql, sql.contains(":name"));
+        SQL.parse(sql, SqlDialect.MYSQL);
+    }
+
+    @Test
+    public void numericTablePlaceholderIsQuotedIdent() {
+        Map<String, Object> vals = Collections.<String, Object>singletonMap("table", 20);
+        SqlParseOptions opt = SqlParseOptions.defaults()
+                .placeholders(SqlPlaceholders.create().add("#{*}"));
+        String sql = SQL.bindNamed("SELECT * FROM #{table}", SqlDialect.MYSQL, opt, vals);
+        assertTrue(sql, sql.contains("`20`"));
+        assertFalse(sql, sql.contains("#{table}"));
+    }
+
+    @Test
+    public void tablePlaceholderRejectsSqlInjection() {
+        Map<String, Object> vals = Collections.<String, Object>singletonMap("table", "t; DROP TABLE x");
+        SqlParseOptions opt = SqlParseOptions.defaults()
+                .placeholders(SqlPlaceholders.create().add("#{*}"));
+        String sql = SQL.bindNamed("SELECT * FROM #{table}", SqlDialect.MYSQL, opt, vals);
+        assertEquals(1, SQL.parseAll(sql).size());
+        assertTrue(sql, sql.contains("`"));
+        assertFalse(sql.toUpperCase().contains("DROP TABLE X") && !sql.contains("`"));
+    }
+
+    @Test
+    public void unknownTemplateIdentLeftAlone() {
+        SqlParseOptions opt = SqlParseOptions.defaults()
+                .placeholders(SqlPlaceholders.create().atWrapped());
+        Map<String, Object> vals = Collections.<String, Object>singletonMap("age", 1);
+        String sql = SQL.bindNamed("SELECT * FROM t WHERE x = @missing@ AND age = @age@",
+                SqlDialect.MYSQL, opt, vals);
+        assertTrue(sql, sql.contains("@missing@"));
+        assertTrue(sql, sql.contains("age = 1"));
     }
 
     @Test
@@ -167,7 +224,7 @@ public class SqlBinderTest {
 
     @Test
     public void formulaNowInWhere() {
-        String sql = SQL.bind("SELECT * FROM t WHERE ts > ?", SQL.parseExpr("NOW()"));
+        String sql = SQL.bind("SELECT * FROM t WHERE ts > ?", parseExpr("NOW()"));
         assertTrue(sql, sql.contains("ts > NOW()"));
         assertFalse(sql, sql.contains("'NOW()'"));
         SQL.parse(sql);
@@ -176,7 +233,7 @@ public class SqlBinderTest {
     @Test
     public void formulaDateAdd() {
         String sql = SQL.bind("SELECT * FROM t WHERE ts > ?",
-                SQL.parseExpr("DATE_ADD(NOW(), INTERVAL 7 DAY)"));
+                parseExpr("DATE_ADD(NOW(), INTERVAL 7 DAY)"));
         assertTrue(sql, sql.toUpperCase().contains("DATE_ADD"));
         assertTrue(sql, sql.contains("INTERVAL"));
         assertFalse(sql, sql.contains("'DATE_ADD"));
@@ -186,7 +243,7 @@ public class SqlBinderTest {
     @Test
     public void formulaArithmeticAndColumn() {
         String sql = SQL.bind("SELECT * FROM t WHERE age > ? AND created = ?",
-                SQL.parseExpr("age + 1"), SQL.parseExpr("created_at"));
+                parseExpr("age + 1"), parseExpr("created_at"));
         assertTrue(sql, sql.contains("age > age + 1") || sql.contains("age > (age + 1)"));
         assertTrue(sql, sql.contains("created = created_at") || sql.contains("created=created_at"));
         SQL.parse(sql);
@@ -202,7 +259,7 @@ public class SqlBinderTest {
     @Test
     public void namedFormula() {
         Map<String, Object> vals = new LinkedHashMap<String, Object>();
-        vals.put("expr", SQL.parseExpr("NOW()"));
+        vals.put("expr", parseExpr("NOW()"));
         String sql = SQL.bindNamed("SELECT * FROM t WHERE ts > :expr", vals);
         assertTrue(sql, sql.contains("ts > NOW()"));
         assertFalse(sql, sql.contains("'NOW()'"));
@@ -210,11 +267,11 @@ public class SqlBinderTest {
 
     @Test
     public void formulaInSelectListAndInsertAndUpdate() {
-        String select = SQL.bind("SELECT ?", SQL.parseExpr("NOW()"));
+        String select = SQL.bind("SELECT ?", parseExpr("NOW()"));
         assertTrue(select, select.contains("SELECT NOW()"));
-        String insert = SQL.bind("INSERT INTO t (ts) VALUES (?)", SQL.parseExpr("NOW()"));
+        String insert = SQL.bind("INSERT INTO t (ts) VALUES (?)", parseExpr("NOW()"));
         assertTrue(insert, insert.contains("VALUES (NOW())") || insert.contains("VALUES(NOW())"));
-        String update = SQL.bind("UPDATE t SET ts = ? WHERE id = ?", SQL.parseExpr("NOW()"), 1);
+        String update = SQL.bind("UPDATE t SET ts = ? WHERE id = ?", parseExpr("NOW()"), 1);
         assertTrue(update, update.contains("ts = NOW()"));
         assertTrue(update, update.contains("id = 1"));
         SQL.parse(select);
@@ -224,10 +281,10 @@ public class SqlBinderTest {
 
     @Test
     public void formulaInFunctionArgAndBetween() {
-        String fn = SQL.bind("SELECT COALESCE(?, 0) FROM t", SQL.parseExpr("age + 1"));
+        String fn = SQL.bind("SELECT COALESCE(?, 0) FROM t", parseExpr("age + 1"));
         assertTrue(fn, fn.contains("COALESCE(age + 1, 0)") || fn.contains("COALESCE((age + 1), 0)"));
         String between = SQL.bind("SELECT * FROM t WHERE ts BETWEEN ? AND ?",
-                SQL.parseExpr("DATE_SUB(NOW(), INTERVAL 1 DAY)"), SQL.parseExpr("NOW()"));
+                parseExpr("DATE_SUB(NOW(), INTERVAL 1 DAY)"), parseExpr("NOW()"));
         assertTrue(between, between.toUpperCase().contains("DATE_SUB"));
         assertTrue(between, between.contains("NOW()"));
         SQL.parse(fn);
@@ -237,7 +294,7 @@ public class SqlBinderTest {
     @Test
     public void formulaMixedWithLiteral() {
         String sql = SQL.bind("SELECT * FROM t WHERE name = ? AND ts > ?",
-                "alice", SQL.parseExpr("NOW()"));
+                "alice", parseExpr("NOW()"));
         assertTrue(sql, sql.contains("name = 'alice'"));
         assertTrue(sql, sql.contains("ts > NOW()"));
         SQL.parse(sql);
@@ -246,7 +303,7 @@ public class SqlBinderTest {
     @Test
     public void formulaInInList() {
         String sql = SQL.bind("SELECT * FROM t WHERE id IN ?",
-                Arrays.asList(1, SQL.parseExpr("id + 1"), 3));
+                Arrays.asList(1, parseExpr("id + 1"), 3));
         assertTrue(sql, sql.contains("id + 1") || sql.contains("id+1"));
         assertTrue(sql, sql.contains("1"));
         SQL.parse(sql);
@@ -260,7 +317,7 @@ public class SqlBinderTest {
         };
         for (int i = 0; i < dialects.length; i++) {
             SqlDialect d = dialects[i];
-            String sql = SQL.bind("SELECT * FROM t WHERE ts > ?", d, SQL.parseExpr("NOW()"));
+            String sql = SQL.bind("SELECT * FROM t WHERE ts > ?", d, parseExpr("NOW()"));
             assertTrue(d.name() + " " + sql, sql.contains("NOW()"));
             assertFalse(d.name() + " quoted " + sql, sql.contains("'NOW()'"));
             SQL.parse(sql, d);

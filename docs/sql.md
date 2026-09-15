@@ -324,6 +324,19 @@ SQL.bindNamed("SELECT * FROM t WHERE id = :id", Collections.singletonMap("id", 1
 SQL.bind("SELECT * FROM t WHERE ts > ?", SQL.parseExpr("NOW()"));
 // SELECT * FROM t WHERE ts > NOW()
 
+// 模板占位（解析时启用 SqlPlaceholders）：#{table} 当表名，@name@ / :name 当值
+Map<String, Object> vals = new LinkedHashMap<String, Object>();
+vals.put("table", "users");
+vals.put("name", "bob");
+vals.put("nameKey", SQL.parseExpr("LENGTH(name)"));
+String out = SQL.bindNamed(
+        "SELECT * FROM #{table} WHERE name = :name AND :nameKey > 2 OR nick = @name@",
+        SqlDialect.MYSQL,
+        SqlParseOptions.defaults().placeholders(
+                SqlPlaceholders.create().commonModelTemplates().add("#{*}")),
+        vals);
+// SELECT * FROM users WHERE name = 'bob' AND LENGTH(name) > 2 OR nick = 'bob'
+
 SqlWallResult wall = SQL.wall(sql); // 默认不拦截解析；显式调用
 wall.passed();
 wall.violations(); // multi-statement / comment-bypass / always-true-condition / sleep-function / delete-without-where / update-without-where

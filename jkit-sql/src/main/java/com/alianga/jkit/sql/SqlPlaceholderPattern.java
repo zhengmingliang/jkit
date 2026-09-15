@@ -72,6 +72,36 @@ public final class SqlPlaceholderPattern {
     }
 
     /**
+     * 从已解析的占位 IDENT 文本取出命名键。仅包裹模式（{@code @name@} / {@code #{table}}）；
+     * printf / 精确字面量返回 null。
+     *
+     * @param token 记号原文
+     * @return 正文，不匹配时 null
+     */
+    String extractNamedKey(String token) {
+        if (kind != Kind.WRAPPED || token == null) {
+            return null;
+        }
+        int pl = prefix.length;
+        int sl = suffix.length;
+        int n = token.length();
+        if (n < pl + sl + 1) {
+            return null;
+        }
+        for (int i = 0; i < pl; i++) {
+            if (token.charAt(i) != prefix[i]) {
+                return null;
+            }
+        }
+        for (int i = 0; i < sl; i++) {
+            if (token.charAt(n - sl + i) != suffix[i]) {
+                return null;
+            }
+        }
+        return token.substring(pl, n - sl);
+    }
+
+    /**
      * 若从 {@code pos} 起匹配成功，返回结束下标（不含）；否则 -1。
      *
      * @param src 源

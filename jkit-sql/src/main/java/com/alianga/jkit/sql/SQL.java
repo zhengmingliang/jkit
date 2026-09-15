@@ -1137,9 +1137,25 @@ public final class SQL {
      * @since 2.0.2
      */
     public static String bindNamed(String sql, SqlDialectSpec dialect, Map<String, ?> values) {
+        return bindNamed(sql, dialect, null, values);
+    }
+
+    /**
+     * 按解析选项填充命名参数（支持 {@code @name@} / {@code #{table}} 等模板占位）。
+     *
+     * @param sql SQL
+     * @param dialect 方言
+     * @param options 解析选项，可空
+     * @param values 命名参数（键不含包裹符，如 {@code table} 对应 {@code #{table}}）
+     * @return 填充后的紧凑 SQL
+     * @since 2.0.2
+     */
+    public static String bindNamed(String sql, SqlDialectSpec dialect, SqlParseOptions options,
+            Map<String, ?> values) {
         SqlDialectSpec d = dialect == null ? SqlDialect.MYSQL : dialect;
-        SqlStatement stmt = parse(sql, d);
-        return toSqlString(bindNamed(stmt, d, values), d);
+        SqlStatement stmt = options == null ? parse(sql, d) : parse(sql, d, options);
+        return toSqlString(bindNamed(stmt, d, values,
+                options == null ? null : options.placeholders()), d);
     }
 
     /**
@@ -1153,11 +1169,26 @@ public final class SQL {
      */
     public static SqlStatement bindNamed(SqlStatement statement, SqlDialectSpec dialect,
             Map<String, ?> values) {
+        return bindNamed(statement, dialect, values, null);
+    }
+
+    /**
+     * 填充命名参数（先深拷贝再改）。{@code placeholders} 用于从 {@code #{table}} 一类 IDENT 抠键。
+     *
+     * @param statement 语句
+     * @param dialect 方言
+     * @param values 命名参数
+     * @param placeholders 额外包裹模式，可空（仍识别 {@code @*@} / {@code #{*}} 等内置）
+     * @return 新语句
+     * @since 2.0.2
+     */
+    public static SqlStatement bindNamed(SqlStatement statement, SqlDialectSpec dialect,
+            Map<String, ?> values, SqlPlaceholders placeholders) {
         if (statement == null) {
             return statement;
         }
         SqlStatement copy = clone(statement);
-        return SqlBinder.bind(copy, dialect, null, values);
+        return SqlBinder.bind(copy, dialect, null, values, placeholders);
     }
 
     /**

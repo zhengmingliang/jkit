@@ -7,6 +7,7 @@ import com.alianga.jkit.sql.ast.SqlCastExpr;
 import com.alianga.jkit.sql.ast.SqlDelete;
 import com.alianga.jkit.sql.ast.SqlExpr;
 import com.alianga.jkit.sql.ast.SqlFunctionExpr;
+import com.alianga.jkit.sql.ast.SqlIdentifier;
 import com.alianga.jkit.sql.ast.SqlInExpr;
 import com.alianga.jkit.sql.ast.SqlInsert;
 import com.alianga.jkit.sql.ast.SqlInsertBranch;
@@ -21,6 +22,7 @@ import com.alianga.jkit.sql.ast.SqlOverExpr;
 import com.alianga.jkit.sql.ast.SqlSelect;
 import com.alianga.jkit.sql.ast.SqlSelectItem;
 import com.alianga.jkit.sql.ast.SqlStatement;
+import com.alianga.jkit.sql.ast.SqlTable;
 import com.alianga.jkit.sql.ast.SqlUnaryExpr;
 import com.alianga.jkit.sql.ast.SqlUpdate;
 import com.alianga.jkit.sql.ast.SqlValuesTable;
@@ -38,29 +40,49 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 把绑定占位符换成字面量或表达式。{@code String} 只做 SQL 单引号加倍，不当公式解析；
- * 公式请传 {@link SqlExpr}（如 {@code SQL.parseExpr("NOW()")}）。
+ * 把绑定占位符换成字面量、公式或标识符。{@code String} 在表达式里只做 SQL 单引号加倍；
+ * 公式请传 {@link SqlExpr}。模板占位（{@code @name@} / {@code #{table}} 等）按命名键替换：
+ * 表名位置写成标识符（必要时加方言引号），表达式位置与 {@code :name} 相同。
  *
- * <p>就地修改；公开门面 {@link SQL#bind} 会先 clone。</p>
+ * <p>就地修改；公开门面 {@link SQL#bind} 会先 clone。未启用命名值时不碰标识符，热路径与原先一致。</p>
  *
  * @author 郑明亮
  * @since 2.0.2
  */
 public final class SqlBinder {
+    /** 常见包裹占位，bind 时用来从 IDENT 抠键；解析热路径不读这份表。 */
+    private static final SqlPlaceholderPattern[] DEFAULT_NAMED_WRAPS = defaultNamedWraps();
+
     private SqlBinder() {
     }
 
     /**
-     * 填充 {@code ?} 与 {@code :name}。
+     * 填充 {@code ?}、{@code :name} 以及模板占位 IDENT。
      *
      * @param statement 语句
      * @param dialect 方言（影响布尔等字面量写法，字符串一律单引号加倍）
      * @param positional 位置参数，可空
-     * @param named 命名参数（不含冒号），可空
+     * @param named 命名参数（不含冒号 / 包裹符），可空
      * @return 原对象
      */
     public static SqlStatement bind(SqlStatement statement, SqlDialectSpec dialect,
             Object[] positional, Map<String, ?> named) {
+        return bind(statement, dialect, positional, named, null);
+    }
+
+    /**
+     * 填充占位符。{@code placeholders} 在默认包裹（{@code @*@} / {@code #{*}} / {@code ${*}} /
+     * {@code {{*}}} / {@code <*>} / {@code <-*->}）之外追加自定义模式。
+     *
+     * @param statement 语句
+     * @param dialect 方言
+     * @param positional 位置参数
+     * @param named 命名参数
+     * @param placeholders 额外包裹模式，可空
+     * @return 原对象
+     */
+    public static SqlStatement bind(SqlStatement statement, SqlDialectSpec dialect,
+            Object[] positional, Map<String, ?> named, SqlPlaceholders placeholders) {
         if (statement == null) {
             return statement;
         }
@@ -69,8 +91,102 @@ public final class SqlBinder {
                 ? Collections.emptyIterator() : Arrays.asList(positional).iterator();
         Map<String, ?> names = named == null
                 ? Collections.<String, Object>emptyMap() : named;
-        statement.accept(new Binder(d, pos, names));
+        statement.accept(new Binder(d, pos, names, extraPatterns(placeholders)));
         return statement;
+    }
+
+    private static SqlPlaceholderPattern[] defaultNamedWraps() {
+        SqlPlaceholders p = SqlPlaceholders.create()
+                .atWrapped()
+                .add("#{*}")
+                .add("${*}")
+                .add("{{*}}")
+                .angle()
+                .arrowAngle();
+        List<SqlPlaceholderPattern> list = p.patterns();
+        return list.toArray(new SqlPlaceholderPattern[list.size()]);
+    }
+
+    private static SqlPlaceholderPattern[] extraPatterns(SqlPlaceholders placeholders) {
+        if (placeholders == null || placeholders.isEmpty()) {
+            return null;
+        }
+        List<SqlPlaceholderPattern> list = placeholders.patterns();
+        return list.toArray(new SqlPlaceholderPattern[list.size()]);
+    }
+
+    private static final Object ABSENT = new Object();
+
+    static String unwrapNamedKey(String token, SqlPlaceholderPattern[] extra) {
+        if (token == null || token.isEmpty()) {
+            return null;
+        }
+        if (extra != null) {
+            String k = unwrapWith(token, extra);
+            if (k != null) {
+                return k;
+            }
+        }
+        return unwrapWith(token, DEFAULT_NAMED_WRAPS);
+    }
+
+    private static String unwrapWith(String token, SqlPlaceholderPattern[] patterns) {
+        if (patterns == null) {
+            return null;
+        }
+        for (int i = 0; i < patterns.length; i++) {
+            String key = patterns[i].extractNamedKey(token);
+            if (key != null) {
+                return key;
+            }
+        }
+        return null;
+    }
+
+    private static boolean looksWrapped(String token) {
+        char c = token.charAt(0);
+        return c == '@' || c == '#' || c == '$' || c == '{' || c == '<';
+    }
+
+    private static boolean isUnquotedIdent(String s) {
+        if (s == null || s.isEmpty()) {
+            return false;
+        }
+        char c0 = s.charAt(0);
+        if (!((c0 >= 'a' && c0 <= 'z') || (c0 >= 'A' && c0 <= 'Z') || c0 == '_' || c0 > 0x7f)) {
+            return false;
+        }
+        for (int i = 1; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+                    || (c >= '0' && c <= '9') || c == '_' || c == '$' || c > 0x7f) {
+                continue;
+            }
+            return false;
+        }
+        return true;
+    }
+
+    static SqlIdentifier identValue(Object v) {
+        if (v instanceof SqlIdentifier) {
+            return (SqlIdentifier) ((SqlIdentifier) v).copy();
+        }
+        if (v instanceof SqlExpr) {
+            throw new IllegalArgumentException(
+                    "table placeholder requires a name, not an expression: " + v);
+        }
+        if (v == null) {
+            throw new IllegalArgumentException("table placeholder cannot be null");
+        }
+        String s = String.valueOf(v);
+        if (s.isEmpty()) {
+            throw new IllegalArgumentException("table placeholder cannot be empty");
+        }
+        SqlIdentifier id = SqlIdentifier.of(s);
+        if (!isUnquotedIdent(s)) {
+            id.setQuoted(true);
+        }
+        return id;
     }
 
     /**
@@ -195,18 +311,61 @@ public final class SqlBinder {
         private final SqlDialectSpec dialect;
         private final Iterator<Object> pos;
         private final Map<String, ?> names;
+        private final boolean hasNamed;
+        private final SqlPlaceholderPattern[] extraWraps;
 
-        private Binder(SqlDialectSpec dialect, Iterator<Object> pos, Map<String, ?> names) {
+        private Binder(SqlDialectSpec dialect, Iterator<Object> pos, Map<String, ?> names,
+                SqlPlaceholderPattern[] extraWraps) {
             this.dialect = dialect;
             this.pos = pos;
             this.names = names;
+            this.hasNamed = names != null && !names.isEmpty();
+            this.extraWraps = extraWraps;
         }
 
         private SqlExpr replace(SqlExpr e) {
-            if (!isBind(e)) {
-                return e;
+            if (isBind(e)) {
+                return expr(take((SqlLiteral) e, pos, names), dialect);
             }
-            return expr(take((SqlLiteral) e, pos, names), dialect);
+            if (hasNamed && e instanceof SqlIdentifier) {
+                Object v = lookupIdent((SqlIdentifier) e);
+                if (v != ABSENT) {
+                    return expr(v, dialect);
+                }
+            }
+            return e;
+        }
+
+        private Object lookupIdent(SqlIdentifier id) {
+            String token = id.simpleName();
+            if (token == null || token.isEmpty()) {
+                return ABSENT;
+            }
+            if (!looksWrapped(token) && extraWraps == null) {
+                return ABSENT;
+            }
+            String key = unwrapNamedKey(token, extraWraps);
+            if (key != null && names.containsKey(key)) {
+                return names.get(key);
+            }
+            if (looksWrapped(token) && names.containsKey(token)) {
+                return names.get(token);
+            }
+            return ABSENT;
+        }
+
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected boolean visitTable(SqlTable node) {
+            if (hasNamed && node.name() != null) {
+                Object v = lookupIdent(node.name());
+                if (v != ABSENT) {
+                    node.setName(identValue(v));
+                }
+            }
+            return true;
         }
 
         private void replaceList(List<SqlExpr> list) {
