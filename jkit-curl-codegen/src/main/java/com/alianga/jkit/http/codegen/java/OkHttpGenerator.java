@@ -60,6 +60,16 @@ public final class OkHttpGenerator extends AbstractCodeGenerator {
             imports.add("java.net.Proxy");
             client.append("        builder.proxy(new Proxy(Proxy.Type.HTTP, new InetSocketAddress(")
                     .append(JavaEmit.quote(proxy.host())).append(", ").append(proxy.port()).append(")));\n");
+            if (proxy.user() != null) {
+                imports.add("okhttp3.Credentials");
+                client.append("        builder.proxyAuthenticator((route, response) -> response.request()\n");
+                client.append("                .newBuilder()\n");
+                client.append("                .header(\"Proxy-Authorization\", Credentials.basic(")
+                        .append(JavaEmit.quote(proxy.user())).append(", ")
+                        .append(JavaEmit.quote(proxy.password() == null ? "" : proxy.password()))
+                        .append("))\n");
+                client.append("                .build());\n");
+            }
         }
         if (req.insecure()) {
             notes.add("已生成忽略证书校验的代码，仅用于开发环境。");

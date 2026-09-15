@@ -102,7 +102,20 @@ public final class ApacheHttpClientGenerator extends AbstractCodeGenerator {
         }
         src.append("\npublic class CurlApacheExample {\n");
         src.append("    public static void main(String[] args) throws Exception {\n");
-        src.append("        CloseableHttpClient client = HttpClients.createDefault();\n");
+        if (req.proxy() != null) {
+            imports.add("org.apache.hc.core5.http.HttpHost");
+            src.append("        CloseableHttpClient client = HttpClients.custom()\n");
+            src.append("                .setProxy(new HttpHost(")
+                    .append(JavaEmit.quote(req.proxy().scheme())).append(", ")
+                    .append(JavaEmit.quote(req.proxy().host())).append(", ")
+                    .append(req.proxy().port()).append("))\n");
+            src.append("                .build();\n");
+            if (req.proxy().user() != null) {
+                notes.add("代理认证请配置 CredentialsProvider（BasicCredentialsProvider + AuthScope）。");
+            }
+        } else {
+            src.append("        CloseableHttpClient client = HttpClients.createDefault();\n");
+        }
         src.append("        ").append(body);
         src.append("        try {\n");
         src.append("            client.execute(request, response -> {\n");

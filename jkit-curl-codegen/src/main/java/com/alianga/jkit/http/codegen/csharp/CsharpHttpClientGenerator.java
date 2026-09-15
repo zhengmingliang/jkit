@@ -6,6 +6,7 @@ import com.alianga.jkit.http.codegen.CurlGenSupport;
 import com.alianga.jkit.http.codegen.GeneratedCode;
 import com.alianga.jkit.http.curl.ParsedCurlRequest;
 import com.alianga.jkit.http.curl.ParsedCurlRequest.Body;
+import com.alianga.jkit.http.curl.ParsedCurlRequest.FormPart;
 import com.alianga.jkit.http.curl.ParsedCurlRequest.Header;
 
 import java.util.ArrayList;
@@ -38,9 +39,24 @@ public final class CsharpHttpClientGenerator extends AbstractCodeGenerator {
     @Override
     public GeneratedCode generate(ParsedCurlRequest req) {
         List<String> notes = new ArrayList<String>();
+        Body body = req.body();
+        boolean multipart = body.kind() == Body.Kind.MULTIPART;
+        boolean file = body.kind() == Body.Kind.FILE;
+
         StringBuilder src = new StringBuilder();
-        src.append("using System.Net.Http;\nusing System.Text;\n\n");
-        src.append("var client = new HttpClient();\n");
+        src.append("using System.Net;\nusing System.Net.Http;\nusing System.Text;\n");
+        if (multipart || file) {
+            src.append("using System.IO;\n");
+        }
+        src.append("\n");
+        if (req.proxy() != null) {
+            src.append("var handler = new HttpClientHandler();\n");
+            src.append("handler.Proxy = new WebProxy(")
+                    .append(CodeQuote.csharp(CurlGenSupport.proxyUrl(req.proxy()))).append(");\n");
+            src.append("var client = new HttpClient(handler);\n");
+        } else {
+            src.append("var client = new HttpClient();\n");
+        }
         src.append("var request = new HttpRequestMessage(new HttpMethod(")
                 .append(CodeQuote.csharp(req.method().toUpperCase(Locale.ROOT))).append("), ")
                 .append(CodeQuote.csharp(req.url())).append(");\n");
@@ -51,13 +67,34 @@ public final class CsharpHttpClientGenerator extends AbstractCodeGenerator {
             src.append("request.Headers.TryAddWithoutValidation(").append(CodeQuote.csharp(h.name()))
                     .append(", ").append(CodeQuote.csharp(h.value())).append(");\n");
         }
-        Body body = req.body();
-        if (body.isPresent() && body.kind() != Body.Kind.FILE && body.kind() != Body.Kind.MULTIPART) {
+        if (multipart) {
+            src.append("var multipart = new MultipartFormDataContent();\n");
+            for (FormPart p : body.parts()) {
+                if (p.file()) {
+                    src.append("{\n");
+                    src.append("var fileContent = new ByteArrayContent(File.ReadAllBytes(")
+                            .append(CodeQuote.csharp(p.filePath())).append("));\n");
+                    if (p.contentType() != null) {
+                        src.append("fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(")
+                                .append(CodeQuote.csharp(p.contentType())).append(");\n");
+                    }
+                    src.append("multipart.Add(fileContent, ").append(CodeQuote.csharp(p.name())).append(", ")
+                            .append(CodeQuote.csharp(p.filename() == null ? "file" : p.filename())).append(");\n");
+                    src.append("}\n");
+                } else {
+                    src.append("multipart.Add(new StringContent(")
+                            .append(CodeQuote.csharp(p.value() == null ? "" : p.value()))
+                            .append(", Encoding.UTF8), ").append(CodeQuote.csharp(p.name())).append(");\n");
+                }
+            }
+            src.append("request.Content = multipart;\n");
+        } else if (file) {
+            src.append("request.Content = new ByteArrayContent(File.ReadAllBytes(")
+                    .append(CodeQuote.csharp(body.filePath())).append("));\n");
+        } else if (body.isPresent()) {
             src.append("request.Content = new StringContent(").append(CodeQuote.csharp(body.text()))
                     .append(", Encoding.UTF8, ").append(CodeQuote.csharp(CurlGenSupport.mediaType(req)))
                     .append(");\n");
-        } else if (body.kind() == Body.Kind.MULTIPART || body.kind() == Body.Kind.FILE) {
-            notes.add("文件/multipart 请使用 MultipartFormDataContent。");
         }
         src.append("var response = await client.SendAsync(request);\n");
         src.append("Console.WriteLine(await response.Content.ReadAsStringAsync());\n");

@@ -77,6 +77,30 @@ public final class CurlGenSupport {
         return out;
     }
 
+    /**
+     * 拼出 {@code scheme://[user:pass@]host:port} 形式的代理 URL，供接受 URL 形态的客户端使用。
+     *
+     * @param proxy 代理配置，可为 {@code null}
+     * @return 代理 URL；{@code proxy} 为 {@code null} 时返回 {@code null}
+     * @since 2.0.2
+     */
+    public static String proxyUrl(ParsedCurlRequest.ProxySpec proxy) {
+        if (proxy == null) {
+            return null;
+        }
+        StringBuilder url = new StringBuilder();
+        url.append(proxy.scheme()).append("://");
+        if (proxy.user() != null) {
+            url.append(proxy.user());
+            if (proxy.password() != null) {
+                url.append(':').append(proxy.password());
+            }
+            url.append('@');
+        }
+        url.append(proxy.hostPort());
+        return url.toString();
+    }
+
     static String basicToken(String user, String password) {
         String raw = (user == null ? "" : user) + ":" + (password == null ? "" : password);
         return Base64Utils.encodeToString(raw.getBytes(java.nio.charset.StandardCharsets.UTF_8));

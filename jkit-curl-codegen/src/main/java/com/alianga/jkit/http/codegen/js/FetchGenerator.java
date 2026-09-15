@@ -63,6 +63,9 @@ public final class FetchGenerator extends AbstractCodeGenerator {
             }
         } else if (body.kind() == Body.Kind.FILE) {
             notes.add("fetch 读取本地文件需在 Node 中用 fs，或在浏览器中用 input[type=file]。");
+            src.append("// Node 18+ 读取文件作为请求体：\n");
+            src.append("// const body = await fs.promises.readFile(")
+                    .append(CodeQuote.js(body.filePath())).append(");\n");
             src.append("const body = undefined;\n");
         } else if (body.isPresent()) {
             src.append("const body = ").append(CodeQuote.js(body.text())).append(";\n");
@@ -78,6 +81,9 @@ public final class FetchGenerator extends AbstractCodeGenerator {
         src.append("console.log(await response.text());\n");
         if (req.insecure()) {
             notes.add("fetch 无法在浏览器里关闭 TLS 校验。");
+        }
+        if (req.proxy() != null) {
+            notes.add("fetch 不支持按请求配置代理，浏览器请在系统网络设置里配置，Node 请使用 undici ProxyAgent。");
         }
         return new GeneratedCode("curl_fetch.js", "javascript", src.toString(),
                 Collections.singletonList("fetch (浏览器 / Node 18+)"), notes);

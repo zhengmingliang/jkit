@@ -6,6 +6,7 @@ import com.alianga.jkit.http.codegen.CurlGenSupport;
 import com.alianga.jkit.http.codegen.GeneratedCode;
 import com.alianga.jkit.http.curl.ParsedCurlRequest;
 import com.alianga.jkit.http.curl.ParsedCurlRequest.Body;
+import com.alianga.jkit.http.curl.ParsedCurlRequest.FormPart;
 import com.alianga.jkit.http.curl.ParsedCurlRequest.Header;
 
 import java.util.ArrayList;
@@ -49,6 +50,19 @@ public final class PhpCurlGenerator extends AbstractCodeGenerator {
             src.append("curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);\n");
             src.append("curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);\n");
         }
+        if (req.proxy() != null) {
+            src.append("curl_setopt($ch, CURLOPT_PROXY, ")
+                    .append(CodeQuote.php(req.proxy().scheme() + "://" + req.proxy().hostPort())).append(");\n");
+            if ("socks5".equalsIgnoreCase(req.proxy().scheme())) {
+                src.append("curl_setopt($ch, CURLOPT_PROXYTYPE, CURLPROXY_SOCKS5);\n");
+            }
+            if (req.proxy().user() != null) {
+                src.append("curl_setopt($ch, CURLOPT_PROXYUSERPWD, ")
+                        .append(CodeQuote.php(req.proxy().user()
+                                + (req.proxy().password() == null ? "" : ":" + req.proxy().password())))
+                        .append(");\n");
+            }
+        }
         src.append("$headers = [\n");
         for (Header h : CurlGenSupport.headersWithAuth(req)) {
             if ("content-length".equalsIgnoreCase(h.name())) {
@@ -64,7 +78,26 @@ public final class PhpCurlGenerator extends AbstractCodeGenerator {
             src.append("curl_setopt($ch, CURLOPT_POSTFIELDS, file_get_contents(")
                     .append(CodeQuote.php(body.filePath())).append("));\n");
         } else if (body.kind() == Body.Kind.MULTIPART) {
-            notes.add("multipart 可用 CURLFile。");
+            src.append("$postFields = [\n");
+            for (FormPart p : body.parts()) {
+                if (p.file()) {
+                    src.append("    ").append(CodeQuote.php(p.name())).append(" => new CURLFile(")
+                            .append(CodeQuote.php(p.filePath()));
+                    if (p.contentType() != null) {
+                        src.append(", ").append(CodeQuote.php(p.contentType()));
+                        if (p.filename() != null) {
+                            src.append(", ").append(CodeQuote.php(p.filename()));
+                        }
+                    } else if (p.filename() != null) {
+                        src.append(", '', ").append(CodeQuote.php(p.filename()));
+                    }
+                    src.append("),\n");
+                } else {
+                    src.append("    ").append(CodeQuote.php(p.name())).append(" => ")
+                            .append(CodeQuote.php(p.value() == null ? "" : p.value())).append(",\n");
+                }
+            }
+            src.append("];\ncurl_setopt($ch, CURLOPT_POSTFIELDS, $postFields);\n");
         }
         src.append("$response = curl_exec($ch);\n");
         src.append("echo curl_getinfo($ch, CURLINFO_HTTP_CODE), PHP_EOL, $response;\n");

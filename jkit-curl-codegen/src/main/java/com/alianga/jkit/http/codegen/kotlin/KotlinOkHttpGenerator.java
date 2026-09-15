@@ -45,6 +45,20 @@ public final class KotlinOkHttpGenerator extends AbstractCodeGenerator {
         src.append("fun main() {\n");
         src.append("    val client = OkHttpClient.Builder()\n");
         src.append("        .followRedirects(").append(req.followRedirects()).append(")\n");
+        if (req.proxy() != null) {
+            src.append("        .proxy(java.net.Proxy(java.net.Proxy.Type.HTTP, java.net.InetSocketAddress(")
+                    .append(JavaEmit.quote(req.proxy().host())).append(", ").append(req.proxy().port())
+                    .append(")))\n");
+            if (req.proxy().user() != null) {
+                src.append("        .proxyAuthenticator { _, response ->\n");
+                src.append("            response.request.newBuilder()\n");
+                src.append("                .header(\"Proxy-Authorization\", Credentials.basic(")
+                        .append(JavaEmit.quote(req.proxy().user())).append(", ")
+                        .append(JavaEmit.quote(req.proxy().password() == null ? "" : req.proxy().password()))
+                        .append("))\n");
+                src.append("                .build()\n        }\n");
+            }
+        }
         src.append("        .build()\n");
         Body body = req.body();
         if (body.kind() == Body.Kind.MULTIPART) {

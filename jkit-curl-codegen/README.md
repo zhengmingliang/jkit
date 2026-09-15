@@ -53,6 +53,19 @@ GeneratedCode code = CurlCodegen.generate("py-requests", model);
 
 `CurlCodegen.list()` / `list("java")` 可枚举生成器。
 
+## 备注与解析告警
+
+`GeneratedCode.notes()` 保存生成备注。curl 解析阶段的告警（如 `未支持的选项 --digest，已跳过`、
+`-b 指向 cookie 文件，未读入内容`）会合入 notes 最前面，其后才是生成器自己的备注
+（如「浏览器 FormData 文件请换成 File/Blob 对象」）。建议把 notes 展示给用户，避免选项被静默忽略：
+
+```java
+GeneratedCode code = CurlCodegen.generate("java-okhttp", curl);
+for (String note : code.notes()) {
+    System.out.println("note: " + note);
+}
+```
+
 ## 生成器 id
 
 | id | 语言 | 库 |

@@ -88,6 +88,9 @@ public final class JsNativeGenerator extends AbstractCodeGenerator {
         } else {
             src.append("req.end();\n");
         }
+        if (req.proxy() != null) {
+            notes.add("Node 原生 http 不支持按请求配置代理，请改用全局 agent（如 https-proxy-agent）。");
+        }
         return new GeneratedCode("curl_native.js", "javascript", src.toString(),
                 Collections.singletonList("follow-redirects"), notes);
     }

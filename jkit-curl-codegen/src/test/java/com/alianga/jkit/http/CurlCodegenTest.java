@@ -216,6 +216,172 @@ public class CurlCodegenTest {
         assertTrue(round.contains("@/tmp/x.bin"));
     }
     @Test
+    public void parseWarningsAreMergedIntoGeneratedNotes() {
+        // --digest 是不支持的选项，解析告警应出现在生成结果的 notes 里
+        GeneratedCode code = CurlCodegen.generate("java-okhttp",
+                "curl --digest -u user:pass https://example.com/api");
+        boolean found = false;
+        for (String note : code.notes()) {
+            if (note.contains("--digest")) {
+                found = true;
+                break;
+            }
+        }
+        assertTrue("解析告警应合入 notes: " + code.notes(), found);
+        // 无告警的 curl 不应混入解析内容
+        GeneratedCode clean = CurlCodegen.generate("java-okhttp", "curl https://example.com/api");
+        for (String note : clean.notes()) {
+            assertFalse(note.contains("未支持"));
+        }
+    }
+
+    @Test
+    public void pythonRequestsEmitsRealMultipartFilesAndProxyAuth() {
+        String curl = "curl -F 'a=1' -F 'f=@/tmp/x.bin;filename=x.bin;type=image/png' "
+                + "-x http://user:pass@127.0.0.1:7890 https://example.com/up";
+        GeneratedCode code = CurlCodegen.generate("py-requests", curl);
+        String src = code.source();
+        assertTrue(src, src.contains("files=files"));
+        assertTrue(src, src.contains("open('/tmp/x.bin', 'rb')"));
+        assertTrue(src, src.contains("'x.bin'"));
+        assertTrue(src, src.contains("'a': '1'"));
+        // 代理不再硬编码 http://，要带认证信息
+        assertTrue(src, src.contains("http://user:pass@127.0.0.1:7890"));
+    }
+
+    @Test
+    public void pythonHttpxEmitsMultipartAndProxy() {
+        String curl = "curl -F 'a=1' -F 'f=@/tmp/x.bin' -x socks5://127.0.0.1:1080 https://example.com/up";
+        GeneratedCode code = CurlCodegen.generate("py-httpx", curl);
+        String src = code.source();
+        assertTrue(src, src.contains("files=files"));
+        assertTrue(src, src.contains("open('/tmp/x.bin', 'rb')"));
+        assertTrue(src, src.contains("proxy='socks5://127.0.0.1:1080'"));
+    }
+
+    @Test
+    public void fetchFileBodyKeepsReadableExample() {
+        GeneratedCode code = CurlCodegen.generate("js-fetch",
+                "curl -T /tmp/data.bin https://example.com/up");
+        String src = code.source();
+        assertTrue(src, src.contains("/tmp/data.bin"));
+        boolean found = false;
+        for (String note : code.notes()) {
+            if (note.contains("fs")) {
+                found = true;
+                break;
+            }
+        }
+        assertTrue("文件正文应有提示: " + code.notes(), found);
+    }
+
+    @Test
+    public void goEmitsRealMultipartAndProxyTransport() {
+        String curl = "curl -F 'a=1' -F 'f=@/tmp/x.bin;filename=x.bin' "
+                + "-x http://127.0.0.1:7890 https://example.com/up";
+        GeneratedCode code = CurlCodegen.generate("go-nethttp", curl);
+        String src = code.source();
+        assertTrue(src, src.contains("mime/multipart"));
+        assertTrue(src, src.contains("writer.WriteField(\"a\", \"1\")"));
+        assertTrue(src, src.contains("os.Open(\"/tmp/x.bin\")"));
+        assertTrue(src, src.contains("writer.FormDataContentType()"));
+        assertTrue(src, src.contains("http.ProxyURL(proxyURL)"));
+        assertFalse(src, src.contains(", nil)"));
+    }
+
+    @Test
+    public void goEmitsFileBodyViaOsOpen() {
+        GeneratedCode code = CurlCodegen.generate("go-nethttp",
+                "curl -T /tmp/data.bin https://example.com/up");
+        String src = code.source();
+        assertTrue(src, src.contains("os.Open(\"/tmp/data.bin\")"));
+        assertFalse(src, src.contains(", nil)"));
+    }
+
+    @Test
+    public void csharpEmitsRealMultipartAndProxy() {
+        String curl = "curl -F 'a=1' -F 'f=@/tmp/x.bin;filename=x.bin' "
+                + "-x http://user:pass@127.0.0.1:7890 https://example.com/up";
+        GeneratedCode code = CurlCodegen.generate("csharp-httpclient", curl);
+        String src = code.source();
+        assertTrue(src, src.contains("MultipartFormDataContent"));
+        assertTrue(src, src.contains("File.ReadAllBytes(\"/tmp/x.bin\")"));
+        assertTrue(src, src.contains("WebProxy(\"http://user:pass@127.0.0.1:7890\")"));
+    }
+
+    @Test
+    public void okhttpEmitsProxyAuthenticator() {
+        GeneratedCode code = CurlCodegen.generate("java-okhttp",
+                "curl -x http://user:pass@127.0.0.1:7890 https://example.com/api");
+        String src = code.source();
+        assertTrue(src, src.contains("proxyAuthenticator"));
+        assertTrue(src, src.contains("Credentials.basic(\"user\", \"pass\")"));
+    }
+
+    @Test
+    public void kotlinEmitsProxyAndPhpCurlEmitsCurlFileAndProxy() {
+        String curl = "curl -F 'f=@/tmp/x.bin;filename=x.bin' "
+                + "-x http://user:pass@127.0.0.1:7890 https://example.com/up";
+        String kt = CurlCodegen.generate("kotlin-okhttp", curl).source();
+        assertTrue(kt, kt.contains("java.net.Proxy("));
+        assertTrue(kt, kt.contains("Credentials.basic(\"user\", \"pass\")"));
+        String php = CurlCodegen.generate("php-curl", curl).source();
+        assertTrue(php, php.contains("new CURLFile('/tmp/x.bin'"));
+        assertTrue(php, php.contains("CURLOPT_PROXY"));
+        assertTrue(php, php.contains("CURLOPT_PROXYUSERPWD"));
+    }
+
+    @Test
+    public void axiosEmitsProxyConfigAndFormData() {
+        String curl = "curl -F 'a=1' -x http://user:pass@127.0.0.1:7890 https://example.com/up";
+        GeneratedCode code = CurlCodegen.generate("js-axios", curl);
+        String src = code.source();
+        assertTrue(src, src.contains("proxy: {"));
+        assertTrue(src, src.contains("auth: { username: 'user', password: 'pass' }"));
+        assertTrue(src, src.contains("FormData"));
+    }
+
+    @Test
+    public void apacheEmitsProxyHost() {
+        String src = CurlCodegen.generate("java-apache",
+                "curl -x http://127.0.0.1:7890 https://example.com/api").source();
+        assertTrue(src, src.contains("setProxy(new HttpHost("));
+    }
+
+    @Test
+    public void harKeepsLiteralPlusAndTracksVersion() {
+        GeneratedCode code = CurlCodegen.generate("har",
+                "curl 'https://example.com/q?time=2024-01-01T08:00:00+08:00&enc=a%2Bb'");
+        String src = code.source();
+        assertTrue(src, src.contains("2024-01-01T08:00:00+08:00"));
+        assertTrue(src, src.contains("a+b"));
+        assertTrue(src, src.contains("\"version\": \"2.0.2\""));
+    }
+
+    @Test
+    public void jsAndPyEscapeUnicodeLineSeparatorsAndControlChars() {
+        GeneratedCode js = CurlCodegen.generate("js-fetch",
+                "curl -X POST -d 'a=1\u2028b' https://example.com/api");
+        assertFalse(js.source(), js.source().contains("\u2028"));
+        assertTrue(js.source(), js.source().contains("\\u2028"));
+        GeneratedCode ctrl = CurlCodegen.generate("js-fetch",
+                "curl -X POST -d $'a\\ab' https://example.com/api");
+        assertTrue(ctrl.source(), ctrl.source().contains("\\u0007"));
+        GeneratedCode py = CurlCodegen.generate("py-requests",
+                "curl -X POST -d 'x\u2029y' https://example.com/api");
+        assertFalse(py.source(), py.source().contains("\u2029"));
+        assertTrue(py.source(), py.source().contains("\\u2029"));
+    }
+
+    @Test
+    public void rustSwiftLuaUseTheirOwnEscapeStyles() {
+        String curl = "curl -X POST -d $'a\\ab' https://example.com/api";
+        assertTrue(CurlCodegen.generate("rust-reqwest", curl).source().contains("\\u{0007}"));
+        assertTrue(CurlCodegen.generate("swift-urlsession", curl).source().contains("\\u{0007}"));
+        assertTrue(CurlCodegen.generate("lua", curl).source().contains("\\007"));
+    }
+
+    @Test
     public void curl2OkHttp() {
         String curl = "curl --url 'https://wx.mail.qq.com/list/maillist' \\\n" +
                 "  -H 'accept: */*' \\\n" +

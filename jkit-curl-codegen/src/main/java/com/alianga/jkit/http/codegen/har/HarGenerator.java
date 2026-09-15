@@ -63,7 +63,7 @@ public final class HarGenerator extends AbstractCodeGenerator {
         src.append("        \"version\": \"1.2\",\n");
         src.append("        \"creator\": {\n");
         src.append("            \"name\": \"jkit-curl-codegen\",\n");
-        src.append("            \"version\": \"2.0.1\"\n");
+        src.append("            \"version\": \"").append(moduleVersion()).append("\"\n");
         src.append("        },\n");
         src.append("        \"entries\": [\n");
         src.append("            {\n");
@@ -227,9 +227,21 @@ public final class HarGenerator extends AbstractCodeGenerator {
         return out;
     }
 
+    /**
+     * 取模块版本：jar 内读 {@code Implementation-Version}，IDE / 测试环境回落到发行版本号。
+     *
+     * @return 版本号
+     */
+    static String moduleVersion() {
+        String v = HarGenerator.class.getPackage().getImplementationVersion();
+        return v == null ? "2.0.2" : v;
+    }
+
     private static String decode(String s) {
         try {
-            return java.net.URLDecoder.decode(s.replace("+", "%20"), "UTF-8");
+            // 先把字面 + 保护成 %2B：URLDecoder 会把 + 当空格，
+            // 而原始 URL / 表单里的 + 可能是字面加号（如签名、时间偏移）
+            return java.net.URLDecoder.decode(s.replace("+", "%2B"), "UTF-8");
         } catch (Exception e) {
             return s;
         }
