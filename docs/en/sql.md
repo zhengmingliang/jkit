@@ -186,7 +186,7 @@ List<SqlStatement> batch = SQL.parseAll(
 
 ## Statistics and Rewriting
 
-Facade rewrites (`addLimit` / `setPage` / `andWhere` / `injectTenant` / `replaceTable` / `replaceColumn` / `addSelectItem` / `removeSelectItem` / `replaceSelectItem` / `expandStar` / `adaptPagination` / `bind`) always **clone first**: they return a new tree and leave the input AST untouched. `SQL.clone` is an AST deep copy (`SqlAstCloner` / `SqlNode.copy`); the dialect argument of `clone(stmt, dialect)` is kept only for API compatibility and is ignored.
+Facade rewrites (`addLimit` / `setPage` / `andWhere` / `inject` / `replaceTable` / `replaceColumn` / `addSelectItem` / `removeSelectItem` / `replaceSelectItem` / `replaceSelectItems` / `expandStar` / `adaptPagination` / `bind`) always **clone first**: they return a new tree and leave the input AST untouched. `SQL.clone` is an AST deep copy (`SqlAstCloner` / `SqlNode.copy`); the dialect argument of `clone(stmt, dialect)` is kept only for API compatibility and is ignored.
 
 ```java
 SqlSchemaStat stat = SQL.stat(sql);
@@ -212,23 +212,33 @@ SqlStatement c4 = SQL.removeSelectItem(c3, "name");             // remove by sim
 SqlStatement c5 = SQL.adaptPagination(c4, SqlDialect.ORACLE);   // reshape pagination for the target dialect
 SqlStatement copy = SQL.clone(stmt);                            // AST deep copy
 
-// Tenant isolation: whitelist tables, drill into UNION / subqueries / CTEs; qualify JOIN aliases
-SqlStatement ten = SQL.injectTenant(stmt, "tenant_id", 100, "t_order", "t_item");
+// Row-level inject: configure tables/columns once, interceptors only call SQL.inject(stmt)
+SQL.injectConfig(SqlInjectConfig.create()
+        .tables("t_order", "t_item", "t_user")
+        .add("deleted", 0)
+        .add("tenant_id", new SqlInjectValue() {
+            public Object get() { return TenantHolder.get(); }
+        }));
+SqlStatement ten = SQL.inject(stmt);
+// one-off: SQL.inject(stmt, "tenant_id", 100, "t_order")
 
-// Column masking: expand * first, then replace the projection (output column name kept)
+// Column masking: expand *, then replace several columns in one clone/walk
 Map<String, List<String>> cols = new LinkedHashMap<String, List<String>>();
-cols.put("t_customer", Arrays.asList("id", "name", "phone"));
-SqlStatement masked = SQL.replaceSelectItem(
-        SQL.expandStar(SQL.parse("SELECT * FROM t_customer"), cols),
-        "phone", "CONCAT(LEFT(phone, 3), '****')");
+cols.put("t_customer", Arrays.asList("id", "name", "phone", "id_card"));
+Map<String, String> masks = new LinkedHashMap<String, String>();
+masks.put("phone", "CONCAT(LEFT(phone, 3), '****')");
+masks.put("id_card", "'****'");
+SqlStatement masked = SQL.replaceSelectItems(
+        SQL.expandStar(SQL.parse("SELECT * FROM t_customer"), cols), masks);
 ```
 
 - `addLimit`: does not overwrite an existing pagination (LIMIT / TOP / ROWNUM / `row_number`). Writes `TOP` for SQL Server, a single-level ROWNUM wrap for classic Oracle, and `LIMIT` otherwise.
 - `setLimit` / `setOffset` / `setPage`: **replace** pagination; in `setPage(pageNo, pageSize)`, pageNo starts at 1.
 - `removeSelectItem`: case-insensitive match on the simple column name (last segment of `t.col`) or an explicit alias; removing the last remaining item throws `IllegalArgumentException`. Outer SELECT only.
-- `injectTenant`: AND `alias.col = value` onto matching physical tables (CTE names and `DUAL` skipped; empty whitelist = every physical table). INSERT adds the column / SET item; MERGE adds ON predicates. String values are SQL-quoted (single quotes doubled), never parsed as expressions.
+- `inject` / `SqlInjectConfig`: AND `alias.col = value` onto matching physical tables (CTE names and `DUAL` skipped). Column names are yours — tenant, soft-delete, org id, etc. `SQL.injectConfig` sets the global table list and columns; `SqlInject.setCurrent` overrides the thread (aspect/request values). `SQL.inject(stmt)` throws `IllegalStateException` if nothing is configured. `injectTenant` still works, marked `@Deprecated`.
 - `expandStar`: expand `*` / `t.*` from a table→columns map; unresolved stars stay as-is. A subquery `*` uses the inner projection.
 - `replaceSelectItem`: replace SELECT items across the tree (UNION / subqueries). Match alias or `t.col`. For `SELECT *`, call `expandStar` first.
+- `replaceSelectItems`: one clone and one walk for several columns, so masking many fields does not rewrite repeatedly.
 - Pagination shapes, Oracle wrapping, and on-demand `format` / `toSqlString` adaptation are in the next section.
 
 ### Rewrite chains (optional)
@@ -657,8 +667,8 @@ mvn -pl jkit-sql test -Dtest=SqlBusinessScenarioTest
 | 4 | SQL firewall | `SQL.wall` / `SqlWallConfig` | table allow/deny lists, required WHERE columns, max tables |
 | 5 | Cross-dialect database migration | `SQL.convertBatch` / `SqlSchemaConverter.convert` | DDL translation loop, batch DML function rewriting |
 | 6 | Multi-dialect pagination | `SQL.setPage` / `SQL.adaptPagination` / `SQL.toSqlString` | LIMIT/TOP/FETCH/ROWNUM, offset=0 single wrap, on-demand write-back |
-| 7 | Multi-tenant rewriting | `SQL.injectTenant` / `SqlRewrites.replaceTable` | whitelist injection (UNION/subqueries), shard routing |
-| 8 | Data masking and column-level access | `SQL.expandStar` / `SQL.replaceSelectItem` / `SQL.removeSelectItem` | expand `*`, mask expressions, drop sensitive columns |
+| 7 | Multi-tenant rewriting | `SQL.inject` / `SqlInjectConfig` / `SqlRewrites.replaceTable` | global table/column config, aspect values, shard routing |
+| 8 | Data masking and column-level access | `SQL.expandStar` / `SQL.replaceSelectItems` / `SQL.removeSelectItem` | expand `*`, batch mask, drop sensitive columns |
 | 9 | Dynamic SQL building | `SqlBuilder` | conditional query assembly, INSERT/UPDATE |
 | 10 | Entity-driven multi-dialect DDL | `SqlEntities.createTable` | MySQL inline COMMENT, PG COMMENT ON |
 | 11 | SQL formatting and conventions | `SQL.format` / `SqlFormatOptions` | keyword case normalization, pretty multi-line |

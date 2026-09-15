@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -695,56 +696,142 @@ public final class SQL {
     }
 
     /**
-     * 按表白名单注入租户条件（先深拷贝再改）。下钻 UNION 臂、FROM 子查询、CTE 体、EXISTS 等
-     * 标量子查询；INSERT 补列 / MERGE 补 ON。无 {@code tables} 时对所有物理表注入（跳过 CTE 名与 {@code DUAL}）。
+     * 设置全局行级注入配置（表白名单、列名、动态取值）。拦截器里直接 {@link #inject(SqlStatement)}。
      *
-     * @param statement 语句
-     * @param column 租户列简单名，如 {@code tenant_id}
-     * @param value 租户值（字面量或绑定）
-     * @param tables 需要隔离的表简单名；省略则全部物理表
-     * @return 新语句
+     * @param config 配置，null 清空
      * @since 2.0.2
      */
-    public static SqlStatement injectTenant(SqlStatement statement, String column, SqlExpr value,
-            String... tables) {
-        Collection<String> list = tables == null || tables.length == 0 ? null : Arrays.asList(tables);
-        return injectTenant(statement, column, value, list);
+    public static void injectConfig(SqlInjectConfig config) {
+        SqlInject.setDefault(config);
     }
 
     /**
-     * 按表白名单注入租户条件（先深拷贝再改）。{@code value} 为 Java 值时收成字面量（字符串按 SQL
-     * 单引号转义，不会当表达式解析）；{@code "?"} 生成绑定占位。
+     * 按 {@link SqlInject#current()}（线程当前，否则全局默认）注入。先深拷贝。
+     * 未配置时抛 {@link IllegalStateException}。
      *
      * @param statement 语句
-     * @param column 租户列简单名
-     * @param value 租户值
-     * @param tables 需要隔离的表简单名；省略则全部物理表
      * @return 新语句
      * @since 2.0.2
      */
-    public static SqlStatement injectTenant(SqlStatement statement, String column, Object value,
-            String... tables) {
-        Collection<String> list = tables == null || tables.length == 0 ? null : Arrays.asList(tables);
-        return injectTenant(statement, column, SqlTenantRewriter.literalValue(value), list);
+    public static SqlStatement inject(SqlStatement statement) {
+        SqlInjectConfig cfg = SqlInject.current();
+        if (cfg == null || cfg.columns().isEmpty()) {
+            throw new IllegalStateException(
+                    "SqlInjectConfig not set; call SQL.injectConfig or SqlInject.setCurrent");
+        }
+        return inject(statement, cfg);
     }
 
     /**
-     * 按表白名单注入租户条件（先深拷贝再改）。
+     * 按配置注入行级条件（先深拷贝再改）。可多列一次遍历。
      *
      * @param statement 语句
-     * @param column 租户列简单名
-     * @param value 租户值
-     * @param tables 需要隔离的表简单名；null 或空 = 全部物理表
+     * @param config 配置
      * @return 新语句
      * @since 2.0.2
      */
-    public static SqlStatement injectTenant(SqlStatement statement, String column, SqlExpr value,
+    public static SqlStatement inject(SqlStatement statement, SqlInjectConfig config) {
+        if (statement == null) {
+            return statement;
+        }
+        SqlStatement copy = clone(statement);
+        return SqlTenantRewriter.inject(copy, config);
+    }
+
+    /**
+     * 注入单列等值条件（先深拷贝再改）。列名自定，不限租户。
+     *
+     * @param statement 语句
+     * @param column 列简单名，如 {@code tenant_id} / {@code deleted}
+     * @param value 值（字面量或绑定）
+     * @param tables 表白名单；省略则全部物理表
+     * @return 新语句
+     * @since 2.0.2
+     */
+    public static SqlStatement inject(SqlStatement statement, String column, SqlExpr value,
+            String... tables) {
+        Collection<String> list = tables == null || tables.length == 0 ? null : Arrays.asList(tables);
+        return inject(statement, column, value, list);
+    }
+
+    /**
+     * 注入单列等值条件（先深拷贝再改）。{@code value} 为 Java 值时收成字面量。
+     *
+     * @param statement 语句
+     * @param column 列简单名
+     * @param value Java 值
+     * @param tables 表白名单；省略则全部物理表
+     * @return 新语句
+     * @since 2.0.2
+     */
+    public static SqlStatement inject(SqlStatement statement, String column, Object value,
+            String... tables) {
+        Collection<String> list = tables == null || tables.length == 0 ? null : Arrays.asList(tables);
+        return inject(statement, column, SqlTenantRewriter.literalValue(value), list);
+    }
+
+    /**
+     * 注入单列等值条件（先深拷贝再改）。
+     *
+     * @param statement 语句
+     * @param column 列简单名
+     * @param value 值
+     * @param tables 表白名单；null 或空 = 全部物理表
+     * @return 新语句
+     * @since 2.0.2
+     */
+    public static SqlStatement inject(SqlStatement statement, String column, SqlExpr value,
             Collection<String> tables) {
         if (statement == null) {
             return statement;
         }
         SqlStatement copy = clone(statement);
         return SqlTenantRewriter.inject(copy, column, value, tables);
+    }
+
+    /**
+     * @param statement 语句
+     * @param column 列简单名
+     * @param value 值
+     * @param tables 表白名单
+     * @return 新语句
+     * @since 2.0.2
+     * @deprecated 用 {@link #inject(SqlStatement, String, SqlExpr, String...)}，列名不限租户
+     */
+    @Deprecated
+    public static SqlStatement injectTenant(SqlStatement statement, String column, SqlExpr value,
+            String... tables) {
+        return inject(statement, column, value, tables);
+    }
+
+    /**
+     * @param statement 语句
+     * @param column 列简单名
+     * @param value Java 值
+     * @param tables 表白名单
+     * @return 新语句
+     * @since 2.0.2
+     * @deprecated 用 {@link #inject(SqlStatement, String, Object, String...)}
+     */
+    @Deprecated
+    public static SqlStatement injectTenant(SqlStatement statement, String column, Object value,
+            String... tables) {
+        return inject(statement, column, value, tables);
+    }
+
+    /**
+     * @param statement 语句
+     * @param column 列简单名
+     * @param value 值
+     * @param tables 表白名单
+     * @return 新语句
+     * @since 2.0.2
+     * @deprecated 用 {@link #inject(SqlStatement, String, SqlExpr, java.util.Collection)}
+     */
+    @Deprecated
+    public static SqlStatement injectTenant(SqlStatement statement, String column, SqlExpr value,
+            Collection<String> tables) {
+        return inject(statement, column, value, tables);
     }
 
     /**
@@ -872,6 +959,41 @@ public final class SQL {
         }
         SqlStatement copy = clone(statement);
         return SqlSelectListRewriter.replaceSelectItem(copy, column, expr, alias);
+    }
+
+    /**
+     * 整树一次遍历替换多列投影（只 clone 一次）。值是表达式 SQL 或 {@link SqlExpr}。
+     *
+     * @param statement 语句
+     * @param replacements 列名（或 {@code t.col}）→ 新表达式
+     * @return 新语句
+     * @since 2.0.2
+     */
+    public static SqlStatement replaceSelectItems(SqlStatement statement, Map<String, ?> replacements) {
+        if (statement == null || replacements == null || replacements.isEmpty()) {
+            return statement;
+        }
+        Map<String, SqlExpr> exprs = new LinkedHashMap<String, SqlExpr>(replacements.size() * 2);
+        for (Map.Entry<String, ?> e : replacements.entrySet()) {
+            if (e.getKey() == null || e.getValue() == null) {
+                continue;
+            }
+            Object v = e.getValue();
+            if (v instanceof SqlExpr) {
+                exprs.put(e.getKey(), (SqlExpr) v);
+            } else {
+                String sql = String.valueOf(v).trim();
+                if (sql.isEmpty()) {
+                    continue;
+                }
+                exprs.put(e.getKey(), parseExpr(sql));
+            }
+        }
+        if (exprs.isEmpty()) {
+            return statement;
+        }
+        SqlStatement copy = clone(statement);
+        return SqlSelectListRewriter.replaceSelectItems(copy, exprs);
     }
 
     /**

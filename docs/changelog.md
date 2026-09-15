@@ -12,7 +12,8 @@
 
 - `JdbcUrlUtils`：解析 JDBC URL（主机 / 集群节点 / 库名 / schema / 参数），`fromUrl` 推断 `SqlDialect`，`getDbType` 返回类型短名，`driverForUrl` / `getDriverClassName` 猜测驱动类。覆盖 MySQL 复制与负载、PostgreSQL HA、Oracle SID/Service/RAC、SQL Server、H2、Gauss/openGauss、达梦等。PostgreSQL 系从 `currentSchema` 取 schema（缺省 `public`）。
 - `SQL.injectTenant` / `SqlRewrites.injectTenant`：按表白名单注入租户条件。下钻 UNION 臂、FROM 子查询、CTE 体、EXISTS / IN 标量子查询；JOIN 按别名限定列；INSERT 补列或改 SET；MERGE 补 ON。字符串值按 SQL 单引号转义，不当表达式解析。CTE 名与 `DUAL` 跳过。
-- `SQL.replaceSelectItem` / `SQL.expandStar`：列级脱敏。整树替换 SELECT 投影（保留输出列名）；`expandStar` 按表列清单把 `*` / `t.*` 展开后再裁列或改写成掩码表达式。解析不到的星号保持原样。
+- `SQL.inject` / `SqlInjectConfig` / `SqlInject`：行级条件注入（列名自定，不限租户）。启动时 `SQL.injectConfig` 配表白名单和列；`SqlInject.setCurrent` 覆盖本线程；`SqlInjectValue` 每次 inject 再取值。可一次注入多列。`injectTenant` 改为 `@Deprecated` 别名。
+- `SQL.replaceSelectItem` / `SQL.replaceSelectItems` / `SQL.expandStar`：列级脱敏。整树替换 SELECT 投影（保留输出列名）；`replaceSelectItems` 一次 clone、一次遍历替换多列；`expandStar` 按表列清单把 `*` / `t.*` 展开后再裁列或改写成掩码表达式。解析不到的星号保持原样。
 - `SqlWallConfig`：`denyTables` / `allowTables` / `requireWhereColumns` / `maxTables`。违规码 `deny-table`、`allow-table`、`missing-where-column`、`too-many-tables`。恒真再拦 `LIKE '%'` 与 `XOR 1=1`。
 - `DATE_FORMAT` 跨方言转换会改写常见格式符：`%Y-%m-%d %H:%i:%s` → PG/Oracle `TO_CHAR(..., 'YYYY-MM-DD HH24:MI:SS')`，SQLite `strftime` 会交换参数并把 `%i` 改成 `%M`。对不上的格式符保留并 `SEMANTIC_RISK`。
 - `SQL.bind` / `SQL.bindNamed`：把 `?` / `:name` 换成字面量。字符串只加倍单引号（不用反斜杠，避免 MySQL `\'` 提前结束字符串），`IN ?` 可填集合。注入 payload 仍是一条语句。

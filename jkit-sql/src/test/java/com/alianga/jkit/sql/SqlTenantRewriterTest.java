@@ -349,7 +349,7 @@ public class SqlTenantRewriterTest {
             SQL.injectTenant(SQL.parse("SELECT 1"), "  ", 1);
             fail("expected IllegalArgumentException");
         } catch (IllegalArgumentException expected) {
-            assertTrue(expected.getMessage().contains("tenant column"));
+            assertTrue(expected.getMessage().contains("inject column"));
         }
     }
 

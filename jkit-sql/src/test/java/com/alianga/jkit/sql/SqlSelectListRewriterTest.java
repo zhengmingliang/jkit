@@ -234,6 +234,34 @@ public class SqlSelectListRewriterTest {
     }
 
     @Test
+    public void replaceSelectItemsBatchOneWalk() {
+        Map<String, String> masks = new LinkedHashMap<String, String>();
+        masks.put("phone", "CONCAT(LEFT(phone, 3), '****')");
+        masks.put("id_card", "'****'");
+        SqlStatement orig = SQL.parse("SELECT id, phone, id_card FROM t_customer");
+        String before = sql(orig);
+        SqlStatement out = SQL.replaceSelectItems(orig, masks);
+        String n = sql(out);
+        assertTrue(n, n.contains("CONCAT(LEFT(phone, 3), '****') AS phone"));
+        assertTrue(n, n.contains("'****' AS id_card"));
+        assertTrue(n, n.contains("id"));
+        assertEquals(before, sql(orig));
+        SQL.parse(n);
+    }
+
+    @Test
+    public void replaceSelectItemsPrefersQualified() {
+        Map<String, String> masks = new LinkedHashMap<String, String>();
+        masks.put("phone", "'x'");
+        masks.put("c.phone", "'y'");
+        SqlStatement out = SQL.replaceSelectItems(
+                SQL.parse("SELECT c.phone, phone FROM t_customer c"), masks);
+        String n = sql(out);
+        assertTrue(n, n.contains("'y' AS phone"));
+        assertTrue(n, n.contains("'x' AS phone"));
+    }
+
+    @Test
     public void nullsAreNoops() {
         SqlStatement stmt = SQL.parse("SELECT phone FROM t");
         assertSame(stmt, SQL.replaceSelectItem(stmt, "phone", (String) null));

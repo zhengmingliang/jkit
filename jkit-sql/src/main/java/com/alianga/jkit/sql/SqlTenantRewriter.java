@@ -31,12 +31,12 @@ import java.util.Locale;
 import java.util.Set;
 
 /**
- * 多租户隔离改写：按表白名单把 {@code alias.tenant_col = value} 注入 SELECT / UPDATE / DELETE
- * 的 WHERE（含 UNION 臂、FROM 子查询、CTE 体、EXISTS 标量子查询），并给匹配的 INSERT / MERGE
- * 补列或 ON 条件。
+ * 行级条件注入：按表白名单把 {@code alias.col = value} 写入 SELECT / UPDATE / DELETE 的 WHERE
+ * （含 UNION、FROM 子查询、CTE、EXISTS），并给匹配的 INSERT / MERGE 补列或 ON。
+ * 列名不限租户，软删、机构号等同路。
  *
- * <p>就地修改；公开门面 {@link SQL#injectTenant} 会先 clone。CTE 名不当物理表；{@code DUAL} 跳过。
- * 无白名单时对所有物理表注入。值表达式每次使用前深拷贝，避免共享节点。</p>
+ * <p>就地修改；公开门面 {@link SQL#inject} 会先 clone。CTE 名不当物理表；{@code DUAL} 跳过。
+ * 无白名单时对所有物理表注入。值表达式每次使用前深拷贝。</p>
  *
  * @author 郑明亮
  * @since 2.0.2
@@ -46,12 +46,39 @@ public final class SqlTenantRewriter {
     }
 
     /**
-     * 就地注入租户条件。
+     * 就地按配置注入（可多列，一次遍历）。
      *
      * @param statement 语句
-     * @param column 租户列简单名，如 {@code tenant_id}
-     * @param value 租户值（字面量 / 绑定）；null 视为 {@code NULL}
-     * @param tables 需要隔离的物理表简单名；null 或空 = 全部物理表
+     * @param config 配置；null 或无列则原样返回
+     * @return 原对象
+     */
+    public static SqlStatement inject(SqlStatement statement, SqlInjectConfig config) {
+        if (statement == null || config == null || config.columns().isEmpty()) {
+            return statement;
+        }
+        Set<String> cte = collectCteNames(statement);
+        Set<String> globalTables = toLowerSet(config.tables());
+        List<Bind> binds = new ArrayList<Bind>(config.columns().size());
+        List<SqlInjectConfig.Column> cols = config.columns();
+        for (int i = 0; i < cols.size(); i++) {
+            SqlInjectConfig.Column col = cols.get(i);
+            Object raw = col.value() == null ? null : col.value().get();
+            SqlExpr expr = literalValue(raw);
+            Set<String> tables = col.tables() == null || col.tables().isEmpty()
+                    ? globalTables : toLowerSet(col.tables());
+            binds.add(new Bind(col.name(), expr, tables));
+        }
+        statement.accept(new Injector(binds, cte));
+        return statement;
+    }
+
+    /**
+     * 就地注入单列条件。
+     *
+     * @param statement 语句
+     * @param column 列简单名，如 {@code tenant_id}
+     * @param value 值（字面量 / 绑定）；null 视为 {@code NULL}
+     * @param tables 物理表简单名；null 或空 = 全部物理表
      * @return 原对象（已改）
      */
     public static SqlStatement inject(SqlStatement statement, String column, SqlExpr value,
@@ -60,14 +87,10 @@ public final class SqlTenantRewriter {
             return statement;
         }
         if (column == null || column.trim().isEmpty()) {
-            throw new IllegalArgumentException("tenant column required");
+            throw new IllegalArgumentException("inject column required");
         }
-        String col = column.trim();
-        SqlExpr val = value == null ? SqlLiteral.of(SqlLiteral.Kind.NULL, "NULL") : value;
-        Set<String> cte = collectCteNames(statement);
-        Set<String> whitelist = toLowerSet(tables);
-        statement.accept(new Injector(col, val, cte, whitelist));
-        return statement;
+        SqlInjectConfig cfg = SqlInjectConfig.create().tables(tables).add(column.trim(), value);
+        return inject(statement, cfg);
     }
 
     /**
@@ -348,20 +371,28 @@ public final class SqlTenantRewriter {
         branch.values().add(copyExpr(value));
     }
 
-    /**
-     * 按语句类型注入。
-     */
-    private static final class Injector extends SqlVisitorAdapter {
-        private final String column;
-        private final SqlExpr value;
-        private final Set<String> cte;
-        private final Set<String> whitelist;
+    private static final class Bind {
+        final String column;
+        final SqlExpr value;
+        final Set<String> whitelist;
 
-        private Injector(String column, SqlExpr value, Set<String> cte, Set<String> whitelist) {
+        Bind(String column, SqlExpr value, Set<String> whitelist) {
             this.column = column;
             this.value = value;
-            this.cte = cte;
             this.whitelist = whitelist;
+        }
+    }
+
+    /**
+     * 按语句类型注入（多列一次遍历）。
+     */
+    private static final class Injector extends SqlVisitorAdapter {
+        private final List<Bind> binds;
+        private final Set<String> cte;
+
+        private Injector(List<Bind> binds, Set<String> cte) {
+            this.binds = binds;
+            this.cte = cte;
         }
 
         /**
@@ -383,10 +414,19 @@ public final class SqlTenantRewriter {
             return true;
         }
 
+        private SqlExpr extras(List<SqlTable> tables) {
+            SqlExpr extra = null;
+            for (int i = 0; i < binds.size(); i++) {
+                Bind b = binds.get(i);
+                extra = and(extra, predicatesFor(tables, b.column, b.value, cte, b.whitelist));
+            }
+            return extra;
+        }
+
         private void injectSelect(SqlSelect select) {
             List<SqlTable> tables = new ArrayList<SqlTable>(4);
             collectPhysical(select.from(), tables);
-            SqlExpr extra = predicatesFor(tables, column, value, cte, whitelist);
+            SqlExpr extra = extras(tables);
             if (extra != null) {
                 select.setWhere(and(select.where(), extra));
             }
@@ -396,7 +436,7 @@ public final class SqlTenantRewriter {
             List<SqlTable> tables = new ArrayList<SqlTable>(4);
             collectPhysical(update.table(), tables);
             collectPhysical(update.from(), tables);
-            SqlExpr extra = predicatesFor(tables, column, value, cte, whitelist);
+            SqlExpr extra = extras(tables);
             if (extra != null) {
                 update.setWhere(and(update.where(), extra));
             }
@@ -406,19 +446,22 @@ public final class SqlTenantRewriter {
             List<SqlTable> tables = new ArrayList<SqlTable>(4);
             collectPhysical(delete.table(), tables);
             collectPhysical(delete.from(), tables);
-            SqlExpr extra = predicatesFor(tables, column, value, cte, whitelist);
+            SqlExpr extra = extras(tables);
             if (extra != null) {
                 delete.setWhere(and(delete.where(), extra));
             }
         }
 
         private void injectInsert(SqlInsert insert) {
-            if (insert.table() != null) {
-                ensureInsertColumn(insert, column, value, cte, whitelist);
-            }
-            List<SqlInsertBranch> branches = insert.branches();
-            for (int i = 0; i < branches.size(); i++) {
-                ensureBranchColumn(branches.get(i), column, value, cte, whitelist);
+            for (int i = 0; i < binds.size(); i++) {
+                Bind b = binds.get(i);
+                if (insert.table() != null) {
+                    ensureInsertColumn(insert, b.column, b.value, cte, b.whitelist);
+                }
+                List<SqlInsertBranch> branches = insert.branches();
+                for (int j = 0; j < branches.size(); j++) {
+                    ensureBranchColumn(branches.get(j), b.column, b.value, cte, b.whitelist);
+                }
             }
         }
 
@@ -426,20 +469,23 @@ public final class SqlTenantRewriter {
             List<SqlTable> tables = new ArrayList<SqlTable>(4);
             collectPhysical(merge.into(), tables);
             collectPhysical(merge.using(), tables);
-            SqlExpr extra = predicatesFor(tables, column, value, cte, whitelist);
+            SqlExpr extra = extras(tables);
             if (extra != null) {
                 merge.setOn(and(merge.on(), extra));
             }
-            boolean intoMatches = merge.into() instanceof SqlTable
-                    && matches((SqlTable) merge.into(), cte, whitelist);
-            if (!intoMatches) {
-                return;
-            }
-            List<SqlMergeWhen> whens = merge.whens();
-            for (int i = 0; i < whens.size(); i++) {
-                SqlInsert nested = whens.get(i).insert();
-                if (nested != null) {
-                    ensureInsertColumn(nested, column, value, cte, whitelist);
+            for (int i = 0; i < binds.size(); i++) {
+                Bind b = binds.get(i);
+                boolean intoMatches = merge.into() instanceof SqlTable
+                        && matches((SqlTable) merge.into(), cte, b.whitelist);
+                if (!intoMatches) {
+                    continue;
+                }
+                List<SqlMergeWhen> whens = merge.whens();
+                for (int j = 0; j < whens.size(); j++) {
+                    SqlInsert nested = whens.get(j).insert();
+                    if (nested != null) {
+                        ensureInsertColumn(nested, b.column, b.value, cte, b.whitelist);
+                    }
                 }
             }
         }

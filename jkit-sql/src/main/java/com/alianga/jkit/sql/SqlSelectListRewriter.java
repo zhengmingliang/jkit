@@ -46,7 +46,49 @@ public final class SqlSelectListRewriter {
         if (statement == null || column == null || column.trim().isEmpty() || replacement == null) {
             return statement;
         }
-        final String spec = column.trim();
+        Map<String, SqlExpr> one = new LinkedHashMap<String, SqlExpr>(2);
+        one.put(column.trim(), replacement);
+        return replaceSelectItems(statement, one, alias);
+    }
+
+    /**
+     * 整树一次遍历替换多列。限定名（{@code t.col}）优先于简单名。
+     *
+     * @param statement 语句
+     * @param replacements 列名 → 新表达式
+     * @return 原对象
+     */
+    public static SqlStatement replaceSelectItems(SqlStatement statement,
+            Map<String, ? extends SqlExpr> replacements) {
+        return replaceSelectItems(statement, replacements, null);
+    }
+
+    static SqlStatement replaceSelectItems(SqlStatement statement,
+            Map<String, ? extends SqlExpr> replacements, final String alias) {
+        if (statement == null || replacements == null || replacements.isEmpty()) {
+            return statement;
+        }
+        final List<ReplaceSpec> specs = new ArrayList<ReplaceSpec>(replacements.size());
+        List<ReplaceSpec> simple = new ArrayList<ReplaceSpec>(replacements.size());
+        for (Map.Entry<String, ? extends SqlExpr> e : replacements.entrySet()) {
+            if (e.getKey() == null || e.getValue() == null) {
+                continue;
+            }
+            String spec = e.getKey().trim();
+            if (spec.isEmpty()) {
+                continue;
+            }
+            ReplaceSpec parsed = ReplaceSpec.parse(spec, e.getValue());
+            if (parsed.qualifier != null) {
+                specs.add(parsed);
+            } else {
+                simple.add(parsed);
+            }
+        }
+        specs.addAll(simple);
+        if (specs.isEmpty()) {
+            return statement;
+        }
         statement.accept(new SqlVisitorAdapter() {
             /**
              * {@inheritDoc}
@@ -54,7 +96,7 @@ public final class SqlSelectListRewriter {
             @Override
             public boolean visit(SqlNode node) {
                 if (node instanceof SqlSelect) {
-                    replaceInSelect((SqlSelect) node, spec, replacement, alias);
+                    replaceInSelectBatch((SqlSelect) node, specs, alias);
                 }
                 return true;
             }
@@ -119,26 +161,46 @@ public final class SqlSelectListRewriter {
         };
     }
 
-    private static void replaceInSelect(SqlSelect select, String spec, SqlExpr replacement, String alias) {
-        String qualifier = null;
-        String simple = spec;
-        int dot = spec.lastIndexOf('.');
-        if (dot > 0 && dot < spec.length() - 1) {
-            qualifier = spec.substring(0, dot);
-            simple = spec.substring(dot + 1);
-        }
+    private static void replaceInSelectBatch(SqlSelect select, List<ReplaceSpec> specs, String alias) {
         List<SqlSelectItem> items = select.selectItems();
         for (int i = 0; i < items.size(); i++) {
             SqlSelectItem item = items.get(i);
-            if (!matches(item, qualifier, simple)) {
-                continue;
+            for (int s = 0; s < specs.size(); s++) {
+                ReplaceSpec spec = specs.get(s);
+                if (!matches(item, spec.qualifier, spec.simple)) {
+                    continue;
+                }
+                item.setExpr(copyExpr(spec.replacement));
+                if (alias != null) {
+                    item.setAlias(alias.length() == 0 ? null : alias);
+                } else if (item.alias() == null || item.alias().isEmpty()) {
+                    item.setAlias(spec.simple);
+                }
+                break;
             }
-            item.setExpr(copyExpr(replacement));
-            if (alias != null) {
-                item.setAlias(alias.length() == 0 ? null : alias);
-            } else if (item.alias() == null || item.alias().isEmpty()) {
-                item.setAlias(simple);
+        }
+    }
+
+    private static final class ReplaceSpec {
+        final String qualifier;
+        final String simple;
+        final SqlExpr replacement;
+
+        private ReplaceSpec(String qualifier, String simple, SqlExpr replacement) {
+            this.qualifier = qualifier;
+            this.simple = simple;
+            this.replacement = replacement;
+        }
+
+        static ReplaceSpec parse(String spec, SqlExpr replacement) {
+            String qualifier = null;
+            String simple = spec;
+            int dot = spec.lastIndexOf('.');
+            if (dot > 0 && dot < spec.length() - 1) {
+                qualifier = spec.substring(0, dot);
+                simple = spec.substring(dot + 1);
             }
+            return new ReplaceSpec(qualifier, simple, replacement);
         }
     }
 

@@ -167,15 +167,50 @@ public final class SqlRewrites {
     }
 
     /**
-     * 内建适配器：按表白名单注入租户条件，等价 {@link SqlTenantRewriter#inject}。
+     * 内建适配器：按表白名单注入单列条件。
      *
-     * @param column 租户列简单名
-     * @param value 租户值
-     * @param tables 需要隔离的表简单名；省略则全部物理表
+     * @param column 列简单名
+     * @param value 值
+     * @param tables 表白名单；省略则全部物理表
+     * @return 规则
+     * @since 2.0.2
+     * @deprecated 用 {@link #inject(String, SqlExpr, String...)}
+     */
+    @Deprecated
+    public static SqlRewriteHook injectTenant(final String column, final SqlExpr value,
+            final String... tables) {
+        return inject(column, value, tables);
+    }
+
+    /**
+     * 内建适配器：按配置注入行级条件，等价 {@link SqlTenantRewriter#inject(SqlStatement, SqlInjectConfig)}。
+     *
+     * @param config 配置
      * @return 规则
      * @since 2.0.2
      */
-    public static SqlRewriteHook injectTenant(final String column, final SqlExpr value,
+    public static SqlRewriteHook inject(final SqlInjectConfig config) {
+        return new SqlRewriteHook() {
+            /**
+             * {@inheritDoc}
+             */
+            @Override
+            public SqlStatement apply(SqlStatement statement) {
+                return SqlTenantRewriter.inject(statement, config);
+            }
+        };
+    }
+
+    /**
+     * 内建适配器：注入单列等值条件。
+     *
+     * @param column 列简单名
+     * @param value 值
+     * @param tables 表白名单；省略则全部物理表
+     * @return 规则
+     * @since 2.0.2
+     */
+    public static SqlRewriteHook inject(final String column, final SqlExpr value,
             final String... tables) {
         final Collection<String> list = tables == null || tables.length == 0
                 ? null : Arrays.asList(tables);
@@ -302,6 +337,25 @@ public final class SqlRewrites {
             @Override
             public SqlStatement apply(SqlStatement statement) {
                 return SqlSelectListRewriter.replaceSelectItem(statement, column, expr, null);
+            }
+        };
+    }
+
+    /**
+     * 内建适配器：一次遍历替换多列投影。
+     *
+     * @param replacements 列名 → 新表达式
+     * @return 规则
+     * @since 2.0.2
+     */
+    public static SqlRewriteHook replaceSelectItems(final Map<String, ? extends SqlExpr> replacements) {
+        return new SqlRewriteHook() {
+            /**
+             * {@inheritDoc}
+             */
+            @Override
+            public SqlStatement apply(SqlStatement statement) {
+                return SqlSelectListRewriter.replaceSelectItems(statement, replacements);
             }
         };
     }

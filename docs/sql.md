@@ -186,7 +186,7 @@ List<SqlStatement> batch = SQL.parseAll(
 
 ## 统计与改写
 
-门面改写（`addLimit` / `setPage` / `andWhere` / `injectTenant` / `replaceTable` / `replaceColumn` / `addSelectItem` / `removeSelectItem` / `replaceSelectItem` / `expandStar` / `adaptPagination` / `bind`）都是 **先 `SQL.clone` 再改**：返回新树，入参 AST 不变。`SQL.clone` 是 AST 深拷贝（`SqlAstCloner` / `SqlNode.copy`），与方言无关（`clone(stmt, dialect)` 的方言参数仅保留 API 兼容）。
+门面改写（`addLimit` / `setPage` / `andWhere` / `inject` / `replaceTable` / `replaceColumn` / `addSelectItem` / `removeSelectItem` / `replaceSelectItem` / `replaceSelectItems` / `expandStar` / `adaptPagination` / `bind`）都是 **先 `SQL.clone` 再改**：返回新树，入参 AST 不变。`SQL.clone` 是 AST 深拷贝（`SqlAstCloner` / `SqlNode.copy`），与方言无关（`clone(stmt, dialect)` 的方言参数仅保留 API 兼容）。
 
 ```java
 SqlSchemaStat stat = SQL.stat(sql);
@@ -212,23 +212,33 @@ SqlStatement c4 = SQL.removeSelectItem(c3, "name");             // 按简单列�
 SqlStatement c5 = SQL.adaptPagination(c4, SqlDialect.ORACLE);   // 按目标方言换分页形态
 SqlStatement copy = SQL.clone(stmt);                            // AST 深拷贝
 
-// 多租户：按表白名单注入，下钻 UNION / 子查询 / CTE；JOIN 用别名限定列
-SqlStatement ten = SQL.injectTenant(stmt, "tenant_id", 100, "t_order", "t_item");
+// 行级注入：启动时配一次表/列，拦截器里只 SQL.inject(stmt)
+SQL.injectConfig(SqlInjectConfig.create()
+        .tables("t_order", "t_item", "t_user")
+        .add("deleted", 0)
+        .add("tenant_id", new SqlInjectValue() {
+            public Object get() { return TenantHolder.get(); }
+        }));
+SqlStatement ten = SQL.inject(stmt);
+// 单次仍可显式：SQL.inject(stmt, "tenant_id", 100, "t_order")
 
-// 列级脱敏：先展开 *，再替换投影（默认保留输出列名）
+// 列级脱敏：先展开 *，再一次替换多列（只 clone / 遍历一次）
 Map<String, List<String>> cols = new LinkedHashMap<String, List<String>>();
-cols.put("t_customer", Arrays.asList("id", "name", "phone"));
-SqlStatement masked = SQL.replaceSelectItem(
-        SQL.expandStar(SQL.parse("SELECT * FROM t_customer"), cols),
-        "phone", "CONCAT(LEFT(phone, 3), '****')");
+cols.put("t_customer", Arrays.asList("id", "name", "phone", "id_card"));
+Map<String, String> masks = new LinkedHashMap<String, String>();
+masks.put("phone", "CONCAT(LEFT(phone, 3), '****')");
+masks.put("id_card", "'****'");
+SqlStatement masked = SQL.replaceSelectItems(
+        SQL.expandStar(SQL.parse("SELECT * FROM t_customer"), cols), masks);
 ```
 
 - `addLimit`：已有分页（LIMIT / TOP / ROWNUM / `row_number` 包装）时不覆盖。SQL Server 写 `TOP`；经典 Oracle 写单层 ROWNUM 包装；其余写 `LIMIT`。
 - `setLimit` / `setOffset` / `setPage`：**替换**分页；`setPage(pageNo, pageSize)` 的 pageNo 从 1 起。
 - `removeSelectItem`：忽略大小写，匹配简单列名（`t.col` 的最后一段）或显式别名；删到只剩一项时再删会抛 `IllegalArgumentException`。只改**外层** SELECT。
-- `injectTenant`：给匹配的物理表 AND `alias.col = value`（CTE 名与 `DUAL` 跳过；无表白名单则全部物理表）。INSERT 补列 / SET；MERGE 补 ON。字符串值按 SQL 单引号转义，不当表达式解析。
+- `inject` / `SqlInjectConfig`：给匹配的物理表 AND `alias.col = value`（CTE 名与 `DUAL` 跳过）。列名自定，租户 / 软删 / 机构号都可以。`SQL.injectConfig` 设全局表名单和列；`SqlInject.setCurrent` 覆盖本线程（切面里取值）。未配置时 `SQL.inject(stmt)` 抛 `IllegalStateException`。`injectTenant` 仍可用，已标 `@Deprecated`。
 - `expandStar`：按表列清单把 `*` / `t.*` 展开；解析不到的星号保持原样。子查询 `*` 用内层投影。
 - `replaceSelectItem`：整树替换 SELECT 投影（UNION / 子查询），匹配别名或 `t.col`；`SELECT *` 请先 `expandStar`。
+- `replaceSelectItems`：一次 clone、一次遍历替换多列，避免脱敏多字段时反复改写。
 - 分页形态、Oracle 包装、`format` / `toSqlString` 按需适配见下一节。
 
 ### 改写规则链（可选）
@@ -243,7 +253,7 @@ SqlStatement out = SQL.rewrite(stmt, SqlRewrites.create()
         .add(SqlRewrites.andWhere(SQL.parseExpr("tenant_id = ?")))
         .add(SqlRewrites.addSelectItem("status"))
         .add(SqlRewrites.removeSelectItem("secret"))
-        .add(SqlRewrites.injectTenant("tenant_id", SqlTenantRewriter.literalValue(100), "t_order"))
+        .add(SqlRewrites.inject("tenant_id", SqlTenantRewriter.literalValue(100), "t_order"))
         .add(SqlRewrites.adaptPagination(SqlDialect.ORACLE))
         .add(SqlRewrites.addLimit(100, SqlDialect.MYSQL)));
 ```
@@ -713,8 +723,8 @@ mvn -pl jkit-sql test -Dtest=SqlBusinessScenarioTest
 | 4 | SQL 防火墙 | `SQL.wall` / `SqlWallConfig` | 表黑白名单、WHERE 必含列、表数上限 |
 | 5 | 跨方言数据库迁移 | `SQL.convertBatch` / `SqlSchemaConverter.convert` | DDL 翻译闭环、批量 DML 函数改写 |
 | 6 | 多方言分页 | `SQL.setPage` / `SQL.adaptPagination` / `SQL.toSqlString` | LIMIT/TOP/FETCH/ROWNUM、offset=0 单层包装、回写按需适配 |
-| 7 | 多租户改写 | `SQL.injectTenant` / `SqlRewrites.replaceTable` | 按表白名单注入（含 UNION/子查询）、分表路由 |
-| 8 | 数据脱敏与列级权限 | `SQL.expandStar` / `SQL.replaceSelectItem` / `SQL.removeSelectItem` | 展开 `*`、掩码替换、裁敏感列 |
+| 7 | 多租户改写 | `SQL.inject` / `SqlInjectConfig` / `SqlRewrites.replaceTable` | 全局表列配置、切面取值、分表路由 |
+| 8 | 数据脱敏与列级权限 | `SQL.expandStar` / `SQL.replaceSelectItems` / `SQL.removeSelectItem` | 展开 `*`、一次替换多列、裁敏感列 |
 | 9 | 动态 SQL 构建 | `SqlBuilder` | 条件查询组装、INSERT/UPDATE |
 | 10 | 实体驱动多方言建表 | `SqlEntities.createTable` | MySQL 内联注释、PG 的 COMMENT ON |
 | 11 | SQL 格式化与规范统一 | `SQL.format` / `SqlFormatOptions` | 关键字大小写归一、pretty 多行 |
