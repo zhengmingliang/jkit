@@ -89,8 +89,8 @@ public final class SqlBinder {
         }
         if (value instanceof Boolean) {
             boolean b = ((Boolean) value).booleanValue();
-            SqlDialect family = dialect == null ? SqlDialect.MYSQL : dialect.typeFamily();
-            if (family == SqlDialect.MYSQL || family == SqlDialect.HIVE) {
+            SqlDialectSpec d = dialect == null ? SqlDialect.MYSQL : dialect;
+            if (d.booleanLiteralAsNumber()) {
                 return SqlLiteral.of(SqlLiteral.Kind.NUMBER, b ? "1" : "0");
             }
             return SqlLiteral.of(SqlLiteral.Kind.BOOLEAN, b ? "TRUE" : "FALSE");

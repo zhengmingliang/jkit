@@ -120,10 +120,36 @@ public class SqlBinderTest {
 
     @Test
     public void booleanLiteralByDialect() {
-        String mysql = SQL.bind("SELECT * FROM t WHERE ok = ?", SqlDialect.MYSQL, true);
-        assertTrue(mysql, mysql.contains("ok = 1"));
-        String pg = SQL.bind("SELECT * FROM t WHERE ok = ?", SqlDialect.POSTGRES, true);
-        assertTrue(pg, pg.toUpperCase().contains("TRUE"));
+        SqlDialect[] asNumber = new SqlDialect[] {
+                SqlDialect.MYSQL, SqlDialect.HIVE, SqlDialect.ORACLE, SqlDialect.ORACLE12,
+                SqlDialect.DAMENG, SqlDialect.SQLSERVER, SqlDialect.SQLITE, SqlDialect.DB2
+        };
+        for (int i = 0; i < asNumber.length; i++) {
+            SqlDialect d = asNumber[i];
+            String yes = SQL.bind("SELECT * FROM t WHERE ok = ?", d, true);
+            String no = SQL.bind("SELECT * FROM t WHERE ok = ?", d, false);
+            assertTrue(d.name() + " true: " + yes, yes.contains("ok = 1"));
+            assertFalse(d.name() + " true must not be TRUE: " + yes, yes.toUpperCase().contains("TRUE"));
+            assertTrue(d.name() + " false: " + no, no.contains("ok = 0"));
+            assertFalse(d.name() + " false must not be FALSE: " + no, no.toUpperCase().contains("FALSE"));
+            SQL.parse(yes, d);
+            SQL.parse(no, d);
+        }
+        SqlDialect[] asKeyword = new SqlDialect[] {
+                SqlDialect.POSTGRES, SqlDialect.H2, SqlDialect.ANSI, SqlDialect.PRESTO,
+                SqlDialect.CLICKHOUSE
+        };
+        for (int i = 0; i < asKeyword.length; i++) {
+            SqlDialect d = asKeyword[i];
+            String yes = SQL.bind("SELECT * FROM t WHERE ok = ?", d, true);
+            String no = SQL.bind("SELECT * FROM t WHERE ok = ?", d, false);
+            assertTrue(d.name() + " true: " + yes, yes.toUpperCase().contains("TRUE"));
+            assertTrue(d.name() + " false: " + no, no.toUpperCase().contains("FALSE"));
+            SQL.parse(yes, d);
+            SQL.parse(no, d);
+        }
+        assertEquals("every dialect classified", SqlDialect.values().length,
+                asNumber.length + asKeyword.length);
     }
 
     @Test
