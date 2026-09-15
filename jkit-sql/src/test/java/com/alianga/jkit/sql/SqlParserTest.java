@@ -1588,6 +1588,11 @@ public class SqlParserTest {
         assertTrue("block comment kept", foundBlock);
         String fmt = SQL.toSqlString(kept);
         assertTrue(fmt, fmt.contains("keep me") || fmt.contains("--"));
+        // 紧凑回写不能把 -- 行注释和 SELECT 放在同一行，否则整句被注释掉
+        assertTrue(fmt.toUpperCase(), fmt.toUpperCase().contains("SELECT"));
+        SQL.parse(fmt, SqlDialect.MYSQL);
+        String pretty = SQL.format(kept, SqlDialect.MYSQL);
+        SQL.parse(pretty, SqlDialect.MYSQL);
     }
 
     /**

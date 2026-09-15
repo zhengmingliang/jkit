@@ -57,6 +57,40 @@ public class SqlBinderTest {
     }
 
     @Test
+    public void numericTableIdentUsesMysqlQuotesAndCommentWraps() {
+        Map<String, Object> vals = new LinkedHashMap<String, Object>();
+        vals.put("name", "bob");
+        vals.put("nameKey", parseExpr("LENGTH(name)"));
+        vals.put("age", 20);
+        vals.put("table", 10086);
+        SqlParseOptions opt = SqlParseOptions.defaults()
+                .placeholders(SqlPlaceholders.create().hashBrace().commonModelTemplates());
+        SqlStatement statement = SQL.parse(
+                "SELECT * FROM #{table} WHERE name = :name AND age = :age and "
+                        + ":nameKey > 2 or nick_name = @name@",
+                SqlDialect.MYSQL, opt);
+        SqlStatement bound = SQL.bindNamed(statement, SqlDialect.MYSQL, vals);
+        bound.addComment("我是注释");
+        String sql2 = bound.toString();
+        assertTrue("MySQL default toString must backtick numeric table: " + sql2, sql2.contains("`10086`"));
+        assertFalse("must not use ANSI double quotes: " + sql2, sql2.contains("\"10086\""));
+        assertTrue(sql2, sql2.contains("/*") && sql2.contains("我是注释") && sql2.contains("*/"));
+        assertFalse("bare comment must not prefix the statement: " + sql2,
+                sql2.startsWith("我是注释"));
+        assertTrue(sql2.toUpperCase(), sql2.toUpperCase().contains("SELECT"));
+        assertTrue(sql2, sql2.contains("'bob'"));
+        assertTrue(sql2, sql2.contains("LENGTH(name)"));
+        SQL.parse(sql2, SqlDialect.MYSQL);
+
+        String mysql = SQL.toSqlString(bound, SqlDialect.MYSQL);
+        assertTrue(mysql, mysql.contains("`10086`"));
+        String oracle = SQL.toSqlString(bound, SqlDialect.ORACLE);
+        assertTrue(oracle, oracle.contains("\"10086\""));
+        String sqlserver = SQL.toSqlString(bound, SqlDialect.SQLSERVER);
+        assertTrue(sqlserver, sqlserver.contains("[10086]"));
+    }
+
+    @Test
     public void namedTemplatePlaceholdersAndFormula() {
         Map<String, Object> vals = new LinkedHashMap<String, Object>();
         vals.put("name", "bob");

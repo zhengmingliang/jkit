@@ -20,6 +20,7 @@ Unreleased changes are appended to the **current version** section (currently 2.
 
 ### Fixed
 
+- `jkit-sql`: `SqlNode.toString()` now uses MySQL identifier quotes (backticks) by default, matching `SQL.toSqlString`. `addComment("text")` and compact `--` line comments are emitted as block comments so they cannot swallow the following statement. Bare `addHint` text is wrapped as a slash-star-plus hint. Use `SQL.toSqlString(stmt, dialect)` for another dialect.
 - `jkit-sql-auto`: `SqlAutoInspector` now resolves schema when checking whether a table exists. If unset, it uses `Connection.getSchema()`; with no connection (dry-run) or an unsupported driver, it parses the JDBC URL. PostgreSQL / Gauss default to `public`, SQL Server to `dbo`, Oracle / Dameng fall back to the username. This avoids treating a same-named table in another schema as present, or emitting ALTER for a table missing from the current schema.
 
 ## 2.0.1 - 2026-09-13

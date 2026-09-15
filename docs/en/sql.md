@@ -365,8 +365,13 @@ stmt.accept(new SqlAstVisitor() {
 
 ```java
 SQL.format(stmt);                           // newlines and indentation (SELECT clauses; CREATE TABLE columns)
-SQL.toSqlString(stmt);                      // compact single line
+SQL.toSqlString(stmt);                      // compact single line (MySQL by default)
+stmt.toString();                            // same as SQL.toSqlString(stmt): MySQL backticks
 SQL.format(stmt, SqlDialect.MYSQL, true);
+SQL.toSqlString(stmt, SqlDialect.ORACLE);   // numeric table names use double quotes
+
+stmt.addComment("a note");                  // body text; written back as /* a note */
+stmt.addComment("-- already a comment");    // delimiters kept (line comments become block comments in compact mode)
 
 // Force dialect quotes on every identifier segment (default false; literals/keywords/*/function names untouched)
 SqlFormatOptions opts = SqlFormatOptions.defaults().quoteIdentifiers(true);
@@ -384,7 +389,7 @@ Identifiers that were already quoted in the input are written back per dialect: 
 With `quoteIdentifiers` on, **unquoted** table/column names are force-quoted the same way.
 `||` is written back from the AST (`CONCAT`→`||`; `OR` parsed by MySQL by default →`OR`).
 
-The write-back is pretty-printing; **comment and whitespace round-trip is not guaranteed**.
+The write-back is pretty-printing; **whitespace round-trip is not guaranteed**. Comments left by `keepComments` or `addComment` are emitted as valid SQL comments: bare text becomes a block comment; compact mode also turns `--` / `#` line comments into block comments so they cannot swallow the rest of the statement. For another dialect's quotes, use `SQL.toSqlString(stmt, dialect)` rather than `toString()`.
 
 ## Dialect Differences
 

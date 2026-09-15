@@ -377,8 +377,13 @@ stmt.accept(new SqlAstVisitor() {
 
 ```java
 SQL.format(stmt);                           // 换行缩进（SELECT 子句换行；CREATE TABLE 按列缩进）
-SQL.toSqlString(stmt);                      // 紧凑单行
+SQL.toSqlString(stmt);                      // 紧凑单行（默认 MySQL）
+stmt.toString();                            // 同 SQL.toSqlString(stmt)：MySQL 反引号
 SQL.format(stmt, SqlDialect.MYSQL, true);
+SQL.toSqlString(stmt, SqlDialect.ORACLE);   // 数字表名等强制引号时用双引号
+
+stmt.addComment("我是注释");                 // 正文即可；回写为 /* 我是注释 */
+stmt.addComment("-- already a comment");    // 已带分隔符的原文保留（紧凑模式下行注释改成块注释）
 
 // 强制给每个标识符段加方言引号（默认 false；不影响字面量/关键字/*/函数名）
 SqlFormatOptions opts = SqlFormatOptions.defaults().quoteIdentifiers(true);
@@ -396,7 +401,7 @@ SQL.format(stmt, SqlDialect.MYSQL, false,
 开启 `quoteIdentifiers` 后，**未引号**的表/列名也会强制加同套引号。
 `||` 按 AST 回写（`CONCAT`→`||`，MySQL 默认解析出的 `OR`→`OR`）。
 
-回写是 pretty-print，**不保证注释和空白 round-trip**。
+回写是 pretty-print，**不保证空白 round-trip**。`keepComments` 或 `addComment` 留下的注释会作为合法 SQL 注释输出：正文包成块注释；紧凑模式下 `--` / `#` 行注释也会改成块注释，避免把后续语句注释掉。跨方言引号请用 `SQL.toSqlString(stmt, dialect)`，不要依赖 `toString()` 以外的方言。
 
 ## 方言差异
 

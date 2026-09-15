@@ -29,6 +29,7 @@
 
 ### 修复
 
+- `jkit-sql`：`SqlNode.toString()` 默认按 MySQL 回写标识符引号（反引号），与 `SQL.toSqlString` 一致；不再误用 ANSI 双引号。`addComment("正文")` / 紧凑模式下的 `--` 行注释会包成合法块注释，避免把后续 SQL 拼成普通文本或整句注释掉。`addHint` 对未包装的正文补 slash-star-plus。跨方言仍用 `SQL.toSqlString(stmt, dialect)`。
 - `jkit-sql-auto`：`SqlAutoInspector` 判断表是否存在时补上 schema。未配置时从 `Connection.getSchema()` 取；无连接（dry-run）或驱动不支持时从 JDBC URL 解析。PostgreSQL / Gauss 缺省 `public`，SQL Server 缺省 `dbo`，Oracle / 达梦回落用户名。避免把其它 schema 下的同名表误判为已存在，或对本库缺失表发出 ALTER。
 
 ## 2.0.1 - 2026-09-13

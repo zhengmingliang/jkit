@@ -255,9 +255,96 @@ public final class SqlFormatter {
             return;
         }
         for (int i = 0; i < stmt.comments().size(); i++) {
-            out.append(stmt.comments().get(i));
+            out.append(renderSqlComment(stmt.comments().get(i)));
             nl();
         }
+    }
+
+    /**
+     * 用户 {@code addComment("正文")} 没有分隔符时包成块注释；紧凑模式下把 {@code --}/{@code #}
+     * 行注释改成块注释，避免把后续语句注释掉。
+     */
+    private String renderSqlComment(String raw) {
+        String t = trimCommentEdges(raw);
+        if (t.isEmpty()) {
+            return "/* */";
+        }
+        if (t.startsWith("/*")) {
+            return t;
+        }
+        if (isLineComment(t)) {
+            if (pretty) {
+                return t;
+            }
+            return toBlockComment(stripLineCommentPrefix(t));
+        }
+        return toBlockComment(t);
+    }
+
+    private String renderHint(String raw) {
+        if (raw == null || raw.isEmpty()) {
+            return raw;
+        }
+        String t = trimCommentEdges(raw);
+        if (t.startsWith("/*")) {
+            return t;
+        }
+        if (t.startsWith("--+")) {
+            if (pretty) {
+                return t;
+            }
+            return "/*+ " + t.substring(3).trim().replace("*/", "* /") + " */";
+        }
+        return "/*+ " + t.replace("*/", "* /") + " */";
+    }
+
+    private static boolean isLineComment(String t) {
+        return t.startsWith("--") || t.startsWith("#") || t.startsWith("//");
+    }
+
+    private static String stripLineCommentPrefix(String t) {
+        if (t.startsWith("--") || t.startsWith("//")) {
+            return t.substring(2);
+        }
+        if (t.startsWith("#")) {
+            return t.substring(1);
+        }
+        return t;
+    }
+
+    private static String toBlockComment(String body) {
+        String b = body == null ? "" : body.trim();
+        if (b.isEmpty()) {
+            return "/* */";
+        }
+        return "/* " + b.replace("*/", "* /") + " */";
+    }
+
+    private static String trimCommentEdges(String s) {
+        if (s == null || s.isEmpty()) {
+            return "";
+        }
+        int n = s.length();
+        int start = 0;
+        int end = n;
+        while (start < end) {
+            char c = s.charAt(start);
+            if (c != ' ' && c != '\t' && c != '\r' && c != '\n') {
+                break;
+            }
+            start++;
+        }
+        while (end > start) {
+            char c = s.charAt(end - 1);
+            if (c != ' ' && c != '\t' && c != '\r' && c != '\n') {
+                break;
+            }
+            end--;
+        }
+        if (start == 0 && end == n) {
+            return s;
+        }
+        return s.substring(start, end);
     }
 
     private void writeWith(SqlStatement stmt) {
@@ -320,7 +407,7 @@ public final class SqlFormatter {
         if (!select.hints().isEmpty()) {
             for (int hi = 0; hi < select.hints().size(); hi++) {
                 sp();
-                out.append(select.hints().get(hi));
+                out.append(renderHint(select.hints().get(hi)));
             }
         }
         if (select.distinct()) {
@@ -1750,7 +1837,7 @@ public final class SqlFormatter {
             }
             if (table.optimizerHint() != null) {
                 sp();
-                out.append(table.optimizerHint());
+                out.append(renderHint(table.optimizerHint()));
             }
         } else if (source instanceof SqlJoin) {
             SqlJoin join = (SqlJoin) source;
