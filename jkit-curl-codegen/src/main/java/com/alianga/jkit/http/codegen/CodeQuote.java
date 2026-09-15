@@ -35,6 +35,20 @@ public final class CodeQuote {
     }
 
     /**
+     * Kotlin 字符串支持 {@code ${...}} 模板插值：只做 Java 转义会让形如 {@code ${nope}} 的值
+     * 被目标编译器求值（未定义符号直接编译失败，已定义符号则被替换成别的值）。
+     *
+     * @param value 原始值
+     * @return Kotlin 双引号字面量（额外转义 {@code $}）
+     */
+    public static String kotlin(String value) {
+        if (value == null) {
+            return "\"\"";
+        }
+        return "\"" + escape(value, '"').replace("$", "\\$") + "\"";
+    }
+
+    /**
      * @param value 原始值
      * @return C# 双引号字面量
      */
@@ -73,6 +87,20 @@ public final class CodeQuote {
     }
 
     /**
+     * R 的反引号名（{@code `X-Name` = "v"}）：反引号内同样要转义反斜杠与反引号，
+     * 否则一个含反引号的头名就能闭合名字、注入任意 R 表达式。
+     *
+     * @param value 原始名
+     * @return 带反引号的 R 名字面量
+     */
+    public static String rName(String value) {
+        if (value == null) {
+            return "``";
+        }
+        return "`" + escape(value, '`', "\\u%04x") + "`";
+    }
+
+    /**
      * @param value 原始值
      * @return Rust 双引号字面量
      */
@@ -92,6 +120,20 @@ public final class CodeQuote {
             return "\"\"";
         }
         return "\"" + escape(value, '"', "\\u{%04x}") + "\"";
+    }
+
+    /**
+     * Swift 字符串内容转义（不含外层引号），用于把值嵌进已经写好的 Swift 字面量中间。
+     * 反斜杠被转义后，{@code \\(...)} 插值也会被还原成普通字符。
+     *
+     * @param value 原始值
+     * @return 转义后的 Swift 字符串内容
+     */
+    public static String swiftEscape(String value) {
+        if (value == null) {
+            return "";
+        }
+        return escape(value, '"', "\\u{%04x}");
     }
 
     /**

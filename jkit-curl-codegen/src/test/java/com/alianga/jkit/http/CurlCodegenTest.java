@@ -546,6 +546,157 @@ public class CurlCodegenTest {
         assertTrue(src.contains("--header \"sec-ch-ua: \\\"Not=A?Brand\\\";v=\\\"99\\\"\" ^"));
     }
 
+    /**
+     * 攻击载荷：覆盖各语言的字符串插值/命令替换/注释闭合记号。
+     * 值里带 {@code ${}}（Kotlin/Swift 模板）、{@code #{}}（Ruby）、{@code ${}}（shell）、
+     * 反引号（R 名字、shell）、以及会打断字面量的双引号与反斜杠。
+     */
+    private static final String HOSTILE_CURL =
+            "curl -X POST 'https://example.com/a\"b\\c' "
+                    + "-H 'X-Tmpl: ${nope}' "
+                    + "-H 'X-Ruby: #{nope}' "
+                    + "-H 'X-Shell: $(whoami)' "
+                    + "-H 'X-Tick: `id`' "
+                    + "-H 'X-Quote: v\"v\\w' "
+                    + "--json '{\"k\":\"${nope}\"}'";
+
+    @Test
+    public void kotlinEscapesStringTemplates() {
+        // Kotlin 会把 ${...} 当模板求值：不转义的话，生成的代码要么编译失败，要么被替换成别的值
+        String src = CurlCodegen.generate("kotlin-okhttp", HOSTILE_CURL).source();
+        assertFalse("Kotlin 模板必须转义: " + src, src.contains("\"${nope}\""));
+        assertFalse("Kotlin 模板必须转义: " + src, src.contains("{\\\"k\\\":\\\"${nope}"));
+        assertTrue(src, src.contains("\\${nope}"));
+    }
+
+    @Test
+    public void kotlinUsesOkHttp4BodyExtensionsNotDeprecatedFactories() {
+        // okhttp 4.x 里 MediaType.parse 是 ERROR 级废弃、RequestBody.create(MediaType, x) 也已废弃，
+        // 只有扩展函数 toMediaType()/toRequestBody()/asRequestBody() 能干净编译
+        String src = CurlCodegen.generate("kotlin-okhttp", SAMPLE).source();
+        assertTrue(src, src.contains(".toRequestBody("));
+        assertTrue(src, src.contains(".toMediaType()"));
+        assertTrue(src, src.contains("import okhttp3.MediaType.Companion.toMediaType"));
+        assertFalse("不能用已废弃的 MediaType.parse: " + src, src.contains("MediaType.parse"));
+        assertFalse("不能用已废弃的 RequestBody.create: " + src, src.contains("RequestBody.create"));
+        GeneratedCode file = CurlCodegen.generate("kotlin-okhttp",
+                "curl -X POST --data-binary @/tmp/a.txt https://example.com/u");
+        assertTrue(file.source(), file.source().contains(".asRequestBody("));
+    }
+
+    @Test
+    public void swiftMultipartEscapesNamesFilenamesAndContentTypes() {
+        String src = CurlCodegen.generate("swift-urlsession",
+                "curl -X POST -F 'fi\"eld=x' -F 'f=@/tmp/a.txt' https://example.com/up").source();
+        // 字段名里的双引号必须转义成对：转义后是 name=\"fi\"eld\"，未转义会是 name=\"fi"eld\"（字面量当场断掉）
+        assertTrue("字段名双引号未转义: " + src, src.contains("name=\\\"fi\\\"eld\\\""));
+        assertFalse("Content-Disposition 被裸双引号打断: " + src,
+                src.contains("name=\\\"fi\"eld\\\""));
+        // 文件名与 Content-Type 同样要过转义，文件路径仍走完整转义
+        assertTrue(src, src.contains("filename=\\\"a.txt\\\""));
+        assertTrue(src, src.contains("URL(fileURLWithPath: \"/tmp/a.txt\")"));
+    }
+
+    @Test
+    public void rEscapesBackticksInHeaderAndPartNames() {
+        String src = CurlCodegen.generate("r-httr2",
+                "curl -X POST -H 'X-`id`: v' -F 'p`x=1' https://example.com/api").source();
+        assertFalse("R 反引号名里的反引号必须转义: " + src, src.contains("`X-`id``"));
+        assertTrue(src, src.contains("`X-\\`id\\``"));
+        assertFalse("multipart 字段名同理: " + src, src.contains("`p`x`"));
+        assertTrue(src, src.contains("`p\\`x`"));
+    }
+
+    @Test
+    public void basicAuthIsNotRenderedTwice() {
+        // -u 的 basic 认证已由 visibleHeaders 注入成 Authorization 头，
+        // 自己又用原生方式渲染一遍就会重复
+        String curl = "curl -u 'alice:s3cr3t' -X POST https://example.com/api";
+        assertAuthCount("lua", curl, 1);
+        assertAuthCount("httpie", curl, 1);
+        assertAuthCount("php-guzzle", curl, 1);
+        assertAuthCount("ruby-httparty", curl, 1);
+        // Lua 之前还额外写过一个 luasocket 并不认识的 authentication 选项
+        assertFalse(CurlCodegen.generate("lua", curl).source().contains("authentication"));
+    }
+
+    /**
+     * 凭据只能被渲染一次：要么写成 base64 的 Authorization 头，要么写成客户端的原生认证选项。
+     */
+    private static void assertAuthCount(String id, String curl, int expected) {
+        String src = CurlCodegen.generate(id, curl).source();
+        int n = countOf(src, "YWxpY2U6czNjcjN0") + countOf(src, "alice");
+        assertEquals(id + " 凭据被渲染了 " + n + " 次: " + src, expected, n);
+    }
+
+    private static int countOf(String text, String token) {
+        int n = 0;
+        int i = text.indexOf(token);
+        while (i >= 0) {
+            n++;
+            i = text.indexOf(token, i + token.length());
+        }
+        return n;
+    }
+
+    @Test
+    public void insecureGeneratesRealTrustAllCodeForOkHttp() {
+        // -k 只写注释等于静默丢掉用户意图：生成的代码仍会严格校验证书
+        String curl = "curl -k -X POST --json '{\"a\":1}' https://example.com/api";
+        String java = CurlCodegen.generate("java-okhttp", curl).source();
+        assertTrue(java, java.contains("X509TrustManager trustAll"));
+        assertTrue(java, java.contains("sslSocketFactory(sslContext.getSocketFactory(), trustAll)"));
+        assertTrue(java, java.contains("hostnameVerifier((hostname, session) -> true)"));
+        assertTrue(java, java.contains("import javax.net.ssl.X509TrustManager"));
+
+        String kt = CurlCodegen.generate("kotlin-okhttp", curl).source();
+        assertTrue(kt, kt.contains("object : X509TrustManager"));
+        assertTrue(kt, kt.contains("sslSocketFactory(sslContext.socketFactory, trustAll)"));
+        assertTrue(kt, kt.contains("hostnameVerifier { _, _ -> true }"));
+        assertTrue(kt, kt.contains("import javax.net.ssl.X509TrustManager"));
+    }
+
+    @Test
+    public void csharpEmitsUsingSystem() {
+        // 关掉 ImplicitUsings 的项目里 Console / Exception 会找不到
+        String src = CurlCodegen.generate("csharp-httpclient", SAMPLE).source();
+        assertTrue(src, src.contains("using System;\n"));
+    }
+
+    @Test
+    public void httpieCommandIsScriptSafe() {
+        // 脚本化执行（非 tty）时 HTTPie 会把 stdin 当正文，和 --raw 同时出现就报错
+        String src = CurlCodegen.generate("httpie", SAMPLE).source();
+        assertTrue(src, src.contains("--ignore-stdin"));
+        // --form 与 --raw 语义冲突，urlencoded 正文只走 --raw
+        assertFalse(src, src.contains("--form"));
+    }
+
+    @Test
+    public void swiftImportsFoundationNetworkingForLinux() {
+        // Linux 上 URLRequest/URLSession 在 FoundationNetworking 里，缺这个 import 编译不过
+        String src = CurlCodegen.generate("swift-urlsession", SAMPLE).source();
+        assertTrue(src, src.contains("#if canImport(FoundationNetworking)"));
+        assertTrue(src, src.contains("import FoundationNetworking"));
+    }
+
+    @Test
+    public void everyGeneratorSurvivesHostileInput() {
+        ParsedCurlRequest model = CurlParser.parseModel(HOSTILE_CURL);
+        for (CodeGenerator g : GeneratorRegistry.get().list()) {
+            String id = g.id();
+            GeneratedCode code;
+            try {
+                code = GeneratorRegistry.get().generate(id, model);
+            } catch (RuntimeException e) {
+                throw new AssertionError(id + " 遇到恶意输入抛异常", e);
+            }
+            assertNotNull(id, code.source());
+            assertFalse(id + " 生成结果为空", code.source().trim().isEmpty());
+            assertTrue(id + " 恶意输入被吞掉了", code.source().contains("nope"));
+        }
+    }
+
     @Test
     public void genAll() {
         String curl = "curl --url 'https://aistudio.xiaomimimo.com/open-apis/chat/dialog/list?xiaomichatbot_ph=oY%2BtexC3%2BXUf0mu9RnSVFw%3D%3D' \\\n" +

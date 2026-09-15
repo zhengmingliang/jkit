@@ -54,7 +54,11 @@ public final class HttpieGenerator extends AbstractCodeGenerator {
             flags.add(method);
         }
 
-        for (Header h : CurlGenSupport.visibleHeaders(req)) {
+        Auth auth = req.auth();
+        // -a 已经把 basic 认证带上了，再输出注入的 Authorization 头会重复
+        boolean nativeBasic = auth != null && "basic".equals(auth.type());
+        for (Header h : nativeBasic
+                ? CurlGenSupport.headersWithoutAuth(req) : CurlGenSupport.visibleHeaders(req)) {
             String name = h.name().replace("=", "\\=");
             String value = h.value();
             if (value.startsWith("=") || value.startsWith("@")) {
@@ -63,8 +67,7 @@ public final class HttpieGenerator extends AbstractCodeGenerator {
             items.add(CodeQuote.sh(name + ":" + value));
         }
 
-        Auth auth = req.auth();
-        if (auth != null && "basic".equals(auth.type())) {
+        if (nativeBasic) {
             flags.add("-a " + CodeQuote.sh(
                     (auth.user() == null ? "" : auth.user()) + ":"
                             + (auth.password() == null ? "" : auth.password())));
@@ -87,13 +90,19 @@ public final class HttpieGenerator extends AbstractCodeGenerator {
             items.add("@" + CodeQuote.sh(body.filePath()));
             notes.add("正文来自本地文件，请确认路径在运行环境中可访问。");
         } else if (body.kind() == Body.Kind.URLENCODED) {
-            flags.add("--form");
+            // 不能同时给 --form 和 --raw：HTTPie 会报
+            // "Request body (from stdin, --raw or a file) and request data (key=value) cannot be mixed"
             flags.add("--raw " + CodeQuote.sh(body.text() == null ? "" : body.text()));
             notes.add("urlencoded 正文以 --raw 发出，避免 HTTPie 再次编码。");
         } else if (body.isPresent()) {
             flags.add("--raw " + CodeQuote.sh(body.text()));
         }
 
+        // 不加 --ignore-stdin 时，HTTPie 会把 stdin 当请求正文，
+        // 一旦和 --raw / 文件正文同时出现就报
+        // "Request body (from stdin, --raw or a file) and request data (key=value) cannot be mixed"，
+        // 脚本化执行（非 tty）必挂。
+        flags.add("--ignore-stdin");
         if (req.followRedirects()) {
             flags.add("--follow");
         }

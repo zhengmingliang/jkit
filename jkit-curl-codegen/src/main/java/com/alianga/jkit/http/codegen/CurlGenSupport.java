@@ -78,6 +78,26 @@ public final class CurlGenSupport {
     }
 
     /**
+     * 生成器若自行渲染原生认证（httpie 的 {@code -a}、Guzzle 的 {@code auth} 选项、HTTParty 的
+     * {@code basic_auth}），必须改用本方法取头——否则 {@link #visibleHeaders} 注入的
+     * Authorization 会和原生认证重复，认证被写两遍。
+     *
+     * @param req 解析模型
+     * @return 含认证信息、不含 Content-Length 与 Authorization 的请求头
+     * @since 2.0.2
+     */
+    public static List<Header> headersWithoutAuth(ParsedCurlRequest req) {
+        List<Header> all = visibleHeaders(req);
+        List<Header> out = new ArrayList<Header>(all.size());
+        for (Header h : all) {
+            if (!"authorization".equalsIgnoreCase(h.name())) {
+                out.add(h);
+            }
+        }
+        return out;
+    }
+
+    /**
      * 拼出 {@code scheme://[user:pass@]host:port} 形式的代理 URL，供接受 URL 形态的客户端使用。
      *
      * @param proxy 代理配置，可为 {@code null}

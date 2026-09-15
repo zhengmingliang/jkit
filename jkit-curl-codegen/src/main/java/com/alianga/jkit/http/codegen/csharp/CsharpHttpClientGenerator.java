@@ -44,7 +44,8 @@ public final class CsharpHttpClientGenerator extends AbstractCodeGenerator {
         boolean file = body.kind() == Body.Kind.FILE;
 
         StringBuilder src = new StringBuilder();
-        src.append("using System.Net;\nusing System.Net.Http;\nusing System.Text;\n");
+        // using System; 必须显式写：项目关掉 ImplicitUsings 时 Console / Exception 会找不到
+        src.append("using System;\nusing System.Net;\nusing System.Net.Http;\nusing System.Text;\n");
         if (multipart || file) {
             src.append("using System.IO;\n");
         }

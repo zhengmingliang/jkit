@@ -72,7 +72,25 @@ public final class OkHttpGenerator extends AbstractCodeGenerator {
             }
         }
         if (req.insecure()) {
-            notes.add("已生成忽略证书校验的代码，仅用于开发环境。");
+            // -k 必须真的把校验关掉；只写注释等于静默丢掉用户意图
+            Collections.addAll(imports, "java.security.SecureRandom",
+                    "java.security.cert.X509Certificate", "javax.net.ssl.SSLContext",
+                    "javax.net.ssl.TrustManager", "javax.net.ssl.X509TrustManager");
+            client.append("        // -k：忽略证书校验，仅用于开发环境\n")
+                    .append("        X509TrustManager trustAll = new X509TrustManager() {\n")
+                    .append("            public void checkClientTrusted(X509Certificate[] chain,"
+                            + " String authType) {\n            }\n")
+                    .append("            public void checkServerTrusted(X509Certificate[] chain,"
+                            + " String authType) {\n            }\n")
+                    .append("            public X509Certificate[] getAcceptedIssuers() {\n")
+                    .append("                return new X509Certificate[0];\n            }\n")
+                    .append("        };\n")
+                    .append("        SSLContext sslContext = SSLContext.getInstance(\"SSL\");\n")
+                    .append("        sslContext.init(null, new TrustManager[] { trustAll },"
+                            + " new SecureRandom());\n")
+                    .append("        builder.sslSocketFactory(sslContext.getSocketFactory(), trustAll);\n")
+                    .append("        builder.hostnameVerifier((hostname, session) -> true);\n");
+            notes.add("-k：已生成忽略证书与主机名校验的代码，仅用于开发环境。");
         }
         client.append("        OkHttpClient client = builder.build();");
 

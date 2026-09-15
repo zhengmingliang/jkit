@@ -49,7 +49,11 @@ public final class PhpGuzzleGenerator extends AbstractCodeGenerator {
         boolean needPsr7 = false;
         StringBuilder options = new StringBuilder();
 
-        List<Header> headers = CurlGenSupport.visibleHeaders(req);
+        Auth auth = req.auth();
+        // Guzzle 的 'auth' 选项自己会发 Authorization，头里再带一遍就重复了
+        boolean nativeBasic = auth != null && "basic".equals(auth.type());
+        List<Header> headers = nativeBasic
+                ? CurlGenSupport.headersWithoutAuth(req) : CurlGenSupport.visibleHeaders(req);
         if (!headers.isEmpty()) {
             options.append("    'headers' => [\n");
             for (Header h : headers) {
@@ -59,8 +63,7 @@ public final class PhpGuzzleGenerator extends AbstractCodeGenerator {
             options.append("    ],\n");
         }
 
-        Auth auth = req.auth();
-        if (auth != null && "basic".equals(auth.type())) {
+        if (nativeBasic) {
             options.append("    'auth' => [")
                     .append(CodeQuote.php(auth.user() == null ? "" : auth.user())).append(", ")
                     .append(CodeQuote.php(auth.password() == null ? "" : auth.password()))

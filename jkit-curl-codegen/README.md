@@ -53,6 +53,24 @@ GeneratedCode code = CurlCodegen.generate("py-requests", model);
 
 `CurlCodegen.list()` / `list("java")` 可枚举生成器。
 
+## 转义
+
+URL、头名/头值、正文、multipart 的字段名与文件名都按目标语言的字符串字面量规则转义，
+统一走 `com.alianga.jkit.http.codegen.CodeQuote`：
+
+| 方法 | 用途 |
+| --- | --- |
+| `js` / `py` | JS / Python 单引号字面量 |
+| `go` / `csharp` / `rust` / `swift` | 对应语言的双引号字面量 |
+| `kotlin` | 双引号字面量，额外转义 `${`，避免被当成模板插值求值 |
+| `swiftEscape` | Swift 字符串内容（不含外层引号），用于嵌进已写好的字面量中间 |
+| `r` / `rName` | R 的字符串字面量 / 反引号名（反引号内同样要转义反引号与反斜杠） |
+| `php` / `ruby` | PHP 单引号字面量 / Ruby 双引号字面量（额外转义 `#{`） |
+| `ps` / `sh` / `cmd` / `lua` | PowerShell / POSIX shell / Windows cmd / Lua |
+| `json` / `jsonEscape` | JSON 字符串 |
+
+新增生成器时不要裸拼字符串：语言没有对应方法的，先在 `CodeQuote` 里补，再在生成器里用。
+
 ## 备注与解析告警
 
 `GeneratedCode.notes()` 保存生成备注。curl 解析阶段的告警（如 `未支持的选项 --digest，已跳过`、
