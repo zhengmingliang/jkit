@@ -343,7 +343,7 @@ WITH prod_city AS (
     JOIN order_items oi ON o.order_id = oi.order_id
     JOIN products    p  ON oi.product_id = p.product_id
     WHERE o.status = 'completed'
-      AND o.order_date >= (TRUNC(SYSDATE) - INTERVAL '180' DAY)
+      AND o.order_date >= (TRUNC(SYSDATE) - 180)
     GROUP BY c.city, p.product_id, p.product_name
 ),
 ranked AS (
@@ -406,7 +406,7 @@ WITH d AS (
            SUM(pay_amount) AS gmv
     FROM orders
     WHERE status = 'completed'
-      AND order_date >= (TRUNC(SYSDATE) - INTERVAL '90' DAY)
+      AND order_date >= (TRUNC(SYSDATE) - 90)
     GROUP BY CAST(order_date AS DATE)
 )
 SELECT dt, gmv,
@@ -432,7 +432,7 @@ WITH ch AS (
            AVG(pay_amount)             AS avg_order_amt
     FROM orders
     WHERE status = 'completed'
-      AND order_date >= (TRUNC(SYSDATE) - INTERVAL '30' DAY)
+      AND order_date >= (TRUNC(SYSDATE) - 30)
     GROUP BY channel
 )
 SELECT channel, uv, order_cnt, gmv, ROUND(avg_order_amt, 2) AS avg_order_amt,
@@ -516,7 +516,7 @@ JOIN orders     o ON oi.order_id = o.order_id
 JOIN products   p ON oi.product_id = p.product_id
 JOIN categories c ON p.category_id = c.category_id
 WHERE o.status = 'completed'
-  AND o.order_date >= (TRUNC(SYSDATE) - INTERVAL '90' DAY)
+  AND o.order_date >= (TRUNC(SYSDATE) - 90)
 GROUP BY c.category_name
 ORDER BY total_amt DESC;
 
@@ -535,7 +535,7 @@ tagged AS (
     FROM orders o
     JOIN first_buy f ON o.customer_id = f.customer_id
     WHERE o.status = 'completed'
-      AND o.order_date >= (TRUNC(SYSDATE) - INTERVAL '60' DAY)
+      AND o.order_date >= (TRUNC(SYSDATE) - 60)
 )
 SELECT cust_type,
        COUNT(*)                    AS order_cnt,
@@ -576,7 +576,7 @@ WITH bucketed AS (
            NTILE(5) OVER (ORDER BY pay_amount DESC) AS amt_tier
     FROM orders
     WHERE status = 'completed'
-      AND order_date >= (TRUNC(SYSDATE) - INTERVAL '90' DAY)
+      AND order_date >= (TRUNC(SYSDATE) - 90)
 )
 SELECT amt_tier,
        COUNT(*)                  AS order_cnt,
@@ -617,7 +617,7 @@ WITH pm AS (
     FROM order_items oi
     JOIN orders o ON oi.order_id = o.order_id
     WHERE o.status = 'completed'
-      AND o.order_date >= (TRUNC(SYSDATE) - INTERVAL '120' DAY)
+      AND o.order_date >= (TRUNC(SYSDATE) - 120)
     GROUP BY oi.product_id, TO_CHAR(o.order_date, 'YYYY-MM')
 ),
 rk AS (
@@ -650,7 +650,7 @@ WITH base AS (
     JOIN categories c ON p.category_id = c.category_id
     JOIN orders     o ON oi.order_id = o.order_id
     WHERE o.status = 'completed'
-      AND o.order_date >= (TRUNC(SYSDATE) - INTERVAL '180' DAY)
+      AND o.order_date >= (TRUNC(SYSDATE) - 180)
     GROUP BY p.category_id, c.category_name
 ),
 rf AS (
@@ -665,7 +665,7 @@ rf AS (
     JOIN orders   o ON r.order_id = o.order_id
     JOIN order_items oi ON o.order_id = oi.order_id
     JOIN products p ON oi.product_id = p.product_id
-    WHERE r.refund_date >= (TRUNC(SYSDATE) - INTERVAL '180' DAY)
+    WHERE r.refund_date >= (TRUNC(SYSDATE) - 180)
     GROUP BY p.category_id
 )
 SELECT b.category_name, b.sales_amt,
@@ -719,7 +719,7 @@ WITH cust_amt AS (
     FROM customers c
     JOIN orders o ON c.customer_id = o.customer_id
     WHERE o.status = 'completed'
-      AND o.order_date >= (TRUNC(SYSDATE) - INTERVAL '365' DAY)
+      AND o.order_date >= (TRUNC(SYSDATE) - 365)
     GROUP BY c.customer_id, c.city
 )
 SELECT city,
@@ -746,7 +746,7 @@ SELECT EXTRACT(HOUR FROM CAST(o.order_date AS TIMESTAMP)) AS hour_of_day,
        COUNT(DISTINCT o.customer_id) AS uv
 FROM orders o
 WHERE o.status = 'completed'
-  AND o.order_date >= (TRUNC(SYSDATE) - INTERVAL '30' DAY)
+  AND o.order_date >= (TRUNC(SYSDATE) - 30)
 GROUP BY EXTRACT(HOUR FROM CAST(o.order_date AS TIMESTAMP)),
          CASE WHEN (TO_NUMBER(TO_CHAR(o.order_date, 'D')) - 1) IN (0, 6) THEN 'weekend' ELSE 'weekday' END
 ORDER BY hour_of_day, day_type;
@@ -821,7 +821,7 @@ WITH dur AS (
     FROM orders o
     JOIN shipments s ON o.order_id = s.order_id
     WHERE s.status = 'signed'
-      AND o.order_date >= (TRUNC(SYSDATE) - INTERVAL '90' DAY)
+      AND o.order_date >= (TRUNC(SYSDATE) - 90)
 )
 SELECT province,
        COUNT(*)                                                          AS order_cnt,
@@ -872,7 +872,7 @@ FETCH FIRST 200 ROWS ONLY;
 WITH date_seq(dt) AS (
     SELECT DATE '2024-01-01' AS dt FROM dual
     UNION ALL
-    SELECT CAST((dt + INTERVAL '1' DAY) AS DATE) FROM date_seq WHERE dt < DATE '2024-03-31'
+    SELECT CAST((dt + 1) AS DATE) FROM date_seq WHERE dt < DATE '2024-03-31'
 ),
 daily AS (
     SELECT CAST(order_date AS DATE) AS dt, SUM(pay_amount) AS gmv
@@ -939,7 +939,7 @@ WITH sold AS (
     FROM order_items oi
     JOIN orders o ON oi.order_id = o.order_id
     WHERE o.status = 'completed'
-      AND o.order_date >= (TRUNC(SYSDATE) - INTERVAL '90' DAY)
+      AND o.order_date >= (TRUNC(SYSDATE) - 90)
     GROUP BY oi.product_id
 ),
 inv AS (
@@ -1056,7 +1056,7 @@ WITH daily AS (
     FROM order_items oi
     JOIN orders o ON oi.order_id = o.order_id
     WHERE o.status = 'completed'
-      AND o.order_date >= (TRUNC(SYSDATE) - INTERVAL '30' DAY)
+      AND o.order_date >= (TRUNC(SYSDATE) - 30)
     GROUP BY oi.product_id, CAST(o.order_date AS DATE)
 ),
 rate AS (
@@ -1086,7 +1086,7 @@ FETCH FIRST 100 ROWS ONLY;
 WITH cart AS (
     SELECT customer_id, product_id, add_time, is_purchased, quantity
     FROM carts
-    WHERE add_time >= (TRUNC(SYSDATE) - INTERVAL '30' DAY)
+    WHERE add_time >= (TRUNC(SYSDATE) - 30)
 ),
 agg AS (
     SELECT p.category_id,
@@ -1187,14 +1187,14 @@ WITH cust_act AS (
 ),
 hist AS (
     SELECT customer_id,
-           COUNT(CASE WHEN order_date >= (TRUNC(SYSDATE) - INTERVAL '90' DAY)  THEN 1 END) AS cnt_90d,
-           COUNT(CASE WHEN order_date >= (TRUNC(SYSDATE) - INTERVAL '180' DAY)
-                       AND order_date <  (TRUNC(SYSDATE) - INTERVAL '90' DAY)  THEN 1 END) AS cnt_90_180d
+           COUNT(CASE WHEN order_date >= (TRUNC(SYSDATE) - 90)  THEN 1 END) AS cnt_90d,
+           COUNT(CASE WHEN order_date >= (TRUNC(SYSDATE) - 180)
+                       AND order_date <  (TRUNC(SYSDATE) - 90)  THEN 1 END) AS cnt_90_180d
     FROM orders
     WHERE status = 'completed'
     GROUP BY customer_id
 )
-SELECT ca.customer_id, c.customer_name, c.level,
+SELECT ca.customer_id, c.customer_name, c."LEVEL",
        ca.last_order_date,
        (TRUNC(SYSDATE) - ca.last_order_date) AS idle_days,
        ca.order_cnt, ROUND(ca.total_amt, 2) AS total_amt,
@@ -1306,18 +1306,18 @@ cust_amt AS (
     WHERE status = 'completed'
     GROUP BY customer_id
 )
-SELECT COALESCE(lb.begin_level, cu.level) AS begin_level,
-       cu.level                           AS current_level,
+SELECT COALESCE(lb.begin_level, cu."LEVEL") AS begin_level,
+       cu."LEVEL"                           AS current_level,
        COUNT(*)                           AS cust_cnt,
        ROUND(AVG(ca.total_amt), 2)        AS avg_amt,
        ROUND(SUM(ca.total_amt), 2)        AS total_gmv,
-       CASE WHEN COALESCE(lb.begin_level, cu.level) = cu.level THEN 'stable'
+       CASE WHEN COALESCE(lb.begin_level, cu."LEVEL") = cu."LEVEL" THEN 'stable'
             ELSE 'changed' END            AS move_flag
 FROM customers cu
 LEFT JOIN level_begin lb ON cu.customer_id = lb.customer_id
 LEFT JOIN cust_amt    ca ON cu.customer_id = ca.customer_id
-GROUP BY COALESCE(lb.begin_level, cu.level), cu.level,
-         CASE WHEN COALESCE(lb.begin_level, cu.level) = cu.level THEN 'stable' ELSE 'changed' END
+GROUP BY COALESCE(lb.begin_level, cu."LEVEL"), cu."LEVEL",
+         CASE WHEN COALESCE(lb.begin_level, cu."LEVEL") = cu."LEVEL" THEN 'stable' ELSE 'changed' END
 ORDER BY cust_cnt DESC;
 
 -- ------------------------------------------------------------------------------
@@ -1409,7 +1409,7 @@ FROM orders o
 JOIN customers c ON o.customer_id = c.customer_id
 JOIN stores    s ON o.store_id = s.store_id
 WHERE o.status = 'completed'
-  AND o.order_date >= (TRUNC(SYSDATE) - INTERVAL '365' DAY)
+  AND o.order_date >= (TRUNC(SYSDATE) - 365)
 GROUP BY c.customer_id, c.customer_name
 HAVING COUNT(DISTINCT s.store_id) > 3
 ORDER BY store_cnt DESC, total_amt DESC
@@ -1448,7 +1448,7 @@ tagged AS (
     FROM orders o
     JOIN cust_stat s ON o.customer_id = s.customer_id
     WHERE o.status = 'completed'
-      AND o.order_date >= (TRUNC(SYSDATE) - INTERVAL '30' DAY)
+      AND o.order_date >= (TRUNC(SYSDATE) - 30)
 )
 SELECT order_id, customer_id, ROUND(pay_amount, 2) AS pay_amount,
        ROUND(avg_amt, 2) AS hist_avg_amt,
@@ -1503,15 +1503,15 @@ WITH latest AS (
 SELECT o.order_id, o.customer_id,
        o.order_date,
        l.last_node_time,
-       ((SYSTIMESTAMP - l.last_node_time) * 24) AS stall_hours,
+       ((SYSDATE - l.last_node_time) * 24) AS stall_hours,
        l.last_node,
-       CASE WHEN ((SYSTIMESTAMP - l.last_node_time) * 24) > 72 THEN 'severely_stalled'
-            WHEN ((SYSTIMESTAMP - l.last_node_time) * 24) > 48 THEN 'stalled'
+       CASE WHEN ((SYSDATE - l.last_node_time) * 24) > 72 THEN 'severely_stalled'
+            WHEN ((SYSDATE - l.last_node_time) * 24) > 48 THEN 'stalled'
             ELSE 'in_transit' END AS logistic_status
 FROM orders o
 JOIN latest l ON o.order_id = l.order_id
 WHERE o.status IN ('shipped', 'delivering')
-  AND ((SYSTIMESTAMP - l.last_node_time) * 24) > 24
+  AND ((SYSDATE - l.last_node_time) * 24) > 24
 ORDER BY stall_hours DESC
 FETCH FIRST 300 ROWS ONLY;
 
@@ -1523,7 +1523,7 @@ WITH addr AS (
            COUNT(*) AS order_cnt, SUM(o.pay_amount) AS amt
     FROM orders o
     JOIN shipments s ON o.order_id = s.order_id
-    WHERE o.order_date >= (TRUNC(SYSDATE) - INTERVAL '90' DAY)
+    WHERE o.order_date >= (TRUNC(SYSDATE) - 90)
     GROUP BY o.customer_id, s.province, s.city
 ),
 cust AS (
@@ -1622,7 +1622,7 @@ WITH oi AS (
     JOIN order_items oi ON o.order_id = oi.order_id
     JOIN products    p  ON oi.product_id = p.product_id
     WHERE o.status = 'completed'
-      AND o.order_date >= (TRUNC(SYSDATE) - INTERVAL '90' DAY)
+      AND o.order_date >= (TRUNC(SYSDATE) - 90)
     GROUP BY o.order_id
 )
 SELECT CASE WHEN sku_cnt = 1 THEN 'single_sku'
@@ -1649,7 +1649,7 @@ WITH daily AS (
     SELECT CAST(order_date AS DATE) AS dt, SUM(pay_amount) AS gmv
     FROM orders
     WHERE status = 'completed'
-      AND order_date >= (TRUNC(SYSDATE) - INTERVAL '120' DAY)
+      AND order_date >= (TRUNC(SYSDATE) - 120)
     GROUP BY CAST(order_date AS DATE)
 ),
 ma AS (
@@ -1675,13 +1675,13 @@ ORDER BY dt DESC;
 WITH d AS (
     SELECT CAST(event_time AS DATE) AS dt, COUNT(DISTINCT customer_id) AS dau
     FROM user_events
-    WHERE event_time >= (TRUNC(SYSDATE) - INTERVAL '90' DAY)
+    WHERE event_time >= (TRUNC(SYSDATE) - 90)
     GROUP BY CAST(event_time AS DATE)
 ),
 m AS (
     SELECT TO_CHAR(event_time, 'YYYY-MM') AS ym, COUNT(DISTINCT customer_id) AS mau
     FROM user_events
-    WHERE event_time >= (TRUNC(SYSDATE) - INTERVAL '90' DAY)
+    WHERE event_time >= (TRUNC(SYSDATE) - 90)
     GROUP BY TO_CHAR(event_time, 'YYYY-MM')
 )
 SELECT d.dt, d.dau, m.mau,
@@ -1695,9 +1695,9 @@ ORDER BY d.dt;
 -- [052] 转化·注册漏斗 | 电商 | 注册用户到首单转化周期分析
 -- ------------------------------------------------------------------------------
 WITH reg AS (
-    SELECT customer_id, register_date, city, level
+    SELECT customer_id, register_date, city, "LEVEL"
     FROM customers
-    WHERE register_date >= (TRUNC(SYSDATE) - INTERVAL '180' DAY)
+    WHERE register_date >= (TRUNC(SYSDATE) - 180)
 ),
 first_order AS (
     SELECT customer_id, MIN(order_date) AS first_order_date
@@ -1724,7 +1724,7 @@ WITH freq AS (
     SELECT customer_id, COUNT(*) AS event_cnt,
            COUNT(DISTINCT CAST(event_time AS DATE)) AS active_days
     FROM user_events
-    WHERE event_time >= (TRUNC(SYSDATE) - INTERVAL '30' DAY)
+    WHERE event_time >= (TRUNC(SYSDATE) - 30)
     GROUP BY customer_id
 )
 SELECT CASE WHEN active_days >= 20 THEN 'super_active'
@@ -1757,7 +1757,7 @@ SELECT device,
        ROUND(SUM(CASE WHEN event_type = 'place_order' THEN 1 ELSE 0 END)
              / NULLIF(SUM(CASE WHEN event_type = 'view' THEN 1 ELSE 0 END), 0) * 100, 2) AS view2order_pct
 FROM user_events
-WHERE event_time >= (TRUNC(SYSDATE) - INTERVAL '30' DAY)
+WHERE event_time >= (TRUNC(SYSDATE) - 30)
 GROUP BY device
 ORDER BY uv DESC;
 
@@ -1770,7 +1770,7 @@ WITH seq AS (
            COUNT(*)     OVER (PARTITION BY session_id)                     AS total_steps
     FROM user_events
     WHERE event_type = 'view'
-      AND event_time >= (TRUNC(SYSDATE) - INTERVAL '7' DAY)
+      AND event_time >= (TRUNC(SYSDATE) - 7)
 )
 SELECT session_id, customer_id, total_steps,
        LISTAGG(CONCAT(CONCAT(CAST(step_no AS VARCHAR(10)), ':'), page_url), '>') WITHIN GROUP (ORDER BY step_no) AS path,
@@ -1792,7 +1792,7 @@ WITH ev AS (
            SUM(CASE WHEN event_type = 'place_order' THEN 1 ELSE 0 END) AS order_cnt
     FROM user_events
     WHERE product_id IS NOT NULL
-      AND event_time >= (TRUNC(SYSDATE) - INTERVAL '30' DAY)
+      AND event_time >= (TRUNC(SYSDATE) - 30)
     GROUP BY product_id
 )
 SELECT p.product_name, e.view_cnt, e.cart_cnt, e.order_cnt,
@@ -1814,7 +1814,7 @@ WITH ev AS (
            LEAD(event_time) OVER (PARTITION BY session_id ORDER BY event_time) AS next_time,
            LEAD(event_type) OVER (PARTITION BY session_id ORDER BY event_time) AS next_type
     FROM user_events
-    WHERE event_time >= (TRUNC(SYSDATE) - INTERVAL '7' DAY)
+    WHERE event_time >= (TRUNC(SYSDATE) - 7)
       AND product_id IS NOT NULL
 )
 SELECT ev.product_id, p.product_name,
@@ -1838,7 +1838,7 @@ WITH ev AS (
     SELECT customer_id, event_time, event_type,
            LAG(event_time) OVER (PARTITION BY customer_id ORDER BY event_time) AS prev_time
     FROM user_events
-    WHERE event_time >= (TRUNC(SYSDATE) - INTERVAL '7' DAY)
+    WHERE event_time >= (TRUNC(SYSDATE) - 7)
 ),
 flag AS (
     SELECT customer_id, event_time, event_type,
@@ -1870,7 +1870,7 @@ FETCH FIRST 300 ROWS ONLY;
 WITH nc AS (
     SELECT customer_id, register_date
     FROM customers
-    WHERE register_date >= (TRUNC(SYSDATE) - INTERVAL '60' DAY)
+    WHERE register_date >= (TRUNC(SYSDATE) - 60)
 ),
 beh AS (
     SELECT n.customer_id,
@@ -1880,7 +1880,7 @@ beh AS (
            COUNT(DISTINCT e.product_id) AS browsed_products
     FROM nc n
     LEFT JOIN user_events e ON n.customer_id = e.customer_id
-         AND e.event_time BETWEEN n.register_date AND (n.register_date + INTERVAL '7' DAY)
+         AND e.event_time BETWEEN n.register_date AND (n.register_date + 7)
     GROUP BY n.customer_id
 )
 SELECT CASE WHEN view_cnt = 0 THEN 'no_browse'
@@ -2018,7 +2018,7 @@ JOIN products   p ON oi.product_id = p.product_id
 JOIN categories c ON p.category_id = c.category_id
 JOIN orders     o ON oi.order_id = o.order_id
 WHERE o.status = 'completed'
-  AND o.order_date >= (TRUNC(SYSDATE) - INTERVAL '180' DAY)
+  AND o.order_date >= (TRUNC(SYSDATE) - 180)
 GROUP BY c.category_name
 ORDER BY total_amt DESC;
 
@@ -2034,7 +2034,7 @@ WITH brand AS (
       AND p.brand IS NOT NULL
     GROUP BY p.category_id, p.brand
 ),
-share AS (
+share_rate AS (
     SELECT category_id, brand, amt,
            amt / NULLIF(SUM(amt) OVER (PARTITION BY category_id), 0) AS share_rate
     FROM brand
@@ -2042,7 +2042,7 @@ share AS (
 SELECT c.category_name, s.brand, ROUND(s.amt, 2) AS amt,
        ROUND(s.share_rate * 100, 2) AS share_pct,
        ROW_NUMBER() OVER (PARTITION BY s.category_id ORDER BY s.amt DESC) AS brand_rank
-FROM share s
+FROM share_rate s
 JOIN categories c ON s.category_id = c.category_id
 ORDER BY c.category_name, brand_rank;
 
@@ -2059,7 +2059,7 @@ WITH g AS (
     JOIN categories c ON p.category_id = c.category_id
     JOIN orders     o ON oi.order_id = o.order_id
     WHERE o.status = 'completed'
-      AND o.order_date >= (TRUNC(SYSDATE) - INTERVAL '90' DAY)
+      AND o.order_date >= (TRUNC(SYSDATE) - 90)
     GROUP BY p.product_id, p.product_name, c.category_name
 )
 SELECT product_name, category_name,
@@ -2105,7 +2105,7 @@ WITH m AS (
     FROM order_items oi
     JOIN orders o ON oi.order_id = o.order_id
     WHERE o.status = 'completed'
-      AND o.order_date >= (TRUNC(SYSDATE) - INTERVAL '120' DAY)
+      AND o.order_date >= (TRUNC(SYSDATE) - 120)
     GROUP BY oi.product_id, TO_CHAR(o.order_date, 'YYYY-MM')
 ),
 piv AS (
@@ -2140,7 +2140,7 @@ WITH pm_sales AS (
     JOIN orders   o ON oi.order_id = o.order_id
     JOIN products p ON oi.product_id = p.product_id
     WHERE o.status = 'completed'
-      AND o.order_date >= (TRUNC(SYSDATE) - INTERVAL '90' DAY)
+      AND o.order_date >= (TRUNC(SYSDATE) - 90)
     GROUP BY oi.product_id
 )
 SELECT p.product_name,
@@ -2191,7 +2191,7 @@ WITH daily AS (
     GROUP BY CAST(order_date AS DATE)
 ),
 promo_days AS (
-    SELECT DISTINCT CAST((d.dt + INTERVAL '0' DAY) AS DATE) AS dt
+    SELECT DISTINCT CAST((d.dt + 0) AS DATE) AS dt
     FROM daily d
     JOIN promotions pm ON d.dt BETWEEN pm.start_date AND pm.end_date
 )
@@ -2227,7 +2227,7 @@ retention AS (
            COUNT(o.order_id) AS later_orders
     FROM fo f
     LEFT JOIN orders o ON f.customer_id = o.customer_id
-         AND o.order_date > (TRUNC(SYSDATE) - INTERVAL '0' DAY)
+         AND o.order_date > (TRUNC(SYSDATE) - 0)
     WHERE f.rn = 1
     GROUP BY f.customer_id, f.channel, f.first_amt
 )
@@ -2289,7 +2289,7 @@ seg AS (
            NTILE(5) OVER (ORDER BY monetary)     AS m
     FROM rfm
 )
-SELECT c.customer_id, c.customer_name, c.level, c.city,
+SELECT c.customer_id, c.customer_name, c."LEVEL", c.city,
        s.recency, s.frequency, ROUND(s.monetary, 2) AS monetary,
        CASE WHEN s.r <= 2 AND s.m >= 4 THEN 'high_value_at_risk'
             WHEN s.r <= 2 AND s.f >= 4 THEN 'loyal_at_risk'
@@ -2315,7 +2315,7 @@ demand AS (
     FROM order_items oi
     JOIN orders o ON oi.order_id = o.order_id
     WHERE o.status = 'completed'
-      AND o.order_date >= (TRUNC(SYSDATE) - INTERVAL '30' DAY)
+      AND o.order_date >= (TRUNC(SYSDATE) - 30)
     GROUP BY oi.product_id
 ),
 agg AS (
@@ -2359,7 +2359,7 @@ wh_sales AS (
     JOIN orders    o ON oi.order_id = o.order_id
     JOIN inventory i ON oi.product_id = i.product_id
     WHERE o.status = 'completed'
-      AND o.order_date >= (TRUNC(SYSDATE) - INTERVAL '90' DAY)
+      AND o.order_date >= (TRUNC(SYSDATE) - 90)
     GROUP BY i.warehouse_id
 )
 SELECT w.warehouse_name, w.city,
@@ -2393,7 +2393,7 @@ SELECT s.carrier,
        RANK() OVER (ORDER BY SUM(CASE WHEN s.delivery_days <= 3 THEN 1 ELSE 0 END)
              / NULLIF(COUNT(*), 0) DESC)                 AS carrier_rank
 FROM shipments s
-WHERE s.ship_date >= (TRUNC(SYSDATE) - INTERVAL '180' DAY)
+WHERE s.ship_date >= (TRUNC(SYSDATE) - 180)
 GROUP BY s.carrier
 ORDER BY ontime_pct DESC;
 
@@ -2405,7 +2405,7 @@ WITH r AS (
            o.order_date, o.customer_id
     FROM refunds r
     JOIN orders o ON r.order_id = o.order_id
-    WHERE r.refund_date >= (TRUNC(SYSDATE) - INTERVAL '180' DAY)
+    WHERE r.refund_date >= (TRUNC(SYSDATE) - 180)
 )
 SELECT reason,
        COUNT(*)                                            AS refund_cnt,
@@ -2431,7 +2431,7 @@ SELECT s.province,
        RANK() OVER (ORDER BY SUM(CASE WHEN s.status = 'exception' THEN 1 ELSE 0 END)
              / NULLIF(COUNT(*), 0) DESC)                       AS risk_rank
 FROM shipments s
-WHERE s.ship_date >= (TRUNC(SYSDATE) - INTERVAL '180' DAY)
+WHERE s.ship_date >= (TRUNC(SYSDATE) - 180)
 GROUP BY s.province
 HAVING COUNT(*) >= 50
 ORDER BY exception_pct DESC;
@@ -2476,7 +2476,7 @@ SELECT p.pay_method,
              / NULLIF(COUNT(*), 0) * 100, 2) AS success_rate_pct,
        SUM(CASE WHEN p.status = 'failed'  THEN 1 ELSE 0 END) AS failed_cnt
 FROM payments p
-WHERE p.pay_date >= (TRUNC(SYSDATE) - INTERVAL '90' DAY)
+WHERE p.pay_date >= (TRUNC(SYSDATE) - 90)
 GROUP BY p.pay_method
 ORDER BY total_amt DESC;
 
@@ -2489,7 +2489,7 @@ WITH dp AS (
            SUM(CASE WHEN status <> 'success' THEN 1 ELSE 0 END)      AS fail_cnt,
            SUM(CASE WHEN status <> 'success' THEN pay_amount ELSE 0 END) AS fail_amt
     FROM payments
-    WHERE pay_date >= (TRUNC(SYSDATE) - INTERVAL '60' DAY)
+    WHERE pay_date >= (TRUNC(SYSDATE) - 60)
     GROUP BY CAST(pay_date AS DATE)
 ),
 ma AS (
@@ -2532,7 +2532,7 @@ SELECT o.order_id, o.customer_id, ROUND(o.pay_amount, 2) AS pay_amount, o.order_
 FROM orders o
 JOIN cust_hist h ON o.customer_id = h.customer_id
 WHERE o.pay_amount >= 10000
-  AND o.order_date >= (TRUNC(SYSDATE) - INTERVAL '30' DAY)
+  AND o.order_date >= (TRUNC(SYSDATE) - 30)
 ORDER BY o.pay_amount DESC
 FETCH FIRST 300 ROWS ONLY;
 
@@ -2549,7 +2549,7 @@ SELECT o.status,
        MIN(o.order_date) AS earliest,
        MAX(o.order_date) AS latest
 FROM orders o
-WHERE o.order_date >= (TRUNC(SYSDATE) - INTERVAL '90' DAY)
+WHERE o.order_date >= (TRUNC(SYSDATE) - 90)
 GROUP BY o.status
 ORDER BY order_cnt DESC;
 
@@ -2614,7 +2614,7 @@ WITH d AS (
     SELECT CAST(order_date AS DATE) AS dt, SUM(pay_amount) AS gmv
     FROM orders
     WHERE status = 'completed'
-      AND order_date >= (TRUNC(SYSDATE) - INTERVAL '365' DAY)
+      AND order_date >= (TRUNC(SYSDATE) - 365)
     GROUP BY CAST(order_date AS DATE)
 ),
 stat AS (
@@ -2647,7 +2647,7 @@ SELECT CASE WHEN (TO_NUMBER(TO_CHAR(o.order_date, 'D')) - 1) IN (0, 6) THEN 'wee
        ROUND(SUM(o.discount_amount) / NULLIF(SUM(o.pay_amount + o.discount_amount), 0) * 100, 2) AS discount_pct
 FROM orders o
 WHERE o.status = 'completed'
-  AND o.order_date >= (TRUNC(SYSDATE) - INTERVAL '90' DAY)
+  AND o.order_date >= (TRUNC(SYSDATE) - 90)
 GROUP BY CASE WHEN (TO_NUMBER(TO_CHAR(o.order_date, 'D')) - 1) IN (0, 6) THEN 'weekend' ELSE 'weekday' END,
          (TO_NUMBER(TO_CHAR(o.order_date, 'D')) - 1)
 ORDER BY dow;
@@ -2692,7 +2692,7 @@ recent AS (
     SELECT c.province, SUM(o.pay_amount) AS gmv_90d
     FROM customers c
     JOIN orders o ON c.customer_id = o.customer_id
-    WHERE o.status = 'completed' AND o.order_date >= (TRUNC(SYSDATE) - INTERVAL '90' DAY)
+    WHERE o.status = 'completed' AND o.order_date >= (TRUNC(SYSDATE) - 90)
     GROUP BY c.province
 )
 SELECT a.province, a.reg_cust, a.buy_cust,
@@ -2716,7 +2716,7 @@ WITH so AS (
     FROM stores s
     JOIN orders o ON s.store_id = o.store_id
     WHERE o.status = 'completed'
-      AND o.order_date >= (TRUNC(SYSDATE) - INTERVAL '180' DAY)
+      AND o.order_date >= (TRUNC(SYSDATE) - 180)
     GROUP BY s.store_id, s.store_name, s.region, o.customer_id
 )
 SELECT store_name, region,
@@ -2742,10 +2742,10 @@ WITH sc AS (
     JOIN order_items oi ON o.order_id = oi.order_id
     JOIN products    p  ON oi.product_id = p.product_id
     WHERE o.status = 'completed'
-      AND o.order_date >= (TRUNC(SYSDATE) - INTERVAL '180' DAY)
+      AND o.order_date >= (TRUNC(SYSDATE) - 180)
     GROUP BY s.store_id, s.store_name, p.category_id
 ),
-share AS (
+share_rate AS (
     SELECT store_name, category_id, amt,
            amt / NULLIF(SUM(amt) OVER (PARTITION BY store_name), 0) AS share_rate,
            ROW_NUMBER() OVER (PARTITION BY store_name ORDER BY amt DESC) AS cat_rank
@@ -2754,7 +2754,7 @@ share AS (
 SELECT s.store_name, c.category_name, ROUND(s.amt, 2) AS amt,
        ROUND(s.share_rate * 100, 2) AS share_pct, s.cat_rank,
        ROUND(s.share_rate - AVG(s.share_rate) OVER (PARTITION BY s.category_id), 4) AS vs_category_avg
-FROM share s
+FROM share_rate s
 JOIN categories c ON s.category_id = c.category_id
 WHERE s.cat_rank <= 5
 ORDER BY s.store_name, s.cat_rank;
@@ -2785,12 +2785,12 @@ ORDER BY gmv DESC;
 -- ------------------------------------------------------------------------------
 WITH pm AS (
     SELECT s.store_id, s.store_name, s.region,
-           SUM(CASE WHEN o.order_date >= (TRUNC(SYSDATE) - INTERVAL '90' DAY)  THEN o.pay_amount ELSE 0 END) AS gmv_90d,
-           SUM(CASE WHEN o.order_date >= (TRUNC(SYSDATE) - INTERVAL '180' DAY)
-                     AND o.order_date <  (TRUNC(SYSDATE) - INTERVAL '90' DAY)  THEN o.pay_amount ELSE 0 END) AS gmv_prev_90d,
-           COUNT(CASE WHEN o.order_date >= (TRUNC(SYSDATE) - INTERVAL '90' DAY) THEN 1 END) AS orders_90d,
-           COUNT(CASE WHEN o.order_date >= (TRUNC(SYSDATE) - INTERVAL '180' DAY)
-                       AND o.order_date <  (TRUNC(SYSDATE) - INTERVAL '90' DAY) THEN 1 END) AS orders_prev_90d
+           SUM(CASE WHEN o.order_date >= (TRUNC(SYSDATE) - 90)  THEN o.pay_amount ELSE 0 END) AS gmv_90d,
+           SUM(CASE WHEN o.order_date >= (TRUNC(SYSDATE) - 180)
+                     AND o.order_date <  (TRUNC(SYSDATE) - 90)  THEN o.pay_amount ELSE 0 END) AS gmv_prev_90d,
+           COUNT(CASE WHEN o.order_date >= (TRUNC(SYSDATE) - 90) THEN 1 END) AS orders_90d,
+           COUNT(CASE WHEN o.order_date >= (TRUNC(SYSDATE) - 180)
+                       AND o.order_date <  (TRUNC(SYSDATE) - 90) THEN 1 END) AS orders_prev_90d
     FROM stores s
     LEFT JOIN orders o ON s.store_id = o.store_id AND o.status = 'completed'
     GROUP BY s.store_id, s.store_name, s.region
@@ -2814,9 +2814,9 @@ ORDER BY gmv_change_pct ASC;
 -- ------------------------------------------------------------------------------
 WITH amt AS (
     SELECT customer_id,
-           SUM(CASE WHEN order_date >= (TRUNC(SYSDATE) - INTERVAL '90' DAY)  THEN pay_amount ELSE 0 END) AS amt_recent,
-           SUM(CASE WHEN order_date >= (TRUNC(SYSDATE) - INTERVAL '180' DAY)
-                     AND order_date <  (TRUNC(SYSDATE) - INTERVAL '90' DAY)  THEN pay_amount ELSE 0 END) AS amt_prev
+           SUM(CASE WHEN order_date >= (TRUNC(SYSDATE) - 90)  THEN pay_amount ELSE 0 END) AS amt_recent,
+           SUM(CASE WHEN order_date >= (TRUNC(SYSDATE) - 180)
+                     AND order_date <  (TRUNC(SYSDATE) - 90)  THEN pay_amount ELSE 0 END) AS amt_prev
     FROM orders
     WHERE status = 'completed'
     GROUP BY customer_id
@@ -2853,7 +2853,7 @@ WITH cust AS (
            SUM(o.discount_amount) AS total_discount
     FROM orders o
     WHERE o.status = 'completed'
-      AND o.order_date >= (TRUNC(SYSDATE) - INTERVAL '180' DAY)
+      AND o.order_date >= (TRUNC(SYSDATE) - 180)
     GROUP BY o.customer_id
 ),
 scored AS (
@@ -2887,7 +2887,7 @@ WITH cust AS (
            AVG(o.discount_amount / NULLIF(o.pay_amount + o.discount_amount, 0)) AS avg_disc_rate
     FROM orders o
     WHERE o.status = 'completed'
-      AND o.order_date >= (TRUNC(SYSDATE) - INTERVAL '180' DAY)
+      AND o.order_date >= (TRUNC(SYSDATE) - 180)
     GROUP BY o.customer_id
     HAVING COUNT(*) >= 3
 )
@@ -2919,7 +2919,7 @@ WITH cat_sales AS (
     JOIN orders   o ON oi.order_id = o.order_id
     JOIN products p ON oi.product_id = p.product_id
     WHERE o.status = 'completed'
-      AND o.order_date >= (TRUNC(SYSDATE) - INTERVAL '180' DAY)
+      AND o.order_date >= (TRUNC(SYSDATE) - 180)
     GROUP BY p.category_id
 )
 SELECT c.category_name,
@@ -2945,7 +2945,7 @@ WITH funnel AS (
            SUM(CASE WHEN event_type = 'place_order' THEN 1 ELSE 0 END) AS order_cnt
     FROM user_events
     WHERE product_id IS NOT NULL
-      AND event_time >= (TRUNC(SYSDATE) - INTERVAL '30' DAY)
+      AND event_time >= (TRUNC(SYSDATE) - 30)
     GROUP BY product_id
 )
 SELECT p.product_name, f.expo_cnt, f.detail_cnt, f.cart_cnt, f.order_cnt,
@@ -2972,7 +2972,7 @@ WITH pd AS (
            MAX(event_time) AS last_view
     FROM user_events
     WHERE event_type = 'detail_view'
-      AND event_time >= (TRUNC(SYSDATE) - INTERVAL '30' DAY)
+      AND event_time >= (TRUNC(SYSDATE) - 30)
       AND product_id IS NOT NULL
     GROUP BY session_id, product_id
 ),
@@ -3002,7 +3002,7 @@ ORDER BY view_depth;
 -- [101] 画像·标签聚合 | 电商 | 用户多维度画像标签聚合
 -- ------------------------------------------------------------------------------
 WITH base AS (
-    SELECT c.customer_id, c.customer_name, c.city, c.level, c.gender,
+    SELECT c.customer_id, c.customer_name, c.city, c."LEVEL", c.gender,
            (TRUNC(SYSDATE) - c.birth_date) / 365 AS age
     FROM customers c
 ),
@@ -3117,7 +3117,7 @@ FETCH FIRST 100 ROWS ONLY;
 WITH np AS (
     SELECT p.product_id, p.product_name, p.category_id, p.launch_date
     FROM products p
-    WHERE p.launch_date >= (TRUNC(SYSDATE) - INTERVAL '365' DAY)
+    WHERE p.launch_date >= (TRUNC(SYSDATE) - 365)
 ),
 perf AS (
     SELECT n.product_id,
@@ -3128,7 +3128,7 @@ perf AS (
     LEFT JOIN order_items oi ON n.product_id = oi.product_id
     LEFT JOIN orders o ON oi.order_id = o.order_id AND o.status = 'completed'
          AND o.order_date >= n.launch_date
-         AND o.order_date <= (n.launch_date + INTERVAL '90' DAY)
+         AND o.order_date <= (n.launch_date + 90)
     GROUP BY n.product_id
 )
 SELECT c.category_name,
@@ -3222,7 +3222,7 @@ sold AS (
     FROM order_items oi
     JOIN orders o ON oi.order_id = o.order_id
     WHERE o.status = 'completed'
-      AND o.order_date >= (TRUNC(SYSDATE) - INTERVAL '180' DAY)
+      AND o.order_date >= (TRUNC(SYSDATE) - 180)
     GROUP BY product_id
 ),
 calc AS (
@@ -3261,7 +3261,7 @@ WITH pr AS (
     FROM orders o
     LEFT JOIN payments p ON o.order_id = p.order_id AND p.status = 'success'
     WHERE o.status = 'completed'
-      AND o.order_date >= (TRUNC(SYSDATE) - INTERVAL '180' DAY)
+      AND o.order_date >= (TRUNC(SYSDATE) - 180)
     GROUP BY o.order_id, o.order_date, o.pay_amount, o.channel
 )
 SELECT channel,
@@ -3293,7 +3293,7 @@ SELECT CAST(o.order_date AS DATE) AS dt,
              / NULLIF(COUNT(*), 0) * 100, 2)         AS cancel_rate_pct,
        ROUND(SUM(o.pay_amount) - LAG(SUM(o.pay_amount)) OVER (ORDER BY CAST(o.order_date AS DATE)), 2) AS gmv_dod
 FROM orders o
-WHERE o.order_date >= (TRUNC(SYSDATE) - INTERVAL '30' DAY)
+WHERE o.order_date >= (TRUNC(SYSDATE) - 30)
 GROUP BY CAST(o.order_date AS DATE)
 ORDER BY dt DESC;
 
@@ -3303,14 +3303,14 @@ ORDER BY dt DESC;
 WITH reg AS (
     SELECT CAST(register_date AS DATE) AS dt, COUNT(*) AS new_cust
     FROM customers
-    WHERE register_date >= (TRUNC(SYSDATE) - INTERVAL '90' DAY)
+    WHERE register_date >= (TRUNC(SYSDATE) - 90)
     GROUP BY CAST(register_date AS DATE)
 ),
 act AS (
     SELECT CAST(order_date AS DATE) AS dt, COUNT(DISTINCT customer_id) AS active_cust
     FROM orders
     WHERE status = 'completed'
-      AND order_date >= (TRUNC(SYSDATE) - INTERVAL '90' DAY)
+      AND order_date >= (TRUNC(SYSDATE) - 90)
     GROUP BY CAST(order_date AS DATE)
 ),
 dates AS (
@@ -3362,7 +3362,7 @@ WITH eod AS (
            ROW_NUMBER() OVER (PARTITION BY account_id, CAST(txn_date AS DATE)
                               ORDER BY txn_date DESC) AS rn
     FROM transactions
-    WHERE txn_date >= (TRUNC(SYSDATE) - INTERVAL '365' DAY)
+    WHERE txn_date >= (TRUNC(SYSDATE) - 365)
 ),
 daily AS (
     SELECT account_id, dt, balance_after FROM eod WHERE rn = 1
@@ -3398,7 +3398,7 @@ WITH big AS (
     FROM transactions t
     JOIN accounts a ON t.account_id = a.account_id
     JOIN branches b ON a.branch_id = b.branch_id
-    WHERE t.txn_date >= (TRUNC(SYSDATE) - INTERVAL '30' DAY)
+    WHERE t.txn_date >= (TRUNC(SYSDATE) - 30)
       AND t.amount >= 100000
 )
 SELECT branch_name, txn_id, account_id, txn_type,
@@ -3416,7 +3416,7 @@ WITH acct_stat AS (
            AVG(amount) AS avg_amt,
            COUNT(*)    AS txn_cnt
     FROM transactions
-    WHERE txn_date >= (TRUNC(SYSDATE) - INTERVAL '180' DAY)
+    WHERE txn_date >= (TRUNC(SYSDATE) - 180)
     GROUP BY account_id
     HAVING COUNT(*) >= 10
 ),
@@ -3426,7 +3426,7 @@ tagged AS (
            (t.amount - s.avg_amt) / NULLIF(s.avg_amt, 0) AS deviation
     FROM transactions t
     JOIN acct_stat s ON t.account_id = s.account_id
-    WHERE t.txn_date >= (TRUNC(SYSDATE) - INTERVAL '7' DAY)
+    WHERE t.txn_date >= (TRUNC(SYSDATE) - 7)
 )
 SELECT txn_id, account_id, txn_type,
        ROUND(amount, 2)      AS amount,
@@ -3450,7 +3450,7 @@ WITH hourly AS (
            COUNT(*)      AS cnt,
            SUM(amount)   AS amt
     FROM transactions
-    WHERE txn_date >= (TRUNC(SYSDATE) - INTERVAL '7' DAY)
+    WHERE txn_date >= (TRUNC(SYSDATE) - 7)
     GROUP BY account_id, TO_CHAR(txn_date, 'YYYY-MM-DD HH24')
 ),
 agg AS (
@@ -3487,7 +3487,7 @@ WITH cp AS (
            SUM(t.amount)     AS total_amt
     FROM transactions t
     JOIN accounts a ON t.account_id = a.account_id
-    WHERE t.txn_date >= (TRUNC(SYSDATE) - INTERVAL '180' DAY)
+    WHERE t.txn_date >= (TRUNC(SYSDATE) - 180)
       AND t.counterparty IS NOT NULL
     GROUP BY a.cust_id, t.counterparty
 ),
@@ -3517,7 +3517,7 @@ WITH flow AS (
            LEAD(t.amount)   OVER (PARTITION BY t.account_id ORDER BY t.txn_date) AS next_amount
     FROM transactions t
     JOIN accounts a ON t.account_id = a.account_id
-    WHERE t.txn_date >= (TRUNC(SYSDATE) - INTERVAL '30' DAY)
+    WHERE t.txn_date >= (TRUNC(SYSDATE) - 30)
 )
 SELECT cust_id, account_id, txn_id,
        ROUND(amount, 2)       AS out_amount,
@@ -3788,7 +3788,7 @@ SELECT t.channel,
        ROUND(SUM(t.amount) - LAG(SUM(t.amount)) OVER (PARTITION BY t.channel ORDER BY TO_CHAR(t.txn_date, 'YYYY-MM')), 2) AS mom_delta
 FROM transactions t
 JOIN accounts a ON t.account_id = a.account_id
-WHERE t.txn_date >= (TRUNC(SYSDATE) - INTERVAL '180' DAY)
+WHERE t.txn_date >= (TRUNC(SYSDATE) - 180)
 GROUP BY t.channel, TO_CHAR(t.txn_date, 'YYYY-MM')
 ORDER BY ym DESC, txn_cnt DESC;
 
@@ -3802,7 +3802,7 @@ WITH t AS (
            (TO_NUMBER(TO_CHAR(t.txn_date, 'D')) - 1)  AS txn_dow
     FROM transactions t
     JOIN accounts a ON t.account_id = a.account_id
-    WHERE t.txn_date >= (TRUNC(SYSDATE) - INTERVAL '90' DAY)
+    WHERE t.txn_date >= (TRUNC(SYSDATE) - 90)
 )
 SELECT cust_id,
        COUNT(*)                                                    AS total_txn,
@@ -3835,7 +3835,7 @@ t AS (
     FROM transactions t
     JOIN accounts a ON t.account_id = a.account_id
     JOIN home h     ON a.cust_id = h.cust_id
-    WHERE t.txn_date >= (TRUNC(SYSDATE) - INTERVAL '90' DAY)
+    WHERE t.txn_date >= (TRUNC(SYSDATE) - 90)
 )
 SELECT cust_id,
        COUNT(*)                                                       AS txn_cnt,
@@ -3867,7 +3867,7 @@ pairs AS (
     JOIN cust_acct a1 ON t.account_id = a1.account_id
     JOIN cust_acct a2 ON t.counterparty = CAST(a2.account_id AS VARCHAR(20))
     WHERE a1.cust_id < a2.cust_id
-      AND t.txn_date >= (TRUNC(SYSDATE) - INTERVAL '180' DAY)
+      AND t.txn_date >= (TRUNC(SYSDATE) - 180)
     GROUP BY a1.cust_id, a2.cust_id
 )
 SELECT ca.cust_name AS cust_a_name, cb.cust_name AS cust_b_name,
@@ -3895,7 +3895,7 @@ WITH day_txn AS (
            SUM(CASE WHEN amount BETWEEN 8000 AND 10000 THEN 1 ELSE 0 END) AS near_threshold_cnt
     FROM transactions
     WHERE txn_type = 'transfer_out'
-      AND txn_date >= (TRUNC(SYSDATE) - INTERVAL '90' DAY)
+      AND txn_date >= (TRUNC(SYSDATE) - 90)
     GROUP BY account_id, CAST(txn_date AS DATE)
 )
 SELECT account_id, dt, txn_cnt,
@@ -3921,7 +3921,7 @@ WITH edges AS (
     FROM transactions t
     JOIN accounts a2 ON t.counterparty = CAST(a2.account_id AS VARCHAR(20))
     WHERE t.txn_type = 'transfer_out'
-      AND t.txn_date >= (TRUNC(SYSDATE) - INTERVAL '180' DAY)
+      AND t.txn_date >= (TRUNC(SYSDATE) - 180)
     GROUP BY t.account_id, a2.account_id
 ),
 cycle2 AS (
@@ -3955,7 +3955,7 @@ SELECT event_type, risk_level,
        ROUND(COUNT(*) / NULLIF(SUM(COUNT(*)) OVER (PARTITION BY event_type), 0) * 100, 2) AS level_share_pct,
        RANK() OVER (PARTITION BY event_type ORDER BY COUNT(*) DESC) AS level_rank
 FROM risk_events
-WHERE event_time >= (TRUNC(SYSDATE) - INTERVAL '180' DAY)
+WHERE event_time >= (TRUNC(SYSDATE) - 180)
 GROUP BY event_type, risk_level
 ORDER BY event_type, event_cnt DESC;
 
@@ -3969,7 +3969,7 @@ WITH evt AS (
            SUM(CASE WHEN risk_level = 'medium' THEN 1 ELSE 0 END)      AS medium_cnt,
            SUM(amount)                                                 AS event_amount
     FROM risk_events
-    WHERE event_time >= (TRUNC(SYSDATE) - INTERVAL '365' DAY)
+    WHERE event_time >= (TRUNC(SYSDATE) - 365)
     GROUP BY cust_id
 ),
 score AS (
@@ -4026,7 +4026,7 @@ SELECT CASE WHEN score >= 800 THEN 'excellent_800+'
 FROM (
     SELECT cust_id, AVG(score) AS score
     FROM credit_scores
-    WHERE score_date >= (TRUNC(SYSDATE) - INTERVAL '90' DAY)
+    WHERE score_date >= (TRUNC(SYSDATE) - 90)
     GROUP BY cust_id
 ) s
 GROUP BY CASE WHEN score >= 800 THEN 'excellent_800+'
@@ -4115,7 +4115,7 @@ txn AS (
     FROM transactions t
     JOIN accounts   a ON t.account_id = a.account_id
     JOIN risky      r ON a.cust_id = r.cust_id
-    WHERE t.txn_date >= (TRUNC(SYSDATE) - INTERVAL '30' DAY)
+    WHERE t.txn_date >= (TRUNC(SYSDATE) - 30)
 )
 SELECT cust_id,
        COUNT(*)                        AS txn_cnt,
@@ -4144,7 +4144,7 @@ WITH suspicious AS (
            CASE WHEN EXTRACT(HOUR FROM CAST(t.txn_date AS TIMESTAMP)) >= 20 OR EXTRACT(HOUR FROM CAST(t.txn_date AS TIMESTAMP)) < 8 THEN 2 ELSE 0 END AS time_score
     FROM transactions t
     JOIN accounts a ON t.account_id = a.account_id
-    WHERE t.txn_date >= (TRUNC(SYSDATE) - INTERVAL '30' DAY)
+    WHERE t.txn_date >= (TRUNC(SYSDATE) - 30)
 ),
 scored AS (
     SELECT cust_id, txn_id, amount, txn_date, txn_type, city,
@@ -4180,7 +4180,7 @@ evt_hist AS (
                     WHEN risk_level = 'medium' THEN 2
                     ELSE 1 END) AS level_num
     FROM risk_events
-    WHERE event_time >= (TRUNC(SYSDATE) - INTERVAL '180' DAY)
+    WHERE event_time >= (TRUNC(SYSDATE) - 180)
     GROUP BY cust_id, TO_CHAR(event_time, 'YYYY-MM')
 ),
 trend AS (
@@ -4214,7 +4214,7 @@ WITH amt AS (
     SELECT txn_type, amount,
            NTILE(100) OVER (PARTITION BY txn_type ORDER BY amount) AS pctile
     FROM transactions
-    WHERE txn_date >= (TRUNC(SYSDATE) - INTERVAL '180' DAY)
+    WHERE txn_date >= (TRUNC(SYSDATE) - 180)
 )
 SELECT txn_type,
        MAX(CASE WHEN pctile = 50  THEN amount END) AS p50,
@@ -4246,7 +4246,7 @@ SELECT a.account_type,
        SUM(CASE WHEN (ft.first_dt - a.open_date) <= 30 THEN 1 ELSE 0 END) AS within_30d
 FROM accounts a
 LEFT JOIN first_txn ft ON a.account_id = ft.account_id
-WHERE a.open_date >= (TRUNC(SYSDATE) - INTERVAL '365' DAY)
+WHERE a.open_date >= (TRUNC(SYSDATE) - 365)
 GROUP BY a.account_type, TO_CHAR(a.open_date, 'YYYY-MM')
 ORDER BY open_ym DESC, opened_cnt DESC;
 
@@ -4257,7 +4257,7 @@ WITH act AS (
     SELECT DISTINCT a.cust_id, TO_CHAR(t.txn_date, 'YYYY-MM') AS ym
     FROM transactions t
     JOIN accounts a ON t.account_id = a.account_id
-    WHERE t.txn_date >= (TRUNC(SYSDATE) - INTERVAL '365' DAY)
+    WHERE t.txn_date >= (TRUNC(SYSDATE) - 365)
 ),
 seq AS (
     SELECT cust_id, ym,
@@ -4323,9 +4323,9 @@ FETCH FIRST 500 ROWS ONLY;
 -- ------------------------------------------------------------------------------
 WITH act AS (
     SELECT a.cust_id,
-           SUM(CASE WHEN t.txn_date >= (TRUNC(SYSDATE) - INTERVAL '90' DAY)  THEN 1 ELSE 0 END) AS cnt_90d,
-           SUM(CASE WHEN t.txn_date >= (TRUNC(SYSDATE) - INTERVAL '180' DAY)
-                     AND t.txn_date <  (TRUNC(SYSDATE) - INTERVAL '90' DAY)  THEN 1 ELSE 0 END) AS cnt_prev_90d,
+           SUM(CASE WHEN t.txn_date >= (TRUNC(SYSDATE) - 90)  THEN 1 ELSE 0 END) AS cnt_90d,
+           SUM(CASE WHEN t.txn_date >= (TRUNC(SYSDATE) - 180)
+                     AND t.txn_date <  (TRUNC(SYSDATE) - 90)  THEN 1 ELSE 0 END) AS cnt_prev_90d,
            MAX(t.txn_date) AS last_txn
     FROM transactions t
     JOIN accounts a ON t.account_id = a.account_id
@@ -4361,7 +4361,7 @@ WITH flow AS (
            SUM(CASE WHEN t.txn_type = 'transfer_out' THEN t.amount ELSE 0 END) AS outflow
     FROM transactions t
     JOIN accounts a ON t.account_id = a.account_id
-    WHERE t.txn_date >= (TRUNC(SYSDATE) - INTERVAL '90' DAY)
+    WHERE t.txn_date >= (TRUNC(SYSDATE) - 90)
     GROUP BY a.cust_id
 )
 SELECT c.cust_id, c.cust_name, c.risk_level,
@@ -4434,7 +4434,7 @@ WITH r AS (
            SUM(profit)                                    AS total_profit,
            COUNT(DISTINCT period)                         AS period_cnt
     FROM fin_reports
-    WHERE period >= TO_CHAR((TRUNC(SYSDATE) - INTERVAL '365' DAY), 'YYYY-MM')
+    WHERE period >= TO_CHAR((TRUNC(SYSDATE) - 365), 'YYYY-MM')
     GROUP BY branch_id
 )
 SELECT b.branch_name, b.city, b.region,
@@ -4514,7 +4514,7 @@ WITH card_stat AS (
            COUNT(DISTINCT t.merchant)                                  AS merchant_cnt,
            COUNT(DISTINCT t.mcc)                                       AS mcc_cnt
     FROM card_txns t
-    WHERE t.txn_date >= (TRUNC(SYSDATE) - INTERVAL '90' DAY)
+    WHERE t.txn_date >= (TRUNC(SYSDATE) - 90)
     GROUP BY t.card_id
 )
 SELECT c.card_type,
@@ -4540,7 +4540,7 @@ WITH ov AS (
     FROM card_txns t
     JOIN cards c ON t.card_id = c.card_id
     WHERE t.is_overseas = 1
-      AND t.txn_date >= (TRUNC(SYSDATE) - INTERVAL '180' DAY)
+      AND t.txn_date >= (TRUNC(SYSDATE) - 180)
 )
 SELECT cust_id, card_id,
        COUNT(*)                          AS overseas_txn_cnt,
@@ -4577,7 +4577,7 @@ SELECT t.mcc,
                  / NULLIF(COUNT(*), 0) > 0.1 THEN 'high_value_mcc'
             ELSE 'normal' END AS mcc_risk_flag
 FROM card_txns t
-WHERE t.txn_date >= (TRUNC(SYSDATE) - INTERVAL '180' DAY)
+WHERE t.txn_date >= (TRUNC(SYSDATE) - 180)
 GROUP BY t.mcc
 ORDER BY total_amt DESC
 FETCH FIRST 100 ROWS ONLY;
@@ -4591,7 +4591,7 @@ WITH card_usage AS (
            COUNT(t.txn_id)                                              AS txn_cnt
     FROM cards c
     LEFT JOIN card_txns t ON c.card_id = t.card_id
-         AND t.txn_date >= (TRUNC(SYSDATE) - INTERVAL '90' DAY)
+         AND t.txn_date >= (TRUNC(SYSDATE) - 90)
     WHERE c.status = 'active'
     GROUP BY c.card_id, c.cust_id, c.credit_limit
 )
@@ -4655,7 +4655,7 @@ WITH t AS (
            MOD(FLOOR(ct.amount), 1000) AS mod_1000,
            COUNT(*) OVER (PARTITION BY ct.merchant) AS merchant_txn_all
     FROM card_txns ct
-    WHERE ct.txn_date >= (TRUNC(SYSDATE) - INTERVAL '90' DAY)
+    WHERE ct.txn_date >= (TRUNC(SYSDATE) - 90)
 )
 SELECT card_id,
        COUNT(*)                                                    AS txn_cnt,
@@ -4684,7 +4684,7 @@ WITH t AS (
            EXTRACT(HOUR FROM CAST(t.txn_date AS TIMESTAMP)) AS hr
     FROM transactions t
     JOIN accounts a ON t.account_id = a.account_id
-    WHERE t.txn_date >= (TRUNC(SYSDATE) - INTERVAL '180' DAY)
+    WHERE t.txn_date >= (TRUNC(SYSDATE) - 180)
 )
 SELECT cust_id,
        COUNT(*)                                                          AS txn_cnt,
@@ -4714,7 +4714,7 @@ WITH e1 AS (
     FROM transactions t
     JOIN accounts a2 ON t.counterparty = CAST(a2.account_id AS VARCHAR(20))
     WHERE t.txn_type = 'transfer_out'
-      AND t.txn_date >= (TRUNC(SYSDATE) - INTERVAL '60' DAY)
+      AND t.txn_date >= (TRUNC(SYSDATE) - 60)
     GROUP BY t.account_id, a2.account_id
 ),
 e2 AS (
@@ -4723,7 +4723,7 @@ e2 AS (
     FROM e1
     JOIN transactions t2 ON t2.account_id = e1.lvl1
     WHERE t2.txn_type = 'transfer_out'
-      AND t2.txn_date >= (TRUNC(SYSDATE) - INTERVAL '60' DAY)
+      AND t2.txn_date >= (TRUNC(SYSDATE) - 60)
 )
 SELECT src AS origin_account,
        COUNT(DISTINCT lvl1)                   AS first_hop_accounts,
@@ -4754,7 +4754,7 @@ used AS (
     SELECT c.cust_id, SUM(t.amount) AS card_used
     FROM card_txns t
     JOIN cards c ON t.card_id = c.card_id
-    WHERE t.txn_date >= (TRUNC(SYSDATE) - INTERVAL '30' DAY)
+    WHERE t.txn_date >= (TRUNC(SYSDATE) - 30)
     GROUP BY c.cust_id
 ),
 coll AS (
@@ -4800,7 +4800,7 @@ SELECT CAST(t.txn_date AS DATE) AS dt,
        COUNT(DISTINCT a.cust_id)                                       AS active_cust
 FROM transactions t
 JOIN accounts a ON t.account_id = a.account_id
-WHERE t.txn_date >= (TRUNC(SYSDATE) - INTERVAL '30' DAY)
+WHERE t.txn_date >= (TRUNC(SYSDATE) - 30)
 GROUP BY CAST(t.txn_date AS DATE)
 ORDER BY dt DESC;
 
@@ -5011,7 +5011,7 @@ WITH cust_loan AS (
 recent AS (
     SELECT cust_id, COUNT(*) AS new_loan_90d
     FROM loans
-    WHERE start_date >= (TRUNC(SYSDATE) - INTERVAL '90' DAY)
+    WHERE start_date >= (TRUNC(SYSDATE) - 90)
     GROUP BY cust_id
 )
 SELECT CASE WHEN cl.product_cnt >= 4 OR COALESCE(r.new_loan_90d, 0) >= 3 THEN 'high_multi'
@@ -5298,7 +5298,7 @@ WITH m AS (
            COUNT(*)          AS loan_cnt,
            SUM(loan_amount)  AS loan_amt
     FROM loans
-    WHERE start_date >= (TRUNC(SYSDATE) - INTERVAL '730' DAY)
+    WHERE start_date >= (TRUNC(SYSDATE) - 730)
     GROUP BY TO_CHAR(start_date, 'YYYY-MM'), product_type
 )
 SELECT ym, product_type, loan_cnt, ROUND(loan_amt, 2) AS loan_amt,
@@ -5405,7 +5405,7 @@ SELECT TO_CHAR(l.start_date, 'YYYY-MM') AS vintage,
        ROUND(AVG(l.term_months), 1)                                    AS avg_term,
        ROUND(SUM(l.loan_amount) / NULLIF(SUM(SUM(l.loan_amount)) OVER (), 0) * 100, 2) AS vintage_share_pct
 FROM loans l
-WHERE l.start_date >= (TRUNC(SYSDATE) - INTERVAL '1095' DAY)
+WHERE l.start_date >= (TRUNC(SYSDATE) - 1095)
 GROUP BY TO_CHAR(l.start_date, 'YYYY-MM')
 ORDER BY vintage DESC;
 
@@ -5419,7 +5419,7 @@ WITH n AS (
            MAX(nav) OVER (PARTITION BY fund_id ORDER BY nav_date
                 ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS peak_nav
     FROM fund_nav
-    WHERE nav_date >= (TRUNC(SYSDATE) - INTERVAL '365' DAY)
+    WHERE nav_date >= (TRUNC(SYSDATE) - 365)
 )
 SELECT f.fund_name, f.fund_type,
        COUNT(*)                                                       AS nav_days,
@@ -5443,7 +5443,7 @@ WITH n AS (
            MAX(nav) OVER (PARTITION BY fund_id ORDER BY nav_date
                 ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running_peak
     FROM fund_nav
-    WHERE nav_date >= (TRUNC(SYSDATE) - INTERVAL '730' DAY)
+    WHERE nav_date >= (TRUNC(SYSDATE) - 730)
 ),
 dd AS (
     SELECT fund_id, nav_date, nav, running_peak,
@@ -5475,7 +5475,7 @@ WITH r AS (
            (nav - LAG(nav) OVER (PARTITION BY fund_id ORDER BY nav_date))
              / NULLIF(LAG(nav) OVER (PARTITION BY fund_id ORDER BY nav_date), 0) AS daily_ret
     FROM fund_nav
-    WHERE nav_date >= (TRUNC(SYSDATE) - INTERVAL '365' DAY)
+    WHERE nav_date >= (TRUNC(SYSDATE) - 365)
 ),
 stat AS (
     SELECT fund_id,
@@ -5512,7 +5512,7 @@ WITH perf AS (
            MIN(nav) AS min_nav,
            AVG(nav) AS avg_nav
     FROM fund_nav
-    WHERE nav_date >= (TRUNC(SYSDATE) - INTERVAL '365' DAY)
+    WHERE nav_date >= (TRUNC(SYSDATE) - 365)
     GROUP BY fund_id
 ),
 chg AS (
@@ -5541,7 +5541,7 @@ WITH r AS (
            (nav - LAG(nav) OVER (PARTITION BY fund_id ORDER BY nav_date))
              / NULLIF(LAG(nav) OVER (PARTITION BY fund_id ORDER BY nav_date), 0) AS ret
     FROM fund_nav
-    WHERE nav_date >= (TRUNC(SYSDATE) - INTERVAL '365' DAY)
+    WHERE nav_date >= (TRUNC(SYSDATE) - 365)
 ),
 stat AS (
     SELECT fund_id,
@@ -5600,7 +5600,7 @@ WITH nav AS (
     SELECT fund_id, nav_date, nav,
            ROW_NUMBER() OVER (PARTITION BY fund_id ORDER BY nav_date) AS rn
     FROM fund_nav
-    WHERE nav_date >= (TRUNC(SYSDATE) - INTERVAL '730' DAY)
+    WHERE nav_date >= (TRUNC(SYSDATE) - 730)
 ),
 sip AS (
     SELECT fund_id,
@@ -5671,7 +5671,7 @@ perf AS (
     SELECT n.fund_id,
            MAX(n.nav) / NULLIF(MIN(n.nav), 0) - 1 AS nav_growth
     FROM fund_nav n
-    WHERE n.nav_date >= (TRUNC(SYSDATE) - INTERVAL '365' DAY)
+    WHERE n.nav_date >= (TRUNC(SYSDATE) - 365)
     GROUP BY n.fund_id
 )
 SELECT m.manager_id,
@@ -5698,7 +5698,7 @@ WITH r AS (
            MIN(n.nav)                                        AS min_nav,
            COUNT(*)                                          AS nav_days
     FROM fund_nav n
-    WHERE n.nav_date >= (TRUNC(SYSDATE) - INTERVAL '365' DAY)
+    WHERE n.nav_date >= (TRUNC(SYSDATE) - 365)
     GROUP BY n.fund_id
 )
 SELECT f.fund_type, f.risk_level,
@@ -6015,7 +6015,7 @@ WITH r AS (
            AVG(rate) OVER (PARTITION BY currency ORDER BY rate_date
                 ROWS BETWEEN 30 PRECEDING AND CURRENT ROW) AS ma30
     FROM fx_rates
-    WHERE rate_date >= (TRUNC(SYSDATE) - INTERVAL '365' DAY)
+    WHERE rate_date >= (TRUNC(SYSDATE) - 365)
 )
 SELECT currency,
        COUNT(*)                                          AS quote_days,
@@ -6045,7 +6045,7 @@ expo AS (
            SUM(t.amount) AS exposure_amt
     FROM transactions t
     JOIN accounts a ON t.account_id = a.account_id
-    WHERE t.txn_date >= (TRUNC(SYSDATE) - INTERVAL '90' DAY)
+    WHERE t.txn_date >= (TRUNC(SYSDATE) - 90)
       AND a.currency IN (SELECT currency FROM fx_rates)
     GROUP BY a.currency
 )
@@ -6096,7 +6096,7 @@ ORDER BY cost_ratio_pct DESC;
 WITH br AS (
     SELECT r.branch_id, SUM(r.revenue) AS revenue, SUM(r.profit) AS profit
     FROM fin_reports r
-    WHERE r.period >= TO_CHAR((TRUNC(SYSDATE) - INTERVAL '365' DAY), 'YYYY-MM')
+    WHERE r.period >= TO_CHAR((TRUNC(SYSDATE) - 365), 'YYYY-MM')
     GROUP BY r.branch_id
 ),
 emp AS (
@@ -6191,7 +6191,7 @@ WITH m AS (
            SUM(r.loan_amt)                                         AS loan,
            SUM(r.asset)                                            AS asset
     FROM fin_reports r
-    WHERE r.period >= TO_CHAR((TRUNC(SYSDATE) - INTERVAL '365' DAY), 'YYYY-MM')
+    WHERE r.period >= TO_CHAR((TRUNC(SYSDATE) - 365), 'YYYY-MM')
     GROUP BY r.branch_id
 ),
 q AS (
@@ -6232,7 +6232,7 @@ dep_profit AS (
 card_inc AS (
     SELECT c.cust_id, SUM(t.amount * 0.006) AS card_fee_income
     FROM card_txns t JOIN cards c ON t.card_id = c.card_id
-    WHERE t.txn_date >= (TRUNC(SYSDATE) - INTERVAL '365' DAY)
+    WHERE t.txn_date >= (TRUNC(SYSDATE) - 365)
     GROUP BY c.cust_id
 ),
 cost AS (
@@ -6273,7 +6273,7 @@ WITH prod AS (
     UNION ALL
     SELECT 'card', c.cust_id, t.amount, t.amount * 0.006
     FROM card_txns t JOIN cards c ON t.card_id = c.card_id
-    WHERE t.txn_date >= (TRUNC(SYSDATE) - INTERVAL '365' DAY)
+    WHERE t.txn_date >= (TRUNC(SYSDATE) - 365)
 )
 SELECT product_line,
        COUNT(*)                                     AS txn_cnt,
@@ -6302,7 +6302,7 @@ ln AS (
 fin AS (
     SELECT SUM(revenue) AS revenue, SUM(profit) AS profit, SUM(cost) AS cost
     FROM fin_reports
-    WHERE period >= TO_CHAR((TRUNC(SYSDATE) - INTERVAL '365' DAY), 'YYYY-MM')
+    WHERE period >= TO_CHAR((TRUNC(SYSDATE) - 365), 'YYYY-MM')
 ),
 cust AS (
     SELECT COUNT(*) AS total_cust FROM fin_customers
@@ -6331,7 +6331,7 @@ CROSS JOIN auc a;
 -- ------------------------------------------------------------------------------
 -- [211] 递归·组织架构 | 人力 | 组织架构树递归展开与层级路径
 -- ------------------------------------------------------------------------------
-WITH org_tree(dept_id) AS (
+WITH org_tree(dept_id, dept_name, parent_dept_id, lvl, path) AS (
     SELECT dept_id, dept_name, parent_dept_id, 1 AS lvl,
            CAST(dept_id AS VARCHAR(200)) AS path
     FROM departments
@@ -6373,7 +6373,7 @@ ORDER BY direct_emp DESC;
 -- ------------------------------------------------------------------------------
 -- [213] 递归·汇报链 | 人力 | 员工汇报链路与到 CEO 层级深度
 -- ------------------------------------------------------------------------------
-WITH chain(emp_id) AS (
+WITH chain(emp_id, emp_name, manager_id, depth, chain_path, chain_names) AS (
     SELECT emp_id, emp_name, manager_id, 1 AS depth,
            CAST(emp_id AS VARCHAR(200)) AS chain_path, CAST(emp_name AS VARCHAR(200)) AS chain_names
     FROM employees
@@ -6512,14 +6512,14 @@ ORDER BY job_level;
 WITH hires AS (
     SELECT TO_CHAR(hire_date, 'YYYY-MM') AS ym, COUNT(*) AS hire_cnt
     FROM employees
-    WHERE hire_date >= (TRUNC(SYSDATE) - INTERVAL '730' DAY)
+    WHERE hire_date >= (TRUNC(SYSDATE) - 730)
     GROUP BY TO_CHAR(hire_date, 'YYYY-MM')
 ),
 leaves AS (
     SELECT TO_CHAR(leave_date, 'YYYY-MM') AS ym, COUNT(*) AS leave_cnt
     FROM employees
     WHERE leave_date IS NOT NULL
-      AND leave_date >= (TRUNC(SYSDATE) - INTERVAL '730' DAY)
+      AND leave_date >= (TRUNC(SYSDATE) - 730)
     GROUP BY TO_CHAR(leave_date, 'YYYY-MM')
 ),
 yms AS (
@@ -6569,7 +6569,7 @@ WITH nh AS (
            leave_date,
            (leave_date - hire_date) AS days_to_leave
     FROM employees
-    WHERE hire_date >= (TRUNC(SYSDATE) - INTERVAL '730' DAY)
+    WHERE hire_date >= (TRUNC(SYSDATE) - 730)
 )
 SELECT TO_CHAR(hire_date, 'YYYY-MM') AS hire_ym,
        COUNT(*)                                                        AS hired_cnt,
@@ -6599,7 +6599,7 @@ WITH dept_stat AS (
 recent_left AS (
     SELECT dept_id, COUNT(*) AS left_180d
     FROM employees
-    WHERE leave_date >= (TRUNC(SYSDATE) - INTERVAL '180' DAY)
+    WHERE leave_date >= (TRUNC(SYSDATE) - 180)
     GROUP BY dept_id
 )
 SELECT d.dept_name,
@@ -6623,12 +6623,12 @@ ORDER BY recent_turnover_pct DESC;
 SELECT d.dept_name, d.cost_center,
        COUNT(e.emp_id)                                                  AS total_emp,
        SUM(CASE WHEN e.status = 'active' THEN 1 ELSE 0 END)             AS active_emp,
-       SUM(CASE WHEN e.leave_date >= (TRUNC(SYSDATE) - INTERVAL '365' DAY) THEN 1 ELSE 0 END) AS left_1y,
-       ROUND(SUM(CASE WHEN e.leave_date >= (TRUNC(SYSDATE) - INTERVAL '365' DAY) THEN 1 ELSE 0 END)
+       SUM(CASE WHEN e.leave_date >= (TRUNC(SYSDATE) - 365) THEN 1 ELSE 0 END) AS left_1y,
+       ROUND(SUM(CASE WHEN e.leave_date >= (TRUNC(SYSDATE) - 365) THEN 1 ELSE 0 END)
              / NULLIF(SUM(CASE WHEN e.status = 'active' THEN 1 ELSE 0 END), 0) * 100, 2) AS annual_turnover_pct,
        ROUND(AVG((TRUNC(SYSDATE) - e.hire_date) / 365.0), 2)        AS avg_tenure,
        ROUND(AVG(e.salary), 2)                                          AS avg_salary,
-       RANK() OVER (ORDER BY SUM(CASE WHEN e.leave_date >= (TRUNC(SYSDATE) - INTERVAL '365' DAY) THEN 1 ELSE 0 END)
+       RANK() OVER (ORDER BY SUM(CASE WHEN e.leave_date >= (TRUNC(SYSDATE) - 365) THEN 1 ELSE 0 END)
              / NULLIF(SUM(CASE WHEN e.status = 'active' THEN 1 ELSE 0 END), 0) DESC) AS turnover_rank
 FROM departments d
 LEFT JOIN employees e ON d.dept_id = e.dept_id
@@ -6651,7 +6651,7 @@ SELECT c.change_type,
        ROUND(SUM(CASE WHEN c.new_salary > c.old_salary THEN 1 ELSE 0 END)
              / NULLIF(COUNT(*), 0) * 100, 2)               AS salary_up_pct
 FROM emp_changes c
-WHERE c.change_date >= (TRUNC(SYSDATE) - INTERVAL '730' DAY)
+WHERE c.change_date >= (TRUNC(SYSDATE) - 730)
 GROUP BY c.change_type, TO_CHAR(c.change_date, 'YYYY-MM')
 ORDER BY change_ym DESC, change_cnt DESC;
 
@@ -6703,7 +6703,7 @@ SELECT p.pay_month,
              / NULLIF(LAG(SUM(p.gross_pay)) OVER (ORDER BY p.pay_month), 0) * 100, 2) AS mom_pct,
        ROUND(SUM(p.tax + p.social_insurance) / NULLIF(SUM(p.gross_pay), 0) * 100, 2) AS burden_pct
 FROM payroll p
-WHERE p.pay_month >= TO_CHAR((TRUNC(SYSDATE) - INTERVAL '730' DAY), 'YYYY-MM')
+WHERE p.pay_month >= TO_CHAR((TRUNC(SYSDATE) - 730), 'YYYY-MM')
 GROUP BY p.pay_month
 ORDER BY p.pay_month;
 
@@ -6721,7 +6721,7 @@ SELECT d.dept_name, d.cost_center,
        ROUND(SUM(p.gross_pay) / NULLIF(COUNT(DISTINCT p.emp_id), 0), 2)  AS cost_per_head
 FROM payroll p
 JOIN departments d ON p.dept_id = d.dept_id
-WHERE p.pay_month >= TO_CHAR((TRUNC(SYSDATE) - INTERVAL '365' DAY), 'YYYY-MM')
+WHERE p.pay_month >= TO_CHAR((TRUNC(SYSDATE) - 365), 'YYYY-MM')
 GROUP BY d.dept_name, d.cost_center
 ORDER BY total_cost DESC;
 
@@ -6933,7 +6933,7 @@ WITH ot AS (
            SUM(CASE WHEN a.overtime_hours > 0 THEN 1 ELSE 0 END)   AS ot_days
     FROM attendance a
     JOIN employees e ON a.emp_id = e.emp_id
-    WHERE a.att_date >= (TRUNC(SYSDATE) - INTERVAL '365' DAY)
+    WHERE a.att_date >= (TRUNC(SYSDATE) - 365)
     GROUP BY a.emp_id, e.dept_id, e.job_level, EXTRACT(MONTH FROM a.att_date)
 )
 SELECT job_level,
@@ -6967,7 +6967,7 @@ SELECT CASE WHEN p.gross_pay < 5000   THEN 'below_5k'
        ROUND(AVG(p.social_insurance) / NULLIF(AVG(p.gross_pay), 0) * 100, 2) AS insurance_rate_pct,
        ROUND(AVG(p.net_pay) / NULLIF(AVG(p.gross_pay), 0) * 100, 2)     AS net_rate_pct
 FROM payroll p
-WHERE p.pay_month >= TO_CHAR((TRUNC(SYSDATE) - INTERVAL '365' DAY), 'YYYY-MM')
+WHERE p.pay_month >= TO_CHAR((TRUNC(SYSDATE) - 365), 'YYYY-MM')
 GROUP BY CASE WHEN p.gross_pay < 5000   THEN 'below_5k'
               WHEN p.gross_pay < 10000  THEN '5k_10k'
               WHEN p.gross_pay < 20000  THEN '10k_20k'
@@ -7056,7 +7056,7 @@ WITH a AS (
            SUM(CASE WHEN status = 'leave'      THEN 1 ELSE 0 END)     AS leave_days,
            ROUND(AVG(work_hours), 2)                                  AS avg_work_hours
     FROM attendance
-    WHERE att_date >= (TRUNC(SYSDATE) - INTERVAL '90' DAY)
+    WHERE att_date >= (TRUNC(SYSDATE) - 90)
     GROUP BY emp_id
 )
 SELECT a.emp_id, e.emp_name, d.dept_name,
@@ -7085,7 +7085,7 @@ WITH late AS (
            MAX(CASE WHEN a.status = 'late' THEN a.check_in END)        AS latest_checkin
     FROM attendance a
     JOIN employees e ON a.emp_id = e.emp_id
-    WHERE a.att_date >= (TRUNC(SYSDATE) - INTERVAL '180' DAY)
+    WHERE a.att_date >= (TRUNC(SYSDATE) - 180)
     GROUP BY a.emp_id, e.dept_id, e.emp_name
 )
 SELECT d.dept_name,
@@ -7110,7 +7110,7 @@ WITH ot AS (
            SUM(a.work_hours)     AS total_hours
     FROM attendance a
     JOIN employees e ON a.emp_id = e.emp_id
-    WHERE a.att_date >= (TRUNC(SYSDATE) - INTERVAL '180' DAY)
+    WHERE a.att_date >= (TRUNC(SYSDATE) - 180)
     GROUP BY e.dept_id, a.emp_id
 )
 SELECT d.dept_name,
@@ -7135,7 +7135,7 @@ WITH a AS (
     SELECT emp_id, att_date, status,
            CASE WHEN status IN ('late', 'absent') THEN 1 ELSE 0 END AS is_abnormal
     FROM attendance
-    WHERE att_date >= (TRUNC(SYSDATE) - INTERVAL '90' DAY)
+    WHERE att_date >= (TRUNC(SYSDATE) - 90)
 ),
 grp AS (
     SELECT emp_id, att_date, status, is_abnormal,
@@ -7179,7 +7179,7 @@ SELECT l.leave_type,
              / NULLIF(COUNT(*), 0) * 100, 2)                   AS reject_rate_pct,
        ROUND(SUM(l.days) / NULLIF(SUM(SUM(l.days)) OVER (), 0) * 100, 2) AS days_share_pct
 FROM leave_requests l
-WHERE l.start_date >= (TRUNC(SYSDATE) - INTERVAL '365' DAY)
+WHERE l.start_date >= (TRUNC(SYSDATE) - 365)
 GROUP BY l.leave_type
 ORDER BY total_days DESC;
 
@@ -7222,7 +7222,7 @@ SELECT d.dept_name, l.leave_type, EXTRACT(MONTH FROM l.start_date) AS mon,
 FROM leave_requests l
 JOIN employees   e ON l.emp_id = e.emp_id
 JOIN departments d ON e.dept_id = d.dept_id
-WHERE l.start_date >= (TRUNC(SYSDATE) - INTERVAL '365' DAY)
+WHERE l.start_date >= (TRUNC(SYSDATE) - 365)
 GROUP BY d.dept_name, l.leave_type, EXTRACT(MONTH FROM l.start_date)
 ORDER BY d.dept_name, mon;
 
@@ -7241,7 +7241,7 @@ SELECT CASE WHEN a.work_hours < 6  THEN 'short_below6'
        ROUND(COUNT(*) / NULLIF(SUM(COUNT(*)) OVER (), 0) * 100, 2) AS record_share_pct,
        ROUND(AVG(a.work_hours - a.overtime_hours), 2)              AS avg_regular_hours
 FROM attendance a
-WHERE a.att_date >= (TRUNC(SYSDATE) - INTERVAL '180' DAY)
+WHERE a.att_date >= (TRUNC(SYSDATE) - 180)
 GROUP BY CASE WHEN a.work_hours < 6  THEN 'short_below6'
               WHEN a.work_hours < 8  THEN 'standard_6_8'
               WHEN a.work_hours < 10 THEN 'normal_8_10'
@@ -7252,7 +7252,7 @@ ORDER BY avg_hours;
 -- ------------------------------------------------------------------------------
 -- [248] 弹性·远程办公 | 人力 | 弹性办公与在岗模式分析
 -- ------------------------------------------------------------------------------
-WITH mode AS (
+WITH att_mode AS (
     SELECT a.emp_id, e.dept_id,
            COUNT(*)                                                        AS total_days,
            SUM(CASE WHEN a.status = 'remote'    THEN 1 ELSE 0 END)         AS remote_days,
@@ -7262,7 +7262,7 @@ WITH mode AS (
            ROUND(AVG(CASE WHEN a.status = 'normal' THEN a.work_hours END), 2) AS avg_onsite_hours
     FROM attendance a
     JOIN employees e ON a.emp_id = e.emp_id
-    WHERE a.att_date >= (TRUNC(SYSDATE) - INTERVAL '180' DAY)
+    WHERE a.att_date >= (TRUNC(SYSDATE) - 180)
     GROUP BY a.emp_id, e.dept_id
 )
 SELECT d.dept_name,
@@ -7276,7 +7276,7 @@ SELECT d.dept_name,
        CASE WHEN AVG(m.remote_days) / NULLIF(AVG(m.total_days), 0) > 0.6 THEN 'remote_first'
             WHEN AVG(m.remote_days) / NULLIF(AVG(m.total_days), 0) > 0.2 THEN 'hybrid'
             ELSE 'onsite_first' END AS work_mode
-FROM mode m
+FROM att_mode m
 JOIN departments d ON m.dept_id = d.dept_id
 GROUP BY d.dept_name
 ORDER BY remote_pct DESC;
@@ -7291,7 +7291,7 @@ WITH att AS (
            SUM(CASE WHEN a.status IN ('late', 'absent') THEN 1 ELSE 0 END) AS abnormal_days,
            SUM(a.overtime_hours)                                      AS total_ot
     FROM attendance a
-    WHERE a.att_date >= (TRUNC(SYSDATE) - INTERVAL '365' DAY)
+    WHERE a.att_date >= (TRUNC(SYSDATE) - 365)
     GROUP BY a.emp_id
 ),
 perf AS (
@@ -7338,7 +7338,7 @@ SELECT TO_CHAR(a.att_date, 'YYYY-MM') AS ym,
        ROUND(SUM(a.overtime_hours) - LAG(SUM(a.overtime_hours))
              OVER (ORDER BY TO_CHAR(a.att_date, 'YYYY-MM')), 1)             AS ot_mom_delta
 FROM attendance a
-WHERE a.att_date >= (TRUNC(SYSDATE) - INTERVAL '365' DAY)
+WHERE a.att_date >= (TRUNC(SYSDATE) - 365)
 GROUP BY TO_CHAR(a.att_date, 'YYYY-MM')
 ORDER BY ym DESC;
 
@@ -7433,7 +7433,7 @@ ORDER BY avg_salary DESC;
 WITH cost AS (
     SELECT p.dept_id, SUM(p.gross_pay) AS total_cost, COUNT(DISTINCT p.emp_id) AS headcount
     FROM payroll p
-    WHERE p.pay_month >= TO_CHAR((TRUNC(SYSDATE) - INTERVAL '365' DAY), 'YYYY-MM')
+    WHERE p.pay_month >= TO_CHAR((TRUNC(SYSDATE) - 365), 'YYYY-MM')
     GROUP BY p.dept_id
 ),
 proj AS (
@@ -7529,7 +7529,7 @@ att AS (
                  / NULLIF(COUNT(*), 0) * 100, 2) AS attendance_rate,
            SUM(overtime_hours) AS total_ot
     FROM attendance
-    WHERE att_date >= (TRUNC(SYSDATE) - INTERVAL '180' DAY)
+    WHERE att_date >= (TRUNC(SYSDATE) - 180)
     GROUP BY emp_id
 ),
 tr AS (
@@ -7633,7 +7633,7 @@ ORDER BY team_size DESC;
 WITH hc AS (
     SELECT COUNT(*) AS total_emp,
            SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active_emp,
-           SUM(CASE WHEN leave_date >= (TRUNC(SYSDATE) - INTERVAL '365' DAY) THEN 1 ELSE 0 END) AS left_1y,
+           SUM(CASE WHEN leave_date >= (TRUNC(SYSDATE) - 365) THEN 1 ELSE 0 END) AS left_1y,
            ROUND(AVG(salary), 2) AS avg_salary,
            ROUND(AVG((TRUNC(SYSDATE) - hire_date) / 365.0), 2) AS avg_tenure
     FROM employees
@@ -7641,7 +7641,7 @@ WITH hc AS (
 cost AS (
     SELECT ROUND(SUM(gross_pay), 2) AS annual_cost
     FROM payroll
-    WHERE pay_month >= TO_CHAR((TRUNC(SYSDATE) - INTERVAL '365' DAY), 'YYYY-MM')
+    WHERE pay_month >= TO_CHAR((TRUNC(SYSDATE) - 365), 'YYYY-MM')
 ),
 perf AS (
     SELECT ROUND(AVG(score), 2) AS avg_perf_score
@@ -7651,7 +7651,7 @@ att AS (
     SELECT ROUND(SUM(CASE WHEN status = 'normal' THEN 1 ELSE 0 END)
                  / NULLIF(COUNT(*), 0) * 100, 2) AS attendance_rate
     FROM attendance
-    WHERE att_date >= (TRUNC(SYSDATE) - INTERVAL '90' DAY)
+    WHERE att_date >= (TRUNC(SYSDATE) - 90)
 )
 SELECT hc.total_emp, hc.active_emp, hc.left_1y,
        ROUND(hc.left_1y / NULLIF(hc.active_emp, 0) * 100, 2) AS turnover_pct,
@@ -7675,7 +7675,7 @@ WITH req AS (
            SUM(r.hired_cnt)  AS hired_cnt,
            SUM(r.headcount)  AS planned_cnt
     FROM recruitment r
-    WHERE r.open_date >= (TRUNC(SYSDATE) - INTERVAL '365' DAY)
+    WHERE r.open_date >= (TRUNC(SYSDATE) - 365)
     GROUP BY r.dept_id
 )
 SELECT d.dept_name,
@@ -7708,7 +7708,7 @@ SELECT TO_CHAR(r.open_date, 'YYYY-MM') AS open_ym,
                  AND (TRUNC(SYSDATE) - r.open_date) > 60 THEN 1 ELSE 0 END) AS backlog_over_60d,
        SUM(r.hired_cnt)                                            AS hired_cnt
 FROM recruitment r
-WHERE r.open_date >= (TRUNC(SYSDATE) - INTERVAL '730' DAY)
+WHERE r.open_date >= (TRUNC(SYSDATE) - 730)
 GROUP BY TO_CHAR(r.open_date, 'YYYY-MM'), r.position
 ORDER BY open_ym DESC, backlog_over_60d DESC;
 
@@ -7722,7 +7722,7 @@ WITH ch AS (
            SUM(r.hired_cnt)                           AS hired_cnt,
            SUM(COALESCE(r.channel_cost, 0))           AS channel_cost
     FROM recruitment r
-    WHERE r.open_date >= (TRUNC(SYSDATE) - INTERVAL '365' DAY)
+    WHERE r.open_date >= (TRUNC(SYSDATE) - 365)
     GROUP BY r.channel
 )
 SELECT channel, req_cnt, apply_cnt, hired_cnt,
@@ -7748,7 +7748,7 @@ WITH off AS (
            SUM(r.hired_cnt)                                   AS accepted_cnt,
            ROUND(AVG(r.offer_salary), 2)                      AS avg_offer_salary
     FROM recruitment r
-    WHERE r.open_date >= (TRUNC(SYSDATE) - INTERVAL '365' DAY)
+    WHERE r.open_date >= (TRUNC(SYSDATE) - 365)
     GROUP BY r.dept_id, r.position
 ),
 mk AS (
@@ -7780,7 +7780,7 @@ WITH nh AS (
     FROM employees e
     LEFT JOIN (SELECT emp_id, AVG(score) AS avg_score FROM performance GROUP BY emp_id) p
            ON e.emp_id = p.emp_id
-    WHERE e.hire_date >= (TRUNC(SYSDATE) - INTERVAL '365' DAY)
+    WHERE e.hire_date >= (TRUNC(SYSDATE) - 365)
 )
 SELECT d.dept_name,
        COUNT(*)                                                        AS new_hires,
@@ -7809,7 +7809,7 @@ WITH tr AS (
            SUM(COALESCE(t.hours, 0))                                      AS total_hours,
            SUM(COALESCE(t.cost, 0))                                       AS total_cost
     FROM training_records t
-    WHERE t.train_date >= (TRUNC(SYSDATE) - INTERVAL '365' DAY)
+    WHERE t.train_date >= (TRUNC(SYSDATE) - 365)
     GROUP BY t.emp_id
 ),
 dept AS (
@@ -7880,14 +7880,14 @@ WITH cost AS (
            COUNT(DISTINCT t.emp_id)                         AS trained_emp
     FROM training_records t
     JOIN employees e ON t.emp_id = e.emp_id
-    WHERE t.train_date >= (TRUNC(SYSDATE) - INTERVAL '365' DAY)
+    WHERE t.train_date >= (TRUNC(SYSDATE) - 365)
     GROUP BY e.dept_id
 ),
 pay AS (
     SELECT e.dept_id, SUM(p.gross_pay) AS annual_payroll
     FROM payroll p
     JOIN employees e ON p.emp_id = e.emp_id
-    WHERE p.pay_month >= TO_CHAR((TRUNC(SYSDATE) - INTERVAL '365' DAY), 'YYYY-MM')
+    WHERE p.pay_month >= TO_CHAR((TRUNC(SYSDATE) - 365), 'YYYY-MM')
     GROUP BY e.dept_id
 )
 SELECT d.dept_name,
@@ -7982,7 +7982,7 @@ WITH pm AS (
            (SELECT COALESCE(SUM(pa2.allocation_pct), 0) FROM project_assignments pa2
             WHERE pa2.project_id = p.project_id) AS total_alloc
     FROM projects p
-    WHERE p.start_date >= (TRUNC(SYSDATE) - INTERVAL '730' DAY)
+    WHERE p.start_date >= (TRUNC(SYSDATE) - 730)
 )
 SELECT d.dept_name, m.status,
        COUNT(*)                                                    AS project_cnt,
@@ -8048,7 +8048,7 @@ WITH chg AS (
            ROW_NUMBER() OVER (PARTITION BY c.emp_id ORDER BY c.change_date) AS chg_seq,
            COUNT(*) OVER (PARTITION BY c.emp_id) AS chg_total
     FROM emp_changes c
-    WHERE c.change_date >= (TRUNC(SYSDATE) - INTERVAL '1095' DAY)
+    WHERE c.change_date >= (TRUNC(SYSDATE) - 1095)
 )
 SELECT d.dept_name,
        COUNT(DISTINCT c.emp_id)                                          AS moved_emp,
@@ -8188,12 +8188,12 @@ WITH sig AS (
                             / NULLIF(COUNT(*), 0), 2) AS attendance_rate,
                       ROUND(AVG(overtime_hours), 2) AS avg_overtime
                FROM attendance
-               WHERE att_date >= (TRUNC(SYSDATE) - INTERVAL '180' DAY)
+               WHERE att_date >= (TRUNC(SYSDATE) - 180)
                GROUP BY emp_id) a ON e.emp_id = a.emp_id
     LEFT JOIN (SELECT emp_id, COUNT(*) AS train_cnt FROM training_records
                WHERE status = 'completed' GROUP BY emp_id) t ON e.emp_id = t.emp_id
     LEFT JOIN (SELECT emp_id, SUM(days) AS leave_days FROM leaves
-               WHERE start_date >= (TRUNC(SYSDATE) - INTERVAL '365' DAY)
+               WHERE start_date >= (TRUNC(SYSDATE) - 365)
                GROUP BY emp_id) lv ON e.emp_id = lv.emp_id
     LEFT JOIN (SELECT emp_id, AVG(score) AS avg_score FROM performance
                GROUP BY emp_id) p ON e.emp_id = p.emp_id
@@ -8226,7 +8226,7 @@ WITH act AS (
            COUNT(DISTINCT p.emp_id)                                     AS paid_headcount
     FROM payroll p
     JOIN employees e ON p.emp_id = e.emp_id
-    WHERE p.pay_date >= (TRUNC(SYSDATE) - INTERVAL '365' DAY)
+    WHERE p.pay_date >= (TRUNC(SYSDATE) - 365)
     GROUP BY e.dept_id, TO_CHAR(p.pay_date, 'YYYY-MM')
 ),
 bud AS (
@@ -8265,7 +8265,7 @@ WITH y AS (
            SUM(p.net_pay)                                              AS net
     FROM payroll p
     JOIN employees e ON p.emp_id = e.emp_id
-    WHERE p.pay_date >= (TRUNC(SYSDATE) - INTERVAL '1095' DAY)
+    WHERE p.pay_date >= (TRUNC(SYSDATE) - 1095)
     GROUP BY EXTRACT(YEAR FROM p.pay_date), e.dept_id
 )
 SELECT d.dept_name, y.yr,
@@ -8292,7 +8292,7 @@ WITH ot AS (
            SUM(CASE WHEN a.status <> 'normal' THEN 1 ELSE 0 END)       AS abnormal_days
     FROM attendance a
     JOIN employees e ON a.emp_id = e.emp_id
-    WHERE a.att_date >= (TRUNC(SYSDATE) - INTERVAL '180' DAY)
+    WHERE a.att_date >= (TRUNC(SYSDATE) - 180)
     GROUP BY e.dept_id, e.emp_id
 ),
 perf AS (
@@ -8371,7 +8371,7 @@ WITH emp_val AS (
     LEFT JOIN (SELECT emp_id, AVG(score) AS avg_score FROM performance GROUP BY emp_id) p
            ON e.emp_id = p.emp_id
     LEFT JOIN (SELECT emp_id, SUM(gross_pay) AS total_gross FROM payroll
-               WHERE pay_month >= TO_CHAR((TRUNC(SYSDATE) - INTERVAL '1095' DAY), 'YYYY-MM')
+               WHERE pay_month >= TO_CHAR((TRUNC(SYSDATE) - 1095), 'YYYY-MM')
                GROUP BY emp_id) py ON e.emp_id = py.emp_id
     LEFT JOIN (SELECT emp_id, SUM(COALESCE(cost, 0)) AS total_train_cost
                FROM training_records GROUP BY emp_id) tr ON e.emp_id = tr.emp_id
@@ -8405,7 +8405,7 @@ WITH pos AS (
            COUNT(*)                                                   AS holder_cnt,
            ROUND(AVG(e.salary), 2)                                     AS avg_salary,
            SUM(CASE WHEN e.leave_date IS NOT NULL
-                     AND e.leave_date >= (TRUNC(SYSDATE) - INTERVAL '180' DAY) THEN 1 ELSE 0 END) AS recent_leavers
+                     AND e.leave_date >= (TRUNC(SYSDATE) - 180) THEN 1 ELSE 0 END) AS recent_leavers
     FROM employees e
     GROUP BY e.dept_id, e.position, e.job_level
 ),
@@ -8455,10 +8455,10 @@ WITH risk AS (
                             / NULLIF(COUNT(*), 0), 2) AS abnormal_rate,
                       ROUND(AVG(overtime_hours), 2) AS avg_ot
                FROM attendance
-               WHERE att_date >= (TRUNC(SYSDATE) - INTERVAL '180' DAY)
+               WHERE att_date >= (TRUNC(SYSDATE) - 180)
                GROUP BY emp_id) a ON e.emp_id = a.emp_id
     LEFT JOIN (SELECT emp_id, SUM(days) AS leave_days FROM leaves
-               WHERE start_date >= (TRUNC(SYSDATE) - INTERVAL '365' DAY) GROUP BY emp_id) lv
+               WHERE start_date >= (TRUNC(SYSDATE) - 365) GROUP BY emp_id) lv
            ON e.emp_id = lv.emp_id
     LEFT JOIN (SELECT sb.emp_id,
                       ROUND(sb.emp_avg_base / NULLIF(cb.company_avg_base, 0), 3) AS pay_ratio
@@ -8508,7 +8508,7 @@ WITH hc AS (
 ),
 turn AS (
     SELECT e.dept_id,
-           SUM(CASE WHEN e.leave_date >= (TRUNC(SYSDATE) - INTERVAL '365' DAY) THEN 1 ELSE 0 END) AS left_1y
+           SUM(CASE WHEN e.leave_date >= (TRUNC(SYSDATE) - 365) THEN 1 ELSE 0 END) AS left_1y
     FROM employees e
     GROUP BY e.dept_id
 ),
@@ -8524,14 +8524,14 @@ at AS (
                  / NULLIF(COUNT(*), 0), 2) AS attendance_rate
     FROM attendance a
     JOIN employees e ON a.emp_id = e.emp_id
-    WHERE a.att_date >= (TRUNC(SYSDATE) - INTERVAL '90' DAY)
+    WHERE a.att_date >= (TRUNC(SYSDATE) - 90)
     GROUP BY e.dept_id
 ),
 cost AS (
     SELECT e.dept_id, SUM(py.gross_pay) AS payroll_cost
     FROM payroll py
     JOIN employees e ON py.emp_id = e.emp_id
-    WHERE py.pay_month >= TO_CHAR((TRUNC(SYSDATE) - INTERVAL '365' DAY), 'YYYY-MM')
+    WHERE py.pay_month >= TO_CHAR((TRUNC(SYSDATE) - 365), 'YYYY-MM')
     GROUP BY e.dept_id
 )
 SELECT d.dept_name,
@@ -8601,7 +8601,7 @@ SELECT 'transactions',
        SUM(CASE WHEN t.txn_date > TRUNC(SYSDATE) THEN 1 ELSE 0 END),
        SUM(CASE WHEN t.amount = 0 THEN 1 ELSE 0 END)
 FROM transactions t
-ORDER BY table_name;
+ORDER BY 1;
 
 -- ------------------------------------------------------------------------------
 -- [287] 质量·重复识别 | 数据治理 | 重复记录识别与主数据合并建议
@@ -8698,7 +8698,7 @@ SELECT 'employees->departments', COUNT(*), SUM(e.orphan_flag),
        CASE WHEN SUM(e.orphan_flag) * 1.0 / NULLIF(COUNT(*), 0) > 0.01 THEN 'fail'
             WHEN SUM(e.orphan_flag) > 0 THEN 'warn' ELSE 'pass' END
 FROM emp_dept e
-ORDER BY orphan_pct DESC;
+ORDER BY 4 DESC;
 
 -- ------------------------------------------------------------------------------
 -- [289] 对账·订单支付 | 数据治理 | 订单金额与支付流水差异对账
@@ -8722,7 +8722,7 @@ cmp AS (
     FROM orders o
     LEFT JOIN pay_agg a ON o.order_id = a.order_id
     WHERE o.status IN ('completed', 'shipped')
-      AND o.order_date >= (TRUNC(SYSDATE) - INTERVAL '180' DAY)
+      AND o.order_date >= (TRUNC(SYSDATE) - 180)
 )
 SELECT TO_CHAR(c.order_date, 'YYYY-MM')                                      AS recon_ym,
        COUNT(*)                                                          AS order_cnt,
@@ -8748,7 +8748,7 @@ WITH eco AS (
            COUNT(*)                                                      AS order_cnt,
            MAX(o.order_date)                                             AS last_order_date
     FROM orders o
-    WHERE o.order_date >= (TRUNC(SYSDATE) - INTERVAL '365' DAY)
+    WHERE o.order_date >= (TRUNC(SYSDATE) - 365)
       AND o.status = 'completed'
     GROUP BY o.customer_id
 ),
@@ -8763,7 +8763,7 @@ fin AS (
            ON a.account_id = t.account_id
     GROUP BY a.cust_id
 )
-SELECT c.customer_name, c.city, c.level,
+SELECT c.customer_name, c.city, c."LEVEL",
        COALESCE(e.gmv, 0)                                                AS annual_gmv,
        COALESCE(e.order_cnt, 0)                                          AS order_cnt,
        COALESCE(f.total_balance, 0)                                      AS total_balance,
@@ -8794,14 +8794,14 @@ WITH sales AS (
            COUNT(DISTINCT o.customer_id)                                 AS cust_cnt,
            ROUND(AVG(o.pay_amount), 2)                                   AS avg_order_value
     FROM orders o
-    WHERE o.order_date >= (TRUNC(SYSDATE) - INTERVAL '365' DAY)
+    WHERE o.order_date >= (TRUNC(SYSDATE) - 365)
       AND o.status = 'completed'
     GROUP BY o.store_id
 ),
 target AS (
     SELECT store_id, SUM(target_amt) AS target_amt
     FROM store_targets
-    WHERE TO_CHAR(target_month, 'YYYY-MM') >= TO_CHAR((TRUNC(SYSDATE) - INTERVAL '365' DAY), 'YYYY-MM')
+    WHERE TO_CHAR(target_month, 'YYYY-MM') >= TO_CHAR((TRUNC(SYSDATE) - 365), 'YYYY-MM')
     GROUP BY store_id
 )
 SELECT s.store_name, s.city, s.region,
@@ -8887,9 +8887,10 @@ WITH base AS (
     JOIN categories c ON p.category_id = c.category_id
     JOIN stores s ON o.store_id = s.store_id
     WHERE o.status = 'completed'
-      AND o.order_date >= (TRUNC(SYSDATE) - INTERVAL '365' DAY)
+      AND o.order_date >= (TRUNC(SYSDATE) - 365)
     GROUP BY s.city, c.category_name, TO_CHAR(o.order_date, 'YYYY-MM')
 )
+SELECT * FROM (
 SELECT 'city'                                                            AS dim_level,
        CAST(b.city AS VARCHAR(100))                                                AS dim_value,
        NULL                                                              AS dim_value2,
@@ -8917,7 +8918,7 @@ SELECT 'city_category', CAST(b.city AS VARCHAR(100)), CAST(b.category_name AS VA
        RANK() OVER (ORDER BY SUM(b.sales_amount) DESC)
 FROM base b
 GROUP BY b.city, b.category_name
-ORDER BY dim_level, sales_amount DESC;
+) ORDER BY dim_level, sales_amount DESC;
 
 -- ------------------------------------------------------------------------------
 -- [294] 波动·异常检测 | 综合 | 核心指标时间序列的统计异常检测
@@ -8927,7 +8928,7 @@ WITH daily AS (
            SUM(o.pay_amount)                                             AS gmv,
            COUNT(*)                                                      AS order_cnt
     FROM orders o
-    WHERE o.order_date >= (TRUNC(SYSDATE) - INTERVAL '180' DAY)
+    WHERE o.order_date >= (TRUNC(SYSDATE) - 180)
       AND o.status = 'completed'
     GROUP BY TRUNC(o.order_date)
 ),
@@ -8964,7 +8965,7 @@ WITH m AS (
            COUNT(DISTINCT o.customer_id)                                 AS active_cust
     FROM orders o
     WHERE o.status = 'completed'
-      AND o.order_date >= (TRUNC(SYSDATE) - INTERVAL '1095' DAY)
+      AND o.order_date >= (TRUNC(SYSDATE) - 1095)
     GROUP BY TO_CHAR(o.order_date, 'YYYY-MM')
 ),
 g AS (
@@ -9000,7 +9001,7 @@ WITH m AS (
            COUNT(DISTINCT o.customer_id)                                 AS cust_cnt
     FROM orders o
     WHERE o.status = 'completed'
-      AND o.order_date >= (TRUNC(SYSDATE) - INTERVAL '1095' DAY)
+      AND o.order_date >= (TRUNC(SYSDATE) - 1095)
     GROUP BY TRUNC(o.order_date, 'MM')
 ),
 w AS (
@@ -9040,7 +9041,7 @@ WITH prod AS (
     JOIN categories c ON p.category_id = c.category_id
     JOIN orders o ON oi.order_id = o.order_id
     WHERE o.status = 'completed'
-      AND o.order_date >= (TRUNC(SYSDATE) - INTERVAL '365' DAY)
+      AND o.order_date >= (TRUNC(SYSDATE) - 365)
     GROUP BY p.product_name, c.category_name
 ),
 cum AS (
@@ -9081,7 +9082,7 @@ WITH act AS (
            SUM(o.pay_amount)                                             AS gmv
     FROM orders o
     WHERE o.status = 'completed'
-      AND o.order_date >= (TRUNC(SYSDATE) - INTERVAL '365' DAY)
+      AND o.order_date >= (TRUNC(SYSDATE) - 365)
     GROUP BY o.store_id, TO_CHAR(o.order_date, 'YYYY-MM')
 ),
 cmp AS (
@@ -9089,7 +9090,7 @@ cmp AS (
            TO_CHAR(t.target_month, 'YYYY-MM')                                AS ym,
            SUM(t.target_amt)                                             AS target_amt
     FROM store_targets t
-    WHERE t.target_month >= (TRUNC(SYSDATE) - INTERVAL '365' DAY)
+    WHERE t.target_month >= (TRUNC(SYSDATE) - 365)
     GROUP BY t.store_id, TO_CHAR(t.target_month, 'YYYY-MM')
 )
 SELECT s.store_name, s.region, c.ym,
@@ -9126,15 +9127,15 @@ WITH kpi AS (
            'CNY'                                                         AS unit
     FROM orders o
     WHERE o.status = 'completed'
-      AND o.order_date >= (TRUNC(SYSDATE) - INTERVAL '30' DAY)
+      AND o.order_date >= (TRUNC(SYSDATE) - 30)
     UNION ALL
     SELECT 'ecommerce_orders', COUNT(*), 'cnt'
     FROM orders o
-    WHERE o.status = 'completed' AND o.order_date >= (TRUNC(SYSDATE) - INTERVAL '30' DAY)
+    WHERE o.status = 'completed' AND o.order_date >= (TRUNC(SYSDATE) - 30)
     UNION ALL
     SELECT 'ecommerce_active_cust', COUNT(DISTINCT o.customer_id), 'cnt'
     FROM orders o
-    WHERE o.status = 'completed' AND o.order_date >= (TRUNC(SYSDATE) - INTERVAL '30' DAY)
+    WHERE o.status = 'completed' AND o.order_date >= (TRUNC(SYSDATE) - 30)
     UNION ALL
     SELECT 'finance_deposit', ROUND(SUM(a.balance), 2), 'CNY'
     FROM accounts a
@@ -9146,7 +9147,7 @@ WITH kpi AS (
     UNION ALL
     SELECT 'finance_txn_amount', ROUND(SUM(t.amount), 2), 'CNY'
     FROM transactions t
-    WHERE t.txn_date >= (TRUNC(SYSDATE) - INTERVAL '30' DAY)
+    WHERE t.txn_date >= (TRUNC(SYSDATE) - 30)
     UNION ALL
     SELECT 'hr_active_headcount', COUNT(*), 'cnt'
     FROM employees e WHERE e.status = 'active'
