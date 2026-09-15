@@ -34,7 +34,7 @@ public final class CurlParser {
     private static final Set<String> SKIP_VALUE = new HashSet<String>(Arrays.asList(
             "-o", "--output", "-O", "--remote-name", "-D", "--dump-header", "-w", "--write-out",
             "--retry", "--retry-delay", "--retry-max-time", "--max-redirs", "--limit-rate",
-            "--cert", "--cacert", "--capath", "--key", "--pass", "--unix-socket",
+            "-E", "--cert", "--cacert", "--capath", "--key", "--pass", "--unix-socket",
             "--connect-to", "--resolve", "--interface", "--dns-servers", "--output-dir",
             "--range", "-r", "--max-filesize", "--keepalive-time", "--speed-limit", "--speed-time"));
 
@@ -169,7 +169,10 @@ public final class CurlParser {
             } else if ("-b".equals(opt) || "--cookie".equals(opt)) {
                 String cookie = take.value();
                 if (cookie.indexOf('=') >= 0) {
-                    b.upsertHeader("Cookie", cookie);
+                    // curl 语义：多个 -b 用 "; " 拼接，而非互相覆盖
+                    String existing = b.header("Cookie");
+                    b.upsertHeader("Cookie", existing == null || existing.isEmpty()
+                            ? cookie : existing + "; " + cookie);
                 } else {
                     b.warn("-b 指向 cookie 文件 " + cookie + "，未读入内容");
                 }
