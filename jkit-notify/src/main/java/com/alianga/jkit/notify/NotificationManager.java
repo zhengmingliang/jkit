@@ -1,5 +1,6 @@
 package com.alianga.jkit.notify;
 
+import com.alianga.jkit.log.Log;
 import com.alianga.jkit.notify.channel.BarkChannel;
 import com.alianga.jkit.notify.channel.DingTalkChannel;
 import com.alianga.jkit.notify.channel.FeishuChannel;
@@ -10,14 +11,17 @@ import com.alianga.jkit.notify.channel.WecomChannel;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.ServiceLoader;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -42,25 +46,39 @@ import java.util.concurrent.atomic.AtomicInteger;
  * 渠道 id 不存在、消息或配置为 {@code null}、类型不被渠道支持属于编程错误，直接抛
  * {@link IllegalArgumentException}。
  *
- * <p>{@link #sendAsync} 使用本模块独立的守护线程池（默认 8 线程），不和 jkit HTTP / SSE
- * 共用，避免 SMTP 阻塞把下载饿死。可用 {@link #setAsyncExecutor(ExecutorService)} 替换。
+ * <p>{@link #sendAsync} 使用本模块独立的守护线程池（默认 8 线程，有界队列 1000，
+ * 满了由提交线程自己执行形成背压），不和 jkit HTTP / SSE 共用，避免 SMTP 阻塞把下载饿死。
+ * 可用 {@link #setAsyncExecutor(ExecutorService)} 替换。
  *
  * @author 郑明亮
  * @since 2.0.1
  */
 public final class NotificationManager {
+    private static final Log LOG =
+            Log.get(NotificationManager.class);
     private static final NotificationManager INSTANCE = new NotificationManager().defaults().loadSpi();
 
-    private static final ExecutorService DEFAULT_ASYNC = Executors.newFixedThreadPool(8, new ThreadFactory() {
-        private final AtomicInteger seq = new AtomicInteger();
+    /** 默认异步池积压上限，防止突发告警把内存打爆。 */
+    private static final int ASYNC_QUEUE_CAPACITY = 1000;
 
-        @Override
-        public Thread newThread(Runnable runnable) {
-            Thread thread = new Thread(runnable, "jkit-notify-" + seq.incrementAndGet());
-            thread.setDaemon(true);
-            return thread;
-        }
-    });
+    private static ExecutorService newDefaultAsync() {
+        ThreadFactory factory = new ThreadFactory() {
+            private final AtomicInteger seq = new AtomicInteger();
+
+            @Override
+            public Thread newThread(Runnable runnable) {
+                Thread thread = new Thread(runnable, "jkit-notify-" + seq.incrementAndGet());
+                thread.setDaemon(true);
+                return thread;
+            }
+        };
+        // 有界队列 + 调用者线程兜底：队列满后由提交方自己执行，形成背压而不是无限积压
+        return new ThreadPoolExecutor(8, 8, 0L, TimeUnit.MILLISECONDS,
+                new LinkedBlockingQueue<Runnable>(ASYNC_QUEUE_CAPACITY),
+                factory, new ThreadPoolExecutor.CallerRunsPolicy());
+    }
+
+    private static final ExecutorService DEFAULT_ASYNC = newDefaultAsync();
 
     private static volatile ExecutorService asyncExecutor = DEFAULT_ASYNC;
 
@@ -100,7 +118,7 @@ public final class NotificationManager {
      * @param channel 渠道实现
      * @return this
      */
-    public NotificationManager register(NotificationChannel channel) {
+    public synchronized NotificationManager register(NotificationChannel channel) {
         if (channel == null || channel.id() == null) {
             throw new IllegalArgumentException("channel id is required");
         }
@@ -114,7 +132,7 @@ public final class NotificationManager {
      * @param id 渠道 id
      * @return 被移除的渠道；不存在时为 {@code null}
      */
-    public NotificationChannel unregister(String id) {
+    public synchronized NotificationChannel unregister(String id) {
         if (id == null) {
             return null;
         }
@@ -125,14 +143,14 @@ public final class NotificationManager {
      * @param id 渠道 id
      * @return 渠道，不存在时为 {@code null}
      */
-    public NotificationChannel get(String id) {
+    public synchronized NotificationChannel get(String id) {
         return channels.get(id);
     }
 
     /**
      * @return 全部已注册渠道（只读）
      */
-    public List<NotificationChannel> list() {
+    public synchronized List<NotificationChannel> list() {
         return Collections.unmodifiableList(new ArrayList<NotificationChannel>(channels.values()));
     }
 
@@ -203,6 +221,14 @@ public final class NotificationManager {
         }
         Message rendered = message == null ? null : message.rendered();
         NotificationChannel channel = resolve(channelId, rendered, accounts.get(0));
+        // 其余账号也在发送前预检，避免第一套发出后才发现第二套配置缺失
+        for (int i = 1; i < accounts.size(); i++) {
+            ChannelConfig config = accounts.get(i);
+            if (config == null) {
+                throw new IllegalArgumentException("config is required");
+            }
+            channel.validate(config);
+        }
         if (policy != null) {
             SendResult blocked = policy.beforeSend(channelId, rendered);
             if (blocked != null) {
@@ -212,9 +238,6 @@ public final class NotificationManager {
         List<SendResult> attempts = new ArrayList<SendResult>(accounts.size());
         for (int i = 0; i < accounts.size(); i++) {
             ChannelConfig config = accounts.get(i);
-            if (config == null) {
-                throw new IllegalArgumentException("config is required");
-            }
             SendResult result = channel.send(rendered, config);
             attempts.add(result);
             if (policy != null) {
@@ -343,7 +366,7 @@ public final class NotificationManager {
         if (config == null) {
             throw new IllegalArgumentException("config is required");
         }
-        NotificationChannel channel = INSTANCE.channels.get(channelId);
+        NotificationChannel channel = INSTANCE.get(channelId);
         if (channel == null) {
             throw new IllegalArgumentException("unknown channel: " + channelId);
         }
@@ -351,6 +374,9 @@ public final class NotificationManager {
             throw new IllegalArgumentException(
                     channelId + " does not support message type: " + message.type());
         }
+        // 配置必填项（webhook/token 等）在这里统一预检：
+        // sendAll/sendFailover 对所有目标先 resolve 再发送，保证编程错误不会部分发送后才抛
+        channel.validate(config);
         return channel;
     }
 
@@ -369,10 +395,27 @@ public final class NotificationManager {
     /**
      * 加载 SPI 扩展渠道。核心内置已由 {@link #defaults()} 注册，核心模块的
      * services 文件应为空或不列核心渠道；extra 模块的 SPI 在此加载。
+     * 单个 provider 损坏（缺依赖、构造抛异常）只跳过并告警，不影响其余渠道。
      */
     private NotificationManager loadSpi() {
-        for (NotificationChannel channel : ServiceLoader.load(NotificationChannel.class)) {
-            register(channel);
+        Iterator<NotificationChannel> it =
+                ServiceLoader.load(NotificationChannel.class).iterator();
+        while (true) {
+            NotificationChannel channel;
+            try {
+                if (!it.hasNext()) {
+                    break;
+                }
+                channel = it.next();
+            } catch (Throwable e) {
+                LOG.warn("notify channel SPI 迭代中断，其余 provider 跳过: {}", e.toString());
+                break;
+            }
+            try {
+                register(channel);
+            } catch (Throwable e) {
+                LOG.warn("notify channel SPI provider 注册失败，已跳过: {}", e.toString());
+            }
         }
         return this;
     }

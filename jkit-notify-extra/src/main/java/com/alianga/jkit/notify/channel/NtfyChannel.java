@@ -88,6 +88,17 @@ public class NtfyChannel extends AbstractHttpChannel {
         return type == MessageType.TEXT || type == MessageType.MARKDOWN;
     }
 
+    /**
+     * buildUrl 依赖消息里的 EXTRA_GROUP，不能用 {@code null} 消息预检；
+     * 用探针消息走 topic 解析（不发请求）。
+     *
+     * @param config 渠道配置
+     */
+    @Override
+    public void validate(ChannelConfig config) {
+        buildUrl(Message.text("validate"), config);
+    }
+
     @Override
     protected String[] usedConfigKeys() {
         return new String[]{"token", "webhook", "to", "username", "password", "timeoutMs"};

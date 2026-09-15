@@ -1,6 +1,7 @@
 package com.alianga.jkit.notify;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FilterInputStream;
@@ -132,7 +133,9 @@ public final class Attachment {
     }
 
     /**
-     * 内存附件返回内部数组；文件附件读取切片。拆包路径请用 {@link #openStream()}。
+     * 内存附件返回内部数组；文件附件按块读取切片（不按声明长度一次性分配，
+     * 避免大文件直接 OOM）。超过 {@link Integer#MAX_VALUE} 的附件无法装进数组，
+     * 请用 {@link #openStream()} 流式处理。
      *
      * @return 字节
      */
@@ -140,24 +143,20 @@ public final class Attachment {
         if (memory != null) {
             return memory;
         }
+        if (length > Integer.MAX_VALUE - 8L) {
+            throw new IllegalStateException("attachment too large to load into memory ("
+                    + length + " bytes), use openStream(): " + filename);
+        }
         try {
             InputStream in = openStream();
             try {
-                byte[] data = new byte[(int) Math.min(length, Integer.MAX_VALUE)];
-                int filled = 0;
-                while (filled < data.length) {
-                    int read = in.read(data, filled, data.length - filled);
-                    if (read < 0) {
-                        break;
-                    }
-                    filled += read;
+                ByteArrayOutputStream out = new ByteArrayOutputStream((int) Math.min(length, 8192));
+                byte[] buf = new byte[8192];
+                int n;
+                while ((n = in.read(buf)) != -1) {
+                    out.write(buf, 0, n);
                 }
-                if (filled == data.length) {
-                    return data;
-                }
-                byte[] slim = new byte[filled];
-                System.arraycopy(data, 0, slim, 0, filled);
-                return slim;
+                return out.toByteArray();
             } finally {
                 in.close();
             }

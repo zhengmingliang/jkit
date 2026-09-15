@@ -16,7 +16,8 @@ import java.util.Map;
  * <p>配置：{@link ChannelConfig#webhook(String)} 填群机器人 webhook 地址
  * （{@code https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx}），无需加签。
  *
- * <p>消息：TEXT / MARKDOWN / MARKDOWN_V2。正文按 UTF-8 字节上限自动截断——TEXT 为
+ * <p>消息：TEXT / MARKDOWN / MARKDOWN_V2 / IMAGE（base64+md5）/ NEWS（图文）。
+ * 正文按 UTF-8 字节上限自动截断——TEXT 为
  * {@value #MAX_TEXT_BYTES} 字节，MARKDOWN / MARKDOWN_V2 为 {@value #MAX_MARKDOWN_BYTES} 字节。
  *
  * <p><b>@人的类型差异</b>：TEXT 的 @ 走结构化字段 {@code mentioned_mobile_list} /

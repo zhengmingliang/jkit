@@ -174,16 +174,20 @@ public final class SendResult {
         if (type == null || type == FailureType.NONE) {
             return 0;
         }
-        if (type == FailureType.RETRYABLE) {
+        // 本地策略抑制（静默时段/去重）不算真实失败，聚合时不应盖过平台错误
+        if (type == FailureType.SUPPRESSED) {
             return 1;
         }
-        if (type == FailureType.THROTTLED) {
+        if (type == FailureType.RETRYABLE) {
             return 2;
         }
-        if (type == FailureType.CONFIG_ERROR) {
+        if (type == FailureType.THROTTLED) {
             return 3;
         }
-        return 4;
+        if (type == FailureType.CONFIG_ERROR) {
+            return 4;
+        }
+        return 5;
     }
 
     /**

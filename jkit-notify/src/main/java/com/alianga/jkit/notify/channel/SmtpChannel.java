@@ -107,12 +107,17 @@ public class SmtpChannel implements NotificationChannel {
     }
 
     @Override
-    public SendResult send(Message message, ChannelConfig config) {
+    public void validate(ChannelConfig config) {
         required(config.username(), "smtp username is required");
         required(config.password(), "smtp password is required");
         if (config.to() == null || config.to().isEmpty()) {
             throw new IllegalArgumentException("smtp to is required (ChannelConfig.to)");
         }
+    }
+
+    @Override
+    public SendResult send(Message message, ChannelConfig config) {
+        validate(config);
         config.logUnused(LOG, id(), USED_KEYS);
 
         if (config.autoSplit() && message.attachments() != null && !message.attachments().isEmpty()) {
@@ -195,8 +200,11 @@ public class SmtpChannel implements NotificationChannel {
     protected SendResult sendOnce(Message message, ChannelConfig config, List<Attachment> attachments) {
         String username = required(config.username(), "smtp username is required");
         String password = required(config.password(), "smtp password is required");
-        String from = config.from() != null ? config.from() : username;
+        String from = requireSafeMailbox(config.from() != null ? config.from() : username);
         List<String> recipients = allRecipients(config);
+        for (String rcpt : recipients) {
+            requireSafeMailbox(rcpt);
+        }
 
         long start = System.currentTimeMillis();
         Socket socket = null;
@@ -209,7 +217,7 @@ public class SmtpChannel implements NotificationChannel {
             readReply(in);
             String ehloHost = ehloHost();
             write(out, "EHLO " + ehloHost);
-            readReply(in);
+            List<String> ehlo = readReplyLines(in);
             if (config.starttls() && !implicitSsl(config)) {
                 write(out, "STARTTLS");
                 readReply(in);
@@ -218,25 +226,45 @@ public class SmtpChannel implements NotificationChannel {
                 out = new BufferedWriter(
                         new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8));
                 write(out, "EHLO " + ehloHost);
+                ehlo = readReplyLines(in);
+            }
+            if (supportsAuth(ehlo, "PLAIN")) {
+                write(out, "AUTH PLAIN " + Base64.getEncoder().encodeToString(
+                        ("\0" + username + "\0" + password).getBytes(StandardCharsets.UTF_8)));
+                readReply(in);
+            } else {
+                write(out, "AUTH LOGIN");
+                readReply(in);
+                write(out, Base64.getEncoder().encodeToString(username.getBytes(StandardCharsets.UTF_8)));
+                readReply(in);
+                write(out, Base64.getEncoder().encodeToString(password.getBytes(StandardCharsets.UTF_8)));
                 readReply(in);
             }
-            write(out, "AUTH LOGIN");
-            readReply(in);
-            write(out, Base64.getEncoder().encodeToString(username.getBytes(StandardCharsets.UTF_8)));
-            readReply(in);
-            write(out, Base64.getEncoder().encodeToString(password.getBytes(StandardCharsets.UTF_8)));
-            readReply(in);
 
             write(out, "MAIL FROM:<" + from + ">");
             readReply(in);
+            // 单个 RCPT 被拒不中断整封邮件：记录后跳过，只要有收件人被接受就继续
+            List<String> rejected = new ArrayList<String>();
             for (String rcpt : recipients) {
                 write(out, "RCPT TO:<" + rcpt + ">");
-                readReply(in);
+                try {
+                    readReply(in);
+                } catch (SmtpReplyException e) {
+                    rejected.add(rcpt);
+                    LOG.warn("[{}] rcpt rejected: {} ({})", id(), rcpt, e.reply());
+                }
+            }
+            if (rejected.size() == recipients.size()) {
+                String reply = "550 all recipients rejected";
+                throw new SmtpReplyException(reply, 550, classifyReply(reply));
             }
             write(out, "DATA");
             readReply(in);
-            writeMime(out, message, from, config, attachments == null
+            // DATA 阶段经 DotStuffingWriter 写出，行首的 '.' 按 RFC 5321 双写
+            BufferedWriter dataOut = new DotStuffingWriter(out);
+            writeMime(dataOut, message, from, config, attachments == null
                     ? Collections.<Attachment>emptyList() : attachments);
+            dataOut.flush();
             write(out, ".");
             String finalReply = readReply(in);
             write(out, "QUIT");
@@ -244,6 +272,10 @@ public class SmtpChannel implements NotificationChannel {
 
             long elapsed = System.currentTimeMillis() - start;
             if (finalReply.startsWith("250")) {
+                if (!rejected.isEmpty()) {
+                    return SendResult.ok(id(), 250,
+                            finalReply + "; rejected recipients: " + rejected, elapsed);
+                }
                 return SendResult.ok(id(), 250, finalReply, elapsed);
             }
             return SendResult.fail(id(), replyCode(finalReply), finalReply,
@@ -514,7 +546,7 @@ public class SmtpChannel implements NotificationChannel {
             headers.append("Cc: ").append(mailboxList(config.cc())).append("\r\n");
         }
         if (config.replyTo() != null && !config.replyTo().trim().isEmpty()) {
-            headers.append("Reply-To: <").append(config.replyTo().trim()).append(">\r\n");
+            headers.append("Reply-To: <").append(requireSafeMailbox(config.replyTo().trim())).append(">\r\n");
         }
         headers.append("Subject: ").append(encodedWord(subject)).append("\r\n");
         headers.append("Date: ").append(date).append("\r\n");
@@ -581,9 +613,9 @@ public class SmtpChannel implements NotificationChannel {
 
     private static String mailbox(String address, String displayName) {
         if (displayName == null || displayName.trim().isEmpty()) {
-            return "<" + address + ">";
+            return "<" + requireSafeMailbox(address) + ">";
         }
-        return encodedWord(displayName.trim()) + " <" + address + ">";
+        return encodedWord(displayName.trim()) + " <" + requireSafeMailbox(address) + ">";
     }
 
     private static String mailboxList(List<String> addresses) {
@@ -592,7 +624,7 @@ public class SmtpChannel implements NotificationChannel {
             if (i > 0) {
                 out.append(", ");
             }
-            out.append('<').append(addresses.get(i)).append('>');
+            out.append('<').append(requireSafeMailbox(addresses.get(i))).append('>');
         }
         return out.toString();
     }
@@ -684,6 +716,122 @@ public class SmtpChannel implements NotificationChannel {
             throw new SmtpReplyException(line, replyCode(line), classifyReply(line));
         }
         return line;
+    }
+
+    /**
+     * 读取一条多行回复并保留全部行（EHLO 需要看能力行）。
+     *
+     * @param in 输入流
+     * @return 全部响应行
+     * @throws IOException 连接关闭
+     */
+    protected java.util.List<String> readReplyLines(BufferedReader in) throws IOException {
+        java.util.List<String> lines = new ArrayList<String>();
+        String line = decodeSmtpLine(in.readLine());
+        if (line == null) {
+            throw new IOException("smtp connection closed");
+        }
+        lines.add(line);
+        while (line.length() >= 4 && line.charAt(3) == '-') {
+            line = decodeSmtpLine(in.readLine());
+            if (line == null) {
+                throw new IOException("smtp connection closed");
+            }
+            lines.add(line);
+        }
+        String last = lines.get(lines.size() - 1);
+        if (last.startsWith("4") || last.startsWith("5")) {
+            throw new SmtpReplyException(last, replyCode(last), classifyReply(last));
+        }
+        return lines;
+    }
+
+    /**
+     * EHLO 能力行里是否声明了指定认证方式。
+     *
+     * @param ehloLines EHLO 全部响应行
+     * @param mechanism 认证方式（如 {@code PLAIN}）
+     * @return 支持时为 {@code true}
+     */
+    protected static boolean supportsAuth(java.util.List<String> ehloLines, String mechanism) {
+        for (String line : ehloLines) {
+            String upper = line.toUpperCase(java.util.Locale.ROOT);
+            if (upper.contains("AUTH") && upper.contains(mechanism)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 邮箱地址不允许带 CR/LF，防止向 MIME 头或 SMTP 命令注入。
+     *
+     * @param addr 地址
+     * @return 原地址
+     */
+    protected static String requireSafeMailbox(String addr) {
+        if (addr == null) {
+            throw new IllegalArgumentException("email address is required");
+        }
+        if (addr.indexOf('\r') >= 0 || addr.indexOf('\n') >= 0) {
+            throw new IllegalArgumentException("email address must not contain CR/LF");
+        }
+        return addr;
+    }
+
+    /**
+     * DATA 阶段写出器：以 {@code .} 开头的行按 RFC 5321 双写（dot-stuffing），
+     * 避免正文里恰好出现的 {@code .} 行被服务器当成 DATA 结束。
+     */
+    protected static final class DotStuffingWriter extends BufferedWriter {
+        private boolean lineStart = true;
+
+        /**
+         * @param out 底层写出器
+         */
+        public DotStuffingWriter(java.io.Writer out) {
+            super(out);
+        }
+
+        @Override
+        public void write(int c) throws IOException {
+            if (lineStart && c == '.') {
+                super.write('.');
+            }
+            super.write(c);
+            lineStart = c == '\n';
+        }
+
+        @Override
+        public void write(char[] cbuf, int off, int len) throws IOException {
+            int i = off;
+            int end = off + len;
+            while (i < end) {
+                if (lineStart && cbuf[i] == '.') {
+                    super.write('.');
+                }
+                int nl = -1;
+                for (int j = i; j < end; j++) {
+                    if (cbuf[j] == '\n') {
+                        nl = j;
+                        break;
+                    }
+                }
+                if (nl < 0) {
+                    super.write(cbuf, i, end - i);
+                    lineStart = false;
+                    break;
+                }
+                super.write(cbuf, i, nl - i + 1);
+                lineStart = true;
+                i = nl + 1;
+            }
+        }
+
+        @Override
+        public void write(String s, int off, int len) throws IOException {
+            write(s.toCharArray(), off, len);
+        }
     }
 
     private static BufferedReader newReader(Socket socket) throws IOException {

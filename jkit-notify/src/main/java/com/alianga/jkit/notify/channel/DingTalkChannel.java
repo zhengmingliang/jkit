@@ -16,7 +16,8 @@ import java.util.Map;
  * <p>配置：{@link ChannelConfig#webhook(String)} 填机器人 webhook 地址（含 access_token），
  * 安全设置选"加签"时再 {@link ChannelConfig#secret(String)} 填 SEC 开头的密钥。
  *
- * <p>消息：TEXT / MARKDOWN / ACTION_CARD。正文按 UTF-8 {@value #MAX_CONTENT_BYTES} 字节上限自动截断。
+ * <p>消息：TEXT / MARKDOWN / ACTION_CARD / NEWS（feedCard）/ IMAGE（图片需公网 picUrl，
+ * 降级为 markdown 图）。正文按 UTF-8 {@value #MAX_CONTENT_BYTES} 字节上限自动截断。
  *
  * <p><b>@人的关键规则</b>：钉钉光有 {@code at.atMobiles} 数组**不会**高亮提醒，被 @ 的手机号
  * 必须以字面文本出现在正文里，否则静默失效。本渠道会自动把缺失的 {@code @手机号} 追加到正文末尾

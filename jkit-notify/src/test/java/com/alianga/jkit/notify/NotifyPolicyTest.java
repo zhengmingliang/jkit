@@ -70,6 +70,78 @@ public class NotifyPolicyTest {
     }
 
     /**
+     * 并发下同一条消息的去重检查只允许一个线程通过（check-then-act 已原子化）。
+     */
+    @Test
+    public void dedupAdmitsExactlyOneConcurrentSender() throws Exception {
+        final NotifyPolicy policy = NotifyPolicy.create().dedupWindowMs(60_000L);
+        final Message msg = Message.text("告警", "CPU 95%");
+        final AtomicInteger admitted = new AtomicInteger();
+        runConcurrent(16, new Runnable() {
+            @Override
+            public void run() {
+                if (policy.beforeSend("dingtalk", msg) == null) {
+                    admitted.incrementAndGet();
+                }
+            }
+        });
+        assertEquals(1, admitted.get());
+    }
+
+    /**
+     * 并发下限流恰好放行 max 条（同一窗口内）。
+     */
+    @Test
+    public void rateLimitAdmitsExactlyMaxConcurrentSenders() throws Exception {
+        final NotifyPolicy policy = NotifyPolicy.create().rateLimit(5, 60_000L);
+        final AtomicInteger admitted = new AtomicInteger();
+        final AtomicInteger throttled = new AtomicInteger();
+        runConcurrent(40, new Runnable() {
+            @Override
+            public void run() {
+                SendResult blocked = policy.beforeSend("dingtalk", Message.text("m" + admitted.get()));
+                if (blocked == null) {
+                    admitted.incrementAndGet();
+                } else {
+                    throttled.incrementAndGet();
+                }
+            }
+        });
+        assertEquals(5, admitted.get());
+        assertEquals(35, throttled.get());
+    }
+
+    private static void runConcurrent(int threads, Runnable task) throws Exception {
+        final java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1);
+        final java.util.concurrent.atomic.AtomicReference<Throwable> error =
+                new java.util.concurrent.atomic.AtomicReference<Throwable>();
+        java.util.List<Thread> pool = new java.util.ArrayList<Thread>();
+        for (int i = 0; i < threads; i++) {
+            Thread thread = new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        start.await();
+                        task.run();
+                    } catch (Throwable e) {
+                        error.compareAndSet(null, e);
+                    }
+                }
+            });
+            thread.setDaemon(true);
+            thread.start();
+            pool.add(thread);
+        }
+        start.countDown();
+        for (Thread thread : pool) {
+            thread.join(15000);
+        }
+        if (error.get() != null) {
+            throw new AssertionError(error.get().toString());
+        }
+    }
+
+    /**
      * 静默时段覆盖当前时间则不发。
      */
     @Test

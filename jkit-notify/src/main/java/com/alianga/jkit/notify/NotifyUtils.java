@@ -801,13 +801,6 @@ public final class NotifyUtils {
     }
 
     /**
-     * 随机 UUID（去掉连字符），短信签名 nonce 用。
-     *
-     * @return 32 位十六进制串
-     * @since 2.0.1
-     */
-
-    /**
      * 返回第一个非空（非 {@code null} 且非空串）字符串。
      *
      * @param values 候选
@@ -861,6 +854,12 @@ public final class NotifyUtils {
         return out.toString();
     }
 
+    /**
+     * 随机 UUID（去掉连字符），短信签名 nonce 用。
+     *
+     * @return 32 位十六进制串
+     * @since 2.0.1
+     */
     public static String uuid() {
         return RandomUtils.getUUID();
     }

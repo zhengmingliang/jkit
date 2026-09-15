@@ -15,6 +15,7 @@ import java.util.Map;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.assertNull;
 
 /**
  * 短信渠道（阿里云 / 腾讯云 / 云片 / 华为云）黑盒测试。
@@ -42,6 +43,26 @@ public class SmsChannelTest extends AbstractHttpChannelTest {
         assertEquals("您的验证码是1235", form.get("text"));
         assertTrue(contentTypeOf(request).startsWith("application/x-www-form-urlencoded"));
         assertTrue(isEmpty());
+    }
+
+    /**
+     * 多号码发送基于消息副本注入当前收件人：发送后调用方消息不残留 smsReceiver。
+     */
+    @Test
+    public void multiNumberSendDoesNotMutateCallerMessage() {
+        respond(200, "{\"code\":0}");
+        respond(200, "{\"code\":0}");
+        Message message = Message.text("您的验证码是1235");
+        SendResult result = NotificationManager.send(YunpianSmsChannel.ID, message,
+                ChannelConfig.ofToken("apikey-xyz").webhookUrl(baseUrl() + "/single_send.json")
+                        .to("13800000001,13800000002"));
+        assertTrue(result.toString(), result.isSuccess());
+        assertNull(message.extraString(AbstractSmsChannel.EXTRA_CURRENT_RECEIVER));
+        assertNull(message.extras().get(AbstractSmsChannel.EXTRA_CURRENT_RECEIVER));
+        String first = take().body();
+        String second = take().body();
+        assertTrue(first + second, (first.contains("13800000001") && second.contains("13800000002"))
+                || (first.contains("13800000002") && second.contains("13800000001")));
     }
 
     /**
