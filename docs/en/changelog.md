@@ -23,6 +23,10 @@ Unreleased changes are appended to the **current version** section (currently 2.
 - `jkit-sql`: `SqlNode.toString()` now uses MySQL identifier quotes (backticks) by default, matching `SQL.toSqlString`. `addComment("text")` and compact `--` line comments are emitted as block comments so they cannot swallow the following statement. Bare `addHint` text is wrapped as a slash-star-plus hint. Use `SQL.toSqlString(stmt, dialect)` for another dialect.
 - `jkit-sql-auto`: `SqlAutoInspector` now resolves schema when checking whether a table exists. If unset, it uses `Connection.getSchema()`; with no connection (dry-run) or an unsupported driver, it parses the JDBC URL. PostgreSQL / Gauss default to `public`, SQL Server to `dbo`, Oracle / Dameng fall back to the username. This avoids treating a same-named table in another schema as present, or emitting ALTER for a table missing from the current schema.
 
+### Documentation
+
+- `docs/sql.md` / `docs/en/sql.md` business-scenario section: extra copy-paste samples for `bind` / `inject` / `expandStar`+`replaceSelectItems` / `addComment`+dialect quotes / MyBatis `#{}/ ${}`. The template-placeholder section now shows the common parse+bind pattern. Samples match `SqlBusinessScenarioTest`.
+
 ## 2.0.1 - 2026-09-13
 
 The repository has been split into multiple modules. This release delivers `jkit-sql`, `jkit-sql-auto` (with Spring Boot 2 / 3 starters), `jkit-notify`, `jkit-notify-extra`, and `jkit-curl-codegen` alongside the parent POM. The coordinate `com.alianga:jkit` still refers to `jkit-core`.

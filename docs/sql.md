@@ -149,6 +149,25 @@ SqlStatement stmt = SQL.parse(
 
 未配置时 `@age@` / `%s` / `<sheet>` 仍按原行为失败或拆成运算符。故意残缺的语句（如 `select * from`）即使开启占位符也会失败。
 
+常用写法（解析 + bind，键不含包裹符）：
+
+```java
+SqlParseOptions opt = SqlParseOptions.defaults()
+        .placeholders(SqlPlaceholders.create().mybatis());   // 只要 MyBatis 时不必叠 common-model
+
+Map<String, Object> vals = new LinkedHashMap<String, Object>();
+vals.put("table", "t_user");
+vals.put("id", 7);
+String sql = SQL.bindNamed(
+        "SELECT * FROM ${table} WHERE id = #{id, jdbcType=INTEGER}",
+        SqlDialect.MYSQL, opt, vals);
+// SELECT * FROM t_user WHERE id = 7
+
+vals.put("table", 10086);                                  // 非合法裸标识符 → 方言引号
+SQL.bindNamed("SELECT * FROM #{table}", SqlDialect.MYSQL, opt, vals);
+// SELECT * FROM `10086`     （Oracle 用 SQL.toSqlString(stmt, ORACLE) → "10086"）
+```
+
 ## 自定义语句解析器（SPI，可选）
 
 内建分派未覆盖的语句（前导关键字不在 SELECT / INSERT / CREATE 等内建清单里，如 `BACKUP …` / `SIGNAL …`）默认抛 `unsupported statement`。需要接住这类语句时，通过 `SqlParseOptions.statementParsers()` 按前导关键字注册 `SqlStatementParser`（不区分大小写，仅兜内建未覆盖的关键字——注册 `SELECT` 不会覆盖内建解析）：
@@ -743,7 +762,7 @@ mvn -pl jkit-sql test -Dtest=SqlBusinessScenarioTest
 | --- | --- | --- | --- |
 | 1 | SQL 审计与依赖分析 | `SQL.tables` / `SQL.stat` / `SqlStatement.isReadOnly` | 依赖提取、写操作标记 |
 | 2 | 读写分离路由 | `SqlStatement.isReadOnly` | 只读走从库、持锁 SELECT 走主库 |
-| 3 | SQL 注入防护 | `SQL.parameterize` / `SQL.bind` / `SQL.exportParameterValues` | 字面量收编、安全回填、绑定值导出 |
+| 3 | SQL 注入防护 | `SQL.parameterize` / `SQL.bind` / `SQL.bindNamed` / `SQL.exportParameterValues` | 字面量收编、安全回填、`IN` 集合、公式 |
 | 4 | SQL 防火墙 | `SQL.wall` / `SqlWallConfig` | 表黑白名单、WHERE 必含列、表数上限 |
 | 5 | 跨方言数据库迁移 | `SQL.convertBatch` / `SqlSchemaConverter.convert` | DDL 翻译闭环、批量 DML 函数改写 |
 | 6 | 多方言分页 | `SQL.setPage` / `SQL.adaptPagination` / `SQL.toSqlString` | LIMIT/TOP/FETCH/ROWNUM、offset=0 单层包装、回写按需适配 |
@@ -751,8 +770,8 @@ mvn -pl jkit-sql test -Dtest=SqlBusinessScenarioTest
 | 8 | 数据脱敏与列级权限 | `SQL.expandStar` / `SQL.replaceSelectItems` / `SQL.removeSelectItem` | 展开 `*`、一次替换多列、裁敏感列 |
 | 9 | 动态 SQL 构建 | `SqlBuilder` | 条件查询组装、INSERT/UPDATE |
 | 10 | 实体驱动多方言建表 | `SqlEntities.createTable` | MySQL 内联注释、PG 的 COMMENT ON |
-| 11 | SQL 格式化与规范统一 | `SQL.format` / `SqlFormatOptions` | 关键字大小写归一、pretty 多行 |
-| 12 | 遗留模板占位符迁移 | `SqlPlaceholders` / `SqlParseOptions.placeholders` | `@xx@`、`%s` 两种风格 |
+| 11 | SQL 格式化与规范统一 | `SQL.format` / `toString` / `addComment` | 关键字大小写、pretty、注释、方言引号 |
+| 12 | 遗留模板占位符迁移 | `SqlPlaceholders` / `SQL.bindNamed` | `@xx@`、`%s`、MyBatis `#{}/ ${}` |
 | 13 | 表达式预计算 | `SQL.eval` | 常量折叠、列引用返回 null |
 | 14 | 安全改写不污染原语句 | `SQL.clone` / clone-then-mutate | 复用缓存原语句、分页改写不改原句 |
 
@@ -821,6 +840,30 @@ SqlStatement stmt = SQL.parse(
         "SELECT * FROM t_user WHERE name = 'alice' AND age = 18 AND id = ?");
 List<Object> values = SQL.exportParameterValues(stmt);   // [alice, 18]
 String parameterized = SQL.parameterize(stmt);           // 值全部变成 ?，已存在的 ? 保持不变
+```
+
+**案例 3：`SQL.bind` 安全回填（含 `IN` 集合）**
+
+```java
+String payload = "'; DROP TABLE t_user; --";
+String sql = SQL.bind("SELECT * FROM t_user WHERE name = ?", payload);
+// SELECT * FROM t_user WHERE name = '''; DROP TABLE t_user; --'  —— 仍是一条语句
+SQL.parseAll(sql).size();                                // 1
+
+String inList = SQL.bind("SELECT * FROM t WHERE id IN ?", Arrays.asList(1, 2, 3));
+// SELECT * FROM t WHERE id IN (1, 2, 3)
+```
+
+**案例 4：`bindNamed` 填值 + 公式**
+
+```java
+Map<String, Object> vals = new LinkedHashMap<String, Object>();
+vals.put("id", 7);
+vals.put("ts", SQL.parseExpr("NOW()"));                  // 公式必须传 SqlExpr
+String sql = SQL.bindNamed(
+        "SELECT * FROM t_user WHERE id = :id AND created_at > :ts", vals);
+// SELECT * FROM t_user WHERE id = 7 AND created_at > NOW()
+// 字符串 "NOW()" 会变成 'NOW()'，不要这么传
 ```
 
 ### 4. SQL 防火墙（Wall）
@@ -923,6 +966,20 @@ SqlStatement out = SQL.rewrite(stmt, SqlRewrites.create()
 SQL.toSqlString(stmt);                                   // 原语句未被改动
 ```
 
+**案例 3：启动时配表白名单，拦截器里 `SQL.inject`**
+
+```java
+SQL.injectConfig(SqlInjectConfig.create()
+        .tables("t_order", "t_item")
+        .add("deleted", 0)
+        .add("tenant_id", new SqlInjectValue() {
+            public Object get() { return TenantHolder.get(); }
+        }));
+SqlStatement out = SQL.inject(SQL.parse("SELECT id FROM t_order WHERE status = 1"));
+// SELECT id FROM t_order WHERE status = 1 AND tenant_id = … AND deleted = 0
+// 请求结束：SqlInject.clear()；单次仍可 SQL.inject(stmt, "tenant_id", 100, "t_order")
+```
+
 ### 8. 数据脱敏与列级权限
 
 对外接口裁掉敏感列；库表重构后旧 SQL 不改代码即可适配。
@@ -942,6 +999,19 @@ out = SQL.removeSelectItem(out, "id_card");
 SqlStatement out = SQL.rewrite(SQL.parse("SELECT name FROM t_user WHERE name = 'a'"),
         SqlRewrites.create().add(SqlRewrites.replaceColumn("name", "user_name")));
 // SELECT user_name FROM t_user WHERE user_name = 'a'
+```
+
+**案例 3：展开 `*` 后一次替换多列**
+
+```java
+Map<String, List<String>> cols = new LinkedHashMap<String, List<String>>();
+cols.put("t_customer", Arrays.asList("id", "name", "phone", "id_card"));
+Map<String, String> masks = new LinkedHashMap<String, String>();
+masks.put("phone", "CONCAT(LEFT(phone, 3), '****')");
+masks.put("id_card", "'****'");
+SqlStatement masked = SQL.replaceSelectItems(
+        SQL.expandStar(SQL.parse("SELECT * FROM t_customer"), cols), masks);
+// SELECT id, name, CONCAT(LEFT(phone, 3), '****') AS phone, '****' AS id_card FROM t_customer
 ```
 
 ### 9. 动态 SQL 构建
@@ -1017,6 +1087,21 @@ pretty.contains("\n");                                   // true
 assertEquals(SQL.tables(SQL.parse(ugly)), SQL.tables(SQL.parse(pretty)));
 ```
 
+**案例 3：`addComment` + `toString()` 默认 MySQL 反引号**
+
+```java
+SqlParseOptions opt = SqlParseOptions.defaults()
+        .placeholders(SqlPlaceholders.create().mybatis());
+SqlStatement bound = SQL.bindNamed(
+        SQL.parse("SELECT * FROM #{table}", SqlDialect.MYSQL, opt),
+        SqlDialect.MYSQL, Collections.<String, Object>singletonMap("table", 10086));
+bound.addComment("我是注释");                             // 传正文即可
+String sql = bound.toString();
+// /* 我是注释 */ SELECT * FROM `10086`
+SQL.toSqlString(bound, SqlDialect.ORACLE);               // "10086"
+SQL.toSqlString(bound, SqlDialect.SQLSERVER);            // [10086]
+```
+
 ### 12. 遗留模板占位符迁移
 
 老系统里的 `@xx@` / `%s` 风格 SQL，不改写文本也能直接解析。
@@ -1039,6 +1124,30 @@ SqlStatement stmt = SQL.parse("SELECT %s FROM (SELECT '20221111' AS %s) AS a",
         SqlDialect.MYSQL,
         SqlParseOptions.defaults().placeholders(SqlPlaceholders.create().printf()));
 SQL.tables(stmt);                                        // []，FROM 的是派生表
+```
+
+**案例 3：MyBatis `#{id}` / `${table}`**
+
+```java
+SqlParseOptions opt = SqlParseOptions.defaults()
+        .placeholders(SqlPlaceholders.create().mybatis());
+SQL.parse("SELECT * FROM ${table} WHERE id = #{id, jdbcType=INTEGER}",
+        SqlDialect.MYSQL, opt);
+```
+
+**案例 4：bind 按属性名填 MyBatis 占位**
+
+```java
+Map<String, Object> vals = new LinkedHashMap<String, Object>();
+vals.put("table", "t_user");
+vals.put("id", 7);
+vals.put("user.name", "bob");
+String sql = SQL.bindNamed(
+        "SELECT * FROM ${table} WHERE id = #{id, jdbcType=INTEGER} AND name = #{user.name}",
+        SqlDialect.MYSQL,
+        SqlParseOptions.defaults().placeholders(SqlPlaceholders.create().mybatis()),
+        vals);
+// SELECT * FROM t_user WHERE id = 7 AND name = 'bob'
 ```
 
 ### 13. 表达式预计算

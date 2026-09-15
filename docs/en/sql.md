@@ -149,6 +149,25 @@ Rule summary:
 
 When not configured, `@age@` / `%s` / `<sheet>` still fail as before or get split into operators. Deliberately incomplete statements (e.g. `select * from`) fail even with placeholders enabled.
 
+Common parse + bind (keys omit the wrappers):
+
+```java
+SqlParseOptions opt = SqlParseOptions.defaults()
+        .placeholders(SqlPlaceholders.create().mybatis());   // MyBatis only; no need to stack common-model
+
+Map<String, Object> vals = new LinkedHashMap<String, Object>();
+vals.put("table", "t_user");
+vals.put("id", 7);
+String sql = SQL.bindNamed(
+        "SELECT * FROM ${table} WHERE id = #{id, jdbcType=INTEGER}",
+        SqlDialect.MYSQL, opt, vals);
+// SELECT * FROM t_user WHERE id = 7
+
+vals.put("table", 10086);                                  // not a bare identifier → dialect quotes
+SQL.bindNamed("SELECT * FROM #{table}", SqlDialect.MYSQL, opt, vals);
+// SELECT * FROM `10086`     (Oracle: SQL.toSqlString(stmt, ORACLE) → "10086")
+```
+
 ## Custom statement parsers (SPI, optional)
 
 Statements whose leading keyword is not on the built-in list (SELECT / INSERT / CREATE / …), such as `BACKUP …` / `SIGNAL …`, throw `unsupported statement` by default. To accept them, register a `SqlStatementParser` via `SqlParseOptions.statementParsers()` keyed by the leading keyword (case-insensitive). Registration only covers keywords the built-in switch does not already handle — registering `SELECT` does not replace the built-in parser:
@@ -686,7 +705,7 @@ mvn -pl jkit-sql test -Dtest=SqlBusinessScenarioTest
 | --- | --- | --- | --- |
 | 1 | SQL auditing and dependency analysis | `SQL.tables` / `SQL.stat` / `SqlStatement.isReadOnly` | dependency extraction, write-op flagging |
 | 2 | Read/write splitting routing | `SqlStatement.isReadOnly` | read-only to replica, locking SELECT to primary |
-| 3 | SQL injection protection | `SQL.parameterize` / `SQL.bind` / `SQL.exportParameterValues` | literal harvesting, safe fill-in, bind-value export |
+| 3 | SQL injection protection | `SQL.parameterize` / `SQL.bind` / `SQL.bindNamed` / `SQL.exportParameterValues` | literal harvesting, safe fill-in, `IN` lists, formulas |
 | 4 | SQL firewall | `SQL.wall` / `SqlWallConfig` | table allow/deny lists, required WHERE columns, max tables |
 | 5 | Cross-dialect database migration | `SQL.convertBatch` / `SqlSchemaConverter.convert` | DDL translation loop, batch DML function rewriting |
 | 6 | Multi-dialect pagination | `SQL.setPage` / `SQL.adaptPagination` / `SQL.toSqlString` | LIMIT/TOP/FETCH/ROWNUM, offset=0 single wrap, on-demand write-back |
@@ -694,8 +713,8 @@ mvn -pl jkit-sql test -Dtest=SqlBusinessScenarioTest
 | 8 | Data masking and column-level access | `SQL.expandStar` / `SQL.replaceSelectItems` / `SQL.removeSelectItem` | expand `*`, batch mask, drop sensitive columns |
 | 9 | Dynamic SQL building | `SqlBuilder` | conditional query assembly, INSERT/UPDATE |
 | 10 | Entity-driven multi-dialect DDL | `SqlEntities.createTable` | MySQL inline COMMENT, PG COMMENT ON |
-| 11 | SQL formatting and conventions | `SQL.format` / `SqlFormatOptions` | keyword case normalization, pretty multi-line |
-| 12 | Legacy template placeholder migration | `SqlPlaceholders` / `SqlParseOptions.placeholders` | `@xx@` and `%s` styles |
+| 11 | SQL formatting and conventions | `SQL.format` / `toString` / `addComment` | keyword case, pretty, comments, dialect quotes |
+| 12 | Legacy template placeholder migration | `SqlPlaceholders` / `SQL.bindNamed` | `@xx@`, `%s`, MyBatis `#{}/ ${}` |
 | 13 | Expression pre-evaluation | `SQL.eval` | constant folding, column refs yield null |
 | 14 | Safe rewriting without polluting the original | `SQL.clone` / clone-then-mutate | reuse cached statements, page without mutating |
 
@@ -765,6 +784,30 @@ SqlStatement stmt = SQL.parse(
         "SELECT * FROM t_user WHERE name = 'alice' AND age = 18 AND id = ?");
 List<Object> values = SQL.exportParameterValues(stmt);   // [alice, 18]
 String parameterized = SQL.parameterize(stmt);           // literals become ?; existing ? untouched
+```
+
+**Example 3: `SQL.bind` fills placeholders without SQL injection (including `IN` lists)**
+
+```java
+String payload = "'; DROP TABLE t_user; --";
+String sql = SQL.bind("SELECT * FROM t_user WHERE name = ?", payload);
+// SELECT * FROM t_user WHERE name = '''; DROP TABLE t_user; --'  — still one statement
+SQL.parseAll(sql).size();                                // 1
+
+String inList = SQL.bind("SELECT * FROM t WHERE id IN ?", Arrays.asList(1, 2, 3));
+// SELECT * FROM t WHERE id IN (1, 2, 3)
+```
+
+**Example 4: `bindNamed` with a value and a formula**
+
+```java
+Map<String, Object> vals = new LinkedHashMap<String, Object>();
+vals.put("id", 7);
+vals.put("ts", SQL.parseExpr("NOW()"));                  // formulas must be SqlExpr
+String sql = SQL.bindNamed(
+        "SELECT * FROM t_user WHERE id = :id AND created_at > :ts", vals);
+// SELECT * FROM t_user WHERE id = 7 AND created_at > NOW()
+// the string "NOW()" would become 'NOW()' — don't pass it that way
 ```
 
 ### 4. SQL firewall (Wall)
@@ -867,6 +910,20 @@ SqlStatement out = SQL.rewrite(stmt, SqlRewrites.create()
 SQL.toSqlString(stmt);                                   // the original statement is untouched
 ```
 
+**Example 3: configure tables/columns at startup, then `SQL.inject` in the interceptor**
+
+```java
+SQL.injectConfig(SqlInjectConfig.create()
+        .tables("t_order", "t_item")
+        .add("deleted", 0)
+        .add("tenant_id", new SqlInjectValue() {
+            public Object get() { return TenantHolder.get(); }
+        }));
+SqlStatement out = SQL.inject(SQL.parse("SELECT id FROM t_order WHERE status = 1"));
+// SELECT id FROM t_order WHERE status = 1 AND tenant_id = … AND deleted = 0
+// after the request: SqlInject.clear(); one-off: SQL.inject(stmt, "tenant_id", 100, "t_order")
+```
+
 ### 8. Data masking and column-level access
 
 Trim sensitive columns for external APIs; adapt old SQL to a physical rename without touching application code.
@@ -886,6 +943,19 @@ out = SQL.removeSelectItem(out, "id_card");
 SqlStatement out = SQL.rewrite(SQL.parse("SELECT name FROM t_user WHERE name = 'a'"),
         SqlRewrites.create().add(SqlRewrites.replaceColumn("name", "user_name")));
 // SELECT user_name FROM t_user WHERE user_name = 'a'
+```
+
+**Example 3: expand `*` then mask several columns in one pass**
+
+```java
+Map<String, List<String>> cols = new LinkedHashMap<String, List<String>>();
+cols.put("t_customer", Arrays.asList("id", "name", "phone", "id_card"));
+Map<String, String> masks = new LinkedHashMap<String, String>();
+masks.put("phone", "CONCAT(LEFT(phone, 3), '****')");
+masks.put("id_card", "'****'");
+SqlStatement masked = SQL.replaceSelectItems(
+        SQL.expandStar(SQL.parse("SELECT * FROM t_customer"), cols), masks);
+// SELECT id, name, CONCAT(LEFT(phone, 3), '****') AS phone, '****' AS id_card FROM t_customer
 ```
 
 ### 9. Dynamic SQL building
@@ -961,6 +1031,21 @@ pretty.contains("\n");                                   // true
 assertEquals(SQL.tables(SQL.parse(ugly)), SQL.tables(SQL.parse(pretty)));
 ```
 
+**Example 3: `addComment` + `toString()` defaults to MySQL backticks**
+
+```java
+SqlParseOptions opt = SqlParseOptions.defaults()
+        .placeholders(SqlPlaceholders.create().mybatis());
+SqlStatement bound = SQL.bindNamed(
+        SQL.parse("SELECT * FROM #{table}", SqlDialect.MYSQL, opt),
+        SqlDialect.MYSQL, Collections.<String, Object>singletonMap("table", 10086));
+bound.addComment("a note");                              // body text is enough
+String sql = bound.toString();
+// /* a note */ SELECT * FROM `10086`
+SQL.toSqlString(bound, SqlDialect.ORACLE);               // "10086"
+SQL.toSqlString(bound, SqlDialect.SQLSERVER);            // [10086]
+```
+
 ### 12. Legacy template placeholder migration
 
 Old `@xx@` / `%s` style SQL parses as-is, without rewriting the text.
@@ -983,6 +1068,30 @@ SqlStatement stmt = SQL.parse("SELECT %s FROM (SELECT '20221111' AS %s) AS a",
         SqlDialect.MYSQL,
         SqlParseOptions.defaults().placeholders(SqlPlaceholders.create().printf()));
 SQL.tables(stmt);                                        // [], FROM is a derived table
+```
+
+**Example 3: MyBatis `#{id}` / `${table}`**
+
+```java
+SqlParseOptions opt = SqlParseOptions.defaults()
+        .placeholders(SqlPlaceholders.create().mybatis());
+SQL.parse("SELECT * FROM ${table} WHERE id = #{id, jdbcType=INTEGER}",
+        SqlDialect.MYSQL, opt);
+```
+
+**Example 4: bind fills MyBatis placeholders by property name**
+
+```java
+Map<String, Object> vals = new LinkedHashMap<String, Object>();
+vals.put("table", "t_user");
+vals.put("id", 7);
+vals.put("user.name", "bob");
+String sql = SQL.bindNamed(
+        "SELECT * FROM ${table} WHERE id = #{id, jdbcType=INTEGER} AND name = #{user.name}",
+        SqlDialect.MYSQL,
+        SqlParseOptions.defaults().placeholders(SqlPlaceholders.create().mybatis()),
+        vals);
+// SELECT * FROM t_user WHERE id = 7 AND name = 'bob'
 ```
 
 ### 13. Expression pre-evaluation

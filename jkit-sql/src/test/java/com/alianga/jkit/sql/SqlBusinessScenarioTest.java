@@ -12,7 +12,10 @@ import com.alianga.jkit.sql.schema.convert.ConversionResult;
 import org.junit.Test;
 
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -27,7 +30,7 @@ import static org.junit.Assert.assertTrue;
  * <ol>
  *   <li>SQL 审计与依赖分析</li>
  *   <li>读写分离路由</li>
- *   <li>SQL 注入防护（参数化）</li>
+ *   <li>SQL 注入防护（参数化 / bind）</li>
  *   <li>SQL 防火墙（Wall）</li>
  *   <li>跨方言数据库迁移</li>
  *   <li>多方言分页适配</li>
@@ -36,7 +39,7 @@ import static org.junit.Assert.assertTrue;
  *   <li>动态 SQL 构建（零字符串拼接）</li>
  *   <li>实体驱动多方言建表</li>
  *   <li>SQL 格式化与规范统一</li>
- *   <li>遗留模板占位符迁移</li>
+ *   <li>遗留模板占位符迁移（含 MyBatis）</li>
  *   <li>表达式预计算（规则引擎 / 预览）</li>
  * </ol>
  *
@@ -122,6 +125,32 @@ public class SqlBusinessScenarioTest {
         assertEquals(Integer.valueOf(18), values.get(1));
         String parameterized = SQL.parameterize(stmt);
         assertFalse(parameterized, parameterized.contains("'alice'"));
+    }
+
+    @Test
+    public void bindFillsPlaceholdersWithoutSqlInjection() {
+        String payload = "'; DROP TABLE t_user; --";
+        String sql = SQL.bind("SELECT * FROM t_user WHERE name = ?", payload);
+        assertTrue(sql, sql.contains("'''; DROP TABLE t_user; --'"));
+        assertEquals(1, SQL.parseAll(sql).size());
+        SQL.parse(sql, SqlDialect.MYSQL);
+
+        String inList = SQL.bind("SELECT * FROM t WHERE id IN ?", Arrays.asList(1, 2, 3));
+        assertTrue(inList, inList.contains("IN (1, 2, 3)") || inList.contains("IN(1, 2, 3)"));
+        SQL.parse(inList, SqlDialect.MYSQL);
+    }
+
+    @Test
+    public void bindNamedFillsValuesAndFormulas() {
+        Map<String, Object> vals = new LinkedHashMap<String, Object>();
+        vals.put("id", Integer.valueOf(7));
+        vals.put("ts", SQL.parseExpr("NOW()"));
+        String sql = SQL.bindNamed(
+                "SELECT * FROM t_user WHERE id = :id AND created_at > :ts", vals);
+        assertTrue(sql, sql.contains("id = 7"));
+        assertTrue(sql, sql.contains("NOW()"));
+        assertFalse(sql, sql.contains("'NOW()'"));
+        SQL.parse(sql, SqlDialect.MYSQL);
     }
 
     // ------------------------------------------------------------------
@@ -229,6 +258,25 @@ public class SqlBusinessScenarioTest {
         assertFalse(norm(SQL.toSqlString(stmt)), norm(SQL.toSqlString(stmt)).contains("tenant_id"));
     }
 
+    @Test
+    public void injectConfigAddsRowFiltersOnWhitelistedTables() {
+        SQL.injectConfig(SqlInjectConfig.create()
+                .tables("t_order")
+                .add("tenant_id", 100)
+                .add("deleted", 0));
+        try {
+            SqlStatement out = SQL.inject(SQL.parse("SELECT id FROM t_order WHERE status = 1"));
+            String sql = norm(SQL.toSqlString(out));
+            assertTrue(sql, sql.contains("tenant_id = 100"));
+            assertTrue(sql, sql.contains("deleted = 0"));
+            assertTrue(sql, sql.contains("status = 1"));
+            SQL.parse(sql, SqlDialect.MYSQL);
+        } finally {
+            SqlInject.clear();
+            SqlInject.setDefault(null);
+        }
+    }
+
     // ------------------------------------------------------------------
     // 场景 8：数据脱敏与列级权限——对外接口裁掉敏感列 / 适配物理列改名
     // ------------------------------------------------------------------
@@ -253,6 +301,22 @@ public class SqlBusinessScenarioTest {
         String sql = norm(SQL.toSqlString(out));
         assertTrue(sql, sql.contains("user_name"));
         assertFalse(sql, sql.contains(" name"));
+    }
+
+    @Test
+    public void expandStarThenReplaceSelectItemsMasksManyColumns() {
+        Map<String, List<String>> cols = new LinkedHashMap<String, List<String>>();
+        cols.put("t_customer", Arrays.asList("id", "name", "phone", "id_card"));
+        Map<String, String> masks = new LinkedHashMap<String, String>();
+        masks.put("phone", "CONCAT(LEFT(phone, 3), '****')");
+        masks.put("id_card", "'****'");
+        SqlStatement masked = SQL.replaceSelectItems(
+                SQL.expandStar(SQL.parse("SELECT * FROM t_customer"), cols), masks);
+        String sql = SQL.toSqlString(masked);
+        assertFalse(sql, sql.contains("SELECT *"));
+        assertTrue(sql, sql.contains("CONCAT"));
+        assertTrue(sql, sql.contains("'****'"));
+        SQL.parse(sql, SqlDialect.MYSQL);
     }
 
     // ------------------------------------------------------------------
@@ -393,6 +457,25 @@ public class SqlBusinessScenarioTest {
         assertEquals(SQL.tables(SQL.parse(sql)), SQL.tables(roundTrip));
     }
 
+    @Test
+    public void addCommentAndToStringUseMysqlQuotes() {
+        SqlParseOptions opt = SqlParseOptions.defaults()
+                .placeholders(SqlPlaceholders.create().mybatis());
+        Map<String, Object> vals = Collections.<String, Object>singletonMap("table", Integer.valueOf(10086));
+        SqlStatement bound = SQL.bindNamed(
+                SQL.parse("SELECT * FROM #{table}", SqlDialect.MYSQL, opt),
+                SqlDialect.MYSQL, vals);
+        bound.addComment("我是注释");
+        String sql = bound.toString();
+        assertTrue(sql, sql.contains("`10086`"));
+        assertFalse(sql, sql.contains("\"10086\""));
+        assertTrue(sql, sql.contains("/*") && sql.contains("我是注释"));
+        assertFalse(sql, sql.startsWith("我是注释"));
+        SQL.parse(sql, SqlDialect.MYSQL);
+        assertTrue(SQL.toSqlString(bound, SqlDialect.ORACLE).contains("\"10086\""));
+        assertTrue(SQL.toSqlString(bound, SqlDialect.SQLSERVER).contains("[10086]"));
+    }
+
     // ------------------------------------------------------------------
     // 场景 12：遗留模板占位符迁移——@xx@ / %s 风格 SQL 收编解析
     // ------------------------------------------------------------------
@@ -412,6 +495,30 @@ public class SqlBusinessScenarioTest {
         assertEquals(com.alianga.jkit.sql.ast.SqlStatementType.SELECT, stmt.type());
         // FROM 的是子查询派生表，无物理表依赖
         assertTrue(SQL.tables(stmt).toString(), SQL.tables(stmt).isEmpty());
+    }
+
+    @Test
+    public void mybatisPlaceholdersParseAndBindByPropertyName() {
+        SqlParseOptions opt = SqlParseOptions.defaults()
+                .placeholders(SqlPlaceholders.create().mybatis());
+        SqlStatement parsed = SQL.parse(
+                "SELECT * FROM ${table} WHERE id = #{id, jdbcType=INTEGER} AND name = #{user.name}",
+                SqlDialect.MYSQL, opt);
+        assertEquals("${table}", SQL.tables(parsed).get(0));
+
+        Map<String, Object> vals = new LinkedHashMap<String, Object>();
+        vals.put("table", "t_user");
+        vals.put("id", Integer.valueOf(7));
+        vals.put("user.name", "bob");
+        String sql = SQL.bindNamed(
+                "SELECT * FROM ${table} WHERE id = #{id, jdbcType=INTEGER} AND name = #{user.name}",
+                SqlDialect.MYSQL, opt, vals);
+        assertTrue(sql, sql.contains("FROM t_user") || sql.contains("FROM `t_user`"));
+        assertTrue(sql, sql.contains("id = 7"));
+        assertTrue(sql, sql.contains("'bob'"));
+        assertFalse(sql, sql.contains("#{id"));
+        assertFalse(sql, sql.contains("${table}"));
+        SQL.parse(sql, SqlDialect.MYSQL);
     }
 
     // ------------------------------------------------------------------

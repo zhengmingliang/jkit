@@ -26,6 +26,7 @@
 ### 文档
 
 - `docs/sql.md` / `docs/en/sql.md`：跨方言转换去掉「进行中」口径；补齐 `inject` / `expandStar` / `replaceSelectItem` / `bind` / Wall 表策略 / `DATE_FORMAT` 格式符。英文转换章节与中文对齐。`sql-auto` 补充已有表注释同步。
+- `docs/sql.md` / `docs/en/sql.md`「业务场景」补 `bind` / `inject` / `expandStar`+`replaceSelectItems` / `addComment`+方言引号 / MyBatis `#{}/ ${}` 可复制示例；模板占位符节增加 parse+bind 常用写法。样例与 `SqlBusinessScenarioTest` 对齐。
 
 ### 修复
 
