@@ -20,6 +20,7 @@
 
 ### 变更
 
+- `jkit-sql`：行级注入实现类由 `SqlTenantRewriter` 更名为 `SqlInjectRewriter`（2.0.2 未发版，不保留旧名）。租户只是一种场景，类名/方法名不再带 tenant。
 - `jkit-sql`：`SQL.bind` / `bindNamed` 字符串入口不再对 parse 结果二次 clone；访问者热路径分发提前；绑定值少分配（位置参数走数组下标、无引号字符串快路径、小整数原文缓存）。AST 入口仍 clone-then-mutate。
 - `jkit-sql-auto`：`SqlAutoDialects.fromUrl` / `driverForUrl` 委托 `JdbcUrlUtils`（覆盖 Gauss / Kingbase / Hive / ClickHouse / Trino 等更多 URL）。
 - `jkit-sql-auto`：已有表对照实体注释。`DatabaseMetaData.REMARKS` 读入活表/列；实体注释非空且与库不一致时发出 `COMMENT ON` / `ALTER TABLE … COMMENT` / MySQL `MODIFY … COMMENT`。实体未写注释时不覆盖库里已有注释。

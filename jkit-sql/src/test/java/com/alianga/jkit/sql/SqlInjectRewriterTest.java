@@ -22,7 +22,7 @@ import static org.junit.Assert.fail;
  * @author 郑明亮
  * @since 2.0.2
  */
-public class SqlTenantRewriterTest {
+public class SqlInjectRewriterTest {
 
     private static String sql(SqlStatement stmt) {
         return SQL.toSqlString(stmt, SqlDialect.MYSQL);
@@ -206,7 +206,7 @@ public class SqlTenantRewriterTest {
     }
 
     @Test
-    public void insertValuesReplacesExistingTenantColumn() {
+    public void insertValuesReplacesExistingInjectColumn() {
         SqlStatement out = inject("INSERT INTO t_order (id, tenant_id) VALUES (1, 0)", 99, "t_order");
         String n = norm(sql(out));
         assertTrue(n, n.contains("99"));
@@ -277,15 +277,15 @@ public class SqlTenantRewriterTest {
     }
 
     @Test
-    public void orWhereIsParenthesizedSoTenantIsNotBypassed() {
-        // 高危回归：原 WHERE 含 OR 时，租户条件必须整体包住 OR，否则 (b=2 AND tenant) OR a=1 越权
+    public void orWhereIsParenthesizedSoInjectIsNotBypassed() {
+        // 高危回归：原 WHERE 含 OR 时，注入条件必须整体包住 OR，否则 (b=2 AND col) OR a=1 越权
         SqlStatement out = inject(
                 "SELECT id FROM t_order WHERE status = 'X' OR owner = 'me'", 5, "t_order");
         String n = norm(sql(out));
         assertTrue(n, n.contains("tenant_id = 5"));
-        assertTrue("OR 分支必须整体套括号，否则租户条件被绕过", n.contains("(status = 'X' OR owner = 'me')"));
+        assertTrue("OR 分支必须整体套括号，否则注入条件被绕过", n.contains("(status = 'X' OR owner = 'me')"));
         assertValid(out, SqlDialect.MYSQL);
-        // 重新解析后语义不变：tenant 与 (OR) 同级 AND
+        // 重新解析后语义不变：注入列与 (OR) 同级 AND
         SqlStatement reparsed = SQL.parse(SQL.toSqlString(out, SqlDialect.MYSQL), SqlDialect.MYSQL);
         assertTrue(norm(sql(reparsed)), norm(sql(reparsed)).contains("tenant_id = 5"));
     }
@@ -336,7 +336,7 @@ public class SqlTenantRewriterTest {
     public void rewriteChainAdapter() {
         SqlStatement stmt = SQL.parse("SELECT id FROM t_order");
         SqlStatement out = SQL.rewrite(stmt, SqlRewrites.create()
-                .add(SqlRewrites.inject("tenant_id", SqlTenantRewriter.literalValue(42),
+                .add(SqlRewrites.inject("tenant_id", SqlInjectRewriter.literalValue(42),
                         "t_order")));
         assertTrue(sql(out).contains("tenant_id = 42"));
         assertFalse(sql(stmt).contains("tenant_id"));
@@ -345,10 +345,10 @@ public class SqlTenantRewriterTest {
     @Test
     public void collectionOverload() {
         SqlStatement out = SQL.inject(SQL.parse("SELECT id FROM t_order"), "tenant_id",
-                SqlTenantRewriter.literalValue(1), Collections.singletonList("t_order"));
+                SqlInjectRewriter.literalValue(1), Collections.singletonList("t_order"));
         assertTrue(sql(out).contains("tenant_id = 1"));
         SqlStatement none = SQL.inject(SQL.parse("SELECT id FROM t_order"), "tenant_id",
-                SqlTenantRewriter.literalValue(1), Arrays.asList("nope"));
+                SqlInjectRewriter.literalValue(1), Arrays.asList("nope"));
         assertFalse(sql(none).contains("tenant_id"));
     }
 

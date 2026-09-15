@@ -15,8 +15,8 @@ import java.util.List;
  * SqlInjectConfig cfg = SqlInjectConfig.create()
  *         .tables("t_order", "t_user")
  *         .add("deleted", 0)
- *         .add("tenant_id", new SqlInjectValue() {
- *             public Object get() { return TenantHolder.get(); }
+ *         .add("org_id", new SqlInjectValue() {
+ *             public Object get() { return Session.orgId(); }
  *         });
  * SQL.injectConfig(cfg);          // 全局默认（启动时）
  * SqlStatement out = SQL.inject(stmt); // 拦截器里不再传表/列

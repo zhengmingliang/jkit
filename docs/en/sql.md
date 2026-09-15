@@ -239,7 +239,7 @@ SQL.injectConfig(SqlInjectConfig.create()
         .tables("t_order", "t_item", "t_user")
         .add("deleted", 0)
         .add("tenant_id", new SqlInjectValue() {
-            public Object get() { return TenantHolder.get(); }
+            public Object get() { return Session.orgId(); }
         }));
 SqlStatement ten = SQL.inject(stmt);
 // one-off: SQL.inject(stmt, "tenant_id", 100, "t_order")
@@ -269,7 +269,7 @@ When several rewrites (custom + built-in) must run in order, compose them with `
 
 ```java
 SqlStatement out = SQL.rewrite(stmt, SqlRewrites.create()
-        .add(new TenantRule())                                   // pre hook: custom rule
+        .add(new RowFilterRule())                                // pre hook: custom rule
         .add(SqlRewrites.replaceTable("users", "users_2026"))
         .add(SqlRewrites.andWhere(SQL.parseExpr("tenant_id = ?")))
         .add(SqlRewrites.addSelectItem("status"))
@@ -925,7 +925,7 @@ SQL.injectConfig(SqlInjectConfig.create()
         .tables("t_order", "t_item")
         .add("deleted", 0)
         .add("tenant_id", new SqlInjectValue() {
-            public Object get() { return TenantHolder.get(); }
+            public Object get() { return Session.orgId(); }
         }));
 SqlStatement out = SQL.inject(SQL.parse("SELECT id FROM t_order WHERE status = 1"));
 // SELECT id FROM t_order WHERE status = 1 AND tenant_id = … AND deleted = 0

@@ -8,7 +8,7 @@ package com.alianga.jkit.sql;
  */
 public interface SqlInjectValue {
     /**
-     * @return 本次注入使用的 Java 值；经 {@link SqlTenantRewriter#literalValue} 收成字面量
+     * @return 本次注入使用的 Java 值；经 {@link SqlInjectRewriter#literalValue} 收成字面量
      */
     Object get();
 }

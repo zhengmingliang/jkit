@@ -247,7 +247,7 @@ public class SqlBusinessScenarioTest {
     // ------------------------------------------------------------------
 
     @Test
-    public void tenantRoutingRewritesTableSuffix() {
+    public void shardRoutingRewritesTableSuffix() {
         SqlStatement stmt = SQL.parse("SELECT id, name FROM t_user WHERE status = 1");
         SqlStatement out = SQL.rewrite(stmt, SqlRewrites.create()
                 .add(SqlRewrites.replaceTable("t_user", "t_user_2026")));
@@ -257,8 +257,8 @@ public class SqlBusinessScenarioTest {
     }
 
     @Test
-    public void tenantIsolationInjectsTenantPredicate() {
-        // 防漏租户过滤：统一在网关层给所有查询追加 tenant_id 条件
+    public void injectAddsRowPredicate() {
+        // 网关层给匹配表白名单的查询追加行级条件（列名自定）
         SqlStatement stmt = SQL.parse("SELECT id FROM t_order WHERE status = 1");
         SqlStatement out = SQL.rewrite(stmt, SqlRewrites.create()
                 .add(SqlRewrites.andWhere(SQL.parseExpr("tenant_id = 100"))));
@@ -682,7 +682,7 @@ public class SqlBusinessScenarioTest {
     }
 
     @Test
-    public void sandboxRequiresTenantColumnAndCapsJoinWidth() {
+    public void sandboxRequiresWhereColumnAndCapsJoinWidth() {
         SqlWallConfig cfg = SqlWallConfig.defaults()
                 .requireWhereColumns("tenant_id")
                 .maxTables(2);

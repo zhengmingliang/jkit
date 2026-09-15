@@ -239,7 +239,7 @@ SQL.injectConfig(SqlInjectConfig.create()
         .tables("t_order", "t_item", "t_user")
         .add("deleted", 0)
         .add("tenant_id", new SqlInjectValue() {
-            public Object get() { return TenantHolder.get(); }
+            public Object get() { return Session.orgId(); }
         }));
 SqlStatement ten = SQL.inject(stmt);
 // 单次仍可显式：SQL.inject(stmt, "tenant_id", 100, "t_order")
@@ -258,7 +258,7 @@ SqlStatement masked = SQL.replaceSelectItems(
 - `setLimit` / `setOffset` / `setPage`：**替换**分页；`setPage(pageNo, pageSize)` 的 pageNo 从 1 起。
 - `removeSelectItem`：忽略大小写，匹配简单列名（`t.col` 的最后一段）或显式别名；删到只剩一项时再删会抛 `IllegalArgumentException`。只改**外层** SELECT。
 - `inject` / `SqlInjectConfig`：给匹配的物理表 AND `alias.col = value`（CTE 名与 `DUAL` 跳过）。列名自定，租户 / 软删 / 机构号都可以。`SQL.injectConfig` 设全局表名单和列；`SqlInject.setCurrent` 覆盖本线程（切面里取值）。未配置时 `SQL.inject(stmt)` 抛 `IllegalStateException`。
-  - **安全约束（2.0.2 修复）**：原 `WHERE` / `HAVING` / `ON` 含 `OR` / `XOR` 等低优先级运算符时，注入会整体套括号，保证租户条件不被优先级“漏”掉，即渲染成 `(a OR b) AND tenant_id = ?` 而非 `a OR b AND tenant_id = ?`。
+  - **安全约束（2.0.2 修复）**：原 `WHERE` / `HAVING` / `ON` 含 `OR` / `XOR` 等低优先级运算符时，注入会整体套括号，保证注入条件不被优先级“漏”掉，即渲染成 `(a OR b) AND col = ?` 而非 `a OR b AND col = ?`。
   - **布尔回写（2.0.2）**：`SqlInjectConfig.dialect(SqlDialect.ORACLE)`（或达梦等）时，注入的布尔值写 `1` / `0`（这些库 SQL 层无 `BOOLEAN` 字面量）；不配方言时按 ANSI 写 `TRUE` / `FALSE`。
 - `expandStar`：按表列清单把 `*` / `t.*` 展开；解析不到的星号保持原样。子查询 `*` 用内层投影。
 - `replaceSelectItem`：整树替换 SELECT 投影（UNION / 子查询），匹配别名或 `t.col`；`SELECT *` 请先 `expandStar`。入参 `alias` 为显式别名时赋给命中的投影列。
@@ -273,12 +273,12 @@ SqlStatement masked = SQL.replaceSelectItems(
 
 ```java
 SqlStatement out = SQL.rewrite(stmt, SqlRewrites.create()
-        .add(new TenantRule())                            // 前 hook：自定义规则
+        .add(new RowFilterRule())                         // 前 hook：自定义规则
         .add(SqlRewrites.replaceTable("users", "users_2026"))
         .add(SqlRewrites.andWhere(SQL.parseExpr("tenant_id = ?")))
         .add(SqlRewrites.addSelectItem("status"))
         .add(SqlRewrites.removeSelectItem("secret"))
-        .add(SqlRewrites.inject("tenant_id", SqlTenantRewriter.literalValue(100), "t_order"))
+        .add(SqlRewrites.inject("tenant_id", SqlInjectRewriter.literalValue(100), "t_order"))
         .add(SqlRewrites.adaptPagination(SqlDialect.ORACLE))
         .add(SqlRewrites.addLimit(100, SqlDialect.MYSQL)));
 ```
@@ -993,7 +993,7 @@ SQL.injectConfig(SqlInjectConfig.create()
         .tables("t_order", "t_item")
         .add("deleted", 0)
         .add("tenant_id", new SqlInjectValue() {
-            public Object get() { return TenantHolder.get(); }
+            public Object get() { return Session.orgId(); }
         }));
 SqlStatement out = SQL.inject(SQL.parse("SELECT id FROM t_order WHERE status = 1"));
 // SELECT id FROM t_order WHERE status = 1 AND tenant_id = … AND deleted = 0

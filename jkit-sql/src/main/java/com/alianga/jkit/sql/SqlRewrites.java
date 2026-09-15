@@ -17,7 +17,7 @@ import java.util.Map;
  *
  * <pre>{@code
  * SqlStatement out = SQL.rewrite(stmt, SqlRewrites.create()
- *         .add(new TenantRule())                        // 前 hook：自定义规则
+ *         .add(new RowFilterRule())                     // 前 hook：自定义规则
  *         .add(SqlRewrites.replaceTable("t", "t_2026")) // 内建：换表
  *         .add(SqlRewrites.addLimit(100, SqlDialect.MYSQL)) // 内建：补 LIMIT
  *         .add(SqlRewrites.andWhere(SQL.parseExpr("id > ?")))); // 内建：AND WHERE
@@ -151,7 +151,7 @@ public final class SqlRewrites {
     /**
      * 内建适配器：把谓词 AND 到顶层 WHERE，等价 {@link SqlRewriter#andWhere}。
      *
-     * @param predicate 谓词（如 {@code SQL.parseExpr("tenant_id = ?")}）
+     * @param predicate 谓词（如 {@code SQL.parseExpr("org_id = ?")}）
      * @return 规则
      */
     public static SqlRewriteHook andWhere(final SqlExpr predicate) {
@@ -167,7 +167,7 @@ public final class SqlRewrites {
     }
 
     /**
-     * 内建适配器：按配置注入行级条件，等价 {@link SqlTenantRewriter#inject(SqlStatement, SqlInjectConfig)}。
+     * 内建适配器：按配置注入行级条件，等价 {@link SqlInjectRewriter#inject(SqlStatement, SqlInjectConfig)}。
      *
      * @param config 配置
      * @return 规则
@@ -180,7 +180,7 @@ public final class SqlRewrites {
              */
             @Override
             public SqlStatement apply(SqlStatement statement) {
-                return SqlTenantRewriter.inject(statement, config);
+                return SqlInjectRewriter.inject(statement, config);
             }
         };
     }
@@ -204,7 +204,7 @@ public final class SqlRewrites {
              */
             @Override
             public SqlStatement apply(SqlStatement statement) {
-                return SqlTenantRewriter.inject(statement, column, value, list);
+                return SqlInjectRewriter.inject(statement, column, value, list);
             }
         };
     }

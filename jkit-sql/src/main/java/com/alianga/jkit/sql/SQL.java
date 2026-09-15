@@ -683,7 +683,7 @@ public final class SQL {
      * 一致，返回新语句，原 AST 不变。调用方需使用返回值。
      *
      * @param statement 语句
-     * @param predicateSql 谓词 SQL，如 {@code tenant_id = ?}
+     * @param predicateSql 谓词 SQL，如 {@code org_id = ?}
      * @return 带新 WHERE 的拷贝；谓词为空时返回原对象
      */
     public static SqlStatement andWhere(SqlStatement statement, String predicateSql) {
@@ -735,14 +735,14 @@ public final class SQL {
             return statement;
         }
         SqlStatement copy = clone(statement);
-        return SqlTenantRewriter.inject(copy, config);
+        return SqlInjectRewriter.inject(copy, config);
     }
 
     /**
      * 注入单列等值条件（先深拷贝再改）。列名自定，不限租户。
      *
      * @param statement 语句
-     * @param column 列简单名，如 {@code tenant_id} / {@code deleted}
+     * @param column 列简单名，如 {@code org_id} / {@code deleted}
      * @param value 值（字面量或绑定）
      * @param tables 表白名单；省略则全部物理表
      * @return 新语句
@@ -767,7 +767,7 @@ public final class SQL {
     public static SqlStatement inject(SqlStatement statement, String column, Object value,
             String... tables) {
         Collection<String> list = tables == null || tables.length == 0 ? null : Arrays.asList(tables);
-        return inject(statement, column, SqlTenantRewriter.literalValue(value), list);
+        return inject(statement, column, SqlInjectRewriter.literalValue(value), list);
     }
 
     /**
@@ -786,7 +786,7 @@ public final class SQL {
             return statement;
         }
         SqlStatement copy = clone(statement);
-        return SqlTenantRewriter.inject(copy, column, value, tables);
+        return SqlInjectRewriter.inject(copy, column, value, tables);
     }
 
     /**
@@ -1000,7 +1000,7 @@ public final class SQL {
      *
      * <pre>{@code
      * SqlStatement out = SQL.rewrite(stmt, SqlRewrites.create()
-     *         .add(new TenantRule())                            // 前 hook：自定义
+     *         .add(new RowFilterRule())                         // 前 hook：自定义
      *         .add(SqlRewrites.replaceTable("t", "t_2026"))     // 内建
      *         .add(SqlRewrites.addLimit(100, SqlDialect.MYSQL))); // 后 hook 位置随意
      * }</pre>

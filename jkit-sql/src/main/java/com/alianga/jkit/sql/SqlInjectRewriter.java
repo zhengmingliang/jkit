@@ -33,7 +33,7 @@ import java.util.Set;
 /**
  * 行级条件注入：按表白名单把 {@code alias.col = value} 写入 SELECT / UPDATE / DELETE 的 WHERE
  * （含 UNION、FROM 子查询、CTE、EXISTS），并给匹配的 INSERT / MERGE 补列或 ON。
- * 列名不限租户，软删、机构号等同路。
+ * 列名自定：软删、机构号、租户等同路，不是只给某一种场景。
  *
  * <p>就地修改；公开门面 {@link SQL#inject} 会先 clone。CTE 名不当物理表；{@code DUAL} 跳过。
  * 无白名单时对所有物理表注入。值表达式每次使用前深拷贝。</p>
@@ -41,8 +41,8 @@ import java.util.Set;
  * @author 郑明亮
  * @since 2.0.2
  */
-public final class SqlTenantRewriter {
-    private SqlTenantRewriter() {
+public final class SqlInjectRewriter {
+    private SqlInjectRewriter() {
     }
 
     /**
@@ -76,7 +76,7 @@ public final class SqlTenantRewriter {
      * 就地注入单列条件。
      *
      * @param statement 语句
-     * @param column 列简单名，如 {@code tenant_id}
+     * @param column 列简单名，如 {@code org_id}
      * @param value 值（字面量 / 绑定）；null 视为 {@code NULL}
      * @param tables 物理表简单名；null 或空 = 全部物理表
      * @return 原对象（已改）
@@ -261,7 +261,7 @@ public final class SqlTenantRewriter {
         }
     }
 
-    private static SqlExpr tenantEq(String qualifier, String column, SqlExpr value) {
+    private static SqlExpr columnEq(String qualifier, String column, SqlExpr value) {
         SqlIdentifier left;
         if (qualifier == null || qualifier.isEmpty()) {
             left = SqlIdentifier.of(column);
@@ -281,7 +281,7 @@ public final class SqlTenantRewriter {
             if (!matches(table, cte, whitelist)) {
                 continue;
             }
-            acc = and(acc, tenantEq(qualifier(table), column, value));
+            acc = and(acc, columnEq(qualifier(table), column, value));
         }
         return acc;
     }
