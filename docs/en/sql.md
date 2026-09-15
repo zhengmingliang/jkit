@@ -316,6 +316,9 @@ List<String> binds = SQL.parameters(sql);                 // "?", ":name"
 String filled = SQL.bind("SELECT * FROM t WHERE name = ?", "'; DROP TABLE t; --");
 // SELECT * FROM t WHERE name = '''; DROP TABLE t; --'   — still one statement
 SQL.bindNamed("SELECT * FROM t WHERE id = :id", Collections.singletonMap("id", 1));
+// Formulas must be SqlExpr; the string "NOW()" becomes 'NOW()'
+SQL.bind("SELECT * FROM t WHERE ts > ?", SQL.parseExpr("NOW()"));
+// SELECT * FROM t WHERE ts > NOW()
 
 SqlWallResult wall = SQL.wall(sql); // parsing is not intercepted by default; call explicitly
 wall.passed();

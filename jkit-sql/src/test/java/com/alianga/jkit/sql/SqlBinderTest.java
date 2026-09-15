@@ -1,5 +1,6 @@
 package com.alianga.jkit.sql;
 
+import com.alianga.jkit.sql.ast.SqlLiteral;
 import com.alianga.jkit.sql.ast.SqlStatement;
 
 import org.junit.Test;
@@ -135,6 +136,108 @@ public class SqlBinderTest {
             assertEquals(d.name(), 1, SQL.parseAll(sql, d).size());
             SQL.parse(sql, d);
             assertTrue(d.name() + " " + sql, sql.contains("''"));
+        }
+    }
+
+    @Test
+    public void formulaNowInWhere() {
+        String sql = SQL.bind("SELECT * FROM t WHERE ts > ?", SQL.parseExpr("NOW()"));
+        assertTrue(sql, sql.contains("ts > NOW()"));
+        assertFalse(sql, sql.contains("'NOW()'"));
+        SQL.parse(sql);
+    }
+
+    @Test
+    public void formulaDateAdd() {
+        String sql = SQL.bind("SELECT * FROM t WHERE ts > ?",
+                SQL.parseExpr("DATE_ADD(NOW(), INTERVAL 7 DAY)"));
+        assertTrue(sql, sql.toUpperCase().contains("DATE_ADD"));
+        assertTrue(sql, sql.contains("INTERVAL"));
+        assertFalse(sql, sql.contains("'DATE_ADD"));
+        SQL.parse(sql);
+    }
+
+    @Test
+    public void formulaArithmeticAndColumn() {
+        String sql = SQL.bind("SELECT * FROM t WHERE age > ? AND created = ?",
+                SQL.parseExpr("age + 1"), SQL.parseExpr("created_at"));
+        assertTrue(sql, sql.contains("age > age + 1") || sql.contains("age > (age + 1)"));
+        assertTrue(sql, sql.contains("created = created_at") || sql.contains("created=created_at"));
+        SQL.parse(sql);
+    }
+
+    @Test
+    public void stringNowStaysQuotedNotFormula() {
+        String sql = SQL.bind("SELECT * FROM t WHERE ts > ?", "NOW()");
+        assertTrue(sql, sql.contains("'NOW()'"));
+        assertFalse("string must not become a function call", sql.contains("ts > NOW()"));
+    }
+
+    @Test
+    public void namedFormula() {
+        Map<String, Object> vals = new LinkedHashMap<String, Object>();
+        vals.put("expr", SQL.parseExpr("NOW()"));
+        String sql = SQL.bindNamed("SELECT * FROM t WHERE ts > :expr", vals);
+        assertTrue(sql, sql.contains("ts > NOW()"));
+        assertFalse(sql, sql.contains("'NOW()'"));
+    }
+
+    @Test
+    public void formulaInSelectListAndInsertAndUpdate() {
+        String select = SQL.bind("SELECT ?", SQL.parseExpr("NOW()"));
+        assertTrue(select, select.contains("SELECT NOW()"));
+        String insert = SQL.bind("INSERT INTO t (ts) VALUES (?)", SQL.parseExpr("NOW()"));
+        assertTrue(insert, insert.contains("VALUES (NOW())") || insert.contains("VALUES(NOW())"));
+        String update = SQL.bind("UPDATE t SET ts = ? WHERE id = ?", SQL.parseExpr("NOW()"), 1);
+        assertTrue(update, update.contains("ts = NOW()"));
+        assertTrue(update, update.contains("id = 1"));
+        SQL.parse(select);
+        SQL.parse(insert);
+        SQL.parse(update);
+    }
+
+    @Test
+    public void formulaInFunctionArgAndBetween() {
+        String fn = SQL.bind("SELECT COALESCE(?, 0) FROM t", SQL.parseExpr("age + 1"));
+        assertTrue(fn, fn.contains("COALESCE(age + 1, 0)") || fn.contains("COALESCE((age + 1), 0)"));
+        String between = SQL.bind("SELECT * FROM t WHERE ts BETWEEN ? AND ?",
+                SQL.parseExpr("DATE_SUB(NOW(), INTERVAL 1 DAY)"), SQL.parseExpr("NOW()"));
+        assertTrue(between, between.toUpperCase().contains("DATE_SUB"));
+        assertTrue(between, between.contains("NOW()"));
+        SQL.parse(fn);
+        SQL.parse(between);
+    }
+
+    @Test
+    public void formulaMixedWithLiteral() {
+        String sql = SQL.bind("SELECT * FROM t WHERE name = ? AND ts > ?",
+                "alice", SQL.parseExpr("NOW()"));
+        assertTrue(sql, sql.contains("name = 'alice'"));
+        assertTrue(sql, sql.contains("ts > NOW()"));
+        SQL.parse(sql);
+    }
+
+    @Test
+    public void formulaInInList() {
+        String sql = SQL.bind("SELECT * FROM t WHERE id IN ?",
+                Arrays.asList(1, SQL.parseExpr("id + 1"), 3));
+        assertTrue(sql, sql.contains("id + 1") || sql.contains("id+1"));
+        assertTrue(sql, sql.contains("1"));
+        SQL.parse(sql);
+    }
+
+    @Test
+    public void formulaRoundTripDialects() {
+        SqlDialect[] dialects = new SqlDialect[] {
+                SqlDialect.MYSQL, SqlDialect.POSTGRES, SqlDialect.ORACLE, SqlDialect.H2,
+                SqlDialect.SQLSERVER, SqlDialect.DAMENG, SqlDialect.SQLITE
+        };
+        for (int i = 0; i < dialects.length; i++) {
+            SqlDialect d = dialects[i];
+            String sql = SQL.bind("SELECT * FROM t WHERE ts > ?", d, SQL.parseExpr("NOW()"));
+            assertTrue(d.name() + " " + sql, sql.contains("NOW()"));
+            assertFalse(d.name() + " quoted " + sql, sql.contains("'NOW()'"));
+            SQL.parse(sql, d);
         }
     }
 

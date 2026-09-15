@@ -1,11 +1,30 @@
 package com.alianga.jkit.sql;
 
+import com.alianga.jkit.sql.ast.SqlBetweenExpr;
+import com.alianga.jkit.sql.ast.SqlBinaryExpr;
+import com.alianga.jkit.sql.ast.SqlCaseExpr;
+import com.alianga.jkit.sql.ast.SqlCastExpr;
+import com.alianga.jkit.sql.ast.SqlDelete;
 import com.alianga.jkit.sql.ast.SqlExpr;
+import com.alianga.jkit.sql.ast.SqlFunctionExpr;
 import com.alianga.jkit.sql.ast.SqlInExpr;
+import com.alianga.jkit.sql.ast.SqlInsert;
+import com.alianga.jkit.sql.ast.SqlInsertBranch;
+import com.alianga.jkit.sql.ast.SqlJoin;
+import com.alianga.jkit.sql.ast.SqlLimit;
+import com.alianga.jkit.sql.ast.SqlListExpr;
 import com.alianga.jkit.sql.ast.SqlLiteral;
-import com.alianga.jkit.sql.ast.SqlNode;
+import com.alianga.jkit.sql.ast.SqlMerge;
+import com.alianga.jkit.sql.ast.SqlMergeWhen;
+import com.alianga.jkit.sql.ast.SqlOrderByItem;
+import com.alianga.jkit.sql.ast.SqlOverExpr;
+import com.alianga.jkit.sql.ast.SqlSelect;
+import com.alianga.jkit.sql.ast.SqlSelectItem;
 import com.alianga.jkit.sql.ast.SqlStatement;
-import com.alianga.jkit.sql.visitor.SqlVisitorAdapter;
+import com.alianga.jkit.sql.ast.SqlUnaryExpr;
+import com.alianga.jkit.sql.ast.SqlUpdate;
+import com.alianga.jkit.sql.ast.SqlValuesTable;
+import com.alianga.jkit.sql.visitor.SqlAstVisitor;
 
 import java.lang.reflect.Array;
 import java.math.BigDecimal;
@@ -19,8 +38,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 把绑定占位符换成字面量。字符串只做 SQL 单引号加倍，不当标识符、不当表达式解析，
- * 因此 {@code '; DROP TABLE t; --} 仍是一条字符串，不会拆成多语句。
+ * 把绑定占位符换成字面量或表达式。{@code String} 只做 SQL 单引号加倍，不当公式解析；
+ * 公式请传 {@link SqlExpr}（如 {@code SQL.parseExpr("NOW()")}）。
  *
  * <p>就地修改；公开门面 {@link SQL#bind} 会先 clone。</p>
  *
@@ -45,26 +64,12 @@ public final class SqlBinder {
         if (statement == null) {
             return statement;
         }
-        final SqlDialectSpec d = dialect == null ? SqlDialect.MYSQL : dialect;
-        final Iterator<Object> pos = positional == null
+        SqlDialectSpec d = dialect == null ? SqlDialect.MYSQL : dialect;
+        Iterator<Object> pos = positional == null
                 ? Collections.emptyIterator() : Arrays.asList(positional).iterator();
-        final Map<String, ?> names = named == null
+        Map<String, ?> names = named == null
                 ? Collections.<String, Object>emptyMap() : named;
-        statement.accept(new SqlVisitorAdapter() {
-            /**
-             * {@inheritDoc}
-             */
-            @Override
-            public boolean visit(SqlNode node) {
-                if (node instanceof SqlInExpr) {
-                    return visitIn((SqlInExpr) node, d, pos, names);
-                }
-                if (node instanceof SqlLiteral) {
-                    replaceLiteral((SqlLiteral) node, d, pos, names);
-                }
-                return true;
-            }
-        });
+        statement.accept(new Binder(d, pos, names));
         return statement;
     }
 
@@ -110,6 +115,20 @@ public final class SqlBinder {
     }
 
     /**
+     * 绑定值收成 AST。{@link SqlExpr} 深拷贝后原样嵌入（公式 / 函数 / 列引用）；其余走 {@link #literal}。
+     *
+     * @param value Java 值或 {@link SqlExpr}
+     * @param dialect 方言
+     * @return 表达式
+     */
+    public static SqlExpr expr(Object value, SqlDialectSpec dialect) {
+        if (value instanceof SqlExpr) {
+            return (SqlExpr) ((SqlExpr) value).copy();
+        }
+        return literal(value, dialect);
+    }
+
+    /**
      * SQL 字符串字面量：单引号加倍。不使用反斜杠，避免 MySQL {@code \' } 提前结束字符串。
      *
      * @param raw 原文
@@ -132,46 +151,11 @@ public final class SqlBinder {
         return sb.toString();
     }
 
-    private static boolean visitIn(SqlInExpr in, SqlDialectSpec dialect, Iterator<Object> pos,
-            Map<String, ?> names) {
-        List<SqlExpr> values = in.values();
-        if (values == null || values.size() != 1 || !(values.get(0) instanceof SqlLiteral)) {
-            return true;
-        }
-        SqlLiteral bind = (SqlLiteral) values.get(0);
-        if (!isBind(bind)) {
-            return true;
-        }
-        Object v = take(bind, pos, names);
-        if (v instanceof Collection || (v != null && v.getClass().isArray())) {
-            List<SqlExpr> items = flatten(v, dialect);
-            if (items.isEmpty()) {
-                throw new IllegalArgumentException("cannot bind empty collection to IN");
-            }
-            in.setValues(items);
+    private static boolean isBind(SqlExpr expr) {
+        if (!(expr instanceof SqlLiteral)) {
             return false;
         }
-        values.set(0, literal(v, dialect));
-        return false;
-    }
-
-    private static void replaceLiteral(SqlLiteral lit, SqlDialectSpec dialect, Iterator<Object> pos,
-            Map<String, ?> names) {
-        if (!isBind(lit)) {
-            return;
-        }
-        Object v = take(lit, pos, names);
-        SqlExpr expr = literal(v, dialect);
-        if (!(expr instanceof SqlLiteral)) {
-            return;
-        }
-        SqlLiteral src = (SqlLiteral) expr;
-        lit.setKind(src.kind());
-        lit.setValue(src.value());
-        lit.setName(src.name());
-    }
-
-    private static boolean isBind(SqlLiteral lit) {
+        SqlLiteral lit = (SqlLiteral) expr;
         return lit.kind() == SqlLiteral.Kind.BIND || lit.kind() == SqlLiteral.Kind.NAMED_BIND;
     }
 
@@ -193,15 +177,276 @@ public final class SqlBinder {
         List<SqlExpr> out = new ArrayList<SqlExpr>(4);
         if (v instanceof Collection) {
             for (Object item : (Collection<?>) v) {
-                out.add(literal(item, dialect));
+                out.add(expr(item, dialect));
             }
             return out;
         }
         int n = Array.getLength(v);
         for (int i = 0; i < n; i++) {
-            out.add(literal(Array.get(v, i), dialect));
+            out.add(expr(Array.get(v, i), dialect));
         }
         return out;
+    }
+
+    /**
+     * 在父节点上把绑定占位换成字面量或公式，保证 {@code NOW()} 等能嵌进树，而不只改 Literal 字段。
+     */
+    private static final class Binder extends SqlAstVisitor {
+        private final SqlDialectSpec dialect;
+        private final Iterator<Object> pos;
+        private final Map<String, ?> names;
+
+        private Binder(SqlDialectSpec dialect, Iterator<Object> pos, Map<String, ?> names) {
+            this.dialect = dialect;
+            this.pos = pos;
+            this.names = names;
+        }
+
+        private SqlExpr replace(SqlExpr e) {
+            if (!isBind(e)) {
+                return e;
+            }
+            return expr(take((SqlLiteral) e, pos, names), dialect);
+        }
+
+        private void replaceList(List<SqlExpr> list) {
+            if (list == null) {
+                return;
+            }
+            for (int i = 0; i < list.size(); i++) {
+                list.set(i, replace(list.get(i)));
+            }
+        }
+
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected boolean visitSelect(SqlSelect node) {
+            node.setWhere(replace(node.where()));
+            node.setHaving(replace(node.having()));
+            node.setTop(replace(node.top()));
+            node.setQualify(replace(node.qualify()));
+            node.setConnectBy(replace(node.connectBy()));
+            node.setStartWith(replace(node.startWith()));
+            replaceList(node.groupBy());
+            replaceList(node.distinctOn());
+            return true;
+        }
+
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected boolean visitSelectItem(SqlSelectItem node) {
+            node.setExpr(replace(node.expr()));
+            return true;
+        }
+
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected boolean visitOrderByItem(SqlOrderByItem node) {
+            node.setExpr(replace(node.expr()));
+            return true;
+        }
+
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected boolean visitLimit(SqlLimit node) {
+            node.setOffset(replace(node.offset()));
+            node.setRowCount(replace(node.rowCount()));
+            return true;
+        }
+
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected boolean visitUpdate(SqlUpdate node) {
+            node.setWhere(replace(node.where()));
+            return true;
+        }
+
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected boolean visitDelete(SqlDelete node) {
+            node.setWhere(replace(node.where()));
+            return true;
+        }
+
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected boolean visitInsert(SqlInsert node) {
+            List<List<SqlExpr>> rows = node.valuesList();
+            for (int i = 0; i < rows.size(); i++) {
+                replaceList(rows.get(i));
+            }
+            return true;
+        }
+
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected boolean visitInsertBranch(SqlInsertBranch node) {
+            replaceList(node.values());
+            return true;
+        }
+
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected boolean visitJoin(SqlJoin node) {
+            node.setCondition(replace(node.condition()));
+            return true;
+        }
+
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected boolean visitMerge(SqlMerge node) {
+            node.setOn(replace(node.on()));
+            return true;
+        }
+
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected boolean visitMergeWhen(SqlMergeWhen node) {
+            node.setAndPredicate(replace(node.andPredicate()));
+            node.setDeleteWhere(replace(node.deleteWhere()));
+            node.setInsertWhere(replace(node.insertWhere()));
+            return true;
+        }
+
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected boolean visitBinaryExpr(SqlBinaryExpr node) {
+            node.setLeft(replace(node.left()));
+            node.setRight(replace(node.right()));
+            return true;
+        }
+
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected boolean visitUnaryExpr(SqlUnaryExpr node) {
+            node.setExpr(replace(node.expr()));
+            return true;
+        }
+
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected boolean visitFunctionExpr(SqlFunctionExpr node) {
+            replaceList(node.arguments());
+            if (node.hasParameters()) {
+                replaceList(node.parameters());
+            }
+            node.setSeparator(replace(node.separator()));
+            node.setFilter(replace(node.filter()));
+            node.setAgainst(replace(node.against()));
+            node.setOver(replace(node.over()));
+            return true;
+        }
+
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected boolean visitCaseExpr(SqlCaseExpr node) {
+            node.setValue(replace(node.value()));
+            replaceList(node.whenList());
+            replaceList(node.thenList());
+            node.setElseExpr(replace(node.elseExpr()));
+            return true;
+        }
+
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected boolean visitCastExpr(SqlCastExpr node) {
+            node.setExpr(replace(node.expr()));
+            return true;
+        }
+
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected boolean visitBetweenExpr(SqlBetweenExpr node) {
+            node.setExpr(replace(node.expr()));
+            node.setBegin(replace(node.begin()));
+            node.setEnd(replace(node.end()));
+            return true;
+        }
+
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected boolean visitInExpr(SqlInExpr node) {
+            node.setExpr(replace(node.expr()));
+            List<SqlExpr> values = node.values();
+            if (values != null && values.size() == 1 && isBind(values.get(0))) {
+                Object v = take((SqlLiteral) values.get(0), pos, names);
+                if (v instanceof Collection || (v != null && v.getClass().isArray())) {
+                    List<SqlExpr> items = flatten(v, dialect);
+                    if (items.isEmpty()) {
+                        throw new IllegalArgumentException("cannot bind empty collection to IN");
+                    }
+                    node.setValues(items);
+                    return true;
+                }
+                values.set(0, expr(v, dialect));
+                return true;
+            }
+            replaceList(values);
+            return true;
+        }
+
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected boolean visitListExpr(SqlListExpr node) {
+            replaceList(node.items());
+            return true;
+        }
+
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected boolean visitOverExpr(SqlOverExpr node) {
+            replaceList(node.partitionBy());
+            return true;
+        }
+
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        protected boolean visitValuesTable(SqlValuesTable node) {
+            replaceList(node.rows());
+            return true;
+        }
     }
 
     private static String toHex(byte[] data) {

@@ -320,6 +320,9 @@ List<String> binds = SQL.parameters(sql);                 // "?", ":name"
 String filled = SQL.bind("SELECT * FROM t WHERE name = ?", "'; DROP TABLE t; --");
 // SELECT * FROM t WHERE name = '''; DROP TABLE t; --'   —— 仍是一条语句
 SQL.bindNamed("SELECT * FROM t WHERE id = :id", Collections.singletonMap("id", 1));
+// 公式必须传 SqlExpr；String "NOW()" 会变成 'NOW()'
+SQL.bind("SELECT * FROM t WHERE ts > ?", SQL.parseExpr("NOW()"));
+// SELECT * FROM t WHERE ts > NOW()
 
 SqlWallResult wall = SQL.wall(sql); // 默认不拦截解析；显式调用
 wall.passed();

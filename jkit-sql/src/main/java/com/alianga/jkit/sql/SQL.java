@@ -1071,7 +1071,8 @@ public final class SQL {
     }
 
     /**
-     * 把 {@code ?} 换成字面量，按默认 MySQL 方言回写。字符串只加倍单引号，不会拆成多语句。
+     * 把 {@code ?} 换成字面量或公式，按默认 MySQL 方言回写。字符串只加倍单引号，不会拆成多语句。
+     * 公式传 {@link SqlExpr}，例如 {@code SQL.parseExpr("NOW()")}；{@code String} 不会当 SQL 解析。
      *
      * @param sql SQL
      * @param values 位置参数
@@ -1083,7 +1084,7 @@ public final class SQL {
     }
 
     /**
-     * 把 {@code ?} 换成字面量后按方言回写。
+     * 把 {@code ?} 换成字面量或公式后按方言回写。公式请传 {@link SqlExpr}。
      *
      * @param sql SQL
      * @param dialect 方言
@@ -1098,7 +1099,7 @@ public final class SQL {
     }
 
     /**
-     * 填充位置参数（先深拷贝再改）。
+     * 填充位置参数（先深拷贝再改）。值可以是 Java 常量或 {@link SqlExpr} 公式。
      *
      * @param statement 语句
      * @param dialect 方言
@@ -1115,7 +1116,7 @@ public final class SQL {
     }
 
     /**
-     * 把 {@code :name} 换成字面量。
+     * 把 {@code :name} 换成字面量或公式。
      *
      * @param sql SQL
      * @param values 命名参数（不含冒号）
