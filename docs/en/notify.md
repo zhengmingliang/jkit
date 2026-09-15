@@ -182,7 +182,9 @@ NotificationManager.send("sms-huawei", Message.text("Verification code SMS")
                 .webhookUrl("https://smsapi.cn-north-4.myhuaweicloud.com:443/sms/batchSendSmsV1")
                 .to("13800000001"));
 
-// Async send (this module has its own independent daemon thread pool, 8 threads by default, not shared with HTTP/SSE; validation is done synchronously)
+// Async send (this module has its own independent daemon thread pool, 8 threads by default with a
+// bounded queue of 1000; when full the submitting thread runs the task as backpressure;
+// not shared with HTTP/SSE; validation is done synchronously)
 Future<SendResult> future = NotificationManager.sendAsync("dingtalk", msg, cfg);
 ```
 
@@ -288,7 +290,7 @@ NotificationManager.send("dingtalk", msg, cfg, policy);
 NotificationManager.sendFailover("dingtalk", msg, Arrays.asList(a, b), policy);
 ```
 
-Dedup hits / quiet hours return `FailureType.SUPPRESSED` (no retry); local rate limiting returns `THROTTLED`. Platform-side rate limiting is still mapped by the channel. Dedup and rate limiting are **in-process**, memory-based implementations and are not shared across instances.
+Dedup hits / quiet hours return `FailureType.SUPPRESSED` (no retry); local rate limiting returns `THROTTLED`. Platform-side rate limiting is still mapped by the channel. Dedup and rate limiting are **in-process**, memory-based implementations and are not shared across instances; dedup reservation and rate-limit counting happen atomically before sending, so concurrent sends cannot slip through duplicated or over quota (window rotation is best-effort).
 
 ### Clock drift with DingTalk signing
 
@@ -349,8 +351,13 @@ public class MySmsChannel implements NotificationChannel {
     @Override
     public boolean supports(MessageType type) { return type == MessageType.TEXT; }
     @Override
+    public void validate(ChannelConfig config) {
+        // Optional: pre-flight check of required config (throw IllegalArgumentException — a programming error).
+        // NotificationManager calls this before any network send, so sendAll/sendFailover can honor
+        // "programming errors never surface after a partial send". Check config only; no requests here.
+    }
+    @Override
     public SendResult send(Message message, ChannelConfig config) {
-        // Config validation (throw IllegalArgumentException for missing params — a programming error)
         // On network failure return SendResult.fail(id(), "reason"), do not throw
         ...
     }

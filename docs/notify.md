@@ -182,7 +182,8 @@ NotificationManager.send("sms-huawei", Message.text("验证码短信")
                 .webhookUrl("https://smsapi.cn-north-4.myhuaweicloud.com:443/sms/batchSendSmsV1")
                 .to("13800000001"));
 
-// 异步发送（本模块独立守护线程池，默认 8 线程，不和 HTTP/SSE 共用；校验同步完成）
+// 异步发送（本模块独立守护线程池，默认 8 线程 + 1000 有界队列，满了由提交线程执行形成背压；
+// 不和 HTTP/SSE 共用；校验同步完成）
 Future<SendResult> future = NotificationManager.sendAsync("dingtalk", msg, cfg);
 ```
 
@@ -288,7 +289,7 @@ NotificationManager.send("dingtalk", msg, cfg, policy);
 NotificationManager.sendFailover("dingtalk", msg, Arrays.asList(a, b), policy);
 ```
 
-去重命中 / 静默时段返回 `FailureType.SUPPRESSED`（不重试）；本地限流返回 `THROTTLED`。平台限流仍由渠道映射。去重与限流是**进程内**内存实现，多实例不共享。
+去重命中 / 静默时段返回 `FailureType.SUPPRESSED`（不重试）；本地限流返回 `THROTTLED`。平台限流仍由渠道映射。去重与限流是**进程内**内存实现，多实例不共享；去重占位与限流计数在发送前原子完成，并发下不会放行重复或超额消息（窗口轮换边界属 best-effort）。
 
 ### 钉钉加签的时钟漂移
 
@@ -349,8 +350,13 @@ public class MySmsChannel implements NotificationChannel {
     @Override
     public boolean supports(MessageType type) { return type == MessageType.TEXT; }
     @Override
+    public void validate(ChannelConfig config) {
+        // 可选：配置必填项预检（缺参抛 IllegalArgumentException，属编程错误）。
+        // NotificationManager 在任何网络发送前调用，sendAll/sendFailover 借此保证
+        // “编程错误不会部分发送后才抛”。只查配置，不要发请求。
+    }
+    @Override
     public SendResult send(Message message, ChannelConfig config) {
-        // 配置校验（缺参抛 IllegalArgumentException，属编程错误）
         // 网络失败 return SendResult.fail(id(), "reason")，不抛异常
         ...
     }

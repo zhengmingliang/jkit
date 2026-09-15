@@ -34,6 +34,19 @@
 
 - `jkit-sql`：`SqlNode.toString()` 默认按 MySQL 回写标识符引号（反引号），与 `SQL.toSqlString` 一致；不再误用 ANSI 双引号。`addComment("正文")` / 紧凑模式下的 `--` 行注释会包成合法块注释，避免把后续 SQL 拼成普通文本或整句注释掉。`addHint` 对未包装的正文补 slash-star-plus。跨方言仍用 `SQL.toSqlString(stmt, dialect)`。
 - `jkit-sql-auto`：`SqlAutoInspector` 判断表是否存在时补上 schema。未配置时从 `Connection.getSchema()` 取；无连接（dry-run）或驱动不支持时从 JDBC URL 解析。PostgreSQL / Gauss 缺省 `public`，SQL Server 缺省 `dbo`，Oracle / 达梦回落用户名。避免把其它 schema 下的同名表误判为已存在，或对本库缺失表发出 ALTER。
+- `jkit-curl-codegen`：curl 解析告警（如 `未支持的选项 --digest，已跳过`）此前在生成路径全部丢失，现合入 `GeneratedCode.notes()` 最前面，生成结果不再静默吞掉提示。
+- `jkit-curl-codegen`：生成器不再静默丢内容。`py-requests` multipart 真实生成 `files=` 并传入请求（此前文件上传整体消失）；`py-httpx` 补 multipart / 文件正文；`js-fetch` / `js-axios` 的 `-T` 文件正文给出带路径的 fs 读取示例而非裸 `undefined`；`go-nethttp` / `csharp-httpclient` 真实生成 multipart（`mime/multipart` / `MultipartFormDataContent`）与文件正文（`os.Open` / `File.ReadAllBytes`）；`php-curl` multipart 生成 `CURLFile`。代理处理对齐：`py-requests` 不再硬编码 `http://`（带 scheme 与认证）；`java-okhttp` / `kotlin-okhttp` 补 `proxyAuthenticator`；`go-nethttp` 走 `http.Transport`；`csharp-httpclient` 走 `WebProxy`；`java-apache` 补 `setProxy`；`js-axios` 补 `proxy` 配置；`php-curl` 补 `CURLOPT_PROXY`；无法按请求配代理的 `js-fetch` / `js-native` 会在 notes 里说明。
+- `jkit-curl-codegen`：`har` 生成器 `decode` 不再把 URL/表单里的字面 `+` 错变成空格（保留 `+`，`%20`/`%2B` 仍正常解码）；creator 版本号不再硬编码 `2.0.1`，jar 内读 `Implementation-Version`，开发环境回落当前版本。`CodeQuote` 的 JS/Python/Go/C#/Ruby/R 字符串转义补上 U+2028/U+2029 与其余控制字符（此前可生成非法 JS）；Rust/Swift 用 `\u{XXXX}`，Lua 用三位十进制 `\ddd`。
+- `jkit-core`：curl 解析多个 `-b`/`--cookie` 按 curl 语义用 `; ` 拼接（此前互相覆盖只留最后一个）；`-E` 与 `--cert` 一致按「忽略不参与请求构造」处理（此前报「未支持」）。
+- `jkit-core`：`HttpUtils` 调试日志与「total timeout exceeded」异常里的 URL 保留完整结构但敏感字段打码——`access_token`/`token`/`sign`/`signature`/`secret`/`key` 等查询参数值，以及 Telegram `/bot<token>/`、Server酱 `/<SendKey>.send` 路径令牌；新增公开方法 `HttpIo.maskUrl`。钉钉/Telegram/Server酱/阿里云短信等凭证不再随日志或异常落盘。
+- `jkit-notify`：SMTP 修复四处——收件人/发件人/Reply-To 不再允许 CR/LF（配置层剥除 + 渠道层拒绝），杜绝向 MIME 头与 SMTP 命令注入；DATA 阶段真正执行 RFC 5321 dot-stuffing（此前 `dotStuff()` 存在但未接入发送路径）；EHLO 声明时优先 `AUTH PLAIN`（此前只会 `AUTH LOGIN`）；单个 RCPT 被拒不再中断整封邮件，全部拒绝才算失败，部分被拒在结果的 response 里列出。
+- `jkit-notify`：新增 `NotificationChannel.validate(ChannelConfig)`（默认空实现）。`NotificationManager` 在任何网络发送前调用，`sendAll` / `sendFailover` 恢复「编程错误不会部分发送」的契约——此前缺 webhook/token 会在前一渠道真实发出后才抛。短信与 ntfy 渠道的 URL 构造依赖消息，改用探针消息预检。
+- `jkit-notify`：`Message` 新增 `copy()`；短信渠道逐号码发送基于副本注入当前收件人，不再把 `smsReceiver` 写回污染调用方消息，同一消息并发发多个短信渠道也不会互相覆盖收件人。
+- `jkit-notify`：`SendResult` 聚合时本地抑制（SUPPRESSED）按最轻级别处理，不再盖过限流/配置错误成为聚合结果的最严重类别。
+- `jkit-notify`：`Attachment.contentBytes()` 文件附件按块读取，不再按声明长度一次性分配（大文件直接 OOM）；超过 2GB 快速失败并提示改用 `openStream()`。
+- `jkit-notify`：渠道注册表 `register/unregister/get/list` 加同步，并发读写不再可能丢渠道或抛 `ConcurrentModificationException`；`NotifyPolicy` 去重占位与限流计数前移到 `beforeSend` 原子完成（`afterAttempt` 保留兼容、不再重复记账），并发下同一条消息不会同时通过去重检查、也不会放行超额消息；默认异步线程池改为 8 线程 + 1000 有界队列 + CallerRunsPolicy 背压，不再无限积压。
+- `jkit-notify`：SPI 加载逐 provider 容错，单个扩展渠道损坏（缺依赖 / 构造抛异常）只告警跳过，不再让整个模块以 `ExceptionInInitializerError` 崩掉。
+- `jkit-notify-extra`：阿里云短信 `RegionId` 跟随 `CFG_REGION`（可配地域），不再硬编码 `cn-hangzhou`。
 
 ## 2.0.1 - 2026-09-13
 
