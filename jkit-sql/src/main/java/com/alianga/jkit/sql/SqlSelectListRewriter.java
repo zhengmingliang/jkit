@@ -163,6 +163,8 @@ public final class SqlSelectListRewriter {
 
     private static void replaceInSelectBatch(SqlSelect select, List<ReplaceSpec> specs, String alias) {
         List<SqlSelectItem> items = select.selectItems();
+        // 同一 SELECT 内共享别名只赋给首个命中项，避免多列替换产生重复别名（2.0.2 修复）
+        boolean sharedAliasUsed = false;
         for (int i = 0; i < items.size(); i++) {
             SqlSelectItem item = items.get(i);
             for (int s = 0; s < specs.size(); s++) {
@@ -171,8 +173,16 @@ public final class SqlSelectListRewriter {
                     continue;
                 }
                 item.setExpr(copyExpr(spec.replacement));
-                if (alias != null) {
-                    item.setAlias(alias.length() == 0 ? null : alias);
+                if (alias != null && alias.length() == 0) {
+                    item.setAlias(null);
+                } else if (alias != null) {
+                    if (!sharedAliasUsed) {
+                        item.setAlias(alias);
+                        sharedAliasUsed = true;
+                    } else {
+                        // 重复命中：退回各列自己的别名，保证输出列名不变且无重复
+                        item.setAlias(spec.simple);
+                    }
                 } else if (item.alias() == null || item.alias().isEmpty()) {
                     item.setAlias(spec.simple);
                 }

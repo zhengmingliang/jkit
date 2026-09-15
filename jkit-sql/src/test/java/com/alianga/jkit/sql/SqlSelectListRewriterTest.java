@@ -262,6 +262,41 @@ public class SqlSelectListRewriterTest {
     }
 
     @Test
+    public void sharedAliasAppliedOnceWhenSameColumnRepeated() {
+        // 边缘场景：同一 SELECT 中同一列出现两次，共享别名只能赋给首个命中项，
+        // 其余退回各列自己的别名，避免产生重复输出别名（2.0.2 修复）。
+        SqlStatement out = SQL.replaceSelectItem(
+                SQL.parse("SELECT phone, phone FROM t_customer"),
+                "phone", SQL.parseExpr("'x'"), "p");
+        String n = sql(out);
+        SQL.parse(n); // 仍应是合法 SQL
+        SqlSelect select = (SqlSelect) out;
+        int pCount = 0;
+        int phoneCount = 0;
+        for (int i = 0; i < select.selectItems().size(); i++) {
+            String a = select.selectItems().get(i).alias();
+            if ("p".equals(a)) {
+                pCount++;
+            } else if ("phone".equals(a)) {
+                phoneCount++;
+            }
+        }
+        assertEquals(n, 1, pCount);
+        assertEquals(n, 1, phoneCount);
+    }
+
+    @Test
+    public void sharedAliasAppliesPerSelectInUnion() {
+        // 共享别名在 UNION 的每个分支（独立 SELECT）都应生效，输出列名保持一致。
+        SqlStatement out = SQL.replaceSelectItem(
+                SQL.parse("SELECT phone FROM t_customer UNION SELECT phone FROM t_backup"),
+                "phone", SQL.parseExpr("'x'"), "p");
+        String n = sql(out);
+        assertEquals(n, 2, countOf(n, " AS p"));
+        SQL.parse(n);
+    }
+
+    @Test
     public void nullsAreNoops() {
         SqlStatement stmt = SQL.parse("SELECT phone FROM t");
         assertSame(stmt, SQL.replaceSelectItem(stmt, "phone", (String) null));
