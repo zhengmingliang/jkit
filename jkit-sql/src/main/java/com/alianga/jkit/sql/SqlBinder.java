@@ -31,11 +31,9 @@ import com.alianga.jkit.sql.visitor.SqlAstVisitor;
 import java.lang.reflect.Array;
 import java.math.BigDecimal;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
@@ -87,11 +85,9 @@ public final class SqlBinder {
             return statement;
         }
         SqlDialectSpec d = dialect == null ? SqlDialect.MYSQL : dialect;
-        Iterator<Object> pos = positional == null
-                ? Collections.emptyIterator() : Arrays.asList(positional).iterator();
         Map<String, ?> names = named == null
                 ? Collections.<String, Object>emptyMap() : named;
-        statement.accept(new Binder(d, pos, names, extraPatterns(placeholders)));
+        statement.accept(new Binder(d, positional, names, extraPatterns(placeholders)));
         return statement;
     }
 
@@ -214,7 +210,7 @@ public final class SqlBinder {
             if (value instanceof Float || value instanceof Double || value instanceof BigDecimal) {
                 return SqlLiteral.of(SqlLiteral.Kind.NUMBER, value.toString());
             }
-            return SqlLiteral.of(SqlLiteral.Kind.NUMBER, value.toString());
+            return SqlLiteral.of(SqlLiteral.Kind.NUMBER, numberText((Number) value));
         }
         if (value instanceof byte[]) {
             return SqlLiteral.of(SqlLiteral.Kind.HEX, "X'" + toHex((byte[]) value) + "'");
@@ -253,9 +249,14 @@ public final class SqlBinder {
         if (raw == null) {
             return "NULL";
         }
-        StringBuilder sb = new StringBuilder(raw.length() + 2);
+        int q = raw.indexOf('\'');
+        if (q < 0) {
+            return "'" + raw + "'";
+        }
+        StringBuilder sb = new StringBuilder(raw.length() + 4);
         sb.append('\'');
-        for (int i = 0; i < raw.length(); i++) {
+        sb.append(raw, 0, q);
+        for (int i = q; i < raw.length(); i++) {
             char c = raw.charAt(i);
             if (c == '\'') {
                 sb.append('\'');
@@ -266,6 +267,28 @@ public final class SqlBinder {
         return sb.toString();
     }
 
+    private static final String[] SMALL_INTS = smallInts();
+
+    private static String[] smallInts() {
+        String[] a = new String[128];
+        for (int i = 0; i < a.length; i++) {
+            a[i] = Integer.toString(i);
+        }
+        return a;
+    }
+
+    private static String numberText(Number value) {
+        if (value instanceof Integer || value instanceof Long
+                || value instanceof Short || value instanceof Byte) {
+            long n = value.longValue();
+            if (n >= 0L && n < SMALL_INTS.length) {
+                return SMALL_INTS[(int) n];
+            }
+            return Long.toString(n);
+        }
+        return value.toString();
+    }
+
     private static boolean isBind(SqlExpr expr) {
         if (!(expr instanceof SqlLiteral)) {
             return false;
@@ -274,18 +297,12 @@ public final class SqlBinder {
         return lit.kind() == SqlLiteral.Kind.BIND || lit.kind() == SqlLiteral.Kind.NAMED_BIND;
     }
 
-    private static Object take(SqlLiteral bind, Iterator<Object> pos, Map<String, ?> names) {
-        if (bind.kind() == SqlLiteral.Kind.NAMED_BIND) {
-            String name = bind.name() == null ? bind.value() : bind.name();
-            if (name == null || !names.containsKey(name)) {
-                throw new IllegalArgumentException("missing named bind :" + name);
-            }
-            return names.get(name);
+    private static Object takeNamed(SqlLiteral bind, Map<String, ?> names) {
+        String name = bind.name() == null ? bind.value() : bind.name();
+        if (name == null || !names.containsKey(name)) {
+            throw new IllegalArgumentException("missing named bind :" + name);
         }
-        if (!pos.hasNext()) {
-            throw new IllegalArgumentException("not enough bind values");
-        }
-        return pos.next();
+        return names.get(name);
     }
 
     private static List<SqlExpr> flatten(Object v, SqlDialectSpec dialect) {
@@ -308,23 +325,34 @@ public final class SqlBinder {
      */
     private static final class Binder extends SqlAstVisitor {
         private final SqlDialectSpec dialect;
-        private final Iterator<Object> pos;
+        private final Object[] positional;
+        private int posAt;
         private final Map<String, ?> names;
         private final boolean hasNamed;
         private final SqlPlaceholderPattern[] extraWraps;
 
-        private Binder(SqlDialectSpec dialect, Iterator<Object> pos, Map<String, ?> names,
+        private Binder(SqlDialectSpec dialect, Object[] positional, Map<String, ?> names,
                 SqlPlaceholderPattern[] extraWraps) {
             this.dialect = dialect;
-            this.pos = pos;
+            this.positional = positional;
             this.names = names;
             this.hasNamed = names != null && !names.isEmpty();
             this.extraWraps = extraWraps;
         }
 
+        private Object take(SqlLiteral bind) {
+            if (bind.kind() == SqlLiteral.Kind.NAMED_BIND) {
+                return takeNamed(bind, names);
+            }
+            if (positional == null || posAt >= positional.length) {
+                throw new IllegalArgumentException("not enough bind values");
+            }
+            return positional[posAt++];
+        }
+
         private SqlExpr replace(SqlExpr e) {
             if (isBind(e)) {
-                return expr(take((SqlLiteral) e, pos, names), dialect);
+                return expr(take((SqlLiteral) e), dialect);
             }
             if (hasNamed && e instanceof SqlIdentifier) {
                 Object v = lookupIdent((SqlIdentifier) e);
@@ -563,7 +591,7 @@ public final class SqlBinder {
             node.setExpr(replace(node.expr()));
             List<SqlExpr> values = node.values();
             if (values != null && values.size() == 1 && isBind(values.get(0))) {
-                Object v = take((SqlLiteral) values.get(0), pos, names);
+                Object v = take((SqlLiteral) values.get(0));
                 if (v instanceof Collection || (v != null && v.getClass().isArray())) {
                     List<SqlExpr> items = flatten(v, dialect);
                     if (items.isEmpty()) {

@@ -653,6 +653,8 @@ mvn -Dtest=SqlParserCompareTest test
 
 On the `tools-test` file corpus `sql-corpus.txt` (about **379** statements), **jkit scores 379/379 (100%)**; the embedded CORPUS (about 64 statements) is also fully green. Competitor gaps vary with the samples (Druid commonly fails on `DISTINCT ON` / WINDOW inheritance / UNNEST; JSqlParser commonly fails on `LOCK IN SHARE MODE` / `[dbo].[user]` / WINDOW inheritance).
 
+The `SQL.bind` / `bindNamed` string entry points fill the tree produced by parse in place (no second clone). `SQL.bind(stmt, …)` still clone-then-mutates. Wall-clock `SqlBindBenchTest` in tools-test (warmup=2000 / iter=20000): full-path named bind went from slower than Druid to faster; the cached-AST path remains slower than JSqlParser because jkit must clone.
+
 Throughput is measured with **JMH** (`SqlParseBenchmark` in `tools-test`). Formal run (fork=2, warmup=5, iterations=5, Cnt=10, avgt, ns/op — lower is better; measured 2026-09-10 on i9-13900HX / OpenJDK 17.0.11):
 
 | Engine | SIMPLE (single table) | JOIN (two tables) | WINDOW (window function) |

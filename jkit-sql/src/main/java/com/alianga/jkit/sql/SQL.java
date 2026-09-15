@@ -1094,8 +1094,8 @@ public final class SQL {
      */
     public static String bind(String sql, SqlDialectSpec dialect, Object... values) {
         SqlDialectSpec d = dialect == null ? SqlDialect.MYSQL : dialect;
-        SqlStatement stmt = parse(sql, d);
-        return toSqlString(bind(stmt, d, values), d);
+        // parse 已是新树，字符串入口不再 clone
+        return toSqlString(SqlBinder.bind(parse(sql, d), d, values, null), d);
     }
 
     /**
@@ -1154,7 +1154,7 @@ public final class SQL {
             Map<String, ?> values) {
         SqlDialectSpec d = dialect == null ? SqlDialect.MYSQL : dialect;
         SqlStatement stmt = options == null ? parse(sql, d) : parse(sql, d, options);
-        return toSqlString(bindNamed(stmt, d, values,
+        return toSqlString(SqlBinder.bind(stmt, d, null, values,
                 options == null ? null : options.placeholders()), d);
     }
 

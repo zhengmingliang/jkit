@@ -16,6 +16,7 @@ Unreleased changes are appended to the **current version** section (currently 2.
 
 ### Changed
 
+- `jkit-sql`: `SQL.bind` / `bindNamed` string entry points no longer clone the tree just produced by parse; visitor dispatch puts SELECT/expr types first; bind values allocate less (index over Iterator, fast-path strings without quotes, interned small-int text). The AST entry points still clone-then-mutate.
 - `jkit-sql-auto`: `SqlAutoDialects.fromUrl` / `driverForUrl` now delegate to `JdbcUrlUtils` (more URL prefixes: Gauss, Kingbase, Hive, ClickHouse, Trino, …).
 
 ### Fixed

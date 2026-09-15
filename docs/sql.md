@@ -711,6 +711,8 @@ mvn -Dtest=SqlParserCompareTest test
 
 `tools-test` 文件语料 `sql-corpus.txt`（约 **379** 条）上 **jkit 379/379（100%）**；内嵌 CORPUS（约 64 条）亦全绿。竞品缺口随样例变化（Druid 常见挂 `DISTINCT ON` / WINDOW 继承 / UNNEST；JSqlParser 常见挂 `LOCK IN SHARE MODE` / `[dbo].[user]` / WINDOW 继承）。
 
+`SQL.bind` / `bindNamed` 字符串入口对 parse 得到的新树就地填值（不再二次 clone）；`SQL.bind(stmt, …)` AST 入口仍 clone-then-mutate。tools-test `SqlBindBenchTest` 墙钟对比（warmup=2000 / iter=20000）：全路径命名填值从慢于 Druid 改为快于 Druid；缓存 AST 路径因必须 clone，仍慢于只反解析的 JSqlParser。
+
 吞吐以 **JMH** 为准（`tools-test` 的 `SqlParseBenchmark`）。正式轮实测（fork=2、warmup=5、iteration=5、Cnt=10，avgt，ns/op，越小越好；2026-09-10，i9-13900HX / OpenJDK 17.0.11）：
 
 | 引擎 | SIMPLE（单表查询） | JOIN（双表连接） | WINDOW（窗口函数） |
