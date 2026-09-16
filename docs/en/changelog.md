@@ -14,6 +14,7 @@ Unreleased changes are appended to the **current version** section (currently 2.
 
 - `JdbcUrlUtils`: parse JDBC URLs (host / cluster nodes / database / schema / parameters), infer `SqlDialect` via `fromUrl`, return a short type name via `getDbType`, and guess the driver class via `driverForUrl` / `getDriverClassName`. Covers MySQL replication and load-balance, PostgreSQL HA, Oracle SID/Service/RAC, SQL Server, H2, Gauss/openGauss, Dameng, and more. PostgreSQL-family URLs read schema from `currentSchema` (default `public`).
 - `com.alianga.jkit.sql.entity.Comment`: first-party table/column comment annotation (`TYPE`+`FIELD`, `value()`). Sits alongside Hibernate `@Comment` and `@SqlTable(comment)` / `@SqlColumn(comment)`; the scanner still matches the simple name `Comment`, so `jkit-sql-model` and similar modules can prefer this package.
+- Complex SQL dialect slice L2/L4 harness (SQL Server): `ComplexSqlSqlServerSliceL2*` (jkit-sql) and `ComplexSqlSqlServerNativeExecute*` (tools-test); 001–300 native execute on `jkit_ss_test` (1433) 300/300 (parseFail=0 / execFail=0); reports under `target/complex-sql-reports/sqlserver-l2|l4-*`.
 
 ### Changed
 
