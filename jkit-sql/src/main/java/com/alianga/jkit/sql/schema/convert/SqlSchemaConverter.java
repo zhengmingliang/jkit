@@ -6,8 +6,11 @@ import com.alianga.jkit.sql.SqlDialectSpec;
 import com.alianga.jkit.sql.ast.SqlDdlStatement;
 import com.alianga.jkit.sql.ast.SqlExpr;
 import com.alianga.jkit.sql.ast.SqlIdentifier;
+import com.alianga.jkit.sql.ast.SqlSelect;
+import com.alianga.jkit.sql.ast.SqlSelectItem;
 import com.alianga.jkit.sql.ast.SqlStatement;
 import com.alianga.jkit.sql.ast.SqlStatementType;
+import com.alianga.jkit.sql.ast.SqlWithItem;
 import com.alianga.jkit.sql.schema.model.ColumnConstraint;
 import com.alianga.jkit.sql.schema.model.ColumnDefinition;
 import com.alianga.jkit.sql.schema.parse.SqlColumnDefinitionParser;
@@ -174,7 +177,68 @@ public final class SqlSchemaConverter {
             convertDdl((SqlDdlStatement) copy, source, target, options, report);
         }
         FunctionAstRewriter.rewrite(copy, source, target, report);
+        adaptRecursiveCte(copy, target);
         return copy;
+    }
+
+    /**
+     * Oracle / SQL Server 没有 {@code WITH RECURSIVE} 关键字。
+     * Oracle 递归 CTE 还要求列清单：{@code WITH x(c1, c2) AS (...)}。
+     */
+    private static void adaptRecursiveCte(SqlStatement stmt, SqlDialectSpec target) {
+        if (stmt == null || target == null) {
+            return;
+        }
+        SqlDialect family = target.typeFamily();
+        boolean oracleFamily = family == SqlDialect.ORACLE || family == SqlDialect.ORACLE12
+                || family == SqlDialect.DAMENG;
+        if (stmt.withRecursive() && (oracleFamily || family == SqlDialect.SQLSERVER)) {
+            stmt.setWithRecursive(false);
+        }
+        if (!oracleFamily || stmt.withItems().isEmpty()) {
+            return;
+        }
+        List<SqlWithItem> items = stmt.withItems();
+        for (int i = 0; i < items.size(); i++) {
+            ensureOracleCteColumns(items.get(i));
+        }
+    }
+
+    private static void ensureOracleCteColumns(SqlWithItem item) {
+        if (item == null) {
+            return;
+        }
+        if (item.columns() != null && !item.columns().isEmpty()) {
+            return;
+        }
+        if (!(item.query() instanceof SqlSelect)) {
+            return;
+        }
+        SqlSelect select = (SqlSelect) item.query();
+        if (select.selectItems().isEmpty()) {
+            return;
+        }
+        List<SqlIdentifier> cols = new ArrayList<SqlIdentifier>(select.selectItems().size());
+        List<SqlSelectItem> items = select.selectItems();
+        for (int i = 0; i < items.size(); i++) {
+            SqlSelectItem si = items.get(i);
+            String name = si.alias();
+            if (name == null || name.isEmpty()) {
+                name = identName(si.expr());
+            }
+            if (name == null || name.isEmpty()) {
+                name = "c" + (i + 1);
+            }
+            cols.add(SqlIdentifier.of(name));
+        }
+        item.setColumns(cols);
+    }
+
+    private static String identName(SqlExpr expr) {
+        if (expr instanceof SqlIdentifier) {
+            return ((SqlIdentifier) expr).simpleName();
+        }
+        return null;
     }
 
     private static void convertDdl(SqlDdlStatement ddl, SqlDialectSpec source, SqlDialectSpec target,

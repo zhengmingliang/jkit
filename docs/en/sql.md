@@ -537,7 +537,7 @@ Undeclared reverse collisions fail `RegistryValidator` at builtin-table build ti
 
 - `IF`→`CASE`, `GROUP_CONCAT`↔`STRING_AGG`/`LISTAGG`, `IFNULL`/`NVL`/`ISNULL`, `CAST`, `LOCATE`/`INSTR`
 - `SUBSTRING`/`LEFT`/`RIGHT`: `FROM n FOR m` on PG/MySQL/H2; comma-form on SQL Server/SQLite; SQLite/Hive `LEFT`/`RIGHT` expand to `SUBSTR`
-- `DATE_ADD`/`DATE_SUB`/`DATEDIFF`/`FROM_UNIXTIME`; `DECODE`/`NVL2`→`CASE`
+- `DATE_ADD`/`DATE_SUB`/`DATEDIFF`/`FROM_UNIXTIME`; SQL Server `DATEADD`/`GETDATE`; `CURRENT_DATE` → `CAST(GETDATE() AS DATE)` on SQL Server; Oracle day intervals as numeric add/subtract (avoids ORA-01873); `LEAST`/`GREATEST` → nested `CASE` on SQL Server; Oracle recursive CTEs get a column list and drop `RECURSIVE`; `DECODE`/`NVL2`→`CASE`
 - `DATE_FORMAT`: common specifiers are rewritten (`%Y-%m-%d %H:%i:%s` → PG/Oracle `TO_CHAR(..., 'YYYY-MM-DD HH24:MI:SS')`; SQLite `strftime` swaps arguments and maps `%i` to `%M`). Unmapped specifiers stay and raise `SEMANTIC_RISK`
 
 MySQL table-level `KEY`/`INDEX` becomes appendix `CREATE INDEX` (FULLTEXT/SPATIAL dropped with `MANUAL_ACTION_REQUIRED`). Independent `CREATE INDEX … USING BTREE` drops `USING` on non-MySQL targets. `ALTER … MODIFY/CHANGE` to PG/H2 becomes `ALTER COLUMN … TYPE`, with NOT NULL/DEFAULT as extra statements.

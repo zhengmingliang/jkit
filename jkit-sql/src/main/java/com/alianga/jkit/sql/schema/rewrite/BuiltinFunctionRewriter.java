@@ -175,8 +175,14 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
                 || "MINUTE".equals(name) || "SECOND".equals(name)) {
             return rewriteDatePart(fn, name, family, report);
         }
-        if ("SYSDATE".equals(name)) {
+        if ("SYSDATE".equals(name) || "GETDATE".equals(name)) {
             return rewriteSysDate(fn, family);
+        }
+        if ("DATEADD".equals(name)) {
+            return rewriteDateAdd(fn, family, report);
+        }
+        if ("LEAST".equals(name) || "GREATEST".equals(name)) {
+            return rewriteLeastGreatest(fn, name, family);
         }
         if ("LAST_DAY".equals(name)) {
             return rewriteLastDay(fn, family, report);
@@ -726,10 +732,15 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
         }
         if (family == SqlDialect.ORACLE || family == SqlDialect.ORACLE12
                 || family == SqlDialect.DAMENG) {
+            String u = unit.toUpperCase(Locale.ROOT);
+            // INTERVAL '180' DAY 默认前导精度 2，会 ORA-01873；按日加减用数字更贴近语料。
+            if ("DAY".equals(u) || "DAYS".equals(u)) {
+                return SqlLiteral.of(SqlLiteral.Kind.NUMBER, num);
+            }
             SqlFunctionExpr out = new SqlFunctionExpr();
             out.setName(SqlIdentifier.of("INTERVAL"));
             out.addArgument(SqlLiteral.of(SqlLiteral.Kind.STRING, "'" + num + "'"));
-            out.addArgument(SqlIdentifier.of(unit.toUpperCase(Locale.ROOT)));
+            out.addArgument(SqlIdentifier.of(u));
             return out;
         }
         if (family == SqlDialect.CLICKHOUSE) {
@@ -1268,8 +1279,8 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
     }
 
     private static SqlExpr rewriteSysDate(SqlFunctionExpr fn, SqlDialect family) {
-        if (family == SqlDialect.MYSQL) {
-            return fn;
+        if (family == SqlDialect.MYSQL || family == SqlDialect.H2 || family == SqlDialect.HIVE) {
+            return call("NOW");
         }
         if (family == SqlDialect.ORACLE || family == SqlDialect.ORACLE12
                 || family == SqlDialect.DAMENG) {
@@ -1282,6 +1293,102 @@ public final class BuiltinFunctionRewriter implements FunctionRewriteRule {
             return call("datetime", SqlLiteral.of(SqlLiteral.Kind.STRING, "'now'"));
         }
         return SqlIdentifier.of("CURRENT_TIMESTAMP");
+    }
+
+    /**
+     * SQL Server {@code DATEADD(unit, n, date)} → MySQL {@code DATE_ADD} / PG·Oracle 间隔运算。
+     */
+    private static SqlExpr rewriteDateAdd(SqlFunctionExpr fn, SqlDialect family,
+                                          ConversionReport.Builder report) {
+        List<SqlExpr> args = fn.arguments();
+        if (args.size() < 3) {
+            return fn;
+        }
+        if (family == SqlDialect.SQLSERVER) {
+            return fn;
+        }
+        String unit = identText(args.get(0));
+        String num = literalNumber(args.get(1));
+        if (unit == null || num == null) {
+            report.warn(ConversionWarning.Severity.SEMANTIC_RISK, "DATEADD",
+                    "DATEADD 参数无法识别，已保留原文");
+            return fn;
+        }
+        boolean sub = num.startsWith("-");
+        String abs = sub ? num.substring(1) : num;
+        if (abs.isEmpty()) {
+            abs = "0";
+        }
+        SqlExpr base = args.get(2);
+        if (family == SqlDialect.MYSQL || family == SqlDialect.H2 || family == SqlDialect.HIVE) {
+            SqlFunctionExpr interval = call("INTERVAL",
+                    SqlLiteral.of(SqlLiteral.Kind.NUMBER, abs),
+                    SqlIdentifier.of(unit.toUpperCase(Locale.ROOT)));
+            return call(sub ? "DATE_SUB" : "DATE_ADD", base, interval);
+        }
+        SqlExpr interval = toTargetInterval(abs, unit, family, "DATEADD", report);
+        if (interval == null) {
+            return fn;
+        }
+        SqlBinaryExpr bin = new SqlBinaryExpr();
+        bin.setOperator(sub ? SqlBinaryOp.MINUS : SqlBinaryOp.PLUS);
+        bin.setLeft(castToDate(base));
+        bin.setRight(interval);
+        bin.setParenthesized(true);
+        return bin;
+    }
+
+    /**
+     * SQL Server 无 LEAST/GREATEST（2019 语料约定），改写成嵌套 CASE。
+     */
+    private static SqlExpr rewriteLeastGreatest(SqlFunctionExpr fn, String name, SqlDialect family) {
+        if (family != SqlDialect.SQLSERVER) {
+            return fn;
+        }
+        List<SqlExpr> args = fn.arguments();
+        if (args.size() < 2) {
+            return fn;
+        }
+        boolean greatest = "GREATEST".equals(name);
+        SqlExpr acc = args.get(0);
+        for (int i = 1; i < args.size(); i++) {
+            SqlExpr next = args.get(i);
+            SqlCaseExpr cse = new SqlCaseExpr();
+            SqlBinaryExpr pred = new SqlBinaryExpr();
+            pred.setOperator(greatest ? SqlBinaryOp.GE : SqlBinaryOp.LE);
+            pred.setLeft(acc);
+            pred.setRight(next);
+            cse.addWhenThen(pred, acc);
+            cse.setElseExpr(next);
+            acc = cse;
+        }
+        return acc;
+    }
+
+    private static String identText(SqlExpr expr) {
+        if (expr instanceof SqlIdentifier) {
+            return ((SqlIdentifier) expr).simpleName();
+        }
+        return null;
+    }
+
+    private static String literalNumber(SqlExpr expr) {
+        if (expr instanceof SqlLiteral) {
+            SqlLiteral lit = (SqlLiteral) expr;
+            if (lit.kind() == SqlLiteral.Kind.NUMBER && lit.value() != null) {
+                return lit.value();
+            }
+        }
+        if (expr instanceof SqlUnaryExpr) {
+            SqlUnaryExpr u = (SqlUnaryExpr) expr;
+            if (u.operator() == SqlUnaryExpr.Op.MINUS) {
+                String inner = literalNumber(u.expr());
+                if (inner != null) {
+                    return inner.startsWith("-") ? inner.substring(1) : "-" + inner;
+                }
+            }
+        }
+        return null;
     }
 
     private static SqlExpr rewriteLastDay(SqlFunctionExpr fn, SqlDialect family,

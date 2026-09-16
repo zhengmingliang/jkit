@@ -3604,7 +3604,19 @@ public final class SqlFormatter {
                 && args.get(1) instanceof SqlIdentifier) {
             return true;
         }
-        return args.size() == 1;
+        // DATE/TIME/TIMESTAMP '2020-01-01' / DATE ? 是类型字面量；DATE(col) 是函数，必须带括号。
+        return args.size() == 1 && isTypedLiteralValue(args.get(0));
+    }
+
+    private static boolean isTypedLiteralValue(SqlExpr expr) {
+        if (expr instanceof SqlLiteral) {
+            SqlLiteral.Kind kind = ((SqlLiteral) expr).kind();
+            return kind == SqlLiteral.Kind.STRING
+                    || kind == SqlLiteral.Kind.BIND
+                    || kind == SqlLiteral.Kind.NAMED_BIND
+                    || kind == SqlLiteral.Kind.VARIABLE;
+        }
+        return false;
     }
 
     private void writeTrimArgs(List<SqlExpr> args) {

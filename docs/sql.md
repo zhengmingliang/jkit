@@ -595,7 +595,12 @@ Oracle ≤11g 的自增默认给出 `MANUAL_ACTION_REQUIRED`；`generateOracleSe
 - `CONCAT(a,b,c)` 在 Oracle 下改为 `||`（Oracle `CONCAT` 只接受两参数）
 - `CAST` / `CONVERT(expr, type)` 的类型走 canonical 表
 - MySQL `CONVERT(expr USING charset)` **不会**误映射成 CAST，只告警并保留原文
-- `DATE_ADD`/`DATE_SUB` → 加减 `INTERVAL`；`DATEDIFF` → 日期相减；`FROM_UNIXTIME` → `TO_TIMESTAMP`
+- `DATE_ADD`/`DATE_SUB` → 加减 `INTERVAL`；转到 Oracle 的「日」间隔写成数字加减（避免 `INTERVAL '180' DAY` 前导精度 2 触发 ORA-01873）
+- `DATEADD(unit, n, d)`（SQL Server 源）→ MySQL `DATE_ADD`/`DATE_SUB`，或 PG/Oracle 间隔运算
+- `GETDATE()` / `SYSDATE` / `NOW()` 互转；SQL Server 目标把 `CURRENT_DATE` 改成 `CAST(GETDATE() AS DATE)`
+- `LEAST`/`GREATEST` 转到 SQL Server 改写成嵌套 `CASE`
+- Oracle / SQL Server 目标去掉 `WITH RECURSIVE` 关键字；Oracle 递归 CTE 补列清单 `WITH x(c1, c2) AS (...)`
+- `DATEDIFF` → 日期相减；`FROM_UNIXTIME` → `TO_TIMESTAMP`
 - `DATE_FORMAT`：常见格式符会改写（`%Y-%m-%d %H:%i:%s` → PG/Oracle `TO_CHAR(..., 'YYYY-MM-DD HH24:MI:SS')`；SQLite `strftime` 交换参数并把 `%i` 改成 `%M`）。对不上的格式符保留并 `SEMANTIC_RISK`
 - `SUBSTRING`/`LEFT`/`RIGHT`/`MID`：Oracle/达梦 `SUBSTR`；SQL Server 两参数补 `LEN`、负起点改 `RIGHT`；SQLite/Hive 的 `LEFT`/`RIGHT` 展开成 `SUBSTR`。回写按方言：PG/MySQL 用 `FROM n FOR m`，SQL Server/SQLite 用逗号
 - `UCASE`/`LCASE`→`UPPER`/`LOWER`；`CONCAT_WS`；`LPAD`/`RPAD`；`SPACE`；`CEIL`/`CEILING`；`POW`/`POWER`；`MOD`；`YEAR`/`MONTH`/`DAY`/`HOUR`/`MINUTE`/`SECOND`；`SYSDATE`；`LAST_DAY`；`CHAR`/`CHR`
@@ -613,6 +618,7 @@ mvn -Dtest=CrossDialectDdlExecutionTest test      # MySQL→PG 建表；需要 D
 mvn -Dtest=CrossDialectExprExecutionTest test     # DDL+表达式真库执行：PG 上 DATE_ADD→INTERVAL、DATEDIFF→CAST 减法、MySQL 上 ||→CONCAT、SQLite 上 AUTOINCREMENT、NUMERIC(10,2) 不截断；PG/MySQL 走 Docker，SQLite 走内存库
 mvn -Dtest=LocalDatasourceConvertTest test        # 读 src/test/resources/datasource，连本机 MySQL/PG/Oracle
 mvn -Dtest=LocalDatasourceFunctionRewriteTest test  # 同上，真库执行 SUBSTRING/LEFT/RIGHT/LOCATE 改写结果
+mvn -Dtest=ComplexSqlExecutionIT test               # 1200 条复杂 SQL 代表题（001/022/211）原文 + MySQL→Oracle12/SQL Server 转换后真库执行
 java -jar target/benchmarks.jar com.alianga.test.sql.jmh.SqlSchemaConvertBenchmark -f 1 -wi 1 -i 1
 ```
 

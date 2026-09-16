@@ -609,3 +609,71 @@ Spring Boot 2/3 starter：`jkit-sql-auto-spring-boot-2`（`spring.factories`）�
 表 / 列注释按方言生成（MySQL/Hive/ClickHouse 内联、H2 列内 + `COMMENT ON TABLE`、PG/Oracle/DB2/ANSI `COMMENT ON`、SQL Server `sp_addextendedproperty`、Presto 表级 `WITH`、SQLite 忽略）。Oracle ≤11g 自增用 SEQUENCE + TRIGGER；达梦列上写 IDENTITY。`CREATE TABLE`（`includeIndexes=false`）不含附录，由 `extraSql` 单独执行。
 
 `SqlDialect.DAMENG` 一等方言：`fromName("dm"/"dameng")`、`jdbc:dm:`。函数改写：`NVL`/`INSTR`/`LISTAGG`/`TO_DATE`/`FROM_UNIXTIME→NUMTODSINTERVAL`。
+
+---
+
+## 12. 复杂业务 SQL 1200 条回归（2026-09-16，可并行）
+
+语料：`jkit-sql/src/test/resources/sqls/complex-sql/`，四方言各 300 条（`-- [NNN] 技法 | 业务域 | 标题`），编号 001–300 一一对应。Oracle 语料是 **12c+**（`FETCH FIRST` / 列清单递归 CTE），解析与转换一律 `SqlDialect.ORACLE12`，不要用 `ORACLE`（11g ROWNUM）。
+
+分层漏斗（后一层依赖前一层的报告，不要抢同一批失败 SQL 去改解析器）：
+
+| 层 | 问题 | 代码落点 | 连库 |
+|---|---|---|---|
+| L0 | 库能连、核心表有数据 | `tools-test` IT | 是 |
+| L1 | `SQL.parse` 成功且为 SELECT | `jkit-sql` 单测 | 否 |
+| L2 | parse → `toSqlString` → 再 parse | `jkit-sql` 单测 | 否 |
+| L3 | `SQL.convert(src→dst)` 后再 parse + 形态检查 | `jkit-sql` 单测 | 否 |
+| L4 | 原文 / 回写 / 转换 SQL 在真库可执行 | `tools-test` IT | 是 |
+
+**硬约束**：`jkit-sql` 零 JDBC；不要改 1200 条语料迁就解析器；失败登记 KnownGaps，按 errorClass 聚类再修。
+
+### 12.1 工作包（可分给其他 agent 并行）
+
+**共享前置（先做完再拆并行）**：`ComplexSqlCorpus` 加载器 + 拆条单测必须先绿。切块规则：`^-- \[(\d+)\]`；丢掉块内前导 `--`；SQL Server 去掉独立一行 `GO`；去掉末尾 `;`。
+
+| ID | 工作包 | 目录 / 类 | 依赖 | 验收 |
+|---|---|---|---|---|
+| A | 语料加载器 | `jkit-sql/.../ComplexSqlCorpus.java` + `ComplexSqlCorpusTest` | 无 | 四文件各 300、编号对齐、001/022/211 抽得出 SQL |
+| B | L1 解析 | `ComplexSqlParseCorpusTest` | A | 1200 条 parse；报告 `target/complex-sql-reports/l1-fails.tsv`；第一轮 ≥95%，冲 100% |
+| C | L1 失败修复 | `SqlSelectParser` / `SqlExprParser` / formatter 仅在 B 的聚类之后 | B 的 fails.tsv | 按 Top errorClass 修；`mvn -pl jkit-sql test` 绿 |
+| D | L2 回写 | `ComplexSqlRoundTripTest` | A，建议等 C | L1 通过集合再 parse 100%；文本保真只出报告 |
+| E | L3 转换 | `ComplexSqlConvertCorpusTest` + `BuiltinFunctionRewriter` | A；代表题 001/022/211 可先于全量 | 主矩阵 MYSQL↔ORACLE12 / MYSQL↔SQLSERVER 转换后再 parse ≥90%；源方言特征残留下降 |
+| F | L4 真库 | `tools-test/.../ComplexSqlExecutionIT` | A；C 的原文基线 | 库不可达 `Assume` skip。先 A/D 原文 300 条，再回写，再转换执行。Oracle 指向 19c `M_PDB`，不要用本机 10g |
+| G | KnownGaps + 文档 | `ComplexSqlKnownGapsTest`；语料 README 加「jkit-sql 回归」；**禁止**链到 next-plan | B/C/E 报告 | 缺口显式登记，只减不增 |
+
+并行建议：A 完成后 **B 与 E 的代表题（001/022/211）可同时做**；C 必须等 B 报告；F 的原文基线可与 B 并行（不改解析器）；F 的转换执行必须等 E。不要两个 agent 同时改 `SqlParser` / `BuiltinFunctionRewriter`。
+
+### 12.2 转换 Morph 检查（L3）
+
+| 能力 | MySQL | PG | Oracle12 | SQL Server |
+|---|---|---|---|---|
+| 分页 | `LIMIT` | `LIMIT` | `FETCH FIRST`，禁止裸 `LIMIT` | `OFFSET/FETCH` 或 `TOP`，禁止 `LIMIT` |
+| 串聚合 | `GROUP_CONCAT` | `STRING_AGG` | `LISTAGG` | `STRING_AGG` |
+| 日期截断 | `DATE_FORMAT` / `DATE(` | `DATE_TRUNC` | `TRUNC(..., 'MM')` | `DATEFROMPARTS` |
+| 日期加减 | `DATE_ADD/SUB` | `INTERVAL 'n days'` | `d ± n` 或 `INTERVAL 'n' DAY` | `DATEADD` |
+| 当前日 | `CURRENT_DATE` | `CURRENT_DATE` | `TRUNC(SYSDATE)` | `GETDATE` |
+| 递归 CTE | `WITH RECURSIVE` | `WITH RECURSIVE` | `WITH x(cols) AS`，无 `RECURSIVE` | `WITH x AS` |
+| 空表 | 可省略 FROM | 可省略 FROM | `FROM dual` | 可省略 FROM |
+| 长度 | `LENGTH` | `LENGTH` | `LENGTH` | `LEN` |
+| 标准差 | `STDDEV_SAMP` | `STDDEV_SAMP` | `STDDEV_SAMP` | `STDEV` |
+| LEAST/GREATEST | 保留 | 保留 | 保留 | `CASE` |
+
+优先补的改写缺口：`DATE_TRUNC` 族、`PERIOD_DIFF`/`MONTHS_BETWEEN`、`GETDATE`↔`SYSDATE`↔`CURRENT_DATE`、作为**源**的 `DATEADD`、`LEAST`/`GREATEST`→SQL Server CASE、`STDDEV_SAMP`↔`STDEV`、`WITH RECURSIVE`↔Oracle 列清单、`FORMAT(d,'yyyy-MM')`、`INTERVAL` 双向、CTE+ORDER BY+LIMIT 的分页包装。
+
+### 12.3 真库（L0/L4）
+
+数据源：`/opt/workspace/zml/tools-test/src/test/resources/datasource`。MySQL `127.0.0.1:3308/test_db`；Oracle 19c `192.168.1.197:2521` 服务名 `M_PDB`（`ORACLE12`）；SQL Server `127.0.0.1:1433/jkit_ss_test`。PostgreSQL 可选。`setMaxRows(200)`、`queryTimeout(30)`、只跑 SELECT、剥掉 `GO`。空结果先对照原文基线（数据按导入时「当前日」生成，窗口类查询会随时间变空）。
+
+### 12.4 本会话进度
+
+- [x] 方案与第 12 节计划（2026-09-16）
+- [x] A 语料加载器 `ComplexSqlCorpus` + `ComplexSqlCorpusTest`（四文件各 300、编号对齐）
+- [x] B L1 全量 parse **1200/1200 = 100%**（MYSQL/POSTGRES/ORACLE12/SQLSERVER 各 300；~0.3s）
+- [x] C 按聚类修解析 — L1 零失败，本轮无需改解析器
+- [x] D L2 结构保真 1200/1200；修 `DATE(col)` 回写丢括号；文本匹配约 46%（非门禁）
+- [x] E L3 主矩阵 1500/1500 parse；残留 0（GETDATE/DATEADD/LEAST/RECURSIVE 已改写）
+- [x] F L4 代表题 001/022/211：原文 9/9、转换 6/6 真库可执行（MySQL / Oracle19c / SQL Server）
+- [x] G KnownGaps 登记已关闭项；仍开放 DATE_TRUNC 族 / PERIOD_DIFF / STDDEV↔STDEV（不影响 parse）
+
+邮件：每完成一块用 `/tmp/jkit-mail-send/SendNotify.java` 发 `mpro@vip.qq.com`（凭证 `email-aliyun`）。

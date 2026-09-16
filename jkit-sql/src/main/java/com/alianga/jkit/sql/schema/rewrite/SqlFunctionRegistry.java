@@ -118,7 +118,9 @@ public final class SqlFunctionRegistry {
                 "UCASE", "LCASE", "CONCAT_WS", "SPACE",
                 "CEIL", "CEILING", "POW", "POWER", "MOD",
                 "YEAR", "MONTH", "DAY", "DAYOFMONTH", "HOUR", "MINUTE", "SECOND",
-                "SYSDATE", "LAST_DAY", "CHAR", "CHR"
+                "SYSDATE", "GETDATE", "DATEADD",
+                "LEAST", "GREATEST",
+                "LAST_DAY", "CHAR", "CHR"
         };
         for (int i = 0; i < names.length; i++) {
             r.register(names[i], builtin);

@@ -15,6 +15,7 @@
 - `SQL.replaceSelectItem` / `SQL.replaceSelectItems` / `SQL.expandStar`：列级脱敏。整树替换 SELECT 投影（保留输出列名）；`replaceSelectItems` 一次 clone、一次遍历替换多列；`expandStar` 按表列清单把 `*` / `t.*` 展开后再裁列或改写成掩码表达式。解析不到的星号保持原样。
 - `SqlWallConfig`：`denyTables` / `allowTables` / `requireWhereColumns` / `maxTables`。违规码 `deny-table`、`allow-table`、`missing-where-column`、`too-many-tables`。恒真再拦 `LIKE '%'` 与 `XOR 1=1`。
 - `DATE_FORMAT` 跨方言转换会改写常见格式符：`%Y-%m-%d %H:%i:%s` → PG/Oracle `TO_CHAR(..., 'YYYY-MM-DD HH24:MI:SS')`，SQLite `strftime` 会交换参数并把 `%i` 改成 `%M`。对不上的格式符保留并 `SEMANTIC_RISK`。
+- 复杂业务 SQL 1200 条回归（`sqls/complex-sql/`，四方言各 300）：L1 parse 1200/1200；L2 parse→format→parse 结构保真 1200/1200；L3 主矩阵 1500 次转换后再 parse 1500/1500。`DATE(col)` 回写不再误成类型字面量。转换补 `GETDATE`/`DATEADD`/`LEAST`/`GREATEST`、`CURRENT_DATE`→SQL Server `CAST(GETDATE() AS DATE)`、Oracle 日期间隔用数字加减、递归 CTE 去 `RECURSIVE` 并补列清单。真库代表题 001/022/211 原文与 MySQL→Oracle12/SQL Server 转换后均可执行（`tools-test` `ComplexSqlExecutionIT`）。
 - `SQL.bind` / `SQL.bindNamed`：把 `?` / `:name` 换成字面量或公式，并识别模板占位 IDENT（`@name@` / `#{table}` / `${*}` / `{{*}}` / `<*>` 等）。表名位置写成标识符（必要时加方言引号，防注入）；表达式位置与 `:name` 相同。字符串只加倍单引号；公式传 `SqlExpr`。`IN ?` 可填集合。布尔：Oracle / 达梦 / SQL Server / SQLite / DB2 / MySQL / Hive 写 `1`/`0`；PG / H2 / ANSI / Presto / ClickHouse 写 `TRUE`/`FALSE`。未传命名值时不扫描标识符。
 - `SqlPlaceholders.mybatis()` / `hashBrace()` / `dollarBrace()`：内置 MyBatis `#{property}`、`${property}`，解析支持 `#{id,jdbcType=VARCHAR}` / `#{item.name}`；bind 按逗号前的属性名取值。
 

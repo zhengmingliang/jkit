@@ -69,6 +69,8 @@ public class SqlRoundTripFidelityTest {
                 {"mysql", "SELECT * FROM t1 UNION ALL SELECT * FROM t2"},
                 {"mysql", "SELECT a, ROW_NUMBER() OVER (PARTITION BY b ORDER BY c) AS rn FROM t"},
                 {"mysql", "SELECT CAST(a AS DECIMAL(10, 2)) FROM t"},
+                {"mysql", "SELECT DATE(o.order_date) FROM orders o"},
+                {"postgres", "SELECT DATE '2020-01-01' FROM t"},
 
                 {"mysql", "SELECT * FROM t1 LEFT JOIN t2 ON t1.a = t2.a"},
                 {"mysql", "SELECT * FROM t1 RIGHT JOIN t2 ON t1.a = t2.a"},

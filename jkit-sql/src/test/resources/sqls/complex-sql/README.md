@@ -232,6 +232,14 @@ departments ──< employees ──< salaries / attendance / leaves / performan
 ## 七、校验说明
 
 - **语法校验**：四份查询文件（各 300 条，共 1200 条）与四份初始化脚本，全部通过 **sqlglot 30.x** 对应方言的 `parse` 校验，0 语法错误。
+- **jkit-sql 回归**（模块测试，不连库；Oracle 语料用 `SqlDialect.ORACLE12`）：
+  - 语料切条：`ComplexSqlCorpusTest`，四文件各 300 条、编号 001–300 对齐。
+  - L1 解析：`ComplexSqlParseCorpusTest`，`SQL.parse` 1200/1200 通过（2026-09-16）。
+  - L2 回写：`ComplexSqlRoundTripTest`，parse→format→parse **1200/1200** 结构不漂移；修了 `DATE(col)` 被误写成类型字面量的问题。文本归一化匹配约 46%（排版差异，非门禁）。
+  - L3 跨方言转换：`ComplexSqlConvertCorpusTest`，主矩阵 1500 次 convert+parse **1500/1500**，源方言特征残留 0。
+  - L4 真库：`tools-test` `ComplexSqlExecutionIT`。MySQL / Oracle 19c / SQL Server 均已连通。代表题 001/022/211 **原文 9/9、MySQL 转换后 6/6** 可执行。全量用 `-Dcomplex.sql.ids=all`。
+  - 报告目录：`jkit-sql/target/complex-sql-reports/`、`tools-test/target/complex-sql-reports/`。
 - **真实执行**（沙箱已安装真实引擎）：
   - **PostgreSQL 16** 与 **MySQL 8**：导入对应初始化脚本后逐条执行 300 条复杂 SQL，**执行失败 0 条，返回 0 行的查询 0 条**——300 条全部跑出非空结果，覆盖窗口函数、递归 CTE、集合运算、风控 / 留存 / 帕累托 / 考勤孤岛等业务模型。
   - **Oracle / SQL Server**：沙箱无法安装真实引擎，初始化脚本与查询文件已通过 sqlglot 逐方言语法校验；其中 Oracle 的 `BEGIN … EXCEPTION` PL/SQL 块与 SQL Server 的 `GO` 批处理分隔符均为对应库原生合法语法。
+
