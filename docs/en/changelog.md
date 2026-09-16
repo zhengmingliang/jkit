@@ -13,6 +13,7 @@ Unreleased changes are appended to the **current version** section (currently 2.
 **jkit-sql**
 
 - `JdbcUrlUtils`: parse JDBC URLs (host / cluster nodes / database / schema / parameters), infer `SqlDialect` via `fromUrl`, return a short type name via `getDbType`, and guess the driver class via `driverForUrl` / `getDriverClassName`. Covers MySQL replication and load-balance, PostgreSQL HA, Oracle SID/Service/RAC, SQL Server, H2, Gauss/openGauss, Dameng, and more. PostgreSQL-family URLs read schema from `currentSchema` (default `public`).
+- `com.alianga.jkit.sql.entity.Comment`: first-party table/column comment annotation (`TYPE`+`FIELD`, `value()`). Sits alongside Hibernate `@Comment` and `@SqlTable(comment)` / `@SqlColumn(comment)`; the scanner still matches the simple name `Comment`, so `jkit-sql-model` and similar modules can prefer this package.
 
 ### Changed
 
@@ -41,6 +42,7 @@ Unreleased changes are appended to the **current version** section (currently 2.
 
 ### Documentation
 
+- `docs/sql.md` / `docs/en/sql.md`: entity table/column comments now name this module's `com.alianga.jkit.sql.entity.Comment`.
 - `docs/sql.md` / `docs/en/sql.md`: classic Oracle ROWNUM wrapping now documents lifting `ORDER BY` off a set-op before pagination, and that `toSqlString` must name the target dialect.
 - `docs/sql.md` / `docs/en/sql.md` business-scenario section: extra copy-paste samples for `bind` / `inject` / `expandStar`+`replaceSelectItems` / `addComment`+dialect quotes / MyBatis `#{}/ ${}`. The template-placeholder section now shows the common parse+bind pattern. Samples match `SqlBusinessScenarioTest`.
 - Business scenarios expanded to 18 (2.0.2): dialect-from-URL (`JdbcUrlUtils`), report `DATE_FORMAT` rewrite, safe dynamic table-name bind, low-code query sandbox (Wall table allow/deny, required WHERE columns, max tables). Scenario 4 also covers tautology `LIKE '%'` / `XOR`.
