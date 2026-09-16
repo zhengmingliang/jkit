@@ -35,6 +35,7 @@ public class ComplexSqlRoundTripTest {
         int parse2Fail = 0;
         int structFail = 0;
         int textMismatch = 0;
+        int parenLoss = 0;
         List<String> failClasses = new ArrayList<String>();
         StringBuilder fails = new StringBuilder();
         fails.append("dialect\tid\tkind\terrorClass\tmessage\n");
@@ -47,6 +48,11 @@ public class ComplexSqlRoundTripTest {
                 parse2Fail++;
                 record(fails, failClasses, item, "PARSE1",
                         ComplexSqlReports.parseErrorClass(e.getMessage()), e.getMessage());
+                continue;
+            } catch (RuntimeException e) {
+                parse2Fail++;
+                record(fails, failClasses, item, "PARSE1", "PARSE_RUNTIME",
+                        e.getClass().getSimpleName() + ": " + e.getMessage());
                 continue;
             }
             String formatted;
@@ -72,6 +78,14 @@ public class ComplexSqlRoundTripTest {
                 structFail++;
                 record(fails, failClasses, item, "STRUCT", "STRUCT_DRIFT", drift);
             }
+            // 有效括号只能多不能少：少一对就可能把 (a - b) / c 变成 a - b / c。
+            int before = ComplexSqlReports.significantParens(item.sql());
+            int after = ComplexSqlReports.significantParens(formatted);
+            if (after < before) {
+                parenLoss++;
+                record(fails, failClasses, item, "PAREN", "PAREN_LOSS",
+                        "paren count " + before + " -> " + after);
+            }
             if (!normalize(item.sql()).equals(normalize(formatted))) {
                 textMismatch++;
             }
@@ -81,6 +95,7 @@ public class ComplexSqlRoundTripTest {
         summary.append("L2 roundtrip total=").append(total)
                 .append(" parse2Fail=").append(parse2Fail)
                 .append(" structFail=").append(structFail)
+                .append(" parenLoss=").append(parenLoss)
                 .append(" textMismatch=").append(textMismatch)
                 .append(" textMatchRate=")
                 .append(String.format(Locale.ROOT, "%.2f",
@@ -96,6 +111,7 @@ public class ComplexSqlRoundTripTest {
         System.out.print(summary);
         assertTrue("L2 re-parse failures " + parse2Fail + " (must be 0)", parse2Fail == 0);
         assertTrue("L2 structure drift " + structFail + " (must be 0)", structFail == 0);
+        assertTrue("L2 paren loss " + parenLoss + " (must be 0); see l2-fails.tsv", parenLoss == 0);
     }
 
     private static void record(StringBuilder fails, List<String> failClasses, Case item,

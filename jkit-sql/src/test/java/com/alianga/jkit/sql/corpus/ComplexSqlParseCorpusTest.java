@@ -101,7 +101,8 @@ public class ComplexSqlParseCorpusTest {
     }
 
     private static double minPassPercent() {
-        String raw = System.getProperty("complex.sql.minPass", "95");
+        // 1200 条已全绿，门禁收紧到 100%：留余量只会让回归静默通过。
+        String raw = System.getProperty("complex.sql.minPass", "100");
         try {
             return Double.parseDouble(raw);
         } catch (NumberFormatException e) {

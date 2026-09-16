@@ -21,8 +21,8 @@ import static org.junit.Assert.assertTrue;
 /**
  * L3：跨方言转换后再 parse，并检查源方言特征残留。
  *
- * <p>主矩阵：MYSQL↔ORACLE12、MYSQL↔SQLSERVER、MYSQL→POSTGRES。
- * 代表题 001 / 022 / 211 额外打印转换摘要。</p>
+ * <p>全矩阵：四方言两两组合共 12 个方向对（4×3×300 = 3600 次转换），
+ * 覆盖 POSTGRES 作为源的方向。代表题 001 / 022 / 211 额外打印转换摘要。</p>
  *
  * @author 郑明亮
  * @since 2.0.2
@@ -39,8 +39,15 @@ public class ComplexSqlConvertCorpusTest {
                 new Pair(Source.MYSQL, Source.ORACLE),
                 new Pair(Source.MYSQL, Source.SQLSERVER),
                 new Pair(Source.MYSQL, Source.POSTGRES),
+                new Pair(Source.POSTGRES, Source.MYSQL),
+                new Pair(Source.POSTGRES, Source.ORACLE),
+                new Pair(Source.POSTGRES, Source.SQLSERVER),
                 new Pair(Source.ORACLE, Source.MYSQL),
-                new Pair(Source.SQLSERVER, Source.MYSQL)
+                new Pair(Source.ORACLE, Source.POSTGRES),
+                new Pair(Source.ORACLE, Source.SQLSERVER),
+                new Pair(Source.SQLSERVER, Source.MYSQL),
+                new Pair(Source.SQLSERVER, Source.POSTGRES),
+                new Pair(Source.SQLSERVER, Source.ORACLE)
         };
         int total = 0;
         int parsePass = 0;
@@ -200,6 +207,9 @@ public class ComplexSqlConvertCorpusTest {
             if (u.contains("FETCH FIRST") || u.contains("FETCH NEXT")) {
                 return "FETCH";
             }
+            if (hasKeyword(u, "STRING_AGG")) {
+                return "STRING_AGG";
+            }
             if (hasKeyword(u, "LISTAGG")) {
                 return "LISTAGG";
             }
@@ -236,7 +246,8 @@ public class ComplexSqlConvertCorpusTest {
     }
 
     private static double minPassPercent() {
-        String raw = System.getProperty("complex.sql.minPass", "90");
+        // 4×3 全矩阵已 3600/3600 全过，门禁收紧到 100%。
+        String raw = System.getProperty("complex.sql.minPass", "100");
         try {
             return Double.parseDouble(raw);
         } catch (NumberFormatException e) {

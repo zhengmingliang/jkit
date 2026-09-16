@@ -130,6 +130,103 @@ public final class ComplexSqlReports {
     }
 
     /**
+     * 「有效」左括号数：先剔除包着单个原子（标识符 / 数字 / 字符串）的冗余括号，
+     * 再计数。回写折叠 {@code (p.avg_score)} → {@code p.avg_score} 不改变语义，
+     * 但折叠 {@code (a - b) / c} 会改求值顺序，故门禁只认有效括号。
+     *
+     * @param sql SQL 文本
+     * @return 有效左括号个数
+     */
+    public static int significantParens(String sql) {
+        if (sql == null || sql.isEmpty()) {
+            return 0;
+        }
+        int n = 0;
+        int i = 0;
+        while (i < sql.length()) {
+            if (sql.charAt(i) != '(') {
+                i++;
+                continue;
+            }
+            int end = matchParen(sql, i);
+            if (end < 0) {
+                i++;
+                continue;
+            }
+            if (isAtomic(sql.substring(i + 1, end))) {
+                // 整个原子括号连同内部一起跳过，两侧折叠与否都不计
+                i = end + 1;
+                continue;
+            }
+            n++;
+            i++;
+        }
+        return n;
+    }
+
+    private static int matchParen(String s, int start) {
+        int depth = 0;
+        for (int i = start; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '\'') {
+                i++;
+                while (i < s.length()) {
+                    if (s.charAt(i) == '\'') {
+                        if (i + 1 < s.length() && s.charAt(i + 1) == '\'') {
+                            i++;
+                        } else {
+                            break;
+                        }
+                    }
+                    i++;
+                }
+                continue;
+            }
+            if (c == '(') {
+                depth++;
+            } else if (c == ')') {
+                depth--;
+                if (depth == 0) {
+                    return i;
+                }
+            }
+        }
+        return -1;
+    }
+
+    private static boolean isAtomic(String inner) {
+        String s = inner.trim();
+        if (s.isEmpty()) {
+            return true;
+        }
+        if (s.matches("(?s)[A-Za-z_][A-Za-z0-9_$]*(\\s*\\.\\s*[A-Za-z_][A-Za-z0-9_$]*)*")) {
+            return true;
+        }
+        if (s.matches("\\d+(?:\\.\\d+)?") || s.matches("'(?:[^']|'')*'") || "?".equals(s)) {
+            return true;
+        }
+        // 函数调用（含嵌套调用）：f(...) / s.f(...) / COUNT(*)
+        int lp = -1;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (Character.isLetterOrDigit(c) || c == '_' || c == '.' || c == '$') {
+                continue;
+            }
+            lp = c == '(' ? i : -1;
+            break;
+        }
+        if (lp <= 0) {
+            return false;
+        }
+        String name = s.substring(0, lp).trim();
+        if (!name.matches("[A-Za-z_][A-Za-z0-9_$]*(\\s*\\.\\s*[A-Za-z_][A-Za-z0-9_$]*)*")) {
+            return false;
+        }
+        int end = matchParen(s, lp);
+        return end == s.length() - 1;
+    }
+
+    /**
      * 从解析异常信息归类，便于按类修解析器。
      *
      * @param message 异常信息
