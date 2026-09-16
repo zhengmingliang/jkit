@@ -27,6 +27,9 @@
 ### 变更
 
 - `jkit-sql`：行级注入实现类由 `SqlTenantRewriter` 更名为 `SqlInjectRewriter`（2.0.2 未发版，不保留旧名）。租户只是一种场景，类名/方法名不再带 tenant。
+- `jkit-sql`：复杂 SQL 回归门禁收紧——L1 parse / L3 转换后 parse 由「≥95% / ≥90%」收到 100%；L3 由 5 个方向对扩到四方言 4×3 全矩阵（3600 次转换，补上 PostgreSQL 作为源）；L2 新增「有效括号不减少」硬断言。8 个方言切片 L2 测试收敛到 `AbstractComplexSqlSliceL2Test`，子类只声明方言与编号区间（净减约 1100 行重复代码）。
+- `jkit-sql`：`SqlIdentifier` 支持逐段引号标记（新增 `markQuotedPart` / `isPartQuoted` / `quotedParts`）。此前只有一个整体 `quoted`，`c."LEVEL"` 会被回写成 `"c"."LEVEL"`——引号扩散到表别名，Oracle 里 `"c"` 与别名 `C` 不匹配而报 `ORA-00904`（1200 条语料真库全量对照中 15 条中招）。`SqlParser` 按段打标记、`SqlAstCloner` 复制位图、`SqlFormatter` 按段输出；无逐段信息时（改写器构造的标识符）回退到整体 `quoted`，行为不变。
+- `jkit-sql`：L2 结构对比由语句级 6 项扩到深结构——`ComplexSqlReports.deepStructureDrift` 递归 select 树比对列数 / WHERE / GROUP BY / HAVING / ORDER BY / FROM / DISTINCT / UNION / LIMIT，L2 与 8 个方言切片共用。此前列被吃掉、WHERE 整段丢失都检测不到。
 - `jkit-sql`：`SQL.bind` / `bindNamed` 字符串入口不再对 parse 结果二次 clone；访问者热路径分发提前；绑定值少分配（位置参数走数组下标、无引号字符串快路径、小整数原文缓存）。AST 入口仍 clone-then-mutate。
 - `jkit-sql-auto`：`SqlAutoDialects.fromUrl` / `driverForUrl` 委托 `JdbcUrlUtils`（覆盖 Gauss / Kingbase / Hive / ClickHouse / Trino 等更多 URL）。
 - `jkit-sql-auto`：已有表对照实体注释。`DatabaseMetaData.REMARKS` 读入活表/列；实体注释非空且与库不一致时发出 `COMMENT ON` / `ALTER TABLE … COMMENT` / MySQL `MODIFY … COMMENT`。实体未写注释时不覆盖库里已有注释。
@@ -41,6 +44,7 @@
 
 ### 修复
 
+- `jkit-sql`：回写不再丢表达式括号。`(a - b) / c` 此前回写成 `a - b / c`、`-(a + b)` 回写成 `-a + b`、`ROUND((SELECT …), 2)` 回写成 `ROUND(SELECT …, 2)`——求值顺序被改，函数参数里的子查询还会写成非法 SQL。parser 现在保留源文括号标记，函数参数中的标量子查询照常带括号。复杂 SQL 语料 1200 条里 172 条受影响；L2 文本保真率由 45.75% 升到 91.83%，并新增「有效括号不减少」门禁（折叠 `(col)` 这类冗余原子括号不算丢失）。
 - `jkit-sql`：经典 Oracle 对带 `ORDER BY` 的 UNION / INTERSECT / EXCEPT / MINUS 做 ROWNUM 分页时，先包成 `SELECT * FROM (set-op) ORDER BY …` 再套 ROWNUM，避免子查询里对集合运算列别名排序报 `ORA-00904`。双层包装外层只投影原查询列，不再把中间层的 `RN` 输出给调用方（原查询为 `SELECT *` 时仍会带出 `RN`）。
 - `jkit-sql`：`SqlNode.toString()` 默认按 MySQL 回写标识符引号（反引号），与 `SQL.toSqlString` 一致；不再误用 ANSI 双引号。`addComment("正文")` / 紧凑模式下的 `--` 行注释会包成合法块注释，避免把后续 SQL 拼成普通文本或整句注释掉。`addHint` 对未包装的正文补 slash-star-plus。跨方言仍用 `SQL.toSqlString(stmt, dialect)`。
 - `jkit-sql-auto`：`SqlAutoInspector` 判断表是否存在时补上 schema。未配置时从 `Connection.getSchema()` 取；无连接（dry-run）或驱动不支持时从 JDBC URL 解析。PostgreSQL / Gauss 缺省 `public`，SQL Server 缺省 `dbo`，Oracle / 达梦回落用户名。避免把其它 schema 下的同名表误判为已存在，或对本库缺失表发出 ALTER。

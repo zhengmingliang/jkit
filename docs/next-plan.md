@@ -675,5 +675,10 @@ Spring Boot 2/3 starter：`jkit-sql-auto-spring-boot-2`（`spring.factories`）�
 - [x] E L3 主矩阵 1500/1500 parse；残留 0（GETDATE/DATEADD/LEAST/RECURSIVE 已改写）
 - [x] F L4 代表题 001/022/211：原文 9/9、转换 6/6 真库可执行（MySQL / Oracle19c / SQL Server）
 - [x] G KnownGaps 登记已关闭项；仍开放 DATE_TRUNC 族 / PERIOD_DIFF / STDDEV↔STDEV（不影响 parse）
+- [x] H 回写保真复查（2026-09-17）：D 的「结构保真」只比 6 个维度，抓不到表达式级丢失。补深结构对比（列数 / WHERE / GROUP BY / HAVING / ORDER BY / FROM / DISTINCT / UNION / LIMIT）后仍 1200/1200，但**回写丢二元表达式括号**：`(a - b) / c` → `a - b / c`，语料 172 条受影响。根因是 `SqlBinaryExpr.parenthesized` 只有改写器会置 true、parser 从不设置，而 formatter 不按优先级自动补括号。已修 parser 保留标记 + formatter 函数参数里的标量子查询带括号；文本匹配 45.75% → 91.83%。
+- [x] I L4 回写对照（2026-09-17）：`ComplexSqlExecutionIT#rewrittenMatchesOriginal` 对原文与 `parse → toSqlString` 后的 SQL 在同一库、同一批数据上取回结果集做规范化比对（数字去尾随零、行间排序消除不稳定顺序），列数 / 行数 / 每行数据任一不符即失败。默认 001/022/211，`-Dcomplex.sql.ids=all` 跑 300×3。
+- [x] J 深结构对比落进门禁：H 的深结构对比原先只在临时探针里，`structureDrift` 仍只比语句级 6 项。已下沉到 `ComplexSqlReports.deepStructureDrift`，L2 与 8 个方言切片共用。
+- [x] K 引号按段保真（2026-09-17，I 全量跑出来的第二个 bug）：`SqlIdentifier` 只有一个整体 `quoted` 标记，`c."LEVEL"` 回写成 `"c"."LEVEL"` —— 引号扩散到表别名，Oracle 里 `"c"` 与别名 `C` 不匹配，真库 ORA-00904，全量 900 条中 15 条中招。改为 `BitSet` 逐段记录引号（parser 标记、cloner 复制、formatter 按段输出），无逐段信息时回退到整体标记。
+- [ ] L 转换后 SQL 目前只在真库验证「能执行」，尚未与原文结果集对照（跨库，需先解决浮点 / 日期格式 / 排序稳定性差异）。
 
 邮件：每完成一块用 `/tmp/jkit-mail-send/SendNotify.java` 发 `mpro@vip.qq.com`（凭证 `email-aliyun`）。
