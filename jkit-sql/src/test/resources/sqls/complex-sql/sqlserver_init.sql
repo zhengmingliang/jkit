@@ -96082,3 +96082,25 @@ INSERT INTO payroll (payroll_id, emp_id, dept_id, pay_month, pay_date, gross_pay
 (2400, 66, 8, FORMAT(DATEADD(day, -330, CAST(GETDATE() AS DATE)), 'yyyy-MM'), DATEADD(day, -330, GETDATE()), 8476.61, 6646.97, 598.27, 1231.37, 6646.97, 'cash');
 
 -- ---------- 完成 ----------
+
+-- ==============================================================================
+-- 补充数据：为 [046] 多城市收货风险、[128] 异地交易风险 等场景提供样本
+-- （原初始化数据分布下，单客户跨城市收货 / 异地交易 行数为 0，导致对应复杂查询无结果）
+-- 注意：城市名使用 ASCII，规避 JDBC 写入中文时丢失编码的问题
+-- ==============================================================================
+
+-- [046] 跨城市收货：为部分客户在近 90 天的订单补充 3 个不同城市的物流记录
+INSERT INTO shipments (shipment_id, order_id, carrier, ship_date, delivery_days, province, city, status, last_node, last_node_time)
+SELECT 900000 + ROW_NUMBER() OVER (ORDER BY c.customer_id),
+       (SELECT TOP 1 o.order_id FROM orders o WHERE o.customer_id = c.customer_id AND o.order_date >= DATEADD(day, -90, CAST(GETDATE() AS DATE))),
+       'SUPPLEMENT', GETDATE(), 3, v.prov, v.city, 'delivered', 'supplement-node', GETDATE()
+FROM (SELECT DISTINCT TOP 40 o.customer_id FROM orders o WHERE o.order_date >= DATEADD(day, -90, CAST(GETDATE() AS DATE))) c
+CROSS JOIN (VALUES ('ProvA','CityAlpha'), ('ProvB','CityBeta'), ('ProvC','CityGamma')) v(prov, city);
+
+-- [128] 异地交易：为部分客户补充交易城市与常住城市不同的交易流水
+INSERT INTO transactions (txn_id, account_id, cust_id, txn_date, txn_type, amount, channel, counterparty, merchant, mcc, is_overseas, city, card_id, balance_after)
+SELECT 900000 + ROW_NUMBER() OVER (ORDER BY c.cust_id, v.city),
+       (SELECT TOP 1 a.account_id FROM accounts a WHERE a.cust_id = c.cust_id),
+       c.cust_id, GETDATE(), 'PAY', 100.00, 'ONLINE', 'supplement', 'supplement', '5311', 0, v.city, NULL, 0.00
+FROM (SELECT DISTINCT TOP 60 a.cust_id FROM accounts a JOIN fin_customers fc ON a.cust_id = fc.cust_id) c
+CROSS JOIN (VALUES ('CityAlpha'), ('CityBeta'), ('CityGamma'), ('CityDelta'), ('CityEpsilon')) v(city);
