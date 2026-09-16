@@ -1,17 +1,17 @@
 # 复杂业务 SQL 300 条 · 数据模型与使用说明
 
-四份 SQL 文件覆盖 **MySQL 8.0+ / PostgreSQL 12+ / Oracle 12c+ / SQL Server 2019+** 四种主流数据库，每条 SQL 均按对应方言独立渲染并通过语法校验。
+四份 SQL 文件覆盖 **MySQL 8.0+ / PostgreSQL 12+ / Oracle 12c+ / SQL Server 2017+** 四种主流数据库，每条 SQL 均按对应方言独立渲染并通过语法校验。
 
 | 文件 | 数据库 | 版本 | 大小 | 说明 |
 |---|---|---|---|---|
 | `mysql_complex_300.sql` | MySQL | 8.0+ | ~470 KB | 使用 `GROUP_CONCAT`、`DATE_FORMAT`、`LIMIT` 等 MySQL 语法 |
 | `postgresql_complex_300.sql` | PostgreSQL | 12+ | ~470 KB | 使用 `STRING_AGG`、`DATE_TRUNC`、`EXTRACT`、标准窗口帧 |
 | `oracle_complex_300.sql` | Oracle | 12c+ | ~470 KB | 使用 `LISTAGG`、`TRUNC`、`MONTHS_BETWEEN`、`FETCH FIRST` |
-| `sqlserver_complex_300.sql` | SQL Server | 2019+ | ~475 KB | 使用 `STRING_AGG`、`DATEDIFF`、`OFFSET/FETCH`，每条以 `GO` 结束 |
+| `sqlserver_complex_300.sql` | SQL Server | 2017+ | ~475 KB | 使用 `STRING_AGG`、`DATEDIFF`、`OFFSET/FETCH`，每条以 `GO` 结束 |
 | `mysql_init.sql` | MySQL | 8.0+ | ~9.6 MB | 建表 + 测试数据初始化（含 `DROP TABLE IF EXISTS` 幂等重建） |
 | `postgresql_init.sql` | PostgreSQL | 12+ | ~11 MB | 建表 + 测试数据初始化 |
 | `oracle_init.sql` | Oracle | 12c+ | ~19 MB | 建表 + 测试数据初始化（PL/SQL `BEGIN…EXCEPTION` 幂等重建） |
-| `sqlserver_init.sql` | SQL Server | 2019+ | ~11 MB | 建表 + 测试数据初始化（批处理 `GO` 分隔） |
+| `sqlserver_init.sql` | SQL Server | 2017+ | ~11 MB | 建表 + 测试数据初始化（批处理 `GO` 分隔） |
 
 ---
 
