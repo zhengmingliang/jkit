@@ -2149,6 +2149,7 @@ public final class SqlParser {
         String raw = consumeIdentPartRaw();
         if (isQuoted(raw)) {
             id.setQuoted(true);
+            id.markQuotedPart(0);
         }
         id.addName(unquote(raw));
         while (true) {
@@ -2165,6 +2166,7 @@ public final class SqlParser {
                 String part = consumeIdentPartRaw();
                 if (isQuoted(part)) {
                     id.setQuoted(true);
+                    id.markQuotedPart(id.names().size());
                 }
                 id.addName(unquote(part));
             } else if (is(SqlTokenType.NAMED_BIND) && lexer.lookahead(0) != null
@@ -2184,6 +2186,7 @@ public final class SqlParser {
                 String part = consumeIdentPartRaw();
                 if (isQuoted(part)) {
                     id.setQuoted(true);
+                    id.markQuotedPart(id.names().size());
                 }
                 id.addName(unquote(part));
             } else {

@@ -3394,7 +3394,7 @@ public final class SqlFormatter {
             if (i > 0) {
                 out.append('.');
             }
-            writeIdentPart(names.get(i), force || id.quoted());
+            writeIdentPart(names.get(i), force || id.isPartQuoted(i));
         }
         if (id.dblink() != null) {
             // Oracle DB Link：fn@dblink

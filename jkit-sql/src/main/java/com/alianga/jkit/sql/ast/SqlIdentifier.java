@@ -13,6 +13,8 @@ import java.util.List;
 public final class SqlIdentifier extends SqlExpr {
     private List<String> names;
     private boolean quoted;
+    /** 逐段引号标记；null 表示无逐段信息，输出时回退到 {@link #quoted}。 */
+    private java.util.BitSet quotedParts;
     /** Oracle DB Link 后缀（{@code fn@dblink} / {@code t@dblink}），无则 null。 */
     private String dblink;
 
@@ -129,5 +131,49 @@ public final class SqlIdentifier extends SqlExpr {
      */
     public void setQuoted(boolean quoted) {
         this.quoted = quoted;
+    }
+
+    /**
+     * 标记第 {@code index} 段在源文中带引号。
+     * 只有部分段带引号时（如 {@code c."LEVEL"}）必须用逐段标记，
+     * 否则回写会把引号扩散到别名上，Oracle 里 {@code "c"} 与别名 {@code C} 不匹配而报 ORA-00904。
+     *
+     * @param index 段下标，从 0 开始
+     */
+    public void markQuotedPart(int index) {
+        if (quotedParts == null) {
+            quotedParts = new java.util.BitSet();
+        }
+        quotedParts.set(index);
+    }
+
+    /**
+     * 第 {@code index} 段输出时是否加引号。
+     * 没有逐段信息时（改写器 / 代码构造的标识符）回退到整体 {@link #quoted()}。
+     *
+     * @param index 段下标，从 0 开始
+     * @return true 表示该段要加引号
+     */
+    public boolean isPartQuoted(int index) {
+        if (quotedParts == null) {
+            return quoted;
+        }
+        return quotedParts.get(index);
+    }
+
+    /**
+     * 复制用的逐段引号位图。
+     *
+     * @return 位图，无逐段信息时为 null
+     */
+    public java.util.BitSet quotedParts() {
+        return quotedParts;
+    }
+
+    /**
+     * @param parts 逐段引号位图，null 表示无逐段信息
+     */
+    public void setQuotedParts(java.util.BitSet parts) {
+        this.quotedParts = parts;
     }
 }

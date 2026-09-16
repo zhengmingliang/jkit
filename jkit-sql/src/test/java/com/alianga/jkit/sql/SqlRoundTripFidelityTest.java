@@ -84,6 +84,13 @@ public class SqlRoundTripFidelityTest {
                 {"mysql", "SELECT CASE WHEN (a - b) / c < 1 THEN 1 ELSE 2 END FROM t"},
                 {"postgres", "SELECT (a - b) / c FROM t"},
                 {"oracle", "SELECT (a - b) / c FROM t"},
+
+                // 引号按段保真：只有列名段带引号时，回写不能把引号扩散到表别名上。
+                // Oracle 里 c."LEVEL" 写成 "c"."LEVEL" 会因别名 C 与 "c" 不匹配而报 ORA-00904。
+                {"oracle", "SELECT c.\"LEVEL\" FROM customers c"},
+                {"oracle", "SELECT c.customer_name, c.\"LEVEL\" FROM customers c WHERE c.\"LEVEL\" > 1"},
+                {"mysql", "SELECT t.`LEVEL` FROM `my tbl` t"},
+                {"sqlserver", "SELECT t.[LEVEL] FROM tbl t"},
                 {"sqlserver", "SELECT (a - b) / c FROM t"},
 
                 {"mysql", "SELECT * FROM t1 LEFT JOIN t2 ON t1.a = t2.a"},

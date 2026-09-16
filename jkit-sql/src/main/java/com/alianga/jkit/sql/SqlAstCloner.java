@@ -372,6 +372,9 @@ public final class SqlAstCloner {
             dest.setNames(copyNames);
         }
         dest.setQuoted(src.quoted());
+        if (src.quotedParts() != null) {
+            dest.setQuotedParts((java.util.BitSet) src.quotedParts().clone());
+        }
         dest.setDblink(src.dblink());
         return dest;
     }
