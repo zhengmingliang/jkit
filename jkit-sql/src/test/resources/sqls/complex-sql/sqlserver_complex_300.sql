@@ -1439,12 +1439,20 @@ GO
 -- ------------------------------------------------------------------------------
 -- [041] HAVING·跨店行为 | 电商 | 跨门店/跨城市购买用户识别
 -- ------------------------------------------------------------------------------
+WITH cust_cities AS (
+    SELECT DISTINCT o.customer_id, s.city
+    FROM orders o
+    JOIN stores s ON o.store_id = s.store_id
+    WHERE o.status = 'completed'
+      AND o.order_date >= DATEADD(day, -365, CAST(GETDATE() AS DATE))
+)
 SELECT c.customer_id, c.customer_name,
        COUNT(DISTINCT s.store_id) AS store_cnt,
        COUNT(DISTINCT s.city)     AS city_cnt,
        COUNT(*)                   AS order_cnt,
        SUM(o.pay_amount)          AS total_amt,
-       STRING_AGG(DISTINCT s.city, ',') WITHIN GROUP (ORDER BY s.city) AS cities
+       (SELECT STRING_AGG(cc.city, ',') WITHIN GROUP (ORDER BY cc.city)
+        FROM cust_cities cc WHERE cc.customer_id = c.customer_id) AS cities
 FROM orders o
 JOIN customers c ON o.customer_id = c.customer_id
 JOIN stores    s ON o.store_id = s.store_id
@@ -5597,15 +5605,16 @@ WITH n AS (
            LAG(nav) OVER (PARTITION BY fund_id ORDER BY nav_date) AS prev_nav,
            FIRST_VALUE(nav) OVER (PARTITION BY fund_id ORDER BY nav_date) AS base_nav,
            MAX(nav) OVER (PARTITION BY fund_id ORDER BY nav_date
-                ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS peak_nav
+                ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS peak_nav,
+           MAX(nav_date) OVER (PARTITION BY fund_id) AS fund_latest_date
     FROM fund_nav
     WHERE nav_date >= DATEADD(day, -365, CAST(GETDATE() AS DATE))
 )
 SELECT f.fund_name, f.fund_type,
        COUNT(*)                                                       AS nav_days,
        MAX(n.nav_date)                                                AS latest_date,
-       ROUND(MAX(CASE WHEN n.nav_date = (SELECT MAX(nav_date) FROM fund_nav n2 WHERE n2.fund_id = n.fund_id) THEN n.nav END), 4) AS latest_nav,
-       ROUND(MAX(CASE WHEN n.nav_date = (SELECT MAX(nav_date) FROM fund_nav n3 WHERE n3.fund_id = n.fund_id) THEN n.nav END)
+       ROUND(MAX(CASE WHEN n.nav_date = n.fund_latest_date THEN n.nav END), 4) AS latest_nav,
+       ROUND(MAX(CASE WHEN n.nav_date = n.fund_latest_date THEN n.nav END)
              / NULLIF(MAX(n.base_nav), 0) * 100 - 100, 2)             AS total_return_pct,
        ROUND(AVG((n.nav - n.prev_nav) / NULLIF(n.prev_nav, 0)) * 100, 4) AS avg_daily_return_pct,
        ROUND(MIN((n.nav - n.peak_nav) / NULLIF(n.peak_nav, 0)) * 100, 2) AS max_drawdown_pct
@@ -6126,7 +6135,7 @@ WITH bud AS (
            SUM(profit)  AS actual_profit
     FROM fin_reports GROUP BY branch_id, period
 ),
-plan AS (
+bud_plan AS (
     SELECT branch_id, period,
            AVG(revenue) OVER (PARTITION BY branch_id) * 1.1 AS budget_revenue,
            AVG(cost)    OVER (PARTITION BY branch_id) * 0.95 AS budget_cost
@@ -6144,7 +6153,7 @@ SELECT b.branch_name, bd.period,
             WHEN bd.actual_revenue / NULLIF(MAX(p.budget_revenue), 0) >= 0.9 THEN 'slight_gap'
             ELSE 'significant_gap' END AS execution_status
 FROM bud bd
-JOIN plan p  ON bd.branch_id = p.branch_id AND bd.period = p.period
+JOIN bud_plan p  ON bd.branch_id = p.branch_id AND bd.period = p.period
 JOIN branches b ON bd.branch_id = b.branch_id
 GROUP BY b.branch_name, bd.period, bd.actual_revenue, bd.actual_cost
 ORDER BY b.branch_name, bd.period DESC;
@@ -8005,7 +8014,7 @@ GO
 -- ------------------------------------------------------------------------------
 -- [264] 薪酬·Offer竞争 | 人力 | Offer 薪资竞争力与接受率关联分析
 -- ------------------------------------------------------------------------------
-WITH off AS (
+WITH offers AS (
     SELECT r.dept_id, r.position,
            SUM(r.offer_cnt)                                   AS offer_cnt,
            SUM(r.hired_cnt)                                   AS accepted_cnt,
@@ -8028,7 +8037,7 @@ SELECT d.dept_name, o.position, o.offer_cnt, o.accepted_cnt,
             WHEN o.avg_offer_salary / NULLIF(m.internal_avg_salary, 0) > 1.20 THEN 'salary_inversion_risk'
             ELSE 'competitive' END AS salary_position_flag,
        NTILE(4) OVER (ORDER BY o.accepted_cnt * 1.0 / NULLIF(o.offer_cnt, 0)) AS accept_quartile
-FROM off o
+FROM offers o
 JOIN departments d ON o.dept_id = d.dept_id
 LEFT JOIN mk m ON o.dept_id = m.dept_id AND o.position = m.position
 ORDER BY accept_rate_pct DESC;
