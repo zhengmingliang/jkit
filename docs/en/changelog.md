@@ -17,6 +17,7 @@ Unreleased changes are appended to the **current version** section (currently 2.
 - Complex SQL dialect slice L2/L4 harness (Oracle): `ComplexSqlOracleSliceL2*` (jkit-sql) and `ComplexSqlOracleNativeExecute*` (tools-test); 001–300 native execute on oracle19c 300/300 (parseFail=0 / execFail=0); reports under `target/complex-sql-reports/oracle-l2|l4-*`.
 - Complex SQL dialect slice L2/L4 harness (MySQL): `ComplexSqlMysqlSliceL2*` (jkit-sql) and `ComplexSqlMysqlNativeExecute*` (tools-test); 001–300 native execute on MySQL `3308/test_db` 300/300 (parseFail=0 / execFail=0); reports under `target/complex-sql-reports/mysql-l2|l4-*`.
 - Complex SQL dialect slice L2/L4 harness (SQL Server): `ComplexSqlSqlServerSliceL2*` (jkit-sql) and `ComplexSqlSqlServerNativeExecute*` (tools-test); 001–300 native execute on `jkit_ss_test` (1433) 300/300 (parseFail=0 / execFail=0); reports under `target/complex-sql-reports/sqlserver-l2|l4-*`.
+- Complex SQL dialect slice L2/L4 harness (PostgreSQL): `ComplexSqlPostgresSliceL2*` (jkit-sql) and `ComplexSqlPostgresNativeExecute*` (tools-test); 001–300 native execute on `jkit_complex` (5532) 294/300 (parseFail=0; 6 corpus cases need explicit cast for `round(float8,int)`); reports under `target/complex-sql-reports/postgres-l2|l4-*`.
 
 ### Changed
 
