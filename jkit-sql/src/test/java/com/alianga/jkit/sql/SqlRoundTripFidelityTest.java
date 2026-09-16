@@ -72,6 +72,20 @@ public class SqlRoundTripFidelityTest {
                 {"mysql", "SELECT DATE(o.order_date) FROM orders o"},
                 {"postgres", "SELECT DATE '2020-01-01' FROM t"},
 
+                // 表达式括号保真：formatter 不按运算符优先级自动补括号，
+                // 回写丢了 (a - b) / c 的外层括号就会变成 a - b / c，求值顺序被改。
+                {"mysql", "SELECT (a - b) / c FROM t"},
+                {"mysql", "SELECT (a + b) * c FROM t"},
+                {"mysql", "SELECT a - (b - c) FROM t"},
+                {"mysql", "SELECT -(a + b) FROM t"},
+                {"mysql", "SELECT (a OR b) AND c FROM t"},
+                {"mysql", "SELECT * FROM t WHERE (a - b) / c > 1"},
+                {"mysql", "SELECT ROUND((revenue - cost) / NULLIF(revenue, 0), 2) FROM t"},
+                {"mysql", "SELECT CASE WHEN (a - b) / c < 1 THEN 1 ELSE 2 END FROM t"},
+                {"postgres", "SELECT (a - b) / c FROM t"},
+                {"oracle", "SELECT (a - b) / c FROM t"},
+                {"sqlserver", "SELECT (a - b) / c FROM t"},
+
                 {"mysql", "SELECT * FROM t1 LEFT JOIN t2 ON t1.a = t2.a"},
                 {"mysql", "SELECT * FROM t1 RIGHT JOIN t2 ON t1.a = t2.a"},
                 {"mysql", "SELECT * FROM t1 FULL JOIN t2 ON t1.a = t2.a"},

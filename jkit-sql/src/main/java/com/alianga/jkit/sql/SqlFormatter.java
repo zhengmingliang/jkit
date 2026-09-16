@@ -3777,12 +3777,9 @@ public final class SqlFormatter {
                 out.append(',');
                 sp();
             }
-            SqlExpr arg = exprs.get(i);
-            if (arg instanceof SqlQueryExpr) {
-                writeNode(((SqlQueryExpr) arg).query());
-            } else {
-                writeExpr(arg);
-            }
+            // 标量子查询也要走 writeExpr：它自带一层括号，
+            // 否则 ROUND((SELECT …), 2) 会回写成 ROUND(SELECT …, 2)。
+            writeExpr(exprs.get(i));
         }
     }
 
