@@ -193,6 +193,10 @@ public abstract class AbstractComplexSqlSliceL2Test {
         if (hasLimit(a) != hasLimit(b)) {
             return "limit " + hasLimit(a) + " -> " + hasLimit(b);
         }
+        String deep = ComplexSqlReports.deepStructureDrift(a, b);
+        if (deep != null) {
+            return "deep " + deep;
+        }
         return null;
     }
 

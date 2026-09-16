@@ -1,5 +1,8 @@
 package com.alianga.jkit.sql.corpus;
 
+import com.alianga.jkit.sql.ast.SqlSelect;
+import com.alianga.jkit.sql.ast.SqlStatement;
+
 import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileOutputStream;
@@ -127,6 +130,57 @@ public final class ComplexSqlReports {
             ordered.put(entries.get(i).getKey(), entries.get(i).getValue());
         }
         return ordered;
+    }
+
+    /**
+     * 深结构对比：递归 select 树比对列数 / WHERE / GROUP BY / HAVING / ORDER BY /
+     * FROM / DISTINCT / UNION / LIMIT（UNION 分支继续往下走）。
+     *
+     * <p>只比「有没有、有几个」，不比表达式内容——那属于文本保真与真库对照的职责。
+     * 这一层是补 structureDrift 的不足：后者只看语句级 6 项，列被吃掉、
+     * WHERE 整段丢失、ORDER BY 少一列都检测不到。</p>
+     *
+     * @param a 回写前的语句
+     * @param b 回写后的语句
+     * @return 首个差异描述，一致返回 {@code null}
+     */
+    public static String deepStructureDrift(SqlStatement a, SqlStatement b) {
+        if (!(a instanceof SqlSelect) || !(b instanceof SqlSelect)) {
+            return null;
+        }
+        List<String> out = new ArrayList<String>();
+        walkSelect((SqlSelect) a, (SqlSelect) b, "root", out, 0);
+        return out.isEmpty() ? null : out.get(0);
+    }
+
+    private static void walkSelect(SqlSelect a, SqlSelect b, String path, List<String> out, int depth) {
+        if (depth > 8) {
+            return;
+        }
+        if (a == null || b == null) {
+            out.add(path + ".nullSelect");
+            return;
+        }
+        cmp(out, path + ".items", a.selectItems().size(), b.selectItems().size());
+        cmp(out, path + ".where", a.where() == null ? 0 : 1, b.where() == null ? 0 : 1);
+        cmp(out, path + ".groupBy", a.groupBy().size(), b.groupBy().size());
+        cmp(out, path + ".having", a.having() == null ? 0 : 1, b.having() == null ? 0 : 1);
+        cmp(out, path + ".orderBy", a.orderBy().size(), b.orderBy().size());
+        cmp(out, path + ".from", a.from() == null ? 0 : 1, b.from() == null ? 0 : 1);
+        cmp(out, path + ".distinct", a.distinct() ? 1 : 0, b.distinct() ? 1 : 0);
+        cmp(out, path + ".unionOp", a.union() == null ? 0 : 1, b.union() == null ? 0 : 1);
+        cmp(out, path + ".limit",
+                (a.limit() == null ? 0 : 1) + (a.top() == null ? 0 : 1),
+                (b.limit() == null ? 0 : 1) + (b.top() == null ? 0 : 1));
+        if (a.union() != null && b.union() != null) {
+            walkSelect(a.union(), b.union(), path + ".u", out, depth + 1);
+        }
+    }
+
+    private static void cmp(List<String> out, String name, int x, int y) {
+        if (x != y) {
+            out.add(name + " " + x + "->" + y);
+        }
     }
 
     /**

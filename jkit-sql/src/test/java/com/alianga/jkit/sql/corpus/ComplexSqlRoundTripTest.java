@@ -148,6 +148,10 @@ public class ComplexSqlRoundTripTest {
         if (la != lb) {
             return "limit " + la + " -> " + lb;
         }
+        String deep = ComplexSqlReports.deepStructureDrift(a, b);
+        if (deep != null) {
+            return "deep " + deep;
+        }
         return null;
     }
 
