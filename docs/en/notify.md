@@ -408,14 +408,19 @@ new SmtpChannel().markdownImageBaseDir("/opt/docs/articles");
 - **Never throws**: a missing file, a non-image (MIME detected from suffix and magic bytes) or a file above `maxInlineImageBytes` keeps the original `src` — a decoration must not break the alert.
 - Watch the size: Base64 adds roughly a third, so three 1.4 MB PNGs turn a single mail into ~5.6 MB. Prefer CDN URLs for many or large images, or lower the cap so oversized images fall back.
 
-#### Mobile adaptation
+#### Body container and responsiveness
 
-With `responsive(true)` (default) you get the `viewport` plus two media queries: wider padding on desktop and, on mobile (`max-width:480px`), tighter padding, smaller heading/table fonts and inertial scrolling for tables.
+The document shell produced by `markdownToDocument` is `<body><div class="jkit-md">…content…</div></body>`. The column width, padding, font, colour and line height are all inlined on that div.
 
-Two implementation details matter when writing a custom theme:
+**Layout must not hang off `<body>`**: Gmail, QQ Mail and similar clients strip `<html>/<head>/<body>` and pour the content into their own container, so `max-width` / `padding` written on `body` disappear with the tag (the symptom: the text fills the whole reading pane while images — which carry inline `style` — still keep their margins). The stylesheet emits `body` and `div.jkit-md` rules as a pair; the `body` rule is only a fallback for clients that keep the shell intact.
 
-- **Media-query rules carry `!important`**: in inline mode a tag's `style` attribute outranks the stylesheet, so a media query without `!important` is completely swallowed and the mobile adaptation does nothing.
+With `responsive(true)` (default) you get the `viewport` plus two media queries: on desktop (`min-width:768px`) code blocks get wider horizontal padding and a taller line height; on mobile (`max-width:480px`) the column padding tightens, heading/table fonts shrink and tables get inertial scrolling.
+
+Three implementation details matter when writing a custom theme:
+
+- **Media-query rules carry `!important`**: in inline mode a tag's `style` attribute outranks the stylesheet, so a media query without `!important` is completely swallowed and the mobile adaptation does nothing. The container's mobile padding relies on the same trick to override the inline value.
 - **Mobile only touches the horizontal padding of code blocks**: the macOS-window style reserves 36px of top padding for the three dots, and a shorthand `padding` would wipe that reservation and let the dots sit on top of the first code line. For the same reason the inline `pre` style must carry the full `padding` instead of just `12px 14px`.
+- **Never hard-code the column width in a media query**: it comes from the theme's own `maxWidth` token (820 by default), and a hard-coded value would override a theme that sets its own.
 
 #### Other notes
 

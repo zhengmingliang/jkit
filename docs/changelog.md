@@ -40,6 +40,9 @@
 - `jkit-notify`：修复 macOS 窗口风格代码块（碧蓝 / Vue 绿 / 墨黑）顶部三个圆点与首行代码重叠——样式表与内联样式都改为顶部留 36px（此前只写 `padding-top:34px`，内联模式与移动端媒体查询的简写 `padding` 都会把它覆盖掉）。
 - `jkit-notify`：移动端媒体查询改为带 `!important`（内联模式下行内 `style` 优先级更高，不带则整段适配不生效），并补上标题字号收敛、表格单元格内边距、图片宽度与表格惯性滚动；移动端不再用简写 `padding` 覆盖代码块上内边距。
 - `jkit-notify`：带引号装饰的引用（姹紫 / 兰青 / 橙心）改为把引号放进左侧 2.6em 留白区，不再压在正文上；内联模式下的引用内边距与样式表保持一致（此前竖条与填充两种风格产出完全相同）。
+- `jkit-notify`：**正文排版改挂到自带的 `<div class="jkit-md">` 容器上**（此前写在 `body` 上）。Gmail、QQ 邮箱等客户端会剥掉 `<html>/<head>/<body>`，`body` 上的 `max-width` / `padding` 会一同失效，表现为正文铺满读信区。现在宽度、内边距、字体、颜色、行高全部内联在这层 div 上，样式表里 `body` 与 `div.jkit-md` 规则成对输出（`body` 仅作兜底），两段媒体查询也同时命中两者。
+- `jkit-notify`：正文栏宽度默认 720 → **820px**，桌面端左右内边距 32 → 16px、上下 24px，移动端改为 `12px 8px`（左右基本不留白）。容器宽度取主题自身的 `maxWidth` 令牌，不再在媒体查询里硬编码。
+- `jkit-notify`：图片改为居中并带主题圆角（`display:block;margin:1.4em auto`），与段落、代码块、表格同宽——此前单独收窄图片会让图片与文字对不齐；桌面端代码块左右内边距 18px、行高 1.7。
 - `jkit-sql`：行级注入实现类由 `SqlTenantRewriter` 更名为 `SqlInjectRewriter`（2.0.2 未发版，不保留旧名）。租户只是一种场景，类名/方法名不再带 tenant。
 - `jkit-sql`：复杂 SQL 回归门禁收紧——L1 parse / L3 转换后 parse 由「≥95% / ≥90%」收到 100%；L3 由 5 个方向对扩到四方言 4×3 全矩阵（3600 次转换，补上 PostgreSQL 作为源）；L2 新增「有效括号不减少」硬断言。8 个方言切片 L2 测试收敛到 `AbstractComplexSqlSliceL2Test`，子类只声明方言与编号区间（净减约 1100 行重复代码）。
 - `jkit-sql`：`SqlIdentifier` 支持逐段引号标记（新增 `markQuotedPart` / `isPartQuoted` / `quotedParts`）。此前只有一个整体 `quoted`，`c."LEVEL"` 会被回写成 `"c"."LEVEL"`——引号扩散到表别名，Oracle 里 `"c"` 与别名 `C` 不匹配而报 `ORA-00904`（1200 条语料真库全量对照中 15 条中招）。`SqlParser` 按段打标记、`SqlAstCloner` 复制位图、`SqlFormatter` 按段输出；无逐段信息时（改写器构造的标识符）回退到整体 `quoted`，行为不变。
