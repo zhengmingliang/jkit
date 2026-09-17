@@ -193,6 +193,33 @@ public final class NotifyUtils {
     }
 
     /**
+     * 按主题渲染 Markdown 片段：可切换配色、代码高亮与内联样式。
+     *
+     * <p>{@code inlineStyle=true} 时把主题样式写进每个标签的 {@code style} 属性，适合粘贴到微信、
+     * 发往 Outlook 等会剥离 {@code <style>} 标签的环境；代价是伪元素与斑马纹等选择器式样不生效。
+     *
+     * <p>设置 {@link MarkdownRenderOptions#imageBaseDir(String)} 后，Markdown 里引用本地相对路径的
+     * 图片会内嵌成 {@code data:image/...;base64,...}，正文可脱离原文件独立展示。
+     *
+     * @param markdown 原文
+     * @param options 渲染选项，{@code null} 时同 {@link #markdownToHtml(String)}
+     * @return HTML 片段（不含 html 文档壳）
+     * @since 2.0.2
+     */
+    public static String markdownToHtml(String markdown, MarkdownRenderOptions options) {
+        if (options == null) {
+            return markdownToHtml(markdown);
+        }
+        MarkdownStyle style = MarkdownStyle.of(options.theme());
+        Markdown.CodeRenderer renderer = options.highlight()
+                ? new HighlightRenderer(style)
+                : null;
+        String fragment = Markdown.toHtml(markdown, renderer);
+        fragment = ImageInliner.apply(fragment, options);
+        return options.inlineStyle() ? HtmlInliner.apply(fragment, style) : fragment;
+    }
+
+    /**
      * 把 Markdown 转成带文档壳的 HTML，便于邮件客户端预览。
      *
      * @param markdown 原文
@@ -200,11 +227,25 @@ public final class NotifyUtils {
      * @return 完整 HTML 文档；原文为空时返回空串
      */
     public static String markdownToDocument(String markdown, boolean responsive) {
-        String fragment = markdownToHtml(markdown);
+        return markdownToDocument(markdown,
+                MarkdownRenderOptions.create().responsive(responsive));
+    }
+
+    /**
+     * 按主题把 Markdown 转成带文档壳的 HTML。
+     *
+     * @param markdown 原文
+     * @param options 渲染选项，{@code null} 时使用默认选项
+     * @return 完整 HTML 文档；原文为空时返回空串
+     * @since 2.0.2
+     */
+    public static String markdownToDocument(String markdown, MarkdownRenderOptions options) {
+        MarkdownRenderOptions opts = options == null ? MarkdownRenderOptions.create() : options;
+        String fragment = markdownToHtml(markdown, opts);
         if (StringUtils.isEmpty(fragment)) {
             return "";
         }
-        return wrapHtmlDocument(fragment, responsive);
+        return wrapHtmlDocument(fragment, opts);
     }
 
     /**
@@ -215,39 +256,50 @@ public final class NotifyUtils {
      * @return 完整 HTML 文档
      */
     public static String wrapHtmlDocument(String fragment, boolean responsive) {
+        return wrapHtmlDocument(fragment, MarkdownRenderOptions.create().responsive(responsive));
+    }
+
+    /**
+     * 给 HTML 片段套带主题的文档壳。
+     *
+     * <p>片段本身没内联样式时才需要 {@code <style>}：若片段已由
+     * {@link #markdownToHtml(String, MarkdownRenderOptions)} 内联过，这里再套一层样式表也无害，
+     * 两者来自同一套令牌，不会打架。
+     *
+     * @param fragment HTML 片段
+     * @param options 渲染选项，{@code null} 时使用默认选项
+     * @return 完整 HTML 文档
+     * @since 2.0.2
+     */
+    public static String wrapHtmlDocument(String fragment, MarkdownRenderOptions options) {
+        MarkdownRenderOptions opts = options == null ? MarkdownRenderOptions.create() : options;
         String body = StringUtils.defaultString(fragment);
-        if (!responsive) {
-            return "<!DOCTYPE html><html><head><meta charset=\"UTF-8\"></head><body>"
-                    + body + "</body></html>";
+        StringBuilder html = new StringBuilder(body.length() + 1024);
+        html.append("<!DOCTYPE html><html><head><meta charset=\"UTF-8\">");
+        if (opts.responsive()) {
+            html.append("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
         }
-        return "<!DOCTYPE html><html><head><meta charset=\"UTF-8\">"
-                + "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
-                + "<style>"
-                + "html{-webkit-text-size-adjust:100%}"
-                + "body{margin:0 auto;padding:16px;max-width:720px;font-family:-apple-system,"
-                + "BlinkMacSystemFont,'Segoe UI',Roboto,'PingFang SC','Hiragino Sans GB',"
-                + "'Microsoft YaHei',sans-serif;line-height:1.65;color:#222;font-size:16px;"
-                + "word-wrap:break-word;overflow-wrap:anywhere}"
-                + "h1,h2,h3,h4{line-height:1.3;margin:1.2em 0 .5em}"
-                + "h1{font-size:1.5em}h2{font-size:1.3em}h3{font-size:1.15em}"
-                + "img,table,pre,video{max-width:100%}"
-                + "img{height:auto}"
-                + "pre{background:#f6f8fa;padding:12px;overflow:auto;border-radius:6px;"
-                + "font-size:13px;white-space:pre;box-sizing:border-box}"
-                + "code{font-family:ui-monospace,Menlo,Consolas,monospace;background:#f6f8fa;"
-                + "padding:0 .3em}"
-                + "pre code{background:none;padding:0}"
-                + "table{border-collapse:collapse;margin:12px 0;display:block;overflow-x:auto}"
-                + "th,td{border:1px solid #d0d7de;padding:6px 10px;text-align:left}"
-                + "th{background:#f6f8fa}"
-                + "blockquote{border-left:4px solid #d0d7de;margin:0;padding:0 12px;color:#57606a}"
-                + "@media (min-width:768px){body{padding:24px 32px;font-size:15px}"
-                + "pre{font-size:13px}}"
-                + "@media (max-width:480px){body{padding:12px;font-size:16px}"
-                + "table,th,td{font-size:14px}pre{font-size:12px;padding:8px}}"
-                + "</style></head><body>"
-                + body
-                + "</body></html>";
+        html.append("<style>").append(MarkdownStyle.of(opts.theme()).css(opts.responsive()))
+                .append("</style></head><body>")
+                .append(body)
+                .append("</body></html>");
+        return html.toString();
+    }
+
+    /**
+     * 把代码高亮接进 Markdown 解析：围栏代码块交给 {@link CodeHighlighter}。
+     */
+    private static final class HighlightRenderer implements Markdown.CodeRenderer {
+        private final MarkdownStyle style;
+
+        HighlightRenderer(MarkdownStyle style) {
+            this.style = style;
+        }
+
+        @Override
+        public String render(String code, String lang) {
+            return CodeHighlighter.render(code, lang, style);
+        }
     }
 
     /**
