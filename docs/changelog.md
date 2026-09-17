@@ -54,6 +54,8 @@
 - `docs/sql.md` / `docs/en/sql.md` 业务场景扩到 18 类（2.0.2）：多数据源方言识别（`JdbcUrlUtils`）、报表 `DATE_FORMAT` 跨方言、动态表名安全绑定、低代码查询沙箱（Wall 表白名单 / WHERE 必含列 / 表数上限）。场景 4 补恒真 `LIKE '%'` / `XOR`。
 - `docs/toolkit.md`：crypto 章节补 AES-GCM（IV 布局 / AAD / 参数校验 / 与 ECB 的差异）、RSA（OAEP 与 PKCS#1 v1.5 选型表、密钥长度、单块上限）、DES 废弃说明；新增「ID 生成」章节对比雪花 / ULID / UUIDv7 的适用场景与单调模式语义，新增「脱敏」章节说明各类型保留位数与 `mask` 的兜底策略。
 - `docs/json.md` / `docs/en/json.md`：Schema 关键字表补 `required`（标准数组写法）与 `must`（自有布尔写法）的区别，新增「必填：required 与 must 选哪个」小节。
+- `docs/csv.md` / `docs/en/csv.md`：补完此前 0 字节的空文档，覆盖 `CSVUtils` 轻量读写、`CSV`/`CSVTable` 带表头与 POJO 映射、`CSVObjectWriter` 流式写对象、流式 `readStream`、字符集与解析细节、异常；从 `srcExclude` 移除并加入中英文侧边栏。
+- `docs/expression.md` / `docs/en/expression.md`：补完此前 0 字节的空文档，覆盖算术/逻辑、`Map` 与 JavaBean 上下文、位置参数 `p0/p1`、`@` 内置函数、自定义函数与静态方法注册、`renderTemplate` 模板渲染、`CacheableExpression` 缓存说明与异常；同包加入侧边栏，`toolkit.md` 新增「表达式引擎」指针小节。
 
 ### 修复
 

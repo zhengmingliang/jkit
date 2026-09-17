@@ -68,6 +68,8 @@ Unreleased changes are appended to the **current version** section (currently 2.
 - Business scenarios expanded to 18 (2.0.2): dialect-from-URL (`JdbcUrlUtils`), report `DATE_FORMAT` rewrite, safe dynamic table-name bind, low-code query sandbox (Wall table allow/deny, required WHERE columns, max tables). Scenario 4 also covers tautology `LIKE '%'` / `XOR`.
 - `docs/toolkit.md`: the crypto section now covers AES-GCM (IV layout / AAD / argument checks / how it differs from ECB), RSA (OAEP vs PKCS#1 v1.5 decision table, key size, per-block limit), and the DES deprecation; new "ID Generation" section compares snowflake / ULID / UUIDv7 and explains the monotonic modes, and a new "Desensitization" section documents what each type keeps and how `mask` falls back.
 - `docs/json.md` / `docs/en/json.md`: the keyword table now distinguishes `required` (standard array form) from `must` (this library's boolean form), with a new "Required: `required` or `must`?" subsection.
+- `docs/csv.md` / `docs/en/csv.md`: fill in the previously empty (0-byte) file, covering `CSVUtils` lightweight I/O, `CSV`/`CSVTable` header-aware read with POJO mapping, `CSVObjectWriter` streaming object write, streaming `readStream`, charset and parsing details, and exceptions; removed from `srcExclude` and added to the zh/en sidebars.
+- `docs/expression.md` / `docs/en/expression.md`: fill in the previously empty (0-byte) file, covering arithmetic/logic, Map and JavaBean contexts, positional parameters `p0/p1`, `@`-prefixed built-in functions, custom functions and static-method registration, `renderTemplate`, the `CacheableExpression` cache notes, and exceptions; added to the sidebars, and `toolkit.md` gains an "Expression Engine" pointer subsection.
 
 ## 2.0.1 - 2026-09-13
 

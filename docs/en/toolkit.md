@@ -356,8 +356,12 @@ Parsing follows Crockford tolerances: `I` / `L` count as `1`, `O` counts as `0`,
 
 ## CSV / ID Card
 
-- `com.alianga.jkit.csv.CSVUtils`: reads and writes string rows in UTF-8; headers, commas/newlines inside quotes; includes streaming `readStream` / `writer`. The `CSV`/`CSVTable` classes in the same package provide a table model and POJO mapping; both share the same parser. See [csv.md](https://github.com/zhengmingliang/jkit/blob/develop/docs/csv.md).
+- `com.alianga.jkit.csv.CSVUtils`: reads and writes string rows in UTF-8; headers, commas/newlines inside quotes; includes streaming `readStream` / `writer`. The `CSV`/`CSVTable` classes in the same package provide a table model and POJO mapping; both share the same parser. Full usage in the [CSV module](/en/csv).
 - `IdCardUtils` / `IdCardGenerator`: 18-digit validation, parsing, and generation; region data is in `idcard-areas.txt`.
+
+## Expression Engine
+
+- `com.alianga.jkit.expression.Expression`: a zero-dependency expression evaluator for rule checks, dynamic value resolution, and template rendering. Supports arithmetic/comparison/logic/ternary operators, Map and JavaBean contexts, positional parameters `p0/p1`, `@`-prefixed built-in functions, and `renderTemplate` string templates. Full usage in the [Expression module](/en/expression).
 
 ## Miscellaneous Utilities
 

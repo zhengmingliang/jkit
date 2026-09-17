@@ -356,8 +356,12 @@ ULID 的 `next()` 每次取 80 位随机数，同一毫秒内顺序不确定；`
 
 ## CSV / 身份证
 
-- `com.alianga.jkit.csv.CSVUtils`：UTF-8 读写字符串行，表头、引号内逗号/换行，含流式 `readStream` / `writer`。同包的 `CSV`/`CSVTable` 提供表格模型与 POJO 映射，两者共用同一个解析器。见 [csv.md](https://github.com/zhengmingliang/jkit/blob/develop/docs/csv.md)。
+- `com.alianga.jkit.csv.CSVUtils`：UTF-8 读写字符串行，表头、引号内逗号/换行，含流式 `readStream` / `writer`。同包的 `CSV`/`CSVTable` 提供表格模型与 POJO 映射，两者共用同一个解析器。完整用法见 [CSV 模块](/csv)。
 - `IdCardUtils` / `IdCardGenerator`：18 位校验、解析、生成；区划数据在 `idcard-areas.txt`。
+
+## 表达式引擎
+
+- `com.alianga.jkit.expression.Expression`：零依赖表达式求值，用于规则判断、动态取值、模板渲染。支持算术/比较/逻辑/三元运算、Map 与 JavaBean 上下文、位置参数 `p0/p1`、以 `@` 开头的内置函数，以及 `renderTemplate` 字符串模板。完整用法见 [表达式引擎](/expression)。
 
 ## 杂项工具
 

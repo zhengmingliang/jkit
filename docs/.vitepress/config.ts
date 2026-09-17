@@ -68,6 +68,8 @@ const zhSidebar: DefaultTheme.Sidebar = [
       { text: 'JSON 模块', link: '/json' },
       { text: 'YAML 模块', link: '/yaml' },
       { text: '配置读取', link: '/config' },
+      { text: 'CSV 模块', link: '/csv' },
+      { text: '表达式引擎', link: '/expression' },
     ],
   },
   {
@@ -123,6 +125,8 @@ const enSidebar: DefaultTheme.Sidebar = [
       { text: 'JSON', link: '/en/json' },
       { text: 'YAML', link: '/en/yaml' },
       { text: 'Configuration', link: '/en/config' },
+      { text: 'CSV', link: '/en/csv' },
+      { text: 'Expression', link: '/en/expression' },
     ],
   },
   {
@@ -155,8 +159,8 @@ export default defineConfig({
   lastUpdated: true,
   // /v2.0.1/ 是 CI 从 tag 嵌进来的另一份站点，当前构建里还不存在
   ignoreDeadLinks: [(url) => /\/v\d+\.\d+\.\d+(\/|$)/.test(url)],
-  // next-plan 是内部开发计划；csv/expression 尚未成文，先不构建进站点
-  srcExclude: ['**/next-plan.md', '**/csv.md', '**/expression.md'],
+  // next-plan 是内部开发计划，不构建进站点
+  srcExclude: ['**/next-plan.md'],
 
   head: [
     ['link', { rel: 'icon', type: 'image/svg+xml', href: `${base}favicon.svg` }],
