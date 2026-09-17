@@ -311,6 +311,28 @@ List<User> users = JSON.parse(json, type);
 if (JDKVersion.VERSION >= 9) { /* 走 VarHandle 实现 */ }
 ```
 
+## 脱敏
+
+`DesensitizeUtils`：日志、导出、前端展示用的打码工具。`null` 返回 `null`、空串返回空串，不抛异常，可以直接埋进日志链路。
+
+```java
+DesensitizeUtils.phone("13800138000");        // 138****8000
+DesensitizeUtils.idCard("110101199003071234");  // 110101********1234（保留前 6 后 4）
+DesensitizeUtils.name("张三");                 // 张*
+DesensitizeUtils.email("zheng@example.com");  // z****@example.com（域名保留）
+DesensitizeUtils.bankCard("6222 0202 0001 1234"); // 6222********1234（先去空格）
+DesensitizeUtils.address("北京市海淀区中关村大街1号"); // 北京市海淀区*******
+DesensitizeUtils.carNo("京A12345");           // 京A***45
+DesensitizeUtils.ip("192.168.1.100");         // 192.168.*.*
+DesensitizeUtils.password("anything");        // ******（固定 6 位，不泄漏长度）
+```
+
+通用入口是 `mask(value, keepHead, keepTail)` / `mask(value, keepHead, keepTail, maskChar)`，中间全部打码；`maskAll(value)` 等长全打码。`keepHead + keepTail` 覆盖整个字符串时**不会原样返回**，只保留首字符——宁可多打码，也不因为「长度异常」把明文放出去。单字符无从打码时原样返回。
+
+配置驱动场景（按字段名指定类型）用 `desensitize(value, Type)`，`Type` 枚举含 `PHONE` / `ID_CARD` / `NAME` / `EMAIL` / `BANK_CARD` / `ADDRESS` / `CAR_NO` / `IP` / `PASSWORD` / `DEFAULT`，`type` 为 `null` 时按 `DEFAULT`（保留首尾各一位）处理。
+
+姓名只按字符数处理，不识别复姓；非纯中文（英文名）走 `DEFAULT` 兜底。脱敏只管展示，**不能替代访问控制**——数据本身仍是明文流转的。
+
 ## ID 生成
 
 - `IdGenerator`：配置驱动入口，读 `generate.properties`，默认委托雪花算法。`id()` 出 `long`、`hex()` 出 16 字符十六进制。

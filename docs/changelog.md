@@ -31,6 +31,7 @@
 - `ULID`：`common.idgenerate` 下的 26 字符 Crockford Base32 有序 ID。`next()` / `nextMonotonic()`（同毫秒内 `+1`，单 JVM 严格递增）、`parse()` 取时间戳与随机部分、`toBytes` / `fromBytes` 16 字节紧凑存储、`isUlid()` 校验。解析按 Crockford 容错（`I`/`L`→`1`、`O`→`0`、大小写不敏感），含 `U` 等非法字符拒绝。按字符串排序即按时间排序，比 UUIDv4 更适合做索引主键。
 - `UUIDv7`：RFC 9562 的时间有序 UUID，毫秒时间戳在高 48 位。`next()` / `nextMonotonic()`（12 位计数器，一毫秒用满则推进逻辑时钟 1ms，保证不回退）、`nextString()`、`timestamp(UUID)` 取回毫秒时间戳、`isV7(UUID)` 判定。形态仍是标准 UUID，可直接存 `uuid` 列。
 - `IdGenerator.ulid()` / `uuidV7()` / `uuidV7String()`：与雪花并列的门面入口。
+- `DesensitizeUtils`：常用数据脱敏。`phone` / `idCard` / `bankCard` / `name` / `email` / `address` / `carNo` / `ip` / `password` 语义方法，通用 `mask(value, keepHead, keepTail[, maskChar])` 与 `maskAll`，配置驱动用 `desensitize(value, Type)`（`Type` 枚举十类）。`null` 与空串原样返回不抛异常；`keepHead + keepTail` 覆盖全文时只保留首字符而非原样返回；`password` 固定输出 6 个掩码，不泄漏密码长度。
 
 ### 变更
 
@@ -51,7 +52,7 @@
 - `docs/sql.md` / `docs/en/sql.md`：跨方言转换去掉「进行中」口径；补齐 `inject` / `expandStar` / `replaceSelectItem` / `bind` / Wall 表策略 / `DATE_FORMAT` 格式符。英文转换章节与中文对齐。`sql-auto` 补充已有表注释同步。
 - `docs/sql.md` / `docs/en/sql.md`「业务场景」补 `bind` / `inject` / `expandStar`+`replaceSelectItems` / `addComment`+方言引号 / MyBatis `#{}/ ${}` 可复制示例；模板占位符节增加 parse+bind 常用写法。样例与 `SqlBusinessScenarioTest` 对齐。
 - `docs/sql.md` / `docs/en/sql.md` 业务场景扩到 18 类（2.0.2）：多数据源方言识别（`JdbcUrlUtils`）、报表 `DATE_FORMAT` 跨方言、动态表名安全绑定、低代码查询沙箱（Wall 表白名单 / WHERE 必含列 / 表数上限）。场景 4 补恒真 `LIKE '%'` / `XOR`。
-- `docs/toolkit.md`：crypto 章节补 AES-GCM（IV 布局 / AAD / 参数校验 / 与 ECB 的差异）、RSA（OAEP 与 PKCS#1 v1.5 选型表、密钥长度、单块上限）、DES 废弃说明；新增「ID 生成」章节，对比雪花 / ULID / UUIDv7 的适用场景与单调模式语义。
+- `docs/toolkit.md`：crypto 章节补 AES-GCM（IV 布局 / AAD / 参数校验 / 与 ECB 的差异）、RSA（OAEP 与 PKCS#1 v1.5 选型表、密钥长度、单块上限）、DES 废弃说明；新增「ID 生成」章节对比雪花 / ULID / UUIDv7 的适用场景与单调模式语义，新增「脱敏」章节说明各类型保留位数与 `mask` 的兜底策略。
 
 ### 修复
 

@@ -311,6 +311,28 @@ List<User> users = JSON.parse(json, type);
 if (JDKVersion.VERSION >= 9) { /* use the VarHandle implementation */ }
 ```
 
+## Desensitization
+
+`DesensitizeUtils` masks data for logs, exports, and UI. `null` returns `null` and an empty string returns an empty string—nothing throws, so it can sit inside a logging path.
+
+```java
+DesensitizeUtils.phone("13800138000");             // 138****8000
+DesensitizeUtils.idCard("110101199003071234");     // 110101********1234 (keep first 6, last 4)
+DesensitizeUtils.name("张三");                      // 张*
+DesensitizeUtils.email("zheng@example.com");       // z****@example.com (domain kept)
+DesensitizeUtils.bankCard("6222 0202 0001 1234");  // 6222********1234 (spaces stripped first)
+DesensitizeUtils.address("北京市海淀区中关村大街1号"); // 北京市海淀区*******
+DesensitizeUtils.carNo("京A12345");                // 京A***45
+DesensitizeUtils.ip("192.168.1.100");              // 192.168.*.*
+DesensitizeUtils.password("anything");             // ****** (fixed length, hides password length)
+```
+
+The generic entry points are `mask(value, keepHead, keepTail)` / `mask(value, keepHead, keepTail, maskChar)`, which mask everything in between; `maskAll(value)` masks the whole string at the same length. When `keepHead + keepTail` covers the entire string the value is **not** returned as-is—only the first character survives. Over-masking beats leaking plaintext just because the length looked odd. A single character cannot be masked and is returned unchanged.
+
+For configuration-driven setups (a field name maps to a type) use `desensitize(value, Type)`; the `Type` enum covers `PHONE` / `ID_CARD` / `NAME` / `EMAIL` / `BANK_CARD` / `ADDRESS` / `CAR_NO` / `IP` / `PASSWORD` / `DEFAULT`, and a `null` type falls back to `DEFAULT` (keep one character at each end).
+
+Names are handled by character count only—compound surnames are not detected, and non-Chinese names (John) fall back to `DEFAULT`. Masking is about presentation; it does **not** replace access control, since the data itself still flows in plaintext.
+
 ## ID Generation
 
 - `IdGenerator`: configuration-driven entry point reading `generate.properties`, delegating to snowflake by default. `id()` returns a `long`, `hex()` a 16-character hex string.
