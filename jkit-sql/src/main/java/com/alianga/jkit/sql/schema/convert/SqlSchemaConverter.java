@@ -4,6 +4,7 @@ import com.alianga.jkit.sql.SQL;
 import com.alianga.jkit.sql.SqlDialect;
 import com.alianga.jkit.sql.SqlDialectSpec;
 import com.alianga.jkit.sql.ast.SqlDdlStatement;
+import com.alianga.jkit.sql.ast.SqlGuardedStatement;
 import com.alianga.jkit.sql.ast.SqlExpr;
 import com.alianga.jkit.sql.ast.SqlIdentifier;
 import com.alianga.jkit.sql.ast.SqlSelect;
@@ -173,6 +174,14 @@ public final class SqlSchemaConverter {
             return null;
         }
         SqlStatement copy = SQL.clone(stmt);
+        if (copy instanceof SqlGuardedStatement) {
+            // 守卫的判定表达式保留原样（T-SQL 特有，如 OBJECT_ID(...)），仅递归转换内层 body
+            SqlGuardedStatement g = (SqlGuardedStatement) copy;
+            if (g.body() != null) {
+                g.setBody(convertStatement(g.body(), source, target, options, report));
+            }
+            return g;
+        }
         if (copy instanceof SqlDdlStatement) {
             convertDdl((SqlDdlStatement) copy, source, target, options, report);
         }

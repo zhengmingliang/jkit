@@ -23,6 +23,7 @@
 - `com.alianga.jkit.sql.entity.Comment`：本模块自有的表 / 字段注释注解（`TYPE`+`FIELD`，`value()`）。与 Hibernate `@Comment`、`@SqlTable(comment)` / `@SqlColumn(comment)` 并列；扫描仍按简单名 `Comment` 识别，供 `jkit-sql-model` 等模块解析字段注释时选用。
 - `SQL.bind` / `SQL.bindNamed`：把 `?` / `:name` 换成字面量或公式，并识别模板占位 IDENT（`@name@` / `#{table}` / `${*}` / `{{*}}` / `<*>` 等）。表名位置写成标识符（必要时加方言引号，防注入）；表达式位置与 `:name` 相同。字符串只加倍单引号；公式传 `SqlExpr`。`IN ?` 可填集合。布尔：Oracle / 达梦 / SQL Server / SQLite / DB2 / MySQL / Hive 写 `1`/`0`；PG / H2 / ANSI / Presto / ClickHouse 写 `TRUE`/`FALSE`。未传命名值时不扫描标识符。
 - `SqlPlaceholders.mybatis()` / `hashBrace()` / `dollarBrace()`：内置 MyBatis `#{property}`、`${property}`，解析支持 `#{id,jdbcType=VARCHAR}` / `#{item.name}`；bind 按逗号前的属性名取值。
+- `SqlGuardedStatement`：T-SQL 控制流守卫 `IF <expr> <stmt> [ELSE <stmt>]`（如 SQL Server init 幂等删表前置 `IF OBJECT_ID('t','U') IS NOT NULL DROP TABLE t;`）。`SqlParser.parseIfGuard` 解析 condition 原文与内层 body 并包成 `SqlGuardedStatement`；其 `type()` 委托给 body，故 `IF…DROP` 对外仍是 DROP，下游格式化 / 跨方言转换可正确识别。解析器在语句起始处的 `IF` 一律按控制流守卫处理（MySQL 里 `IF` 是函数，但语句起始位置不冲突）。`SqlFormatter` / `SqlAstCloner` / `SqlSchemaConverter` 均已支持——`sqlserver_init.sql` 整文件 `parseAll` 不再因 `IF` 抛 unsupported，其 51 处守卫识别为 DROP，跨方言转换 0 失败。
 
 ### 变更
 
