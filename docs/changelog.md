@@ -53,9 +53,11 @@
 - `docs/sql.md` / `docs/en/sql.md`「业务场景」补 `bind` / `inject` / `expandStar`+`replaceSelectItems` / `addComment`+方言引号 / MyBatis `#{}/ ${}` 可复制示例；模板占位符节增加 parse+bind 常用写法。样例与 `SqlBusinessScenarioTest` 对齐。
 - `docs/sql.md` / `docs/en/sql.md` 业务场景扩到 18 类（2.0.2）：多数据源方言识别（`JdbcUrlUtils`）、报表 `DATE_FORMAT` 跨方言、动态表名安全绑定、低代码查询沙箱（Wall 表白名单 / WHERE 必含列 / 表数上限）。场景 4 补恒真 `LIKE '%'` / `XOR`。
 - `docs/toolkit.md`：crypto 章节补 AES-GCM（IV 布局 / AAD / 参数校验 / 与 ECB 的差异）、RSA（OAEP 与 PKCS#1 v1.5 选型表、密钥长度、单块上限）、DES 废弃说明；新增「ID 生成」章节对比雪花 / ULID / UUIDv7 的适用场景与单调模式语义，新增「脱敏」章节说明各类型保留位数与 `mask` 的兜底策略。
+- `docs/json.md` / `docs/en/json.md`：Schema 关键字表补 `required`（标准数组写法）与 `must`（自有布尔写法）的区别，新增「必填：required 与 must 选哪个」小节。
 
 ### 修复
 
+- `jkit-core`：JSON Schema 的 `required` 关键字此前只被解析、从未参与校验——按标准写法声明的必填字段缺失时 `validateSuccess` 仍返回 `true`，是静默失效。`JSONNode#validateSchemaObject` 现在校验 `required` 列出的字段是否存在（标准语义：只要求字段存在，值为 `null` 也算存在；类型判定仍由 `type` 负责）；`required` 无需配合 `properties` 也能生效，嵌套对象同样覆盖。本库自有的 `must` 语义不变（要求字段存在且值不为 `null`），两者混用时都要满足。
 - `jkit-sql`：回写不再丢表达式括号。`(a - b) / c` 此前回写成 `a - b / c`、`-(a + b)` 回写成 `-a + b`、`ROUND((SELECT …), 2)` 回写成 `ROUND(SELECT …, 2)`——求值顺序被改，函数参数里的子查询还会写成非法 SQL。parser 现在保留源文括号标记，函数参数中的标量子查询照常带括号。复杂 SQL 语料 1200 条里 172 条受影响；L2 文本保真率由 45.75% 升到 91.83%，并新增「有效括号不减少」门禁（折叠 `(col)` 这类冗余原子括号不算丢失）。
 - `jkit-sql`：经典 Oracle 对带 `ORDER BY` 的 UNION / INTERSECT / EXCEPT / MINUS 做 ROWNUM 分页时，先包成 `SELECT * FROM (set-op) ORDER BY …` 再套 ROWNUM，避免子查询里对集合运算列别名排序报 `ORA-00904`。双层包装外层只投影原查询列，不再把中间层的 `RN` 输出给调用方（原查询为 `SELECT *` 时仍会带出 `RN`）。
 - `jkit-sql`：`SqlNode.toString()` 默认按 MySQL 回写标识符引号（反引号），与 `SQL.toSqlString` 一致；不再误用 ANSI 双引号。`addComment("正文")` / 紧凑模式下的 `--` 行注释会包成合法块注释，避免把后续 SQL 拼成普通文本或整句注释掉。`addHint` 对未包装的正文补 slash-star-plus。跨方言仍用 `SQL.toSqlString(stmt, dialect)`。

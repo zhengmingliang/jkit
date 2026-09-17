@@ -340,7 +340,8 @@ result.getPath();     // 失败路径
 | 关键字 | 说明 |
 | --- | --- |
 | `type` | 类型：`object` / `array` / `string` / `number` / `integer` / `boolean` / `null`，支持数组多类型 |
-| `must` | 必填（本实现使用 `must`，等价于标准 `required`） |
+| `required` | 标准必填写法，字符串数组，写在父级：`"required": ["name", "age"]`。只要字段存在即满足，值为 `null` 也算存在 |
+| `must` | 本库自有必填写法，布尔值，写在字段自己的 schema 里：`"name": {"must": true}`。要求字段存在**且值不为 `null`** |
 | `minimum` / `maximum` | 数值边界 |
 | `exclusiveMinimum` / `exclusiveMaximum` | 开区间 |
 | `minLength` / `maxLength` | 字符串长度 |
@@ -352,6 +353,22 @@ result.getPath();     // 失败路径
 | `rules` | 自定义规则，支持 `regular` 正则与 `expression` 表达式 |
 | `anyOf` / `allOf` / `oneOf` | 组合校验 |
 | `disableExtra` | 禁止出现未定义字段 |
+
+### 必填：`required` 与 `must` 选哪个
+
+两种写法都认，语义不同，混用时都要满足：
+
+```java
+// 标准写法：父级声明，只要求字段存在
+JSONSchema.of("{\"type\":\"object\",\"required\":[\"name\"],\"properties\":{\"name\":{\"type\":\"string\"}}}")
+        .validateSuccess("{}");            // false：field 'name' is required but not found
+
+// 自有写法：字段内声明，还要求值不是 null
+JSONSchema.of("{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\",\"must\":true}}}")
+        .validateSuccess("{\"name\":null}"); // false
+```
+
+接口入参校验推荐用 `required`（与标准 schema 工具互通），`must` 适合「不能传 null」的场景。`required` 列出的字段若还声明了 `type`，`{"v":null}` 会因类型不匹配失败——那是 `type` 的判定，不是必填判定。
 
 ## 9. 其它能力
 

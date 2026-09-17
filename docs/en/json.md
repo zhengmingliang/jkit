@@ -340,7 +340,8 @@ Supported constraint keywords:
 | Keyword | Description |
 | --- | --- |
 | `type` | type: `object` / `array` / `string` / `number` / `integer` / `boolean` / `null`; an array of multiple types is supported |
-| `must` | required (this implementation uses `must`, equivalent to the standard `required`) |
+| `required` | the standard form: an array of strings declared on the parent, `"required": ["name", "age"]`. Presence is enough — `null` counts as present |
+| `must` | this library's own form: a boolean declared inside the field schema, `"name": {"must": true}`. The field must exist **and its value must not be `null`** |
 | `minimum` / `maximum` | numeric bounds |
 | `exclusiveMinimum` / `exclusiveMaximum` | open intervals |
 | `minLength` / `maxLength` | string length |
@@ -352,6 +353,22 @@ Supported constraint keywords:
 | `rules` | custom rules, supporting `regular` regex and `expression` expressions |
 | `anyOf` / `allOf` / `oneOf` | combined validation |
 | `disableExtra` | forbid undefined fields |
+
+### Required: `required` or `must`?
+
+Both are honoured, with different semantics; when both appear, both must hold:
+
+```java
+// Standard form: declared on the parent, presence is enough
+JSONSchema.of("{\"type\":\"object\",\"required\":[\"name\"],\"properties\":{\"name\":{\"type\":\"string\"}}}")
+        .validateSuccess("{}");            // false: field 'name' is required but not found
+
+// This library's form: declared inside the field, also rejects null
+JSONSchema.of("{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\",\"must\":true}}}")
+        .validateSuccess("{\"name\":null}"); // false
+```
+
+Prefer `required` for API payload validation (it interoperates with standard schema tooling); use `must` when a null value must be rejected too. If a `required` field also declares `type`, then `{"v":null}` fails on `type`, not on `required`.
 
 ## 9. Other Capabilities
 

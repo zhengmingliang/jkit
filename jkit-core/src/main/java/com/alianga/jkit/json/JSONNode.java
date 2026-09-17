@@ -298,10 +298,37 @@ public abstract class JSONNode implements Comparable<JSONNode> {
                     }
                 }
             }
-            return JSONSchemaResult.SUCCESS;
+            return validateRequiredFields(schema);
         } catch (Throwable throwable) {
             return JSONSchemaResult.fail(throwable.getMessage());
         }
+    }
+
+    /**
+     * 校验标准 JSON Schema 的 {@code required} 数组：列出的字段必须存在。
+     *
+     * <p>与 {@code must} 的区别：{@code must} 是本库的自有写法（写在字段自己的 schema 里，
+     * 且要求值非 {@code null}）；{@code required} 是标准写法（写在父级，只要求字段存在，
+     * 值为 {@code null} 也算存在）。两者同时使用时都要满足。
+     *
+     * @param schema 对象类型 schema
+     * @return 校验结果
+     */
+    private JSONSchemaResult validateRequiredFields(JSONSchema schema) {
+        Set<String> required = schema.getRequired();
+        if (required == null || required.isEmpty()) {
+            return JSONSchemaResult.SUCCESS;
+        }
+        ensureCompleted(true);
+        for (String field : required) {
+            if (field == null) {
+                continue;
+            }
+            if (!fieldValues.containsKey(field)) {
+                return JSONSchemaResult.fail("field: '" + field + "' is required but not found", getAbsolutePath());
+            }
+        }
+        return JSONSchemaResult.SUCCESS;
     }
 
     private JSONSchemaResult validateSchemaArray(JSONSchema schema) {
