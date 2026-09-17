@@ -23,6 +23,9 @@ Unreleased changes are appended to the **current version** section (currently 2.
 
 - `AESCrypt` GCM authenticated encryption: `encryptGcm(data, key)` / `decryptGcm(data, key)` use `AES/GCM/NoPadding` with a fresh random 12-byte IV prepended to the ciphertext (`IV || ciphertext`); decryption splits it off, so callers never manage IVs. The four-argument `encryptGcm(data, key, iv, aad)` / `decryptGcm(data, key, iv, aad)` take an explicit IV and AAD (authenticated but not encrypted — handy for binding a user id or order number). Also `generateIv()` and the `GCM_CIPHER_ALGORITHM` / `GCM_IV_LENGTH` / `GCM_TAG_BITS` constants. Unlike ECB / CBC, a tampered ciphertext or a wrong key fails loudly instead of decrypting into garbage.
 - `EncryptUtils.RSA` OAEP padding: `encryptOaep(byte[], PublicKey)` / `decryptOaep(byte[], PrivateKey)` plus base64 string helpers, using `RSA/ECB/OAEPWithSHA-256AndMGF1Padding`; `buildKeyPair(int keySize)` picks the key size explicitly and `DEFAULT_KEY_SIZE` exposes the default.
+- `ULID`: a 26-character Crockford Base32 sortable id in `common.idgenerate`. `next()` / `nextMonotonic()` (adds 1 within the same millisecond, strictly increasing inside one JVM), `parse()` for timestamp and randomness, `toBytes` / `fromBytes` for a compact 16-byte form, `isUlid()` for validation. Parsing applies the Crockford tolerances (`I`/`L`→`1`, `O`→`0`, case-insensitive) and rejects `U` and other illegal characters. Lexicographic order equals generation order, which suits index keys far better than UUIDv4.
+- `UUIDv7`: the RFC 9562 time-ordered UUID with the millisecond timestamp in the high 48 bits. `next()` / `nextMonotonic()` (12-bit counter; when it is exhausted inside one millisecond the logical clock advances 1ms so ids never go backwards), `nextString()`, `timestamp(UUID)` to recover epoch millis, `isV7(UUID)` to check. Still a well-formed UUID that fits a `uuid` column.
+- `IdGenerator.ulid()` / `uuidV7()` / `uuidV7String()`: facade entries alongside snowflake.
 
 ### Changed
 
@@ -61,7 +64,7 @@ Unreleased changes are appended to the **current version** section (currently 2.
 - `docs/sql.md` / `docs/en/sql.md`: classic Oracle ROWNUM wrapping now documents lifting `ORDER BY` off a set-op before pagination, and that `toSqlString` must name the target dialect.
 - `docs/sql.md` / `docs/en/sql.md` business-scenario section: extra copy-paste samples for `bind` / `inject` / `expandStar`+`replaceSelectItems` / `addComment`+dialect quotes / MyBatis `#{}/ ${}`. The template-placeholder section now shows the common parse+bind pattern. Samples match `SqlBusinessScenarioTest`.
 - Business scenarios expanded to 18 (2.0.2): dialect-from-URL (`JdbcUrlUtils`), report `DATE_FORMAT` rewrite, safe dynamic table-name bind, low-code query sandbox (Wall table allow/deny, required WHERE columns, max tables). Scenario 4 also covers tautology `LIKE '%'` / `XOR`.
-- `docs/toolkit.md`: the crypto section now covers AES-GCM (IV layout / AAD / argument checks / how it differs from ECB), RSA (OAEP vs PKCS#1 v1.5 decision table, key size, per-block limit), and the DES deprecation.
+- `docs/toolkit.md`: the crypto section now covers AES-GCM (IV layout / AAD / argument checks / how it differs from ECB), RSA (OAEP vs PKCS#1 v1.5 decision table, key size, per-block limit), and the DES deprecation; a new "ID Generation" section compares snowflake / ULID / UUIDv7 and explains the monotonic modes.
 
 ## 2.0.1 - 2026-09-13
 

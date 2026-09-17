@@ -311,6 +311,27 @@ List<User> users = JSON.parse(json, type);
 if (JDKVersion.VERSION >= 9) { /* use the VarHandle implementation */ }
 ```
 
+## ID Generation
+
+- `IdGenerator`: configuration-driven entry point reading `generate.properties`, delegating to snowflake by default. `id()` returns a `long`, `hex()` a 16-character hex string.
+- `SnowFlakeIdWorker`: the snowflake algorithm; requires worker / datacenter ids, so multi-instance deployments must keep those ids distinct.
+- `ULID`: 26 Crockford Base32 characters — 10 for the millisecond timestamp, 16 for randomness. **Lexicographic order equals generation order**, which makes it a much better index key than UUIDv4 (whose random prefix splits B+Tree pages constantly).
+- `UUIDv7`: puts the millisecond timestamp in the high 48 bits while staying a well-formed UUID that fits a `uuid` column.
+
+```java
+String ulid = IdGenerator.ulid();                 // or ULID.next()
+String mono = ULID.nextMonotonic();               // increments within the same millisecond
+long ts = ULID.parse(ulid).timestamp();           // back to epoch millis
+byte[] bytes = ULID.toBytes(ulid);                // 16-byte compact form (6 timestamp + 10 random)
+
+UUID v7 = IdGenerator.uuidV7();                   // or UUIDv7.next()
+long when = UUIDv7.timestamp(v7);
+```
+
+`ULID.next()` draws a fresh 80-bit random value, so ordering within one millisecond is undefined; `nextMonotonic()` adds 1 to the previous random value inside the same millisecond — use it when strict ordering matters (across instances, the same millisecond can still interleave). `UUIDv7.nextMonotonic()` uses a 12-bit counter and advances the logical clock by 1ms when the counter is exhausted, so it never goes backwards.
+
+Parsing follows Crockford tolerances: `I` / `L` count as `1`, `O` counts as `0`, and case does not matter; a `U` or any other illegal character is rejected. `ULID.isUlid(s)` validates without throwing.
+
 ## CSV / ID Card
 
 - `com.alianga.jkit.csv.CSVUtils`: reads and writes string rows in UTF-8; headers, commas/newlines inside quotes; includes streaming `readStream` / `writer`. The `CSV`/`CSVTable` classes in the same package provide a table model and POJO mapping; both share the same parser. See [csv.md](https://github.com/zhengmingliang/jkit/blob/develop/docs/csv.md).

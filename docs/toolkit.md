@@ -311,6 +311,27 @@ List<User> users = JSON.parse(json, type);
 if (JDKVersion.VERSION >= 9) { /* 走 VarHandle 实现 */ }
 ```
 
+## ID 生成
+
+- `IdGenerator`：配置驱动入口，读 `generate.properties`，默认委托雪花算法。`id()` 出 `long`、`hex()` 出 16 字符十六进制。
+- `SnowFlakeIdWorker`：雪花算法，需配置 worker / datacenter 实例号，跨实例部署要靠实例号区分。
+- `ULID`：26 字符 Crockford Base32，前 10 位毫秒时间戳、后 16 位随机数，**按字符串排序即按时间排序**，适合做索引主键（UUIDv4 的随机前缀会让 B+Tree 频繁页分裂）。
+- `UUIDv7`：把毫秒时间戳放进 UUID 高 48 位，形态仍是标准 UUID，可直接存 `uuid` 列。
+
+```java
+String ulid = IdGenerator.ulid();                 // 或 ULID.next()
+String mono = ULID.nextMonotonic();               // 同一毫秒内递增，单 JVM 严格有序
+long ts = ULID.parse(ulid).timestamp();           // 解析回毫秒时间戳
+byte[] bytes = ULID.toBytes(ulid);                // 16 字节紧凑存储（6 时间戳 + 10 随机）
+
+UUID v7 = IdGenerator.uuidV7();                   // 或 UUIDv7.next()
+long when = UUIDv7.timestamp(v7);
+```
+
+ULID 的 `next()` 每次取 80 位随机数，同一毫秒内顺序不确定；`nextMonotonic()` 在同一毫秒内在上一个随机值上 `+1`，需要严格有序时用后者（多实例部署时同毫秒仍可能交错）。UUIDv7 的 `nextMonotonic()` 用 12 位计数器，一毫秒内用满会把逻辑时钟推进 1ms，保证不回退。
+
+解析时 `I` / `L` 视作 `1`、`O` 视作 `0`、大小写不敏感（Crockford 容错），含 `U` 或其它非法字符一律拒绝；`ULID.isUlid(s)` 只做校验不抛异常。
+
 ## CSV / 身份证
 
 - `com.alianga.jkit.csv.CSVUtils`：UTF-8 读写字符串行，表头、引号内逗号/换行，含流式 `readStream` / `writer`。同包的 `CSV`/`CSVTable` 提供表格模型与 POJO 映射，两者共用同一个解析器。见 [csv.md](https://github.com/zhengmingliang/jkit/blob/develop/docs/csv.md)。
