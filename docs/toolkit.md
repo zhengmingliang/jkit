@@ -93,8 +93,22 @@ Verify.verify(n > 0, "n must be positive");
 
 ```java
 long digest = Hash64.hash("cache-key");
-byte[] out = AESCrypt.encrypt(plain, key16);
+byte[] out = AESCrypt.encryptGcm(plain, key32);   // 推荐：GCM 认证加密
 ```
+
+### AES-GCM：新代码默认选它
+
+`AESCrypt.encryptGcm(data, key)` / `decryptGcm(data, key)` 走 `AES/GCM/NoPadding`（AEAD），每次随机 12 字节 IV 并拼在密文前面（`IV || ciphertext`），解密时自动拆分，调用方不用自己保管 IV。相比 ECB / CBC，GCM 额外提供完整性校验：**密文被改一个字节、或拿错密钥，解密直接抛异常**，而 ECB / CBC 会解出一堆乱码让错误继续往后传。
+
+```java
+byte[] key = AESCrypt.generateKey(256);
+byte[] packed = AESCrypt.encryptGcm(plain, key);          // 自带 IV，可直接存库 / 传输
+byte[] plain2 = AESCrypt.decryptGcm(packed, key);
+```
+
+需要自己管 IV、或要把「不加密但要防篡改」的字段绑进密文时，用四参版本：`encryptGcm(data, key, iv, aad)` / `decryptGcm(data, key, iv, aad)`，`aad` 传 `null` 即不启用。AAD 必须与加密时逐字节一致，否则解密失败。IV 在同一密钥下**不可重复**；IV 长度必须 12 字节、密钥必须 16/24/32 字节，非法参数抛 `IllegalArgumentException`，密文短于 12 字节时解密直接拒绝而不是当成空明文。
+
+ECB 的静态 `encrypt(data, key)` / `decrypt(data, key)` 保留但**不推荐**：相同明文块产生相同密文块，会泄漏数据模式，也不防篡改。它和构造器走的 CBC 路径互不相通（见下文）。
 
 摘要类方法（`md5`、`sha1`、`sha256`、`sha512`、`sha256_HMAC`）输出**小写** 16 进制，底层统一走 `ByteUtils.toHexStringLower`。
 
@@ -109,6 +123,32 @@ crypt.decrypt(in, out);                    // 大文件走流；in 和 out 都�
 流式重载**会关掉传入的两条流**（内部关闭 `CipherOutputStream` 时连带关闭 `outputData`，并显式 `close()` 了 `inputData`），别在 try-with-resources 外面复用它们。
 
 `AwaruaTiger`：Tiger 摘要（192 位 / 24 字节），`computeHash(bytes)` 一次算完整个数组并自动重置实例，因此同一实例可以重复调用；但实例带内部状态，**不是线程安全的**。只为 TTH（tiger tree hash）这类兼容场景保留，新代码用 SHA-256。
+
+### RSA：密钥默认 2048 位，填充优先 OAEP
+
+`EncryptUtils.RSA` 提供密钥对生成与公钥加密 / 私钥解密。两条填充路径互不相通，选错就是解密失败：
+
+| 方法 | 填充 | 适用 |
+| --- | --- | --- |
+| `encryptOaep` / `decryptOaep` | `RSA/ECB/OAEPWithSHA-256AndMGF1Padding` | **新数据默认选这个**，抗选择密文攻击，带随机盐，同明文每次密文不同 |
+| `encrypt` / `decrypt` | `RSA/ECB/PKCS1Padding`（PKCS#1 v1.5） | 解密历史密文、对接只认 v1.5 的老系统 |
+
+```java
+KeyPair pair = EncryptUtils.RSA.buildKeyPair();          // 2048 位
+String pub = Base64Utils.encodeToString(pair.getPublic().getEncoded());
+String pri = Base64Utils.encodeToString(pair.getPrivate().getEncoded());
+
+String cipher = EncryptUtils.RSA.encryptOaep("敏感字段", pub);   // base64 密文
+String text = EncryptUtils.RSA.decryptOaep(cipher, pri);
+```
+
+`buildKeyPair()` 自 2.0.2 起默认生成 **2048 位**（此前是 1024 位，已不满足当前安全基线）。确需沿用旧长度用 `buildKeyPair(1024)` 显式指定；小于 512 位抛 `IllegalArgumentException`。2048 位密钥下 OAEP 单块最多加密 190 字节，超长数据请走「随机 AES 密钥加密正文 + RSA 加密该密钥」的混合方案。
+
+字符串便捷方法在密钥非法时返回空字符串（不抛异常），调用方要判空。
+
+### DES 已废弃
+
+`DESCrypt` 与 `EncryptUtils.DES` 自 2.0.2 起标 `@Deprecated`：56 位有效密钥可被暴力破解，ECB / CBC 又不防篡改。仍可用于解密历史数据，新代码一律用 `AESCrypt.encryptGcm`。
 
 ### ContextObfuscator：上下文派生的混淆包装
 

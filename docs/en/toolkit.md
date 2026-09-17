@@ -93,8 +93,22 @@ Verify.verify(n > 0, "n must be positive");
 
 ```java
 long digest = Hash64.hash("cache-key");
-byte[] out = AESCrypt.encrypt(plain, key16);
+byte[] out = AESCrypt.encryptGcm(plain, key32);   // preferred: GCM authenticated encryption
 ```
+
+### AES-GCM: The Default for New Code
+
+`AESCrypt.encryptGcm(data, key)` / `decryptGcm(data, key)` use `AES/GCM/NoPadding` (AEAD) with a fresh random 12-byte IV prepended to the ciphertext (`IV || ciphertext`); decryption splits it off automatically, so callers never store IVs. Compared with ECB / CBC, GCM also authenticates: **flip one byte or use the wrong key and decryption throws**, whereas ECB / CBC happily return garbage that travels further down the pipeline.
+
+```java
+byte[] key = AESCrypt.generateKey(256);
+byte[] packed = AESCrypt.encryptGcm(plain, key);          // IV included; safe to store or ship
+byte[] plain2 = AESCrypt.decryptGcm(packed, key);
+```
+
+When you manage IVs yourself, or want to bind fields that must not be encrypted but must not be tampered with either, use the four-argument form `encryptGcm(data, key, iv, aad)` / `decryptGcm(data, key, iv, aad)` and pass `null` for `aad` to skip it. The AAD must match byte for byte or decryption fails. An IV must never repeat under the same key; IVs are 12 bytes and keys 16/24/32 bytes—illegal arguments throw `IllegalArgumentException`, and ciphertext shorter than 12 bytes is rejected instead of being treated as empty plaintext.
+
+The ECB helpers `encrypt(data, key)` / `decrypt(data, key)` remain but are **not recommended**: identical plaintext blocks produce identical ciphertext blocks, leaking patterns, and nothing detects tampering. They are also not interchangeable with the CBC path used by the constructor (see below).
 
 The digest methods (`md5`, `sha1`, `sha256`, `sha512`, `sha256_HMAC`) output **lowercase** hex; underneath they all go through `ByteUtils.toHexStringLower`.
 
@@ -109,6 +123,32 @@ crypt.decrypt(in, out);                    // streams for large files; both in a
 The streaming overloads **close both streams passed in** (closing the internal `CipherOutputStream` also closes `outputData`, and `inputData` is explicitly `close()`d), so don't reuse them outside try-with-resources.
 
 `AwaruaTiger`: Tiger digest (192-bit / 24 bytes). `computeHash(bytes)` processes the entire array in one shot and automatically resets the instance, so the same instance can be called repeatedly; however, instances carry internal state and are **not thread-safe**. Kept only for compatibility scenarios like TTH (tiger tree hash); use SHA-256 in new code.
+
+### RSA: 2048-bit by Default, OAEP Padding First
+
+`EncryptUtils.RSA` generates key pairs and does public-key encrypt / private-key decrypt. The two padding paths are not interchangeable—pick the wrong one and decryption simply fails:
+
+| Methods | Padding | Use for |
+| --- | --- | --- |
+| `encryptOaep` / `decryptOaep` | `RSA/ECB/OAEPWithSHA-256AndMGF1Padding` | **Default for new data**: resists chosen-ciphertext attacks, randomised salt, different ciphertext each time |
+| `encrypt` / `decrypt` | `RSA/ECB/PKCS1Padding` (PKCS#1 v1.5) | Legacy ciphertext, or peers that only speak v1.5 |
+
+```java
+KeyPair pair = EncryptUtils.RSA.buildKeyPair();          // 2048 bits
+String pub = Base64Utils.encodeToString(pair.getPublic().getEncoded());
+String pri = Base64Utils.encodeToString(pair.getPrivate().getEncoded());
+
+String cipher = EncryptUtils.RSA.encryptOaep("sensitive", pub);   // base64 ciphertext
+String text = EncryptUtils.RSA.decryptOaep(cipher, pri);
+```
+
+`buildKeyPair()` generates **2048-bit** keys since 2.0.2 (it used to be 1024, which no longer meets current baselines). Call `buildKeyPair(1024)` when the old length is genuinely required; below 512 bits throws `IllegalArgumentException`. With a 2048-bit key, OAEP encrypts at most 190 bytes per block—for larger payloads use the hybrid pattern of encrypting the body with a random AES key and wrapping that key with RSA.
+
+The string helpers return an empty string (rather than throwing) when the key is invalid, so callers must check for empty.
+
+### DES Is Deprecated
+
+`DESCrypt` and `EncryptUtils.DES` are `@Deprecated` since 2.0.2: 56 effective bits are brute-forceable and neither ECB nor CBC detects tampering. They still work for decrypting legacy data; use `AESCrypt.encryptGcm` everywhere else.
 
 ### ContextObfuscator: Context-Derived Obfuscation Wrapping
 

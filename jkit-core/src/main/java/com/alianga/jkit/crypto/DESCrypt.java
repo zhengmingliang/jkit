@@ -24,10 +24,17 @@ import java.security.spec.InvalidKeySpecException;
  *
  * <p>密钥长度固定为 8 字节（64 位，其中 56 位有效）。
  *
+ * <p><b>已废弃</b>：DES 的 56 位有效密钥可在数小时内被暴力破解，且 ECB / CBC 都不防篡改。
+ * 新代码请用 {@link AESCrypt#encryptGcm(byte[], byte[])}（AEAD，256 位密钥）；
+ * 仅在与老系统对接、且对方只认 DES 时才保留本类。
+ *
  * @author 郑明亮
  * @version 1.0
+ * @see AESCrypt
  * @see CipherCrpyt
+ * @deprecated 自 2.0.2 起废弃，改用 {@link AESCrypt} 的 GCM 模式
  */
+@Deprecated
 public class DESCrypt extends CipherCrpyt {
     /**
      * DES 密钥算法名称。

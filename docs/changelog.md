@@ -24,8 +24,15 @@
 - `SQL.bind` / `SQL.bindNamed`：把 `?` / `:name` 换成字面量或公式，并识别模板占位 IDENT（`@name@` / `#{table}` / `${*}` / `{{*}}` / `<*>` 等）。表名位置写成标识符（必要时加方言引号，防注入）；表达式位置与 `:name` 相同。字符串只加倍单引号；公式传 `SqlExpr`。`IN ?` 可填集合。布尔：Oracle / 达梦 / SQL Server / SQLite / DB2 / MySQL / Hive 写 `1`/`0`；PG / H2 / ANSI / Presto / ClickHouse 写 `TRUE`/`FALSE`。未传命名值时不扫描标识符。
 - `SqlPlaceholders.mybatis()` / `hashBrace()` / `dollarBrace()`：内置 MyBatis `#{property}`、`${property}`，解析支持 `#{id,jdbcType=VARCHAR}` / `#{item.name}`；bind 按逗号前的属性名取值。
 
+**jkit-core**
+
+- `AESCrypt` GCM 认证加密：`encryptGcm(data, key)` / `decryptGcm(data, key)` 走 `AES/GCM/NoPadding`，每次随机 12 字节 IV 并拼在密文前（`IV || ciphertext`），解密自动拆分，无需调用方保管 IV；四参版本 `encryptGcm(data, key, iv, aad)` / `decryptGcm(data, key, iv, aad)` 支持自定义 IV 与 AAD（附加认证数据参与完整性校验但不加密，适合绑定用户 ID / 业务单号）。另有 `generateIv()`、`GCM_CIPHER_ALGORITHM` / `GCM_IV_LENGTH` / `GCM_TAG_BITS` 常量。相比 ECB / CBC，密文被篡改或密钥不对时解密直接抛异常，而不是解出乱码继续往下传。
+- `EncryptUtils.RSA` OAEP 填充：`encryptOaep(byte[], PublicKey)` / `decryptOaep(byte[], PrivateKey)` 及 base64 字符串便捷方法，填充为 `RSA/ECB/OAEPWithSHA-256AndMGF1Padding`；新增 `buildKeyPair(int keySize)` 可显式指定密钥长度，常量 `DEFAULT_KEY_SIZE`。
+
 ### 变更
 
+- `jkit-core`：`EncryptUtils.RSA.buildKeyPair()` 默认密钥长度由 1024 位上调到 **2048 位**。1024 位 RSA 已不满足当前安全基线（NIST / PCI-DSS 均要求 ≥2048）；确需沿用旧长度改为显式调用 `buildKeyPair(1024)`，小于 512 位抛 `IllegalArgumentException`。
+- `jkit-core`：`DESCrypt` 与 `EncryptUtils.DES` 标 `@Deprecated`（56 位有效密钥可被暴力破解，ECB / CBC 不防篡改）。方法仍可用，仅用于解密历史数据；新代码用 `AESCrypt.encryptGcm`。
 - `jkit-sql`：行级注入实现类由 `SqlTenantRewriter` 更名为 `SqlInjectRewriter`（2.0.2 未发版，不保留旧名）。租户只是一种场景，类名/方法名不再带 tenant。
 - `jkit-sql`：复杂 SQL 回归门禁收紧——L1 parse / L3 转换后 parse 由「≥95% / ≥90%」收到 100%；L3 由 5 个方向对扩到四方言 4×3 全矩阵（3600 次转换，补上 PostgreSQL 作为源）；L2 新增「有效括号不减少」硬断言。8 个方言切片 L2 测试收敛到 `AbstractComplexSqlSliceL2Test`，子类只声明方言与编号区间（净减约 1100 行重复代码）。
 - `jkit-sql`：`SqlIdentifier` 支持逐段引号标记（新增 `markQuotedPart` / `isPartQuoted` / `quotedParts`）。此前只有一个整体 `quoted`，`c."LEVEL"` 会被回写成 `"c"."LEVEL"`——引号扩散到表别名，Oracle 里 `"c"` 与别名 `C` 不匹配而报 `ORA-00904`（1200 条语料真库全量对照中 15 条中招）。`SqlParser` 按段打标记、`SqlAstCloner` 复制位图、`SqlFormatter` 按段输出；无逐段信息时（改写器构造的标识符）回退到整体 `quoted`，行为不变。
@@ -41,6 +48,7 @@
 - `docs/sql.md` / `docs/en/sql.md`：跨方言转换去掉「进行中」口径；补齐 `inject` / `expandStar` / `replaceSelectItem` / `bind` / Wall 表策略 / `DATE_FORMAT` 格式符。英文转换章节与中文对齐。`sql-auto` 补充已有表注释同步。
 - `docs/sql.md` / `docs/en/sql.md`「业务场景」补 `bind` / `inject` / `expandStar`+`replaceSelectItems` / `addComment`+方言引号 / MyBatis `#{}/ ${}` 可复制示例；模板占位符节增加 parse+bind 常用写法。样例与 `SqlBusinessScenarioTest` 对齐。
 - `docs/sql.md` / `docs/en/sql.md` 业务场景扩到 18 类（2.0.2）：多数据源方言识别（`JdbcUrlUtils`）、报表 `DATE_FORMAT` 跨方言、动态表名安全绑定、低代码查询沙箱（Wall 表白名单 / WHERE 必含列 / 表数上限）。场景 4 补恒真 `LIKE '%'` / `XOR`。
+- `docs/toolkit.md`：crypto 章节补 AES-GCM（IV 布局 / AAD / 参数校验 / 与 ECB 的差异）、RSA（OAEP 与 PKCS#1 v1.5 选型表、密钥长度、单块上限）、DES 废弃说明。
 
 ### 修复
 

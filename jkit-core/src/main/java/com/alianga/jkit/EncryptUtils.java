@@ -10,6 +10,8 @@ import com.alianga.jkit.log.Log;
 
 import javax.crypto.Cipher;
 import javax.crypto.Mac;
+import javax.crypto.spec.OAEPParameterSpec;
+import javax.crypto.spec.PSource;
 import javax.crypto.spec.SecretKeySpec;
 
 import java.io.BufferedInputStream;
@@ -36,6 +38,7 @@ import java.security.NoSuchAlgorithmException;
 import java.security.PrivateKey;
 import java.security.PublicKey;
 import java.security.spec.InvalidKeySpecException;
+import java.security.spec.MGF1ParameterSpec;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.security.spec.X509EncodedKeySpec;
 import java.util.Map;
@@ -65,6 +68,20 @@ public class EncryptUtils {
     private static final Charset DEFAULT_CHARSET = StandardCharsets.UTF_8;
     private static final String UTF_8 = DEFAULT_CHARSET.name();
     private static final String RSA = "RSA";
+    /**
+     * RSA OAEP 填充算法（SHA-256 + MGF1-SHA256）。
+     *
+     * @since 2.0.2
+     */
+    private static final String OAEP_CIPHER_ALGORITHM = "RSA/ECB/OAEPWithSHA-256AndMGF1Padding";
+    /**
+     * OAEP 摘要算法名。
+     */
+    private static final String OAEP_DIGEST = "SHA-256";
+    /**
+     * OAEP 掩码生成函数名。
+     */
+    private static final String OAEP_MGF = "MGF1";
 
     static {
         fixKeyLength();
@@ -392,7 +409,13 @@ public class EncryptUtils {
 
     /**
      * DES 对称加解密器，通过 {@link #newInstance(String)} 或 {@link #newInstance(String, String)} 创建。
+     *
+     * <p><b>已废弃</b>：底层是 56 位有效密钥的 DES，不具备现代安全强度。新代码请用 {@link AES}，
+     * 或直接调用 {@link AESCrypt#encryptGcm(byte[], byte[])}。保留本类只为解密历史数据。
+     *
+     * @deprecated 自 2.0.2 起废弃，改用 {@link AES}
      */
+    @Deprecated
     public static class DES extends Encrypt {
         /**
          * 加解密对象
@@ -935,18 +958,51 @@ public class EncryptUtils {
 
     /**
      * RSA 非对称加解密工具，提供密钥对生成、公钥加密与私钥解密。
+     *
+     * <p>填充模式的选择（新代码默认选 OAEP）：
+     * <ul>
+     *   <li>{@link #encryptOaep(byte[], PublicKey)} / {@link #decryptOaep(byte[], PrivateKey)}：
+     *       {@code RSA/ECB/OAEPWithSHA-256AndMGF1Padding}，抗选择密文攻击，<b>推荐</b>。</li>
+     *   <li>{@link #encrypt(byte[], PublicKey)} / {@link #decrypt(byte[], PrivateKey)}：
+     *       {@code RSA/ECB/PKCS1Padding}（PKCS#1 v1.5），只用于解密历史密文或对接只认 v1.5 的老系统。</li>
+     * </ul>
      */
     public static class RSA {
         private static final Charset charset = DEFAULT_CHARSET;
 
         /**
-         * 生成 1024 位的 RSA 密钥对。
+         * 默认 RSA 密钥长度：2048 位。
+         *
+         * @since 2.0.2
+         */
+        public static final int DEFAULT_KEY_SIZE = 2048;
+
+        /**
+         * 生成 {@value #DEFAULT_KEY_SIZE} 位的 RSA 密钥对。
+         *
+         * <p>2.0.2 之前默认生成 1024 位，1024 位 RSA 已不满足当前安全基线（NIST / PCI-DSS 均要求 ≥2048），
+         * 因此默认值上调。确需沿用旧长度时用 {@link #buildKeyPair(int)} 显式指定。
          *
          * @return 新生成的 RSA 密钥对
          * @throws NoSuchAlgorithmException 当前运行环境不支持 RSA 算法
          */
         public static KeyPair buildKeyPair() throws NoSuchAlgorithmException {
-            final int keySize = 1024;
+            return buildKeyPair(DEFAULT_KEY_SIZE);
+        }
+
+        /**
+         * 生成指定长度的 RSA 密钥对。
+         *
+         * @param keySize 密钥长度（位），常用 2048 / 3072 / 4096；小于 2048 仅建议用于兼容历史系统
+         * @return 新生成的 RSA 密钥对
+         * @throws NoSuchAlgorithmException 当前运行环境不支持 RSA 算法
+         * @throws IllegalArgumentException keySize 小于 512 时抛出
+         * @since 2.0.2
+         */
+        public static KeyPair buildKeyPair(int keySize) throws NoSuchAlgorithmException {
+            if (keySize < 512) {
+                throw new IllegalArgumentException("RSA key size must be >= 512 bits: " + keySize);
+            }
             KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance(RSA);
             keyPairGenerator.initialize(keySize);
             return keyPairGenerator.genKeyPair();
@@ -955,6 +1011,9 @@ public class EncryptUtils {
         //公钥加密
         /**
          * 使用公钥加密数据，等价于 RSA/ECB/PKCS1Padding 模式。
+         *
+         * <p>PKCS#1 v1.5 填充存在选择密文攻击面，新数据请用
+         * {@link #encryptOaep(byte[], PublicKey)}；本方法保留用于兼容历史密文。
          *
          * @param content   待加密的原始字节，长度不能超过密钥允许的分组大小
          * @param publicKey 公钥
@@ -969,7 +1028,7 @@ public class EncryptUtils {
 
         //私钥解密
         /**
-         * 使用私钥解密数据。
+         * 使用私钥解密数据（PKCS#1 v1.5 填充）。
          *
          * @param content    待解密的密文字节
          * @param privateKey 私钥
@@ -980,6 +1039,84 @@ public class EncryptUtils {
             Cipher cipher = Cipher.getInstance(RSA);
             cipher.init(Cipher.DECRYPT_MODE, privateKey);
             return cipher.doFinal(content);
+        }
+
+        /**
+         * 使用公钥加密数据，填充模式为 {@code RSA/ECB/OAEPWithSHA-256AndMGF1Padding}（推荐）。
+         *
+         * <p>OAEP 带随机盐，同一明文每次密文不同，并能抵抗选择密文攻击；
+         * 密文只能用 {@link #decryptOaep(byte[], PrivateKey)} 解。
+         *
+         * @param content   待加密的原始字节，2048 位密钥最多 190 字节
+         * @param publicKey 公钥
+         * @return 加密后的字节数组
+         * @throws Exception 加密算法不可用、公钥非法或数据长度非法时抛出
+         * @since 2.0.2
+         */
+        public static byte[] encryptOaep(byte[] content, PublicKey publicKey) throws Exception {
+            Cipher cipher = Cipher.getInstance(OAEP_CIPHER_ALGORITHM);
+            cipher.init(Cipher.ENCRYPT_MODE, publicKey, oaepSpec());
+            return cipher.doFinal(content);
+        }
+
+        /**
+         * 使用私钥解密 {@link #encryptOaep(byte[], PublicKey)} 产出的密文。
+         *
+         * @param content    待解密的密文字节
+         * @param privateKey 私钥
+         * @return 解密后的原始字节数组
+         * @throws Exception 解密算法不可用、私钥非法或密文被篡改时抛出
+         * @since 2.0.2
+         */
+        public static byte[] decryptOaep(byte[] content, PrivateKey privateKey) throws Exception {
+            Cipher cipher = Cipher.getInstance(OAEP_CIPHER_ALGORITHM);
+            cipher.init(Cipher.DECRYPT_MODE, privateKey, oaepSpec());
+            return cipher.doFinal(content);
+        }
+
+        /**
+         * 使用 base64 公钥字符串做 OAEP 加密，结果再 base64 编码，便于跨系统传输。
+         *
+         * @param content   待加密文本
+         * @param publicKey base64 编码的公钥字符串
+         * @return base64 密文；失败时返回空字符串
+         * @since 2.0.2
+         */
+        public static String encryptOaep(String content, String publicKey) {
+            try {
+                byte[] encrypted = encryptOaep(content.getBytes(charset), getPublicKey(publicKey));
+                return Base64Utils.encodeToString(encrypted);
+            } catch (Exception e) {
+                log.error("RSA OAEP encrypt failed: %s", e.getMessage());
+                return "";
+            }
+        }
+
+        /**
+         * 解密 {@link #encryptOaep(String, String)} 产出的 base64 密文。
+         *
+         * @param content    待解密的 base64 密文
+         * @param privateKey base64 编码的私钥字符串
+         * @return 明文；失败时返回空字符串
+         * @since 2.0.2
+         */
+        public static String decryptOaep(String content, String privateKey) {
+            try {
+                byte[] decrypted = decryptOaep(Base64Utils.decode(content), getPrivateKey(privateKey));
+                return new String(decrypted, charset);
+            } catch (Exception e) {
+                log.error("RSA OAEP decrypt failed: %s", e.getMessage());
+                return "";
+            }
+        }
+
+        /**
+         * 构造 OAEP 参数：SHA-256 摘要 + MGF1-SHA256 掩码 + 默认标签。
+         *
+         * @return OAEP 参数规格
+         */
+        private static OAEPParameterSpec oaepSpec() {
+            return new OAEPParameterSpec(OAEP_DIGEST, OAEP_MGF, MGF1ParameterSpec.SHA256, PSource.PSpecified.DEFAULT);
         }
 
         /**

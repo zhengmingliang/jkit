@@ -19,8 +19,15 @@ Unreleased changes are appended to the **current version** section (currently 2.
 - Complex SQL dialect slice L2/L4 harness (SQL Server): `ComplexSqlSqlServerSliceL2*` (jkit-sql) and `ComplexSqlSqlServerNativeExecute*` (tools-test); 001–300 native execute on `jkit_ss_test` (1433) 300/300 (parseFail=0 / execFail=0); reports under `target/complex-sql-reports/sqlserver-l2|l4-*`.
 - Complex SQL dialect slice L2/L4 harness (PostgreSQL): `ComplexSqlPostgresSliceL2*` (jkit-sql) and `ComplexSqlPostgresNativeExecute*` (tools-test); 001–300 native execute on `jkit_complex` (5532) 294/300 (parseFail=0; 6 corpus cases need explicit cast for `round(float8,int)`); reports under `target/complex-sql-reports/postgres-l2|l4-*`.
 
+**jkit-core**
+
+- `AESCrypt` GCM authenticated encryption: `encryptGcm(data, key)` / `decryptGcm(data, key)` use `AES/GCM/NoPadding` with a fresh random 12-byte IV prepended to the ciphertext (`IV || ciphertext`); decryption splits it off, so callers never manage IVs. The four-argument `encryptGcm(data, key, iv, aad)` / `decryptGcm(data, key, iv, aad)` take an explicit IV and AAD (authenticated but not encrypted — handy for binding a user id or order number). Also `generateIv()` and the `GCM_CIPHER_ALGORITHM` / `GCM_IV_LENGTH` / `GCM_TAG_BITS` constants. Unlike ECB / CBC, a tampered ciphertext or a wrong key fails loudly instead of decrypting into garbage.
+- `EncryptUtils.RSA` OAEP padding: `encryptOaep(byte[], PublicKey)` / `decryptOaep(byte[], PrivateKey)` plus base64 string helpers, using `RSA/ECB/OAEPWithSHA-256AndMGF1Padding`; `buildKeyPair(int keySize)` picks the key size explicitly and `DEFAULT_KEY_SIZE` exposes the default.
+
 ### Changed
 
+- `jkit-core`: `EncryptUtils.RSA.buildKeyPair()` now generates **2048-bit** keys by default (was 1024). 1024-bit RSA no longer meets current baselines (NIST and PCI-DSS both require ≥2048); call `buildKeyPair(1024)` when the old length is truly needed, and anything below 512 bits throws `IllegalArgumentException`.
+- `jkit-core`: `DESCrypt` and `EncryptUtils.DES` are `@Deprecated` (56 effective bits are brute-forceable, and neither ECB nor CBC detects tampering). Both still work for reading legacy ciphertext; use `AESCrypt.encryptGcm` for anything new.
 - `jkit-sql`: the row-level inject implementation is renamed from `SqlTenantRewriter` to `SqlInjectRewriter` (2.0.2 has not shipped, so the old name is not kept). Tenant is one scenario; class and method names no longer say tenant.
 - `jkit-sql`: complex-SQL regression gates tightened — L1 parse and L3 convert-then-parse moved from "≥95% / ≥90%" to 100%; L3 grew from 5 direction pairs to the full 4×3 matrix (3600 conversions, adding PostgreSQL as a source); L2 gained a hard "no loss of significant parentheses" assertion. The 8 dialect slice L2 tests now extend `AbstractComplexSqlSliceL2Test` and only declare dialect and id range (about 1100 fewer duplicated lines).
 - `jkit-sql`: `SqlIdentifier` now tracks quoting per name part (`markQuotedPart` / `isPartQuoted` / `quotedParts`). Previously a single `quoted` flag covered the whole identifier, so `c."LEVEL"` round-tripped to `"c"."LEVEL"` — the quotes leaked onto the table alias, and Oracle rejects it with `ORA-00904` because `"c"` does not match alias `C` (15 of 900 corpus cases failed on real databases). `SqlParser` marks per part, `SqlAstCloner` copies the bitmap, `SqlFormatter` emits per part; identifiers built by rewriters have no per-part info and fall back to the whole-identifier flag, so behaviour is unchanged there.
@@ -54,6 +61,7 @@ Unreleased changes are appended to the **current version** section (currently 2.
 - `docs/sql.md` / `docs/en/sql.md`: classic Oracle ROWNUM wrapping now documents lifting `ORDER BY` off a set-op before pagination, and that `toSqlString` must name the target dialect.
 - `docs/sql.md` / `docs/en/sql.md` business-scenario section: extra copy-paste samples for `bind` / `inject` / `expandStar`+`replaceSelectItems` / `addComment`+dialect quotes / MyBatis `#{}/ ${}`. The template-placeholder section now shows the common parse+bind pattern. Samples match `SqlBusinessScenarioTest`.
 - Business scenarios expanded to 18 (2.0.2): dialect-from-URL (`JdbcUrlUtils`), report `DATE_FORMAT` rewrite, safe dynamic table-name bind, low-code query sandbox (Wall table allow/deny, required WHERE columns, max tables). Scenario 4 also covers tautology `LIKE '%'` / `XOR`.
+- `docs/toolkit.md`: the crypto section now covers AES-GCM (IV layout / AAD / argument checks / how it differs from ECB), RSA (OAEP vs PKCS#1 v1.5 decision table, key size, per-block limit), and the DES deprecation.
 
 ## 2.0.1 - 2026-09-13
 
