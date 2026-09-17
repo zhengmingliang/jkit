@@ -10,6 +10,15 @@ Unreleased changes are appended to the **current version** section (currently 2.
 
 ### Added
 
+**jkit-notify**
+
+- `MarkdownTheme`: 12 rendering themes for Markdown → HTML (default / lark / orangeheart / rainbow / lapis / phycat / blue / vue / green / wheat / ayer / purple), with names and look aligned with doocs/md. Themes only change appearance, never the parsing result. `MarkdownTheme.of("lark")` resolves by id, ignoring case and `-` / `_`, and falls back to the default theme for unknown values.
+- `MarkdownRenderOptions` plus `NotifyUtils.markdownToHtml(md, options)` / `markdownToDocument(md, options)`: pick theme, code highlighting, inline styles and responsive behaviour in one place. `inlineStyle(true)` writes styles into every tag's `style` attribute for Outlook / corporate mailboxes / WeChat pasting, all of which strip `<head><style>`.
+- Syntax highlighting for fenced code blocks (on by default, disable with `.highlight(false)`): a dependency-free lexer covering java / js / ts / go / python / sql / shell / yaml / properties / json / xml / html. It emits inline `<span style>`, so it renders in both modes; unknown languages fall back to plain escaping.
+- `SmtpChannel.markdownTheme(theme)` / `inlineMarkdownStyle(boolean)`: pin the Markdown rendering theme for the SMTP channel (default: classic theme + `<style>` mode).
+- Local image embedding: with `MarkdownRenderOptions.imageBaseDir(dir)` (or `SmtpChannel.markdownImageBaseDir(dir)`) every Markdown image that points at a local relative path is converted to `data:image/...;base64,...` and written into `src`, so the body stands alone. Only local paths are touched — `http(s)://` / `//` / `data:` / `cid:` are kept as-is; `./`, `../`, absolute paths and the `file:` prefix all resolve. Missing files, non-images (MIME from suffix and magic bytes) and files above `maxInlineImageBytes` (default 2MB) keep the original `src` — no exception is thrown.
+- `MarkdownRenderOptions` also gained `.inlineImage(boolean)` and `.maxInlineImageBytes(long)` to toggle embedding and cap the per-image size.
+
 **jkit-sql**
 
 - `JdbcUrlUtils`: parse JDBC URLs (host / cluster nodes / database / schema / parameters), infer `SqlDialect` via `fromUrl`, return a short type name via `getDbType`, and guess the driver class via `driverForUrl` / `getDriverClassName`. Covers MySQL replication and load-balance, PostgreSQL HA, Oracle SID/Service/RAC, SQL Server, H2, Gauss/openGauss, Dameng, and more. PostgreSQL-family URLs read schema from `currentSchema` (default `public`).
@@ -22,6 +31,10 @@ Unreleased changes are appended to the **current version** section (currently 2.
 
 ### Changed
 
+- `jkit-notify`: `markdownToDocument(md, responsive)` / `wrapHtmlDocument(fragment, responsive)` now generate the stylesheet from the active theme instead of a hard-coded CSS block. The output structure is unchanged; the default look shifts slightly (16px body, 1.75 line height, richer heading and table styling) and code highlighting is on by default.
+- `jkit-notify`: fixed the macOS-window code blocks (blue / vue / ayer) where the three top dots overlapped the first code line. Both the stylesheet and the inline style now reserve 36px on top (previously only `padding-top:34px`, which was wiped out by the inline style and by the shorthand `padding` in the mobile media query).
+- `jkit-notify`: mobile media-query rules now carry `!important` — in inline mode a tag's `style` attribute outranks the stylesheet, so without it the whole mobile adaptation was dead. The mobile block also shrinks heading sizes, tightens table cell padding, caps image width and enables inertial table scrolling; it no longer overrides the code block's top padding with a shorthand `padding`.
+- `jkit-notify`: quotes with the decorative quote mark (purple / lapis / orangeheart) now place the mark inside a 2.6em left gutter instead of on top of the text, and inline-mode quote padding matches the stylesheet (previously the bar and filled variants produced identical output).
 - `jkit-sql`: the row-level inject implementation is renamed from `SqlTenantRewriter` to `SqlInjectRewriter` (2.0.2 has not shipped, so the old name is not kept). Tenant is one scenario; class and method names no longer say tenant.
 - `jkit-sql`: complex-SQL regression gates tightened — L1 parse and L3 convert-then-parse moved from "≥95% / ≥90%" to 100%; L3 grew from 5 direction pairs to the full 4×3 matrix (3600 conversions, adding PostgreSQL as a source); L2 gained a hard "no loss of significant parentheses" assertion. The 8 dialect slice L2 tests now extend `AbstractComplexSqlSliceL2Test` and only declare dialect and id range (about 1100 fewer duplicated lines).
 - `jkit-sql`: `SqlIdentifier` now tracks quoting per name part (`markQuotedPart` / `isPartQuoted` / `quotedParts`). Previously a single `quoted` flag covered the whole identifier, so `c."LEVEL"` round-tripped to `"c"."LEVEL"` — the quotes leaked onto the table alias, and Oracle rejects it with `ORA-00904` because `"c"` does not match alias `C` (15 of 900 corpus cases failed on real databases). `SqlParser` marks per part, `SqlAstCloner` copies the bitmap, `SqlFormatter` emits per part; identifiers built by rewriters have no per-part info and fall back to the whole-identifier flag, so behaviour is unchanged there.
