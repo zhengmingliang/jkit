@@ -279,10 +279,15 @@ public final class NotifyUtils {
         if (opts.responsive()) {
             html.append("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
         }
-        html.append("<style>").append(MarkdownStyle.of(opts.theme()).css(opts.responsive()))
-                .append("</style></head><body>")
+        MarkdownStyle style = MarkdownStyle.of(opts.theme());
+        html.append("<style>").append(style.css(opts.responsive()))
+                .append("</style></head><body style=\"margin:0;padding:0;background:")
+                .append(style.background())
+                // 排版挂在这层 div 上：邮件客户端普遍会剥掉 <body>，只保留正文内容
+                .append("\"><div class=\"").append(MarkdownStyle.CONTAINER_CLASS)
+                .append("\" style=\"").append(style.containerInline()).append("\">")
                 .append(body)
-                .append("</body></html>");
+                .append("</div></body></html>");
         return html.toString();
     }
 

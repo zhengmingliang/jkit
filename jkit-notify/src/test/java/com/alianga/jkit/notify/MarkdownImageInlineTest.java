@@ -114,7 +114,7 @@ public class MarkdownImageInlineTest {
         String html = render(md, MarkdownRenderOptions.create()
                 .imageBaseDir(dir.getAbsolutePath()).inlineStyle(true));
         assertTrue(html.contains("src=\"data:image/png;base64,"));
-        assertTrue(html.contains("style=\"max-width:100%;height:auto\""));
+        assertTrue(html.contains("display:block;max-width:100%;height:auto"));
         assertTrue(html.contains("<strong style="));
         assertTrue(html.contains("href=\"https://a.com\""));
     }

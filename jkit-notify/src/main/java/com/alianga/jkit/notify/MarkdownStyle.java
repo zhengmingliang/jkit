@@ -38,6 +38,22 @@ final class MarkdownStyle {
     static final String SERIF = "Georgia,'Times New Roman','Songti SC','SimSun',serif";
 
     /**
+     * 正文容器 div 的 class 名。排版宽度与内边距都挂在这层容器上，
+     * 因为邮件客户端通常会剥掉 {@code <body>}。
+     */
+    static final String CONTAINER_CLASS = "jkit-md";
+
+    /**
+     * 桌面端正文栏内边距：上下留白，左右只留一点，避免正文被压窄。
+     */
+    static final String DESKTOP_PADDING = "24px 16px";
+
+    /**
+     * 移动端正文栏内边距：左右基本不留白，把宽度让给正文。
+     */
+    static final String MOBILE_PADDING = "12px 8px";
+
+    /**
      * 标题装饰风格。
      */
     enum Title {
@@ -124,7 +140,7 @@ final class MarkdownStyle {
     private String mono = MONO;
     private int fontSize = 16;
     private double lineHeight = 1.75;
-    private int maxWidth = 720;
+    private int maxWidth = 820;
     private int radius = 6;
     private Title title = Title.UNDERLINE;
     private Quote quote = Quote.BAR;
@@ -500,13 +516,11 @@ final class MarkdownStyle {
     String css(boolean responsive) {
         StringBuilder css = new StringBuilder(2048);
         css.append("html{-webkit-text-size-adjust:100%}");
-        css.append("body{margin:0 auto;padding:16px;max-width:").append(maxWidth).append("px;")
-                .append("background:").append(background).append(";")
-                .append("color:").append(text).append(";")
-                .append("font-family:").append(font).append(";")
-                .append("font-size:").append(fontSize).append("px;")
-                .append("line-height:").append(lineHeight).append(";")
-                .append("word-wrap:break-word;overflow-wrap:anywhere}");
+        String base = containerBase();
+        css.append("body{").append(base).append("}");
+        // 邮件客户端（Gmail / QQ 邮箱等）普遍会剥掉 <body>，只把正文塞进自己的容器，
+        // 所以排版必须挂在这层 div 上，body 规则只作为文档壳完整保留时的兜底
+        css.append("div.").append(CONTAINER_CLASS).append("{").append(base).append("}");
         appendHeadingCss(css);
         css.append("p{margin:.9em 0}");
         css.append("a{color:").append(primary).append(";text-decoration:underline;overflow-wrap:anywhere}");
@@ -521,15 +535,24 @@ final class MarkdownStyle {
         appendCodeCss(css);
         appendTableCss(css);
         css.append("hr{border:0;border-top:1px solid ").append(border).append(";margin:1.6em 0}");
-        css.append("img{max-width:100%;height:auto}");
+        css.append("img{display:block;max-width:100%;height:auto;margin:1.4em auto;")
+                .append("border-radius:").append(radius).append("px}");
         if (responsive) {
-            css.append("@media (min-width:768px){body{padding:24px 32px}}");
+            // 桌面端同样要 !important：内联模式下 pre 带 style 属性，普通规则压不过。
+            // 容器的宽度与内边距不在这里写：它们由 containerInline() 内联给出（含主题自身的
+            // maxWidth 令牌），硬编码会盖掉个别主题的宽度设定
+            css.append("@media (min-width:768px){")
+                    // 只改左右内边距、下内边距与行高：上内边距不能动，MAC 风格要留 36px 给圆点
+                    .append("pre{padding-left:18px !important;padding-right:18px !important;")
+                    .append("padding-bottom:14px !important;line-height:1.7 !important}")
+                    .append("}");
             // 内联模式下行内 style 属性的优先级高于样式表，媒体查询必须加 !important 才能压过它，
             // 否则移动端字号/内边距的适配会被内联样式完全吃掉（内联时尤其明显）。
             // pre 只改左右内边距：MAC 风格的 36px 上内边距要留给圆点，不能被简写 padding 覆盖。
             css.append("@media (max-width:480px){")
-                    .append("body{padding:12px;font-size:")
-                    .append(Math.max(fontSize - 1, 12)).append("px}")
+                    .append("body,div.").append(CONTAINER_CLASS)
+                    .append("{padding:").append(MOBILE_PADDING).append(" !important;font-size:")
+                    .append(Math.max(fontSize - 1, 12)).append("px !important}")
                     .append("h1{font-size:1.45em !important}")
                     .append("h2{font-size:1.25em !important}")
                     .append("h3{font-size:1.12em !important}")
@@ -546,6 +569,37 @@ final class MarkdownStyle {
         }
         css.append(extraCss);
         return css.toString();
+    }
+
+    /**
+     * 正文容器的基础样式（{@code <body>} 与容器 div 共用）。
+     *
+     * @return 样式声明，不含选择符与大括号
+     */
+    private String containerBase() {
+        return "margin:0 auto;padding:16px;max-width:" + maxWidth + "px;"
+                + "background:" + background + ";"
+                + "color:" + text + ";"
+                + "font-family:" + font + ";"
+                + "font-size:" + fontSize + "px;"
+                + "line-height:" + lineHeight + ";"
+                + "word-wrap:break-word;overflow-wrap:anywhere";
+    }
+
+    /**
+     * 正文容器 div 的内联样式，供 {@code wrapHtmlDocument} 直接写进 {@code style} 属性。
+     *
+     * <p>内联样式无法响应断点，这里取桌面端取值；移动端由样式表里带 {@code !important} 的
+     * 媒体查询覆盖（{@code !important} 的优先级高于普通内联声明）。
+     *
+     * @return style 属性文本
+     */
+    String containerInline() {
+        return "max-width:" + maxWidth + "px;margin:0 auto;padding:" + DESKTOP_PADDING
+                + ";background:" + background + ";color:" + text
+                + ";font-family:" + font + ";font-size:" + fontSize + "px;"
+                + "line-height:" + lineHeight
+                + ";word-wrap:break-word;overflow-wrap:anywhere";
     }
 
     private void appendHeadingCss(StringBuilder css) {
@@ -681,7 +735,8 @@ final class MarkdownStyle {
                 + ";border:1px solid " + border);
         styles.put("td", "padding:8px 12px;text-align:left;border:1px solid " + border);
         styles.put("hr", "border:0;border-top:1px solid " + border + ";margin:1.6em 0");
-        styles.put("img", "max-width:100%;height:auto");
+        styles.put("img", "display:block;max-width:100%;height:auto;margin:1.4em auto;"
+                + "border-radius:" + radius + "px");
         return styles;
     }
 
