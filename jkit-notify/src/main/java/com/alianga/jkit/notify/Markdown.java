@@ -23,25 +23,50 @@ final class Markdown {
     }
 
     /**
-     * 把 Markdown 转成 HTML 片段（不含 {@code <html>} 文档壳）。
+     * 围栏代码块的渲染回调，用于接入语法高亮；返回的内容必须自行完成 HTML 转义。
+     */
+    interface CodeRenderer {
+        /**
+         * 渲染一段代码。
+         *
+         * @param code 未转义的原始代码
+         * @param lang 语言标识，可能为空串
+         * @return 已转义的 HTML
+         */
+        String render(String code, String lang);
+    }
+
+    /**
+     * 把 Markdown 转成 HTML 片段（不含 {@code <html>} 文档壳），代码块仅转义。
      *
      * @param markdown 原文，{@code null} 或空串返回空串
      * @return HTML 片段
      */
     static String toHtml(String markdown) {
+        return toHtml(markdown, null);
+    }
+
+    /**
+     * 把 Markdown 转成 HTML 片段，围栏代码交给 {@code renderer} 渲染。
+     *
+     * @param markdown 原文，{@code null} 或空串返回空串
+     * @param renderer 代码渲染器，{@code null} 时退化为纯转义
+     * @return HTML 片段
+     */
+    static String toHtml(String markdown, CodeRenderer renderer) {
         if (markdown == null || markdown.isEmpty()) {
             return "";
         }
         String normalized = markdown.replace("\r\n", "\n").replace('\r', '\n');
-        return convertBlocks(normalized);
+        return convertBlocks(normalized, renderer);
     }
 
-    private static String convertBlocks(String text) {
+    private static String convertBlocks(String text, CodeRenderer renderer) {
         String[] lines = text.split("\n", -1);
-        return convertRange(lines, 0, lines.length);
+        return convertRange(lines, 0, lines.length, renderer);
     }
 
-    private static String convertRange(String[] lines, int from, int to) {
+    private static String convertRange(String[] lines, int from, int to, CodeRenderer renderer) {
         StringBuilder html = new StringBuilder();
         int i = from;
         while (i < to) {
@@ -53,7 +78,7 @@ final class Markdown {
                 html.append('\n');
             }
             if (isFence(lines[i])) {
-                i = appendFence(html, lines, i, to);
+                i = appendFence(html, lines, i, to, renderer);
             } else if (looksLikeTable(lines, i, to)) {
                 i = appendTable(html, lines, i, to);
             } else {
@@ -67,11 +92,11 @@ final class Markdown {
                     html.append("<hr>");
                     i++;
                 } else if (isBlockquote(lines[i])) {
-                    i = appendQuote(html, lines, i, to);
+                    i = appendQuote(html, lines, i, to, renderer);
                 } else if (ulMarkerEnd(lines[i]) >= 0) {
-                    i = appendList(html, lines, i, to, false);
+                    i = appendList(html, lines, i, to, false, renderer);
                 } else if (olMarkerEnd(lines[i]) >= 0) {
-                    i = appendList(html, lines, i, to, true);
+                    i = appendList(html, lines, i, to, true, renderer);
                 } else {
                     i = appendParagraph(html, lines, i, to);
                 }
@@ -80,7 +105,8 @@ final class Markdown {
         return html.toString();
     }
 
-    private static int appendFence(StringBuilder html, String[] lines, int start, int to) {
+    private static int appendFence(StringBuilder html, String[] lines, int start, int to,
+                                  CodeRenderer renderer) {
         int fenceIndent = indent(lines[start]);
         String open = lines[start].trim();
         char tick = open.charAt(0);
@@ -107,11 +133,15 @@ final class Markdown {
         if (!lang.isEmpty()) {
             html.append(" class=\"language-").append(NotifyUtils.escapeHtml(lang)).append('"');
         }
-        html.append('>').append(NotifyUtils.escapeHtml(code.toString())).append("</code></pre>");
+        html.append('>')
+                .append(renderer == null ? NotifyUtils.escapeHtml(code.toString())
+                        : renderer.render(code.toString(), lang))
+                .append("</code></pre>");
         return i;
     }
 
-    private static int appendQuote(StringBuilder html, String[] lines, int start, int to) {
+    private static int appendQuote(StringBuilder html, String[] lines, int start, int to,
+                                  CodeRenderer renderer) {
         StringBuilder inner = new StringBuilder();
         int i = start;
         while (i < to && isBlockquote(lines[i])) {
@@ -121,7 +151,8 @@ final class Markdown {
             inner.append(stripQuote(lines[i]));
             i++;
         }
-        html.append("<blockquote>").append(convertBlocks(inner.toString())).append("</blockquote>");
+        html.append("<blockquote>").append(convertBlocks(inner.toString(), renderer))
+                .append("</blockquote>");
         return i;
     }
 
@@ -148,7 +179,8 @@ final class Markdown {
                 && !looksLikeTable(lines, i, to);
     }
 
-    private static int appendList(StringBuilder html, String[] lines, int start, int to, boolean ordered) {
+    private static int appendList(StringBuilder html, String[] lines, int start, int to,
+                                  boolean ordered, CodeRenderer renderer) {
         int baseIndent = indent(lines[start]);
         html.append(ordered ? "<ol>" : "<ul>");
         int i = start;
@@ -200,7 +232,7 @@ final class Markdown {
                     nested.append(stripIndent(lines[k], contentCol));
                 }
             }
-            String inner = convertBlocks(nested.toString());
+            String inner = convertBlocks(nested.toString(), renderer);
             if (tight) {
                 inner = unwrapTightParagraphs(inner);
             }
