@@ -312,11 +312,122 @@ Swapping the two styles guarantees signature failure. DingTalk's signature goes 
 - **TLS protocol pinning**: `.sslProtocols("TLSv1.2")`. Major JDK versions change the default enabled protocol set, and handshake failures are only reported as a generic `SSLHandshakeException` — explicit pinning is the fastest way to rule this out.
 - **Self-signed certificates**: for self-hosted enterprise gateways use `.trustAllCerts(true)` (skips certificate and hostname verification; do not enable for public mailbox providers).
 - **Authentication**: AUTH LOGIN (username/password Base64). `from` defaults to `username`. `to("a@x.com,b@x.com")` is split into multiple recipients on comma/semicolon; `cc` / `bcc` / `replyTo` are available. Bcc goes through `RCPT TO` but does not appear in the MIME headers.
-- **MIME**: `Date` and `Message-ID` are always included. Subject uses `=?UTF-8?B?...?=`, body is UTF-8 Base64 folded at 76 characters; the DATA phase does RFC 5321 dot-stuffing (a leading `.` is written as `..`). HTML is sent directly as `text/html`; MARKDOWN is converted to HTML via `NotifyUtils.markdownToHtml` before sending. The conversion covers headings, nested lists (code blocks/tables inside list items), GFM tables, CLI-style wide tables of the `----+----` form, indented fenced code blocks (``` / ~~~), links, bold, and more — it is not full CommonMark. DingTalk/WeCom/Feishu/ServerChan render markdown themselves and do not go through this conversion.
+- **MIME**: `Date` and `Message-ID` are always included. Subject uses `=?UTF-8?B?...?=`, body is UTF-8 Base64 folded at 76 characters; the DATA phase does RFC 5321 dot-stuffing (a leading `.` is written as `..`). HTML is sent directly as `text/html`; MARKDOWN is converted to HTML via `Markdown.toDocument` before sending. The conversion covers headings, nested lists (code blocks/tables inside list items), GFM tables, CLI-style wide tables of the `----+----` form, indented fenced code blocks (``` / ~~~), links, bold, raw HTML `<img>` (sanitised and passed through), and more — it is not full CommonMark. DingTalk/WeCom/Feishu/ServerChan render markdown themselves and do not go through this conversion.
 - **Attachments and splitting**: `Attachment.of(file)` only keeps the path and reads in chunks when sending/splitting — 100MB-scale files don't need to enter the heap in full. `Attachment.of(name, bytes)` is still an in-memory attachment. MIME types are detected automatically from extension and file header. With `.autoSplit(true)` enabled, a single attachment exceeding `maxAttachmentSize` (default 10 MB) is cut into `filename.partN` chunks of `splitChunkSize` (default 5 MB) and sent across multiple emails. Sizes accept `10MB`, `512KB`, `1.5G`, or a plain byte count. The body includes the SHA-256 and `cat` reassembly instructions.
 - **Template variables**: `.var("host", "web-1")` or `.vars(map)`. `${host}` / `${cpu.value}` in the title and body are substituted before `send` / `sendAll` / `sendAsync`; missing keys become empty strings. The original `Message` is not modified.
-- **Markdown preview**: when SMTP converts MARKDOWN to HTML it wraps it in a responsive document shell by default (viewport + mobile/desktop `@media`). If you only want a fragment, use `NotifyUtils.markdownToHtml`; for a full document use `NotifyUtils.markdownToDocument(md, true/false)`.
+- **Markdown preview**: when SMTP converts MARKDOWN to HTML it wraps it in a responsive document shell by default (viewport + mobile/desktop `@media`) and applies the classic theme. If you only want a fragment, use `Markdown.toHtml`; for a full document use `Markdown.toDocument(md, true/false)`. To change colors and layout, see "Markdown rendering themes" below.
 
+### Markdown rendering themes
+
+`MarkdownTheme` ships 13 themes (the first 12 aligned with [doocs/md](https://github.com/doocs/md), plus `blog` which copies alianga.com / Sakura article styling). They only change appearance — the Markdown parsing result and the supported syntax subset stay the same.
+
+#### Theme catalogue
+
+| id | Name | Primary | Headings | Quote | Code block | Table | Best for |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `default` | Classic | `#0969da` grey-blue | Underline | Bar | Flat | Grid | Daily alerts (default) |
+| `lark` | Blue | `#3370ff` Lark blue | Bar | Filled | Bordered | Grid | External weekly reports |
+| `orangeheart` | Orange heart | `#e8590c` warm orange | Centered | Quote mark | Flat | Striped | Campaign / marketing pushes |
+| `rainbow` | Rainbow | `#d6336c` rose | Underline | Filled | Bordered | Striped | Festive / playful (gradient `hr`) |
+| `lapis` | Lapis | `#0c8599` teal | Bar | Quote mark | Flat | Minimal | Technical docs |
+| `phycat` | Light yellow | `#e67700` amber | Bar | Filled | Flat | Grid | Cheerful notices |
+| `blue` | Azure | `#0f4c81` deep blue | Underline | Bar | **macOS window** | Grid | Technical reports with code |
+| `vue` | Vue green | `#35495e` / accent `#42b883` | Bar | Filled | **macOS window** | Grid | Front-end teams |
+| `green` | Green | `#2f9e44` fresh green | Underline | Bar | Flat | Striped | Data reports |
+| `wheat` | Wheat | `#a16207` wheat | Centered | Filled | Bordered | Minimal | Long-form reading (serif) |
+| `ayer` | Ink black | `#61afef` on `#1f2430` | Bar | Bar | **macOS window** | Grid | Wall displays / night reading |
+| `purple` | Purple | `#7048e8` purple | Centered | Quote mark | Bordered | Striped | Brand-coloured pushes |
+| `blog` | Blog | `#e67474` coral | ¶/# marks | Quote mark | Dark One Dark | Grid | alianga.com replica |
+
+A theme is not a blob of CSS: it declares a set of **tokens** (primary / accent / text / muted / background / panel / border colour, font, size, line height, radius, heading style, quote style, code-block style, table style and the syntax-highlight palette). `MarkdownStyle` turns one token set into both the `<head><style>` sheet and the inline `style` map, so the two injection modes look the same and adding a theme means adding tokens only.
+
+#### Quick start
+
+```java
+// Full document: orange heart theme + code highlighting (on by default)
+String html = Markdown.toDocument(md,
+        MarkdownRenderOptions.create().theme(MarkdownTheme.ORANGE_HEART));
+
+// Fragment only, with inlined styles (Outlook / WeChat friendly)
+String fragment = Markdown.toHtml(md, MarkdownRenderOptions.create()
+        .theme(MarkdownTheme.LARK)
+        .inlineStyle(true));
+
+// Pin a theme on the SMTP channel
+NotificationManager.register(new SmtpChannel()
+        .markdownTheme(MarkdownTheme.LAPIS)
+        .inlineMarkdownStyle(true));
+```
+
+#### Render options `MarkdownRenderOptions`
+
+| Method | Default | Meaning |
+| --- | --- | --- |
+| `.theme(MarkdownTheme)` | `DEFAULT` | Theme; `null` means classic |
+| `.inlineStyle(boolean)` | `false` | Write styles into every tag's `style` attribute (see below) |
+| `.highlight(boolean)` | `true` | Syntax highlighting for fenced code blocks |
+| `.responsive(boolean)` | `true` | Emit `viewport` plus mobile / desktop `@media` rules |
+| `.imageBaseDir(String\|File)` | unset | Base directory for local images; setting it enables image embedding |
+| `.inlineImage(boolean)` | `true` | Turn off to keep original `src` even with a base dir |
+| `.maxInlineImageBytes(long)` | `2MB` | Per-image embedding cap; larger images keep their original `src`. Non-positive means unlimited |
+
+Every method returns the current instance for chaining, and `MarkdownRenderOptions.create()` returns a fresh instance each time.
+
+#### Two style injection modes
+
+| | `<style>` mode (default) | Inline mode `inlineStyle(true)` |
+| --- | --- | --- |
+| Output | One stylesheet in `<head>` | A `style` attribute on every tag |
+| Use when | Browsers, QQ Mail, mobile mail apps, exported HTML files | Outlook desktop, some corporate mail servers, pasting into WeChat |
+| Pseudo-element decoration | Works (macOS dots, quote marks, gradient `hr`) | Dropped |
+| Zebra striping | Works | Degrades to a uniform header background |
+| Size | Small | Roughly doubles |
+
+The rule of thumb: if the client strips `<head><style>`, go inline; otherwise keep the default. Both come from the same tokens, so they never fight — `Markdown.toDocument` emits the stylesheet anyway and the inline attributes are just an extra safety net.
+
+#### Code highlighting
+
+On by default, dependency-free (no highlight.js), covering java / js / ts / go / python / sql / shell / yaml / properties / json / xml / html; unknown languages fall back to plain escaping instead of failing. Disable with `.highlight(false)`.
+
+Highlighting emits inline `<span style="color:...">`, so it is visible in both modes. Colouring happens **before** HTML escaping, so a code block containing `<script>` or `"` neither becomes a real tag nor breaks string detection.
+
+#### Embedding local images (relative path → Base64)
+
+An email body is a standalone document, so `![](./assets/cover.png)` is guaranteed to break on the receiving side. Set a base directory and local images are read into `data:image/png;base64,...` and written straight into `src`:
+
+```java
+String html = Markdown.toDocument(md, MarkdownRenderOptions.create()
+        .theme(MarkdownTheme.BLUE)
+        .imageBaseDir("/opt/docs/articles"));   // resolves ./assets/x.png in the Markdown
+
+// Same on the SMTP channel
+new SmtpChannel().markdownImageBaseDir("/opt/docs/articles");
+```
+
+- **Local paths only**: `http(s)://`, `//`, `data:`, `cid:` and `mailto:` are left untouched, so CDN images are unaffected.
+- `./`, `../`, absolute paths and the `file:` prefix all resolve; `%XX` sequences are URL-decoded and `?query` / `#frag` are stripped.
+- **Never throws**: a missing file, a non-image (MIME detected from suffix and magic bytes) or a file above `maxInlineImageBytes` keeps the original `src` — a decoration must not break the alert.
+- Watch the size: Base64 adds roughly a third, so three 1.4 MB PNGs turn a single mail into ~5.6 MB. Prefer CDN URLs for many or large images, or lower the cap so oversized images fall back.
+
+#### Body container and responsiveness
+
+The document shell produced by `Markdown.toDocument` is `<body><div class="jkit-md">…content…</div></body>`. The column width, padding, font, colour and line height are all inlined on that div.
+
+**Layout must not hang off `<body>`**: Gmail, QQ Mail and similar clients strip `<html>/<head>/<body>` and pour the content into their own container, so `max-width` / `padding` written on `body` disappear with the tag (the symptom: the text fills the whole reading pane while images — which carry inline `style` — still keep their margins). In the stylesheet `body` only paints the full-viewport background (no `max-width`); column width, padding and `margin:0 auto` centering all hang off `div.jkit-md`. Opening the complete document in a browser centres the column; when a mail client strips `body` the div is still there.
+
+With `responsive(true)` (default) you get the `viewport` plus two media queries: on desktop (`min-width:768px`) code blocks get wider horizontal padding and a taller line height; on mobile (`max-width:480px`) the column padding tightens, heading/table fonts shrink and tables get inertial scrolling.
+
+Three implementation details matter when writing a custom theme:
+
+- **Media-query rules carry `!important`**: in inline mode a tag's `style` attribute outranks the stylesheet, so a media query without `!important` is completely swallowed and the mobile adaptation does nothing. The container's mobile padding relies on the same trick to override the inline value.
+- **Mobile only touches the horizontal padding of code blocks**: the macOS-window style reserves 36px of top padding for the three dots, and a shorthand `padding` would wipe that reservation and let the dots sit on top of the first code line. For the same reason the inline `pre` style must carry the full `padding` instead of just `12px 14px`.
+- **Never hard-code the column width in a media query**: it comes from the theme's own `maxWidth` token (820 by default), and a hard-coded value would override a theme that sets its own.
+
+#### Other notes
+
+- **2.0.1 entry points are deprecated**: `NotifyUtils.markdownToHtml(md)` / `markdownToDocument(md, true/false)` / `wrapHtmlDocument(fragment, true/false)` still work; switch to `Markdown.toHtml` / `toDocument` / `wrapDocument`. The document shell now builds its stylesheet from the classic theme (five heading sizes, line height 1.75, richer table/quote styling).
+- **Lenient theme lookup**: `MarkdownTheme.of("lark")` ignores case and `-` / `_` (and also accepts constant names like `ORANGE_HEART`), falling back to `default` when unknown — a typo in configuration will never block an alert.
+- **Zero dependencies**: themes, highlighting, inlining and image embedding are all hand-rolled.
 ### Field-tested provider rates and pitfalls (from real-world records in this repository's historical projects)
 
 | Provider | SMTP address | Field-tested / notes |

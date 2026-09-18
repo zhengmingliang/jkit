@@ -2,6 +2,7 @@ package com.alianga.jkit.notify.channel;
 
 import com.alianga.jkit.notify.ChannelConfig;
 import com.alianga.jkit.notify.FailureType;
+import com.alianga.jkit.notify.Markdown;
 import com.alianga.jkit.notify.Message;
 import com.alianga.jkit.notify.MessageType;
 import com.alianga.jkit.notify.NotifyUtils;
@@ -155,7 +156,7 @@ public class TelegramChannel extends AbstractHttpChannel {
      *
      * <p>Telegram 的 HTML 模式只认 {@code b/i/u/s/a/code/pre/blockquote}；通用 HTML 里的
      * 标题、段落、列表、表格等标签会被当作纯文本显示。所以先经
-     * {@link NotifyUtils#markdownToHtml} 转换，再做标签映射：标题→加粗、段落标签剥掉、
+     * {@link Markdown#toHtml(String)} 转换，再做标签映射：标题→加粗、段落标签剥掉、
      * 列表转 {@code • } 行、GFM 任务列表 {@code - [x]}/{@code - [ ]} 转为 Unicode 勾选框
      * （{@code ✅}/{@code ⬜}，勾选框本身替代子弹与 {@code [x]}/{@code [ ]}）、表格转竖线分隔行、
      * {@code strong/em/del} 转对应短标签、图片降级为丢弃。
@@ -164,7 +165,7 @@ public class TelegramChannel extends AbstractHttpChannel {
      * @return Telegram HTML 片段
      */
     private static String markdownToTelegramHtml(String markdown) {
-        String html = NotifyUtils.markdownToHtml(markdown);
+        String html = Markdown.toHtml(markdown);
         if (html.isEmpty()) {
             return html;
         }

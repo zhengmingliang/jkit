@@ -8,6 +8,15 @@
 
 ### 新增
 
+**jkit-notify**
+
+- `MarkdownTheme`：Markdown → HTML 的 13 套渲染主题（经典 / 蓝 / 橙心 / 彩虹 / 兰青 / 嫩黄 / 碧蓝 / Vue 绿 / 绿意 / 麦色 / 墨黑 / 姹紫 / **博客**），前 12 套命名与观感对齐 doocs/md，`blog` 复刻 alianga.com（Halo · LIlGG_Sakura）正文：珊瑚红链接、暖黄行内码、深色 One Dark 代码块、¶/# 标题装饰、列表虚线圆角框。`MarkdownTheme.of("lark")` 按 id 解析，忽略大小写与 `-` / `_`，未知值回退经典主题。
+- `MarkdownRenderOptions` 与 `Markdown.toHtml(md, options)` / `toDocument(md, options)`：一次指定主题、代码高亮、内联样式与响应式。`inlineStyle(true)` 把样式写进每个标签的 `style` 属性，兼容会剥离 `<head><style>` 的 Outlook / 部分企业邮箱与微信粘贴。`Markdown` 升为公开入口；`NotifyUtils.markdownToHtml(md)` / `markdownToDocument(md, boolean)` / `wrapHtmlDocument(fragment, boolean)` 保留并标过期。
+- 代码块语法高亮（默认开启，`.highlight(false)` 关闭）：自研零依赖词法扫描，覆盖 java / js / ts / go / python / sql / shell / yaml / properties / json / xml / html，输出内联 `<span style>`，两种模式下都可见；不认识的语言退化为纯转义。
+- `SmtpChannel.markdownTheme(theme)` / `inlineMarkdownStyle(boolean)`：给 SMTP 渠道固定 Markdown 渲染主题（默认经典 + `<style>` 模式）。
+- 本地图片内嵌：`MarkdownRenderOptions.imageBaseDir(dir)`（对应 `SmtpChannel.markdownImageBaseDir(dir)`）设置基准目录后，Markdown 里引用本地相对路径的图片会转成 `data:image/...;base64,...` 写进 `src`，正文可脱离原文件独立展示。只处理本地路径，`http(s)://` / `//` / `data:` / `cid:` 原样保留；支持 `./`、`../`、绝对路径与 `file:` 前缀。文件不存在、非图片（按后缀与文件头识别 MIME）或超过 `maxInlineImageBytes`（默认 2MB）时保留原 `src`，不抛异常。
+- `MarkdownRenderOptions` 新增 `.inlineImage(boolean)` 与 `.maxInlineImageBytes(long)`，控制图片内嵌开关与单张体积上限。
+
 **jkit-sql**
 
 - `JdbcUrlUtils`：解析 JDBC URL（主机 / 集群节点 / 库名 / schema / 参数），`fromUrl` 推断 `SqlDialect`，`getDbType` 返回类型短名，`driverForUrl` / `getDriverClassName` 猜测驱动类。覆盖 MySQL 复制与负载、PostgreSQL HA、Oracle SID/Service/RAC、SQL Server、H2、Gauss/openGauss、达梦等。PostgreSQL 系从 `currentSchema` 取 schema（缺省 `public`）。
@@ -23,6 +32,7 @@
 - `com.alianga.jkit.sql.entity.Comment`：本模块自有的表 / 字段注释注解（`TYPE`+`FIELD`，`value()`）。与 Hibernate `@Comment`、`@SqlTable(comment)` / `@SqlColumn(comment)` 并列；扫描仍按简单名 `Comment` 识别，供 `jkit-sql-model` 等模块解析字段注释时选用。
 - `SQL.bind` / `SQL.bindNamed`：把 `?` / `:name` 换成字面量或公式，并识别模板占位 IDENT（`@name@` / `#{table}` / `${*}` / `{{*}}` / `<*>` 等）。表名位置写成标识符（必要时加方言引号，防注入）；表达式位置与 `:name` 相同。字符串只加倍单引号；公式传 `SqlExpr`。`IN ?` 可填集合。布尔：Oracle / 达梦 / SQL Server / SQLite / DB2 / MySQL / Hive 写 `1`/`0`；PG / H2 / ANSI / Presto / ClickHouse 写 `TRUE`/`FALSE`。未传命名值时不扫描标识符。
 - `SqlPlaceholders.mybatis()` / `hashBrace()` / `dollarBrace()`：内置 MyBatis `#{property}`、`${property}`，解析支持 `#{id,jdbcType=VARCHAR}` / `#{item.name}`；bind 按逗号前的属性名取值。
+- `SqlGuardedStatement`：T-SQL 控制流守卫 `IF <expr> <stmt> [ELSE <stmt>]`（如 SQL Server init 幂等删表前置 `IF OBJECT_ID('t','U') IS NOT NULL DROP TABLE t;`）。`SqlParser.parseIfGuard` 解析 condition 原文与内层 body 并包成 `SqlGuardedStatement`；其 `type()` 委托给 body，故 `IF…DROP` 对外仍是 DROP，下游格式化 / 跨方言转换可正确识别。解析器在语句起始处的 `IF` 一律按控制流守卫处理（MySQL 里 `IF` 是函数，但语句起始位置不冲突）。`SqlFormatter` / `SqlAstCloner` / `SqlSchemaConverter` 均已支持——`sqlserver_init.sql` 整文件 `parseAll` 不再因 `IF` 抛 unsupported，其 51 处守卫识别为 DROP，跨方言转换 0 失败。
 
 **jkit-core**
 
@@ -46,6 +56,15 @@
 
 - `jkit-core`：`EncryptUtils.RSA.buildKeyPair()` 默认密钥长度由 1024 位上调到 **2048 位**。1024 位 RSA 已不满足当前安全基线（NIST / PCI-DSS 均要求 ≥2048）；确需沿用旧长度改为显式调用 `buildKeyPair(1024)`，小于 512 位抛 `IllegalArgumentException`。
 - `jkit-core`：`DESCrypt` 与 `EncryptUtils.DES` 标 `@Deprecated`（56 位有效密钥可被暴力破解，ECB / CBC 不防篡改）。方法仍可用，仅用于解密历史数据；新代码用 `AESCrypt.encryptGcm`。
+- `jkit-notify`：Markdown 渲染入口迁到 `Markdown`（`toHtml` / `toDocument` / `wrapDocument`）。`NotifyUtils` 上 2.0.1 的 `markdownToHtml(md)` / `markdownToDocument(md, boolean)` / `wrapHtmlDocument(fragment, boolean)` 保留并 `@Deprecated`。`toDocument` / `wrapDocument` 按主题生成样式表（此前是写死的一段 CSS），默认观感略调（正文 16px、行高 1.75、标题与表格样式更完整），并默认开启代码高亮。
+- `jkit-notify`：修复 macOS 窗口风格代码块（碧蓝 / Vue 绿 / 墨黑）顶部三个圆点与首行代码重叠——样式表与内联样式都改为顶部留 36px（此前只写 `padding-top:34px`，内联模式与移动端媒体查询的简写 `padding` 都会把它覆盖掉）。
+- `jkit-notify`：移动端媒体查询改为带 `!important`（内联模式下行内 `style` 优先级更高，不带则整段适配不生效），并补上标题字号收敛、表格单元格内边距、图片宽度与表格惯性滚动；移动端不再用简写 `padding` 覆盖代码块上内边距。
+- `jkit-notify`：带引号装饰的引用（姹紫 / 兰青 / 橙心）改为把引号放进左侧 2.6em 留白区，不再压在正文上；内联模式下的引用内边距与样式表保持一致（此前竖条与填充两种风格产出完全相同）。
+- `jkit-notify`：**正文排版改挂到自带的 `<div class="jkit-md">` 容器上**（此前写在 `body` 上）。Gmail、QQ 邮箱等客户端会剥掉 `<html>/<head>/<body>`，`body` 上的 `max-width` / `padding` 会一同失效，表现为正文铺满读信区。现在宽度、内边距、字体、颜色、行高全部内联在这层 div 上。
+- `jkit-notify`：修复完整 HTML 文档在浏览器中正文栏贴左边——`body` 不再带 `max-width`（文档壳给 body 写了内联 `margin:0` 以铺满底色，限宽会留下、居中外边距被盖掉）。栏宽与 `margin:0 auto` 只挂在 `div.jkit-md` 上，移动端媒体查询也只收这层容器的内边距。
+- `jkit-notify`：正文栏宽度默认 720 → **820px**，桌面端左右内边距 32 → 16px、上下 24px，移动端改为 `12px 8px`（左右基本不留白）。容器宽度取主题自身的 `maxWidth` 令牌，不再在媒体查询里硬编码。
+- `jkit-notify`：图片改为居中并带主题圆角（`display:block;margin:1.4em auto`），与段落、代码块、表格同宽——此前单独收窄图片会让图片与文字对不齐；桌面端代码块左右内边距 18px、行高 1.7。
+- `jkit-notify`：原文里的 HTML `<img>`（公众号稿常用 `<img src="..." width="100%" />`）消毒后透传，不再转义成 `&lt;img&gt;`。只保留 src/alt/title/width/height/class/loading；`onerror` 等事件丢掉，`javascript:` 的 src 降为 `#`。其他 HTML 标签仍转义。
 - `jkit-sql`：行级注入实现类由 `SqlTenantRewriter` 更名为 `SqlInjectRewriter`（2.0.2 未发版，不保留旧名）。租户只是一种场景，类名/方法名不再带 tenant。
 - `jkit-sql`：复杂 SQL 回归门禁收紧——L1 parse / L3 转换后 parse 由「≥95% / ≥90%」收到 100%；L3 由 5 个方向对扩到四方言 4×3 全矩阵（3600 次转换，补上 PostgreSQL 作为源）；L2 新增「有效括号不减少」硬断言。8 个方言切片 L2 测试收敛到 `AbstractComplexSqlSliceL2Test`，子类只声明方言与编号区间（净减约 1100 行重复代码）。
 - `jkit-sql`：`SqlIdentifier` 支持逐段引号标记（新增 `markQuotedPart` / `isPartQuoted` / `quotedParts`）。此前只有一个整体 `quoted`，`c."LEVEL"` 会被回写成 `"c"."LEVEL"`——引号扩散到表别名，Oracle 里 `"c"` 与别名 `C` 不匹配而报 `ORA-00904`（1200 条语料真库全量对照中 15 条中招）。`SqlParser` 按段打标记、`SqlAstCloner` 复制位图、`SqlFormatter` 按段输出；无逐段信息时（改写器构造的标识符）回退到整体 `quoted`，行为不变。

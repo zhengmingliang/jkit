@@ -59,6 +59,38 @@ import java.util.Set;
  */
 public class SqlParserTest {
 
+    @Test
+    public void parseSqlServerSql() {
+        String sqls = "-- ============================================================================\n" +
+                "-- SQL Server 2017+ 初始化脚本\n" +
+                "-- 配套 complex-sql 300 条复杂业务 SQL 的初始化脚本（建表 + 测试数据）\n" +
+                "-- ============================================================================\n" +
+                "--\n" +
+                "-- 说明：\n" +
+                "--   1. 共 51 张表，94332 行测试数据。\n" +
+                "--   2. 所有日期/时间列均以『当前时间』为基准动态生成相对偏移，\n" +
+                "--      因此无论何时执行，近 30 天 / 180 天 / 1 年 / 3 年的分析窗口都有数据。\n" +
+                "--   3. 数据刻意包含：帕累托分布的高价值客户、快进快出与拆分交易等可疑模式、\n" +
+                "--      逾期贷款、考勤异常、少量 NULL 与重复姓名、少量孤儿外键记录，\n" +
+                "--      用于让风控/数据质量/异常检测类 SQL 能跑出非空结果。\n" +
+                "--   4. 表结构与字段说明见 README.md。\n" +
+                "--   5. 建议执行前先创建数据库：CREATE DATABASE complex_sql; GO  USE complex_sql; GO\n" +
+                "--\n" +
+                "-- ============================================================================\n" +
+                "\n" +
+                "SET NOCOUNT ON;\n" +
+                "\n" +
+                "-- ---------- 1. 删除已存在的表 ----------\n" +
+                "IF OBJECT_ID('payroll', 'U') IS NOT NULL DROP TABLE payroll;\n" +
+                "IF OBJECT_ID('project_assignments', 'U') IS NOT NULL DROP TABLE project_assignments;";
+        List<SqlStatement> sqlStatements = SQL.parseAll(sqls);
+        assertEquals(3, sqlStatements.size());
+        // 顺序：SET NOCOUNT ON(0) / IF...DROP payroll(1) / IF...DROP project_assignments(2)
+        assertEquals(SqlStatementType.SET, sqlStatements.get(0).type());
+        assertEquals(SqlStatementType.DROP, sqlStatements.get(1).type());
+        assertEquals(SqlStatementType.DROP, sqlStatements.get(2).type());
+    }
+
     /**
      * 基本 SELECT 与表列抽取。
      */
