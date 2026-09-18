@@ -32,6 +32,7 @@
 - `UUIDv7`：RFC 9562 的时间有序 UUID，毫秒时间戳在高 48 位。`next()` / `nextMonotonic()`（12 位计数器，一毫秒用满则推进逻辑时钟 1ms，保证不回退）、`nextString()`、`timestamp(UUID)` 取回毫秒时间戳、`isV7(UUID)` 判定。形态仍是标准 UUID，可直接存 `uuid` 列。
 - `IdGenerator.ulid()` / `uuidV7()` / `uuidV7String()`：与雪花并列的门面入口。
 - `DesensitizeUtils`：常用数据脱敏。`phone` / `idCard` / `bankCard` / `name` / `email` / `address` / `carNo` / `ip` / `password` 语义方法，通用 `mask(value, keepHead, keepTail[, maskChar])` 与 `maskAll`，配置驱动用 `desensitize(value, Type)`（`Type` 枚举十类）。`null` 与空串原样返回不抛异常；`keepHead + keepTail` 覆盖全文时只保留首字符而非原样返回；`password` 固定输出 6 个掩码，不泄漏密码长度。
+- `HttpClient`：可实例化 HTTP 客户端（next-plan 第 4 节）。`HttpUtils` 是进程级全局门面，所有 `setXxx` 改全局默认，多线程下互相覆盖污染；`HttpClient` 每个实例持有独立配置（超时 / 代理 / SSL / CookieJar / 引擎 / 拦截器 / fakeIp / 默认 Content-Type），多实例与多线程互不污染。`builder()` 从当前全局默认起算、链式覆盖；`shared()` 取全局默认单例，与 `HttpUtils` 静态方法等价。隔离通过 ThreadLocal 把实例配置下发到发送链路实现，无需全局加锁。`HttpConfig` 新增 `copy()` 供实例取独立配置副本。
 
 ### 变更
 

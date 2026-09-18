@@ -161,6 +161,31 @@ public class HttpUtils {
     private static volatile HttpCookieJar cookieJar;
     private static volatile HttpEngine engine;
 
+    /**
+     * 当前线程正在执行请求的客户端。实例级配置（超时/代理/SSL/CookieJar/引擎/拦截器）
+     * 通过它下发到发送链路，保证多个 {@link HttpClient} 实例之间互不污染，且不同线程
+     * 并发执行时各自隔离，无需全局加锁。{@code null} 表示走全局默认（共享）客户端。
+     */
+    private static final ThreadLocal<HttpClient> ACTIVE = new ThreadLocal<HttpClient>();
+
+    /**
+     * 仅包内可见：进入某个客户端的请求作用域。
+     *
+     * @param client 当前客户端，{@code null} 表示退出作用域
+     */
+    static void scope(HttpClient client) {
+        ACTIVE.set(client);
+    }
+
+    /**
+     * 仅包内可见：取当前线程活跃的客户端，没有则返回 {@code null}。
+     *
+     * @return 当前客户端或 {@code null}
+     */
+    static HttpClient active() {
+        return ACTIVE.get();
+    }
+
     private HttpUtils() {
     }
 
@@ -168,7 +193,8 @@ public class HttpUtils {
      * @return 全局 HTTP 配置（超时、HTTP/2、缓冲上限、代理认证）
      */
     public static HttpConfig config() {
-        return HttpConfig.shared();
+        HttpClient active = active();
+        return active != null ? active.getConfig() : HttpConfig.shared();
     }
 
     /**
@@ -217,7 +243,8 @@ public class HttpUtils {
      * @return 当前是否忽略 HTTPS 证书
      */
     public static boolean isIgnoreSsl() {
-        return ignoreSSL;
+        HttpClient active = active();
+        return active != null ? active.isIgnoreSsl() : ignoreSSL;
     }
 
     /**
@@ -447,6 +474,13 @@ public class HttpUtils {
      * @return Cookie 仓库，尚未设置时创建内存实现
      */
     public static HttpCookieJar getCookieJar() {
+        HttpClient active = active();
+        if (active != null) {
+            HttpCookieJar cj = active.getCookieJar();
+            if (cj != null) {
+                return cj;
+            }
+        }
         if (HttpUtils.cookieJar == null) {
             HttpUtils.cookieJar = new CookieJarImpl();
         }
@@ -457,6 +491,13 @@ public class HttpUtils {
      * @return 当前传输引擎（懒创建）
      */
     public static HttpEngine getHttpEngine() {
+        HttpClient active = active();
+        if (active != null) {
+            HttpEngine e = active.getEngine();
+            if (e != null) {
+                return e;
+            }
+        }
         HttpEngine current = engine;
         if (current == null) {
             synchronized (HttpUtils.class) {
@@ -495,6 +536,62 @@ public class HttpUtils {
             config().setProxyAuth(null, null);
         }
         engine = null;
+    }
+
+    /**
+     * @return 当前代理，未设置时为 {@code null}（使用系统默认）
+     */
+    public static Proxy getProxy() {
+        HttpClient active = active();
+        return active != null ? active.getProxy() : proxy;
+    }
+
+    /**
+     * 仅包内可见：取全局代理原始值（不被实例作用域覆盖）。
+     *
+     * @return 全局代理
+     */
+    static Proxy rawProxy() {
+        return proxy;
+    }
+
+    /**
+     * 仅包内可见：取全局 SSL 忽略开关原始值。
+     *
+     * @return 是否忽略 SSL
+     */
+    static boolean rawIgnoreSsl() {
+        return ignoreSSL;
+    }
+
+    /**
+     * 仅包内可见：取全局引擎原始值（可能为 null）。
+     *
+     * @return 全局引擎
+     */
+    static HttpEngine rawEngine() {
+        return engine;
+    }
+
+    /**
+     * 仅包内可见：取全局 CookieJar（含默认内存实现兜底）。
+     *
+     * @return 全局 CookieJar
+     */
+    static HttpCookieJar resolveCookieJar() {
+        if (cookieJar == null) {
+            cookieJar = new CookieJarImpl();
+        }
+        return cookieJar;
+    }
+
+    /**
+     * 仅包内可见：取当前默认 Content-Type（可能来自活跃的实例客户端）。
+     *
+     * @return 默认 Content-Type
+     */
+    static String currentDefaultMediaType() {
+        return defaultMediaType;
     }
 
     /**
@@ -2866,11 +2963,11 @@ public class HttpUtils {
             request.url(request.effectiveUrl());
             request.clearQueries();
         }
-        if (request.getProxy() == null && proxy != null) {
-            request.proxy(proxy);
+        if (request.getProxy() == null && getProxy() != null) {
+            request.proxy(getProxy());
         }
         if (!request.isIgnoreSslSet()) {
-            request.ignoreSsl(ignoreSSL);
+            request.ignoreSsl(isIgnoreSsl());
         }
         applyProxyAuth(request);
         applyCookies(request);
@@ -2933,7 +3030,7 @@ public class HttpUtils {
         }
     }
 
-    private static void applyDefaults(HttpRequest request) {
+    static void applyDefaults(HttpRequest request) {
         HttpConfig cfg = config();
         if (!request.isConnectTimeoutSet()) {
             request.connectTimeoutMs(cfg.getConnectTimeoutMs());
@@ -3023,7 +3120,7 @@ public class HttpUtils {
         }
     }
 
-    private static String appendQuery(String url, Map<String, Object> params) {
+    static String appendQuery(String url, Map<String, Object> params) {
         String requestParamString = getRequestParamString(params);
         if (url.indexOf('?') != -1) {
             return url + "&" + requestParamString;
