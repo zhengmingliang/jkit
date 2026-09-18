@@ -121,6 +121,7 @@
 - `jkit-notify`：渠道注册表 `register/unregister/get/list` 加同步，并发读写不再可能丢渠道或抛 `ConcurrentModificationException`；`NotifyPolicy` 去重占位与限流计数前移到 `beforeSend` 原子完成（`afterAttempt` 保留兼容、不再重复记账），并发下同一条消息不会同时通过去重检查、也不会放行超额消息；默认异步线程池改为 8 线程 + 1000 有界队列 + CallerRunsPolicy 背压，不再无限积压。
 - `jkit-notify`：SPI 加载逐 provider 容错，单个扩展渠道损坏（缺依赖 / 构造抛异常）只告警跳过，不再让整个模块以 `ExceptionInInitializerError` 崩掉。
 - `jkit-notify-extra`：阿里云短信 `RegionId` 跟随 `CFG_REGION`（可配地域），不再硬编码 `cn-hangzhou`。
+- `jkit-core`：表达式求值器 `com.alianga.jkit.expression` 修复两处正确性问题。`&&` / `||` 此前**不做短路求值**——进入运算符分派前就急切算出了右操作数，导致 `true || (1/0)`、`false && (1/0)` 这类本应短路的表达式反而抛除零异常，右操作数的副作用也无法被跳过；现在 `ExprEvaluator` 在左操作数已能决定结果时直接返回、不再计算右操作数，与 Java 语义一致。`>` / `<` / `>=` / `<=` 此前硬性按 `Number` 转型，字符串比较直接抛异常；改为数字按数值、其余 `Comparable` 按自然序（如字符串字典序）比较，类型不可比时给出清晰错误。新增 `ExpressionRegressionTest`（23 例）固化短路、字符串关系比较、运算符优先级、类型强制、内置函数与三元等语义——该包此前零测试。
 
 ## 2.0.1 - 2026-09-13
 
