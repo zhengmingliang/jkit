@@ -1,9 +1,10 @@
 package com.alianga.jkit.html;
 
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Set;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -18,7 +19,39 @@ import java.util.regex.Pattern;
  * @since 2.0.2
  */
 public final class Selector {
+    /** 已解析选择器的缓存上限，超出后淘汰最久未用者。 */
+    private static final int CACHE_MAX = 256;
+
+    /** 解析结果不可变且线程安全，按访问序缓存，避免重复解析同一选择器。 */
+    private static final Map<String, List<Complex>> CACHE =
+            new LinkedHashMap<String, List<Complex>>(64, 0.75f, true);
+
     private Selector() {
+    }
+
+    /**
+     * 解析选择器并缓存结果；解析失败时抛出 {@link SelectorException} 且不写入缓存。
+     *
+     * @param query CSS 选择器
+     * @return 解析后的复合选择器列表
+     */
+    private static List<Complex> parseCached(String query) {
+        synchronized (CACHE) {
+            List<Complex> hit = CACHE.get(query);
+            if (hit != null) {
+                return hit;
+            }
+        }
+        List<Complex> parsed = new Parser(query).parse();
+        synchronized (CACHE) {
+            if (CACHE.size() >= CACHE_MAX) {
+                Iterator<String> it = CACHE.keySet().iterator();
+                it.next();
+                it.remove();
+            }
+            CACHE.put(query, parsed);
+        }
+        return parsed;
     }
 
     /**
@@ -29,18 +62,37 @@ public final class Selector {
      * @return 匹配元素集合
      */
     public static Elements select(String query, Element root) {
-        List<Complex> complexes = new Parser(query).parse();
-        Set<Element> set = new LinkedHashSet<Element>();
-        List<Element> all = allElements(root);
-        for (Complex c : complexes) {
+        List<Complex> complexes = parseCached(query);
+        Elements out = new Elements();
+        boolean dedup = complexes.size() > 1;
+        for (int i = 0; i < complexes.size(); i++) {
+            Complex c = complexes.get(i);
             int last = c.steps.size() - 1;
-            for (Element e : all) {
-                if (matchFrom(c, last, e)) {
-                    set.add(e);
-                }
+            collect(c, last, root, out, dedup);
+        }
+        return out;
+    }
+
+    /**
+     * 深度优先收集匹配元素。直接走子节点表，不构建中间列表、不分配迭代器。
+     *
+     * @param c 复合选择器
+     * @param last 最末一步下标
+     * @param el 当前元素
+     * @param out 结果容器
+     * @param dedup 是否去重（仅逗号分组时需要）
+     */
+    private static void collect(Complex c, int last, Element el, Elements out, boolean dedup) {
+        if (matchFrom(c, last, el) && (!dedup || !out.contains(el))) {
+            out.add(el);
+        }
+        int size = el.childCount();
+        for (int k = 0; k < size; k++) {
+            Node n = el.childAt(k);
+            if (n instanceof Element) {
+                collect(c, last, (Element) n, out, dedup);
             }
         }
-        return new Elements(new ArrayList<Element>(set));
     }
 
     /**
@@ -51,30 +103,33 @@ public final class Selector {
      * @return 首个匹配元素
      */
     public static Element selectFirst(String query, Element root) {
-        List<Complex> complexes = new Parser(query).parse();
-        List<Element> all = allElements(root);
-        for (Complex c : complexes) {
+        List<Complex> complexes = parseCached(query);
+        for (int i = 0; i < complexes.size(); i++) {
+            Complex c = complexes.get(i);
             int last = c.steps.size() - 1;
-            for (Element e : all) {
-                if (matchFrom(c, last, e)) {
-                    return e;
-                }
+            Element hit = findFirst(c, last, root);
+            if (hit != null) {
+                return hit;
             }
         }
         return null;
     }
 
-    private static List<Element> allElements(Element root) {
-        List<Element> out = new ArrayList<Element>();
-        walk(root, out);
-        return out;
-    }
-
-    private static void walk(Element el, List<Element> out) {
-        out.add(el);
-        for (Element child : el.children()) {
-            walk(child, out);
+    private static Element findFirst(Complex c, int last, Element el) {
+        if (matchFrom(c, last, el)) {
+            return el;
         }
+        int size = el.childCount();
+        for (int k = 0; k < size; k++) {
+            Node n = el.childAt(k);
+            if (n instanceof Element) {
+                Element hit = findFirst(c, last, (Element) n);
+                if (hit != null) {
+                    return hit;
+                }
+            }
+        }
+        return null;
     }
 
     private static boolean matchFrom(Complex c, int idx, Element el) {
@@ -124,9 +179,10 @@ public final class Selector {
     private static final class Compound {
         final List<Simple> simples = new ArrayList<Simple>();
 
+        /** 按下标遍历，避免每个被测试元素都分配一次 Iterator。 */
         boolean matches(Element e) {
-            for (Simple s : simples) {
-                if (!s.matches(e)) {
+            for (int i = 0; i < simples.size(); i++) {
+                if (!simples.get(i).matches(e)) {
                     return false;
                 }
             }
@@ -143,11 +199,12 @@ public final class Selector {
         private final String tag;
 
         TagSimple(String tag) {
-            this.tag = tag;
+            // DOM 标签名解析时已统一小写，选择器侧也归一，匹配退化为 equals
+            this.tag = "*".equals(tag) ? tag : tag.toLowerCase();
         }
 
         public boolean matches(Element e) {
-            return "*".equals(tag) || e.tagName().equalsIgnoreCase(tag);
+            return "*".equals(tag) || e.tagName().equals(tag);
         }
     }
 
@@ -193,20 +250,15 @@ public final class Selector {
             if ("!=".equals(op)) {
                 return !e.attr(name).equals(value);
             }
-            if (!e.hasAttr(name)) {
+            String av = e.attrOrNull(name);
+            if (av == null) {
                 return false;
             }
-            String av = e.attr(name);
             if ("=".equals(op)) {
                 return av.equals(value);
             }
             if ("~=".equals(op)) {
-                for (String part : av.split("\\s+")) {
-                    if (part.equals(value)) {
-                        return true;
-                    }
-                }
-                return false;
+                return hasToken(av, value);
             }
             if ("|=".equals(op)) {
                 return av.equals(value) || av.startsWith(value + "-");
@@ -221,6 +273,30 @@ public final class Selector {
                 return av.contains(value);
             }
             return false;
+        }
+
+        /** {@code ~=} 的空白分词匹配，手写扫描替代正则 split。 */
+        private static boolean hasToken(String av, String tok) {
+            int i = 0;
+            int n = av.length();
+            int len = tok.length();
+            while (i < n) {
+                while (i < n && isSep(av.charAt(i))) {
+                    i++;
+                }
+                int s = i;
+                while (i < n && !isSep(av.charAt(i))) {
+                    i++;
+                }
+                if (i - s == len && av.regionMatches(s, tok, 0, len)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static boolean isSep(char c) {
+            return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f';
         }
     }
 
@@ -240,14 +316,11 @@ public final class Selector {
         public boolean matches(Element e) {
             switch (name) {
                 case "first-child":
-                    return isNthChild(e, 1);
+                    return indexInParent(e) == 1;
                 case "last-child":
-                    Element p = e.parentElement();
-                    return p != null && !p.children().isEmpty()
-                            && p.children().get(p.children().size() - 1) == e;
+                    return indexInParent(e) == elementChildCount(e.parentElement());
                 case "only-child":
-                    Element op = e.parentElement();
-                    return op != null && op.children().size() == 1 && op.children().get(0) == e;
+                    return elementChildCount(e.parentElement()) == 1 && indexInParent(e) == 1;
                 case "root":
                     return e.parent() == null;
                 case "empty":
@@ -281,17 +354,8 @@ public final class Selector {
             }
         }
 
-        private boolean isNthChild(Element e, int pos) {
-            Element p = e.parentElement();
-            return p != null && !p.children().isEmpty() && p.children().get(pos - 1) == e;
-        }
-
         private boolean nthMatches(Element e, int a, int b) {
-            Element p = e.parentElement();
-            if (p == null) {
-                return false;
-            }
-            return nth(a, b, p.children().indexOf(e) + 1);
+            return nth(a, b, indexInParent(e));
         }
 
         private boolean typeMatches(Element e, int a, int b) {
@@ -303,13 +367,14 @@ public final class Selector {
             if (p == null) {
                 return false;
             }
-            return nth(a, b, p.children().size() - p.children().indexOf(e));
+            return nth(a, b, elementChildCount(p) - indexInParent(e) + 1);
         }
 
         /** 与 Jsoup 一致：空白文本节点与注释不算“有内容”。 */
         private boolean isEmptyOfContent(Element e) {
-            for (int k = 0; k < e.childNodeSize(); k++) {
-                Node n = e.childNode(k);
+            int size = e.childCount();
+            for (int k = 0; k < size; k++) {
+                Node n = e.childAt(k);
                 if (n instanceof Comment) {
                     continue;
                 }
@@ -322,6 +387,9 @@ public final class Selector {
         }
 
         private boolean nth(int a, int b, int idx) {
+            if (idx <= 0) {
+                return false;
+            }
             if (a == 0) {
                 return idx == b;
             }
@@ -336,10 +404,12 @@ public final class Selector {
                 return 1;
             }
             int idx = 0;
-            for (Element c : p.children()) {
-                if (c.tagName().equals(e.tagName())) {
+            int size = p.childCount();
+            for (int k = 0; k < size; k++) {
+                Node n = p.childAt(k);
+                if (n instanceof Element && ((Element) n).tagName().equals(e.tagName())) {
                     idx++;
-                    if (c == e) {
+                    if (n == e) {
                         return idx;
                     }
                 }
@@ -353,13 +423,51 @@ public final class Selector {
                 return 1;
             }
             int count = 0;
-            for (Element c : p.children()) {
-                if (c.tagName().equals(e.tagName())) {
+            int size = p.childCount();
+            for (int k = 0; k < size; k++) {
+                Node n = p.childAt(k);
+                if (n instanceof Element && ((Element) n).tagName().equals(e.tagName())) {
                     count++;
                 }
             }
             return count;
         }
+    }
+
+    /** 元素在同级元素中的序号，从 1 开始；无父元素或不在子节点中返回 0。 */
+    private static int indexInParent(Element e) {
+        Element p = e.parentElement();
+        if (p == null) {
+            return 0;
+        }
+        int idx = 0;
+        int size = p.childCount();
+        for (int k = 0; k < size; k++) {
+            Node n = p.childAt(k);
+            if (!(n instanceof Element)) {
+                continue;
+            }
+            idx++;
+            if (n == e) {
+                return idx;
+            }
+        }
+        return 0;
+    }
+
+    /** 直接子元素个数，父元素为 null 时返回 0。 */
+    private static int elementChildCount(Element p) {
+        if (p == null) {
+            return 0;
+        }
+        int count = 0;
+        int size = p.childCount();
+        for (int k = 0; k < size; k++) {
+            if (p.childAt(k) instanceof Element) {
+                count++;
+            }
+        }
+        return count;
     }
 
     private static final class Parser {

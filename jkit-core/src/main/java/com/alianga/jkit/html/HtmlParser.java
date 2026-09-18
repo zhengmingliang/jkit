@@ -26,6 +26,11 @@ public final class HtmlParser {
     private static final Set<String> RAW = new HashSet<String>(Arrays.asList(
             "script", "style", "textarea"));
 
+    /** 空元素（无结束标签），与 {@link Element} 中的 VOID 保持一致。 */
+    private static final Set<String> VOID = new HashSet<String>(Arrays.asList(
+            "area", "base", "br", "col", "embed", "hr", "img", "input",
+            "link", "meta", "param", "source", "track", "wbr"));
+
     /** 只在 head 中出现的标签，遇到它们会隐式创建 head。 */
     private static final Set<String> HEAD_ONLY = new HashSet<String>(Arrays.asList(
             "head", "title", "meta", "link", "base", "style", "noscript"));
@@ -112,8 +117,8 @@ public final class HtmlParser {
                     ctx.closeTag(name);
                     continue;
                 }
-                if (Character.isLetter(nc)) {
-                    StartTag tag = readStartTag(html, i, n);
+                if (isAsciiLetter(nc)) {
+                    StartTag tag = readStartTag(html, i, n, ctx);
                     i = ctx.startTag(tag, html);
                     continue;
                 }
@@ -140,12 +145,6 @@ public final class HtmlParser {
         return new HashSet<String>(Arrays.asList(items));
     }
 
-    private static void applyAttrs(Element el, Map<String, String> attrs) {
-        for (Map.Entry<String, String> e : attrs.entrySet()) {
-            el.setAttr(e.getKey(), e.getValue());
-        }
-    }
-
     private static int findClose(String html, String tag, int from, int n) {
         String marker = "</" + tag;
         int idx = from;
@@ -163,17 +162,26 @@ public final class HtmlParser {
         return n;
     }
 
-    private static StartTag readStartTag(String html, int start, int n) {
+    /**
+     * 读取起始标签，属性写入 {@code ctx} 的复用缓冲区，避免每个标签都分配 Map。
+     *
+     * @param html HTML 文本
+     * @param start {@code <} 的下标
+     * @param n 文本长度
+     * @param ctx 解析上下文（承载属性缓冲区）
+     * @return 起始标签
+     */
+    private static StartTag readStartTag(String html, int start, int n, Ctx ctx) {
         int j = start + 1;
         int ks = j;
         while (j < n && isTagChar(html.charAt(j))) {
             j++;
         }
-        String name = html.substring(ks, j).toLowerCase();
-        Map<String, String> attrs = new java.util.LinkedHashMap<String, String>();
+        String name = Names.tag(html.substring(ks, j).toLowerCase());
+        ctx.resetAttrs();
         boolean selfClose = false;
         while (j < n) {
-            while (j < n && Character.isWhitespace(html.charAt(j))) {
+            while (j < n && isWs(html.charAt(j))) {
                 j++;
             }
             if (j >= n) {
@@ -194,19 +202,19 @@ public final class HtmlParser {
                 break;
             }
             int as = j;
-            while (j < n && !Character.isWhitespace(html.charAt(j))
+            while (j < n && !isWs(html.charAt(j))
                     && html.charAt(j) != '=' && html.charAt(j) != '>'
                     && html.charAt(j) != '/') {
                 j++;
             }
-            String an = html.substring(as, j).toLowerCase();
-            while (j < n && Character.isWhitespace(html.charAt(j))) {
+            String an = Names.attr(html.substring(as, j).toLowerCase());
+            while (j < n && isWs(html.charAt(j))) {
                 j++;
             }
             String av = "";
             if (j < n && html.charAt(j) == '=') {
                 j++;
-                while (j < n && Character.isWhitespace(html.charAt(j))) {
+                while (j < n && isWs(html.charAt(j))) {
                     j++;
                 }
                 if (j < n && (html.charAt(j) == '"' || html.charAt(j) == '\'')) {
@@ -222,7 +230,7 @@ public final class HtmlParser {
                     }
                 } else {
                     int vs = j;
-                    while (j < n && !Character.isWhitespace(html.charAt(j))
+                    while (j < n && !isWs(html.charAt(j))
                             && html.charAt(j) != '>' && html.charAt(j) != '<'
                             && html.charAt(j) != '"' && html.charAt(j) != '\''
                             && !endOfTag(html, j)) {
@@ -233,10 +241,10 @@ public final class HtmlParser {
                 av = Html.unescape(av);
             }
             if (!an.isEmpty()) {
-                attrs.put(an, av);
+                ctx.addAttr(an, av);
             }
         }
-        return new StartTag(name, attrs, selfClose, isVoid(name), j);
+        return new StartTag(name, selfClose, VOID.contains(name), j);
     }
 
     /** 判断 {@code j} 处的 {@code /} 是否为自闭合标记（{@code />} 或位于串尾）。 */
@@ -244,24 +252,48 @@ public final class HtmlParser {
         return html.charAt(j) == '/' && (j + 1 >= html.length() || html.charAt(j + 1) == '>');
     }
 
+    /** HTML 空白：只认 ASCII 五个字符，避免 {@code Character.isWhitespace} 的 Unicode 分支。 */
+    private static boolean isWs(char c) {
+        return c == ' ' || c == '\n' || c == '\r' || c == '\t' || c == '\f';
+    }
+
     private static boolean isTagChar(char c) {
-        return Character.isLetterOrDigit(c) || c == '-' || c == '_' || c == ':';
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+                || c == '-' || c == '_' || c == ':';
     }
 
-    private static boolean isVoid(String tag) {
-        return "area".equals(tag) || "base".equals(tag) || "br".equals(tag)
-                || "col".equals(tag) || "embed".equals(tag) || "hr".equals(tag)
-                || "img".equals(tag) || "input".equals(tag) || "link".equals(tag)
-                || "meta".equals(tag) || "param".equals(tag) || "source".equals(tag)
-                || "track".equals(tag) || "wbr".equals(tag);
+    private static boolean isAsciiLetter(char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
     }
 
-    /** 解析期上下文：维护开放元素栈与隐式骨架。 */
+    /** 判断字符串是否全为空白（避免 {@code trim()} 的额外分配）。 */
+    private static boolean isBlank(String s) {
+        for (int i = 0; i < s.length(); i++) {
+            if (!isWs(s.charAt(i))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * 解析期上下文：维护开放元素栈与隐式骨架。
+     *
+     * <p>{@code head}/{@code body} 是否在栈内用下标缓存（{@code headIdx}/{@code bodyIdx}），
+     * 避免每个节点都做一次 O(栈深) 的线性查找。
+     */
     private static final class Ctx {
         private final List<Element> stack = new ArrayList<Element>();
         private final Element htmlEl;
         private Element headEl;
         private Element bodyEl;
+        private int headIdx = -1;
+        private int bodyIdx = -1;
+
+        /** 属性复用缓冲区：一次解析内反复使用，避免每标签分配 Map。 */
+        private String[] attrKeys = new String[8];
+        private String[] attrValues = new String[8];
+        private int attrCount;
 
         Ctx(Document doc) {
             this.htmlEl = new Element("html");
@@ -274,18 +306,26 @@ public final class HtmlParser {
             return stack.get(stack.size() - 1);
         }
 
-        boolean inStack(Element el) {
-            for (Element e : stack) {
-                if (e == el) {
-                    return true;
-                }
-            }
-            return false;
+        void push(Element el) {
+            stack.add(el);
         }
 
-        void popTo(Element el) {
-            while (stack.size() > 1 && top() != el) {
-                stack.remove(stack.size() - 1);
+        /** 弹出栈顶，并同步失效 head/body 的下标缓存。 */
+        void pop() {
+            int idx = stack.size() - 1;
+            stack.remove(idx);
+            if (idx == headIdx) {
+                headIdx = -1;
+            }
+            if (idx == bodyIdx) {
+                bodyIdx = -1;
+            }
+        }
+
+        /** 弹到指定下标处（保留该下标元素）。 */
+        void popTo(int idx) {
+            while (stack.size() > idx + 1) {
+                pop();
             }
         }
 
@@ -294,31 +334,33 @@ public final class HtmlParser {
                 headEl = new Element("head");
                 htmlEl.appendChild(headEl);
             }
-            if (!inStack(headEl)) {
-                popTo(htmlEl);
-                stack.add(headEl);
+            if (headIdx < 0) {
+                popTo(HTML_IDX);
+                push(headEl);
+                headIdx = stack.size() - 1;
             }
             return headEl;
         }
 
         void openBody() {
             head();
-            popTo(htmlEl);
+            popTo(HTML_IDX);
             if (bodyEl == null) {
                 bodyEl = new Element("body");
                 htmlEl.appendChild(bodyEl);
             }
-            stack.add(bodyEl);
+            push(bodyEl);
+            bodyIdx = stack.size() - 1;
         }
 
         Element container(String tag) {
-            if (bodyEl != null && inStack(bodyEl)) {
+            if (bodyIdx >= 0) {
                 return top();
             }
             if (tag != null && HEAD_ONLY.contains(tag)) {
                 return head();
             }
-            if (headEl != null && inStack(headEl)) {
+            if (headIdx >= 0) {
                 return top();
             }
             return htmlEl;
@@ -328,17 +370,45 @@ public final class HtmlParser {
             if (s.isEmpty()) {
                 return;
             }
-            if (bodyEl == null || !inStack(bodyEl)) {
-                if (headEl != null && inStack(headEl)) {
+            if (bodyIdx < 0) {
+                if (headIdx >= 0) {
                     top().appendChild(new TextNode(Html.unescape(s)));
                     return;
                 }
-                if (s.trim().isEmpty()) {
+                if (isBlank(s)) {
                     return;
                 }
                 openBody();
             }
             top().appendChild(new TextNode(Html.unescape(s)));
+        }
+
+        /** 清空属性缓冲区。 */
+        void resetAttrs() {
+            attrCount = 0;
+        }
+
+        /** 向缓冲区追加一个属性。 */
+        void addAttr(String key, String value) {
+            if (attrCount == attrKeys.length) {
+                int cap = attrKeys.length * 2;
+                String[] nk = new String[cap];
+                String[] nv = new String[cap];
+                System.arraycopy(attrKeys, 0, nk, 0, attrCount);
+                System.arraycopy(attrValues, 0, nv, 0, attrCount);
+                attrKeys = nk;
+                attrValues = nv;
+            }
+            attrKeys[attrCount] = key;
+            attrValues[attrCount] = value;
+            attrCount++;
+        }
+
+        /** 把缓冲区中的属性写入元素。 */
+        void applyAttrs(Element el) {
+            for (int i = 0; i < attrCount; i++) {
+                el.setAttr(attrKeys[i], attrValues[i]);
+            }
         }
 
         int startTag(StartTag tag, String html) {
@@ -347,12 +417,12 @@ public final class HtmlParser {
                 return tag.next;
             }
             if ("head".equals(name)) {
-                applyAttrs(head(), tag.attrs);
+                applyAttrs(head());
                 return tag.next;
             }
             if ("body".equals(name)) {
                 openBody();
-                applyAttrs(bodyEl, tag.attrs);
+                applyAttrs(bodyEl);
                 return tag.next;
             }
             if (bodyEl == null && (HEAD_ONLY.contains(name) || "script".equals(name))) {
@@ -365,10 +435,10 @@ public final class HtmlParser {
                 }
             }
             Element el = new Element(name);
-            applyAttrs(el, tag.attrs);
+            applyAttrs(el);
             top().appendChild(el);
             if (!tag.voidElement && !tag.selfClose) {
-                stack.add(el);
+                push(el);
             }
             if (RAW.contains(name) && !tag.selfClose) {
                 int closeIdx = findClose(html, name, tag.next, html.length());
@@ -391,7 +461,7 @@ public final class HtmlParser {
         }
 
         void openBodyIfNeeded() {
-            if (bodyEl == null || !inStack(bodyEl)) {
+            if (bodyIdx < 0) {
                 openBody();
             }
         }
@@ -410,19 +480,19 @@ public final class HtmlParser {
             if (targets == null) {
                 return;
             }
-            int floor = indexOf(bodyEl) + 1;
+            int floor = bodyIdx + 1;
             boolean changed = true;
             while (changed) {
                 changed = false;
-                while (stack.size() > floor && targets.contains(top().tagName().toLowerCase())) {
-                    stack.remove(stack.size() - 1);
+                while (stack.size() > floor && targets.contains(top().tagName())) {
+                    pop();
                     changed = true;
                 }
                 if (targets.contains("p")) {
                     for (int k = stack.size() - 1; k >= floor; k--) {
                         if ("p".equals(stack.get(k).tagName())) {
                             while (stack.size() > k) {
-                                stack.remove(stack.size() - 1);
+                                pop();
                             }
                             changed = true;
                             break;
@@ -432,15 +502,6 @@ public final class HtmlParser {
             }
         }
 
-        int indexOf(Element el) {
-            for (int k = 0; k < stack.size(); k++) {
-                if (stack.get(k) == el) {
-                    return k;
-                }
-            }
-            return -1;
-        }
-
         void ensureTableSection(String name) {
             Element t = top();
             if (!"table".equals(t.tagName())) {
@@ -448,11 +509,11 @@ public final class HtmlParser {
             }
             Element tbody = new Element("tbody");
             t.appendChild(tbody);
-            stack.add(tbody);
+            push(tbody);
             if (!"tr".equals(name)) {
                 Element tr = new Element("tr");
                 tbody.appendChild(tr);
-                stack.add(tr);
+                push(tr);
             }
         }
 
@@ -461,41 +522,40 @@ public final class HtmlParser {
                 return;
             }
             if ("html".equals(name)) {
-                popTo(htmlEl);
+                popTo(HTML_IDX);
                 return;
             }
             if ("head".equals(name)) {
                 head();
-                popTo(headEl);
+                popTo(headIdx);
                 return;
             }
             if ("body".equals(name)) {
                 if (bodyEl != null) {
-                    popTo(htmlEl);
+                    popTo(HTML_IDX);
                 }
                 return;
             }
             for (int k = stack.size() - 1; k >= 2; k--) {
                 if (stack.get(k).tagName().equalsIgnoreCase(name)) {
-                    while (stack.size() > k) {
-                        stack.remove(stack.size() - 1);
-                    }
+                    popTo(k - 1);
                     return;
                 }
             }
         }
     }
 
+    /** {@code html} 元素在开放元素栈中的固定下标（{@code 0} 为 doc，{@code 1} 为 html）。 */
+    private static final int HTML_IDX = 1;
+
     private static final class StartTag {
         final String name;
-        final Map<String, String> attrs;
         final boolean selfClose;
         final boolean voidElement;
         final int next;
 
-        StartTag(String name, Map<String, String> attrs, boolean selfClose, boolean voidElement, int next) {
+        StartTag(String name, boolean selfClose, boolean voidElement, int next) {
             this.name = name;
-            this.attrs = attrs;
             this.selfClose = selfClose;
             this.voidElement = voidElement;
             this.next = next;

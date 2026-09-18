@@ -2,6 +2,7 @@ package com.alianga.jkit.html;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -9,6 +10,9 @@ import java.util.Set;
 
 /**
  * HTML 元素节点，承载标签名、属性与子节点，并提供选择器查询与内容抽取 API。
+ *
+ * <p>属性表与子节点表均为懒创建：无属性、无子节点的元素不持有任何容器对象，
+ * 大文档下可显著降低常驻内存。
  *
  * @author 郑明亮
  * @since 2.0.2
@@ -35,8 +39,10 @@ public class Element extends Node {
             "script", "style"));
 
     private final String tagName;
-    private final Map<String, String> attributes = new LinkedHashMap<String, String>();
-    private final List<Node> childNodes = new ArrayList<Node>();
+    private String[] attrKeys;
+    private String[] attrValues;
+    private int attrCount;
+    private List<Node> childNodes;
 
     Element(String tagName) {
         this.tagName = tagName;
@@ -58,8 +64,8 @@ public class Element extends Node {
      * @return 属性值
      */
     public String attr(String key) {
-        String v = attributes.get(key.toLowerCase());
-        return v == null ? "" : v;
+        int i = indexOfAttr(key);
+        return i < 0 ? "" : attrValues[i];
     }
 
     /**
@@ -69,7 +75,7 @@ public class Element extends Node {
      * @return 是否存在
      */
     public boolean hasAttr(String key) {
-        return attributes.containsKey(key.toLowerCase());
+        return indexOfAttr(key) >= 0;
     }
 
     /**
@@ -78,7 +84,45 @@ public class Element extends Node {
      * @return 属性映射
      */
     public Map<String, String> attributes() {
-        return new LinkedHashMap<String, String>(attributes);
+        if (attrCount == 0) {
+            return Collections.emptyMap();
+        }
+        Map<String, String> map = new LinkedHashMap<String, String>(attrCount + 1);
+        for (int i = 0; i < attrCount; i++) {
+            map.put(attrKeys[i], attrValues[i]);
+        }
+        return Collections.unmodifiableMap(map);
+    }
+
+    /**
+     * 返回属性值，属性不存在时返回 {@code null}（包内使用，避免{@link #hasAttr} + {@link #attr} 两次扫描）。
+     *
+     * @param key 属性名（大小写不敏感）
+     * @return 属性值，不存在返回 null
+     */
+    String attrOrNull(String key) {
+        int i = indexOfAttr(key);
+        return i < 0 ? null : attrValues[i];
+    }
+
+    /**
+     * 查找属性下标：先按原样精确匹配（绝大多数调用已是小写），再按忽略大小写匹配。
+     *
+     * @param key 属性名
+     * @return 下标，不存在返回 -1
+     */
+    private int indexOfAttr(String key) {
+        for (int i = 0; i < attrCount; i++) {
+            if (attrKeys[i].equals(key)) {
+                return i;
+            }
+        }
+        for (int i = 0; i < attrCount; i++) {
+            if (attrKeys[i].equalsIgnoreCase(key)) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     /**
@@ -105,10 +149,23 @@ public class Element extends Node {
      * @return 类名集合
      */
     public List<String> classNames() {
-        List<String> names = new ArrayList<String>();
-        for (String part : className().split("\\s+")) {
-            if (!part.isEmpty()) {
-                names.add(part);
+        String cn = className();
+        if (cn.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<String> names = new ArrayList<String>(4);
+        int i = 0;
+        int n = cn.length();
+        while (i < n) {
+            while (i < n && isSep(cn.charAt(i))) {
+                i++;
+            }
+            int s = i;
+            while (i < n && !isSep(cn.charAt(i))) {
+                i++;
+            }
+            if (i > s) {
+                names.add(cn.substring(s, i));
             }
         }
         return names;
@@ -121,16 +178,37 @@ public class Element extends Node {
      * @return 是否包含
      */
     public boolean hasClass(String cls) {
-        for (String name : classNames()) {
-            if (name.equals(cls)) {
+        String cn = className();
+        if (cn.isEmpty()) {
+            return false;
+        }
+        int i = 0;
+        int n = cn.length();
+        int len = cls.length();
+        while (i < n) {
+            while (i < n && isSep(cn.charAt(i))) {
+                i++;
+            }
+            int s = i;
+            while (i < n && !isSep(cn.charAt(i))) {
+                i++;
+            }
+            if (i - s == len && cn.regionMatches(s, cls, 0, len)) {
                 return true;
             }
         }
         return false;
     }
 
+    private static boolean isSep(char c) {
+        return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f';
+    }
+
     /**
      * 返回元素自身的纯文本（递归拼接所有后代文本节点）。
+     *
+     * <p>块级元素之间补一个空格、多余空白折叠为单个空格并去掉首尾空白，与 Jsoup 行为一致；
+     * {@code pre}/{@code textarea}/{@code script}/{@code style} 保留原始空白。
      *
      * @return 文本
      */
@@ -147,7 +225,9 @@ public class Element extends Node {
      */
     public String ownText() {
         StringBuilder sb = new StringBuilder();
-        for (Node child : childNodes) {
+        int size = childCount();
+        for (int k = 0; k < size; k++) {
+            Node child = childNodes.get(k);
             if (child instanceof TextNode) {
                 sb.append(((TextNode) child).text());
             }
@@ -156,40 +236,19 @@ public class Element extends Node {
     }
 
     /**
-     * 返回同一父元素下的下一个兄弟元素，没有则 {@code null}。
+     * 返回未做空白归一化的原始文本（含 {@code script}/{@code style} 内容），
+     * 供需要原文的场景使用；日常抽取请用 {@link #text()}。
      *
-     * @return 下一个兄弟元素
+     * @return 原始文本
      */
-    public Element nextElementSibling() {
-        List<Element> cs = siblings();
-        int idx = cs.indexOf(this);
-        return idx >= 0 && idx + 1 < cs.size() ? cs.get(idx + 1) : null;
-    }
-
-    /**
-     * 返回同一父元素下的上一个兄弟元素，没有则 {@code null}。
-     *
-     * @return 上一个兄弟元素
-     */
-    public Element previousElementSibling() {
-        List<Element> cs = siblings();
-        int idx = cs.indexOf(this);
-        return idx > 0 ? cs.get(idx - 1) : null;
-    }
-
-    /**
-     * 返回在同级元素中的下标，从 0 开始；无父元素时为 0。
-     *
-     * @return 同级下标
-     */
-    public int elementSiblingIndex() {
-        int idx = siblings().indexOf(this);
-        return idx < 0 ? 0 : idx;
-    }
-
-    private List<Element> siblings() {
-        Element p = parentElement();
-        return p == null ? new ArrayList<Element>() : p.children();
+    @Override
+    public String nodeText() {
+        StringBuilder sb = new StringBuilder();
+        int size = childCount();
+        for (int k = 0; k < size; k++) {
+            sb.append(childNodes.get(k).nodeText());
+        }
+        return sb.toString();
     }
 
     private void appendText(StringBuilder sb, boolean preserve) {
@@ -197,7 +256,9 @@ public class Element extends Node {
             return;
         }
         boolean keep = preserve || PRESERVE.contains(tagName);
-        for (Node child : childNodes) {
+        int size = childCount();
+        for (int k = 0; k < size; k++) {
+            Node child = childNodes.get(k);
             if (child instanceof Element) {
                 Element el = (Element) child;
                 if (!keep && isBlockish(el) && sb.length() > 0
@@ -254,26 +315,11 @@ public class Element extends Node {
         while (to > from && isTrimmable(s.charAt(to - 1))) {
             to--;
         }
-        return s.substring(from, to);
+        return from == 0 && to == s.length() ? s : s.substring(from, to);
     }
 
     private static boolean isTrimmable(char c) {
         return isWhitespace(c) || c == ' ';
-    }
-
-    /**
-     * 返回未做空白归一化的原始文本（含 {@code script}/{@code style} 内容），
-     * 供需要原文的场景使用；日常抽取请用 {@link #text()}。
-     *
-     * @return 原始文本
-     */
-    @Override
-    public String nodeText() {
-        StringBuilder sb = new StringBuilder();
-        for (Node child : childNodes) {
-            sb.append(child.nodeText());
-        }
-        return sb.toString();
     }
 
     /**
@@ -285,10 +331,11 @@ public class Element extends Node {
     public String outerHtml() {
         StringBuilder sb = new StringBuilder();
         sb.append('<').append(tagName);
-        for (Map.Entry<String, String> e : attributes.entrySet()) {
-            sb.append(' ').append(e.getKey()).append("=\"").append(Html.escapeAttr(e.getValue())).append('"');
+        for (int i = 0; i < attrCount; i++) {
+            sb.append(' ').append(attrKeys[i]).append("=\"").append(Html.escapeAttr(attrValues[i])).append('"');
         }
-        if (childNodes.isEmpty()) {
+        int size = childCount();
+        if (size == 0) {
             if (VOID.contains(tagName)) {
                 return sb.append('>').toString();
             }
@@ -296,8 +343,8 @@ public class Element extends Node {
             return sb.toString();
         }
         sb.append('>');
-        for (Node child : childNodes) {
-            sb.append(child.outerHtml());
+        for (int k = 0; k < size; k++) {
+            sb.append(childNodes.get(k).outerHtml());
         }
         sb.append("</").append(tagName).append('>');
         return sb.toString();
@@ -310,8 +357,9 @@ public class Element extends Node {
      */
     public String innerHtml() {
         StringBuilder sb = new StringBuilder();
-        for (Node child : childNodes) {
-            sb.append(child.outerHtml());
+        int size = childCount();
+        for (int k = 0; k < size; k++) {
+            sb.append(childNodes.get(k).outerHtml());
         }
         return sb.toString();
     }
@@ -322,8 +370,13 @@ public class Element extends Node {
      * @return 子元素列表
      */
     public List<Element> children() {
-        List<Element> list = new ArrayList<Element>();
-        for (Node child : childNodes) {
+        int size = childCount();
+        if (size == 0) {
+            return Collections.emptyList();
+        }
+        List<Element> list = new ArrayList<Element>(size);
+        for (int k = 0; k < size; k++) {
+            Node child = childNodes.get(k);
             if (child instanceof Element) {
                 list.add((Element) child);
             }
@@ -337,7 +390,7 @@ public class Element extends Node {
      * @return 子节点数
      */
     public int childNodeSize() {
-        return childNodes.size();
+        return childCount();
     }
 
     /**
@@ -367,6 +420,77 @@ public class Element extends Node {
      */
     public Element parentElement() {
         return parentNode instanceof Element ? (Element) parentNode : null;
+    }
+
+    /**
+     * 返回同一父元素下的下一个兄弟元素，没有则 {@code null}。
+     *
+     * @return 下一个兄弟元素
+     */
+    public Element nextElementSibling() {
+        Element p = parentElement();
+        if (p == null) {
+            return null;
+        }
+        boolean seen = false;
+        int size = p.childCount();
+        for (int k = 0; k < size; k++) {
+            Node n = p.childNodes.get(k);
+            if (n == this) {
+                seen = true;
+            } else if (seen && n instanceof Element) {
+                return (Element) n;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 返回同一父元素下的上一个兄弟元素，没有则 {@code null}。
+     *
+     * @return 上一个兄弟元素
+     */
+    public Element previousElementSibling() {
+        Element p = parentElement();
+        if (p == null) {
+            return null;
+        }
+        Element prev = null;
+        int size = p.childCount();
+        for (int k = 0; k < size; k++) {
+            Node n = p.childNodes.get(k);
+            if (n == this) {
+                return prev;
+            }
+            if (n instanceof Element) {
+                prev = (Element) n;
+            }
+        }
+        return prev;
+    }
+
+    /**
+     * 返回在同级元素中的下标，从 0 开始；无父元素时为 0。
+     *
+     * @return 同级下标
+     */
+    public int elementSiblingIndex() {
+        Element p = parentElement();
+        if (p == null) {
+            return 0;
+        }
+        int idx = 0;
+        int size = p.childCount();
+        for (int k = 0; k < size; k++) {
+            Node n = p.childNodes.get(k);
+            if (n == this) {
+                return idx;
+            }
+            if (n instanceof Element) {
+                idx++;
+            }
+        }
+        return idx;
     }
 
     /**
@@ -401,12 +525,25 @@ public class Element extends Node {
         return Selector.selectFirst(css, this);
     }
 
+    /** 直接子节点数量（包内使用，无子节点时不分配容器）。 */
+    int childCount() {
+        return childNodes == null ? 0 : childNodes.size();
+    }
+
+    /** 第 {@code index} 个直接子节点（包内使用）。 */
+    Node childAt(int index) {
+        return childNodes.get(index);
+    }
+
     /**
      * 追加子节点（解析器内部使用）。
      *
      * @param child 子节点
      */
     void appendChild(Node child) {
+        if (childNodes == null) {
+            childNodes = new ArrayList<Node>(4);
+        }
         child.parentNode = this;
         childNodes.add(child);
     }
@@ -418,6 +555,27 @@ public class Element extends Node {
      * @param value 属性值
      */
     void setAttr(String key, String value) {
-        attributes.put(key.toLowerCase(), value);
+        String k = key.toLowerCase();
+        for (int i = 0; i < attrCount; i++) {
+            if (attrKeys[i].equals(k)) {
+                attrValues[i] = value;
+                return;
+            }
+        }
+        if (attrKeys == null) {
+            attrKeys = new String[2];
+            attrValues = new String[2];
+        } else if (attrCount == attrKeys.length) {
+            int cap = attrKeys.length * 2;
+            String[] nk = new String[cap];
+            String[] nv = new String[cap];
+            System.arraycopy(attrKeys, 0, nk, 0, attrCount);
+            System.arraycopy(attrValues, 0, nv, 0, attrCount);
+            attrKeys = nk;
+            attrValues = nv;
+        }
+        attrKeys[attrCount] = k;
+        attrValues[attrCount] = value;
+        attrCount++;
     }
 }

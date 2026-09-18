@@ -275,7 +275,7 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 | JWT + 加密默认值 | `EncryptUtils.RSA` 仍 1024+ECB；DES 仍在门面 | HS256/RS256；RSA 2048+OAEP；AES-GCM；DES/1024 `@Deprecated` | 加密一半已做（8600d5d）；**JWT 已补（JwtUtils，零依赖，16 测试全过）** |
 | 空文档 | `docs/expression.md`、`docs/csv.md` | 现在是空文件，表达式/CSV 两套门面实际存在 | **已做（305ddae）** |
 | `jkit-llm` | 新模块 | 建立在 HttpClient 实例 + 已有 `sseMerge` 上，本季不要做 |
-| 轻量 HTML | 新模块或 core | 替代已移除的 Jsoup，CSS 选择器子集 | **已做**：`com.alianga.jkit.html`（`Html` / `Element` / `Document` / `Elements` / `Selector` / `HtmlParser` / `Entities`，零依赖，32 测试全过；以 Jsoup 1.18.1 差分验证 93 组用例 86 组一致，剩余差异为 `:has()` / `:eq()` 等 Jsoup 专有扩展与收养算法，已在 `docs/html.md` §7 列明） |
+| 轻量 HTML | 新模块或 core | 替代已移除的 Jsoup，CSS 选择器子集 | **已做**：`com.alianga.jkit.html`（`Html` / `Element` / `Document` / `Elements` / `Selector` / `HtmlParser` / `Entities`，零依赖，32 测试全过；以 Jsoup 1.18.1 差分验证 119 组用例 112 组一致，剩余差异为 `:has()` / `:eq()` 等 Jsoup 专有扩展与收养算法，已在 `docs/html.md` §7 列明；另完成性能专项，解析与选择器已追平或快于 Jsoup、常驻内存仍高约 11%，实测数据见 `docs/html.md` §9） |
 | 韧性抽包 | `http.lb` 的 Retry/熔断 | 给 notify / 任意 Callable 用 | **已做（Retryer + CircuitBreaker，com.alianga.jkit.resilience，与 HTTP 解耦，15 测试全过）** |
 | zstd | HTTP `Content-Encoding` | 已有 gzip/deflate/br | 零依赖不可行，保持不做 |
 | Consul / K8s 发现 | `ServiceDiscovery` | 已有 Nacos + 静态 | 需基础设施，暂不验证 |

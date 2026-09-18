@@ -151,3 +151,30 @@ These are deliberate trade-offs — check the list when migrating:
 An illegal selector **always throws — it never degrades silently or loops**. `h1 @ p`, `p ~ + p` and `p:not()` each fail immediately with a clear message.
 
 Parsing itself throws nothing — all malformed input is adapted into a DOM rather than aborting on dirty HTML.
+
+## 9. Performance
+
+Measured on the same machine against Jsoup 1.18.1 (3 warmup rounds, 7 timed rounds, median taken; `-Xms1g -Xmx2g`, JDK 8). Jsoup is used for benchmarking only and is **not** a project dependency. The corpus is a generated article list page: small = 2 items (~1.6 KB), medium = 60 items (~30 KB), large = 600 items (~300 KB). The ratio is `Jsoup time / jkit time`, so values above 1 mean jkit is faster.
+
+| Scenario | jkit | Jsoup 1.18.1 | jkit faster |
+|----------|------|--------------|-------------|
+| Small page parse | 0.013 ms | 0.016 ms | 1.28x |
+| Medium page parse | 0.177 ms | 0.192 ms | 1.09x |
+| Large page parse | 1.775 ms | 1.834 ms | 1.03x |
+| Large page parse + `text()` | 2.092 ms | 2.063 ms | 0.99x |
+| Medium `#main` | 0.007 ms | 0.010 ms | 1.60x |
+| Medium `.post` | 0.008 ms | 0.014 ms | 1.65x |
+| Medium `article.post h2` | 0.007 ms | 0.030 ms | 4.14x |
+| Medium `a[href^=/p/]` | 0.008 ms | 0.015 ms | 1.92x |
+| Large `#main` | 0.112 ms | 0.102 ms | 0.91x |
+| Large `a[href^=/p/]` | 0.118 ms | 0.135 ms | 1.15x |
+| Retained heap, 200 large DOMs | 268.0 MB | 241.5 MB | 0.90x |
+| End-to-end (parse + 3 queries + text) | 2.572 ms | 2.487 ms | 0.97x |
+
+Verdict:
+
+- **Parsing and selectors now match or beat Jsoup**; end-to-end throughput is on par (run-to-run variance is about 10%, swinging between 0.97x and 1.05x).
+- **Retained heap is still about 11% higher.** `Element` stores attributes in parallel arrays and children in an `ArrayList` — simpler and dependency-free, but each DOM is slightly fatter than Jsoup's.
+- Full-tree selectors on large pages (e.g. `#main`) are about 9% slower than Jsoup, because every query does a complete depth-first traversal with no id / class index.
+
+The optimizations cluster in three places: attributes moved from `LinkedHashMap` to lazily allocated parallel `String[]`, with tag and attribute names interned through `Names`; the parser replaces O(depth) stack searches with cached indices and writes attributes into a reusable buffer; selector traversal drops intermediate lists and iterators, collapses attribute matching into a single scan, and caches parsed selectors by access order (cap 256).
