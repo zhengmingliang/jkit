@@ -573,7 +573,7 @@ cd ../tools-test && mvn -Dtest='SqlParserCompareTest,SqlRoundTripFidelityCorpusT
 
 | 项 | 说明 |
 |---|---|
-| 中英 `sql.md` | 英文转换/SPI 章节短一截（还停留在 KEY 被 strip，没写附录 INDEX / `registerFunctions`）。对外只维护这两份 + 设计文档，**不要**把 next-plan 链回去 |
+| 中英 `sql.md` | 英文转换/SPI 章节短一截（还停留在 KEY 被 strip，没写附录 INDEX / `registerFunctions`）。对外只维护这两份 + 设计文档，**不要**把 next-plan 链回去 | ✅ 已对齐（2026-09-18）：英文转换章节补到与中文全等，含 Normal Form 框架、Phase 0–1/2–3 代码、`registerFunctions`/`SqlFunctionRegistry`/`SqlDialectSpec` |
 | 设计文档 §12 | 与 `generateOracleSequence` 对齐（opt-in 已实现） |
 | `SqlDdlStatement.columnDefinitions()` | 仍是 `List<String>`。结构化列是平行通路。**不要**为了好看改公开签名 |
 | pretty 缩进 | `SqlFormatter.indent` 是死代码（第 9 节）。有真实需求再做 subquery/CTE/UNION 缩进，勿硬接 |

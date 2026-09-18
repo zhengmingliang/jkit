@@ -520,31 +520,87 @@ Explicitly not done: a procedure-body **execution engine** (structured AST alrea
 
 ## Cross-dialect type conversion
 
-Schema / SQL conversion uses a **Normal Form** (canonical types) so adding a dialect is O(K), not O(N²). Design: [sql-schema-converter-design.md](../sql-schema-converter-design.md).
+Schema / SQL conversion across dialects goes through a **Normal Form** (canonical types), avoiding pairwise N² mappings. Design: [sql-schema-converter-design.md](../sql-schema-converter-design.md).
 
-Phase 0–1 are in tree (JDK 8; `SqlDdlStatement.columnDefinitions()` stays `List<String>`):
+Phase 0–1 are now in tree (JDK 8; `SqlDdlStatement.columnDefinitions()` stays `List<String>`):
 
 ```java
+import com.alianga.jkit.sql.schema.model.CanonicalType;
+import com.alianga.jkit.sql.schema.model.ColumnDefinition;
+import com.alianga.jkit.sql.schema.parse.SqlColumnDefinitionParser;
+import com.alianga.jkit.sql.schema.registry.SqlDataTypeRegistry;
+
+SqlDdlStatement ddl = (SqlDdlStatement) SQL.parse(
+        "CREATE TABLE t (id INT NOT NULL AUTO_INCREMENT, name VARCHAR(32))",
+        SqlDialect.MYSQL);
 List<ColumnDefinition> cols = SqlColumnDefinitionParser.fromDdl(ddl, SqlDialect.MYSQL);
+// cols.get(0): name=id, type=INT, NOT NULL + AUTO_INCREMENT
+
 SqlDataTypeRegistry types = SqlDataTypeRegistry.builtins();
 types.convert("VARCHAR(100)", SqlDialect.MYSQL, SqlDialect.ORACLE); // VARCHAR2(100)
+types.convert("DATETIME", SqlDialect.MYSQL, SqlDialect.POSTGRES);   // TIMESTAMP
 types.fromDialect("TINYINT(1)", SqlDialect.MYSQL);                  // BOOLEAN
+types.fromDialect("NUMBER(10,2)", SqlDialect.ORACLE);               // DECIMAL
 ```
 
-Undeclared reverse collisions fail `RegistryValidator` at builtin-table build time.
+Undeclared type collisions are blocked by `RegistryValidator` at builtin-table build time; `RegistryValidationTest` runs in CI.
 
-`SQL.convert` / `SQL.convertBatch` rewrite CREATE TABLE and `ALTER TABLE ADD/MODIFY/CHANGE` column types, plus query functions:
+Phase 2–3 expose a whole-statement entry (CREATE TABLE column types / auto-increment / UNSIGNED / defaults / table options; other statements are formatted for the target dialect, reusing the existing pagination adaptation):
 
-- `IF`→`CASE`, `GROUP_CONCAT`↔`STRING_AGG`/`LISTAGG`, `IFNULL`/`NVL`/`ISNULL`, `CAST`, `LOCATE`/`INSTR`
-- `SUBSTRING`/`LEFT`/`RIGHT`: `FROM n FOR m` on PG/MySQL/H2; comma-form on SQL Server/SQLite; SQLite/Hive `LEFT`/`RIGHT` expand to `SUBSTR`
-- `DATE_ADD`/`DATE_SUB`/`DATEDIFF`/`FROM_UNIXTIME`; SQL Server `DATEADD`/`GETDATE`; `CURRENT_DATE` → `CAST(GETDATE() AS DATE)` on SQL Server; Oracle day intervals as numeric add/subtract (avoids ORA-01873); `LEAST`/`GREATEST` → nested `CASE` on SQL Server; Oracle recursive CTEs get a column list and drop `RECURSIVE`; `DECODE`/`NVL2`→`CASE`
+```java
+String pg = SQL.convert(
+        "CREATE TABLE t (id INT AUTO_INCREMENT PRIMARY KEY, flag TINYINT(1) DEFAULT 0)",
+        SqlDialect.MYSQL, SqlDialect.POSTGRES);
+// id INTEGER NOT NULL GENERATED ALWAYS AS IDENTITY PRIMARY KEY, flag BOOLEAN DEFAULT false
+
+ConversionResult r = SQL.convert(sql, SqlDialect.MYSQL, SqlDialect.ORACLE,
+        SqlSchemaConvertOptions.defaults()
+                .failOnSeverity(ConversionWarning.Severity.MANUAL_ACTION_REQUIRED));
+```
+
+Oracle ≤11g auto-increment yields `MANUAL_ACTION_REQUIRED` by default; `generateOracleSequence(true)` appends a SEQUENCE + TRIGGER.
+
+Query functions are rewritten:
+
+- `IF(a,b,c)` → `CASE WHEN` (non-MySQL); `JOIN ON` / `DEFAULT NOW()` also go through the function table
+- `NOW()` / `CURDATE()` / `CURTIME()`
+- `GROUP_CONCAT` ↔ `STRING_AGG` / `LISTAGG`
+- `IFNULL` / `NVL` / `ISNULL` (binary) renamed per target dialect; `COALESCE` for PG/ANSI
+- `CONCAT(a,b,c)` becomes `||` under Oracle (Oracle `CONCAT` only takes two args)
+- `CAST` / `CONVERT(expr, type)` types go through the canonical table
+- MySQL `CONVERT(expr USING charset)` is **not** mis-mapped to CAST — it warns and keeps the original
+- `DATE_ADD`/`DATE_SUB` → `INTERVAL` add/subtract; day intervals written to Oracle are numeric add/subtract (avoids ORA-01873 from `INTERVAL '180' DAY` leading precision 2)
+- `DATEADD(unit, n, d)` (SQL Server source) → MySQL `DATE_ADD`/`DATE_SUB`, or PG/Oracle interval arithmetic
+- `GETDATE()` / `SYSDATE` / `NOW()` interconvert; SQL Server target rewrites `CURRENT_DATE` to `CAST(GETDATE() AS DATE)`
+- `LEAST`/`GREATEST` → nested `CASE` on SQL Server
+- Oracle / SQL Server targets drop `WITH RECURSIVE`; Oracle recursive CTEs add a column list `WITH x(c1, c2) AS (...)`
+- `DATEDIFF` → date subtraction; `FROM_UNIXTIME` → `TO_TIMESTAMP`
 - `DATE_FORMAT`: common specifiers are rewritten (`%Y-%m-%d %H:%i:%s` → PG/Oracle `TO_CHAR(..., 'YYYY-MM-DD HH24:MI:SS')`; SQLite `strftime` swaps arguments and maps `%i` to `%M`). Unmapped specifiers stay and raise `SEMANTIC_RISK`
+- `SUBSTRING`/`LEFT`/`RIGHT`/`MID`: Oracle/Dameng `SUBSTR`; SQL Server two-arg form adds `LEN`, negative start becomes `RIGHT`; SQLite/Hive `LEFT`/`RIGHT` expand to `SUBSTR`. Formatting per dialect: PG/MySQL use `FROM n FOR m`, SQL Server/SQLite use the comma form
+- `UCASE`/`LCASE`→`UPPER`/`LOWER`; `CONCAT_WS`; `LPAD`/`RPAD`; `SPACE`; `CEIL`/`CEILING`; `POW`/`POWER`; `MOD`; `YEAR`/`MONTH`/`DAY`/`HOUR`/`MINUTE`/`SECOND`; `SYSDATE`; `LAST_DAY`; `CHAR`/`CHR`
+- `DECODE`/`NVL2` → `CASE`; `FIND_IN_SET`/`SUBSTRING_INDEX` with no clean equivalent warn and stay
 
-MySQL table-level `KEY`/`INDEX` becomes appendix `CREATE INDEX` (FULLTEXT/SPATIAL dropped with `MANUAL_ACTION_REQUIRED`). Independent `CREATE INDEX … USING BTREE` drops `USING` on non-MySQL targets. `ALTER … MODIFY/CHANGE` to PG/H2 becomes `ALTER COLUMN … TYPE`, with NOT NULL/DEFAULT as extra statements.
+MySQL table-level `KEY`/`INDEX` unsupported by the target dialect becomes appendix `CREATE INDEX`; `FULLTEXT`/`SPATIAL` are dropped with `MANUAL_ACTION_REQUIRED`. `UNIQUE KEY` becomes portable `UNIQUE (...)`. Independent `CREATE INDEX … USING BTREE` drops `USING` on non-MySQL targets.
 
-Real execution lives in `tools-test`: `CrossDialectDdlExecutionTest` (MySQL→PG CREATE TABLE, Docker), `CrossDialectExprExecutionTest` (DDL + expression execution across PostgreSQL / MySQL containers and in-memory SQLite), `LocalDatasourceFunctionRewriteTest`, `LocalDatasourceBindTest` (`SQL.bind` on the local datasource file). JMH: `SqlSchemaConvertBenchmark`.
+`SQL.convertBatch` converts in bulk. `ALTER TABLE ADD/MODIFY/CHANGE` converts column types; to PG/H2 it becomes `ALTER COLUMN … TYPE`, with NOT NULL/DEFAULT emitted as extra statements.
 
-Supported first-class dialects (13, including Dameng and Oracle 12c: MySQL, PostgreSQL, Oracle 11g/12c, SQL Server, H2, ANSI, DB2, SQLite, Hive, ClickHouse, Presto, Dameng) and `fromName` product aliases: [design doc §4](../sql-schema-converter-design.md). How to extend types/functions: [§9](../sql-schema-converter-design.md).
+Conversion results are re-parsed for the target dialect as corpus regression. Real table creation and expression execution are verified in the parent `tools-test` (jkit's own parser is more lenient than real databases; issues a re-parse cannot catch are caught by real execution):
+
+```text
+cd ../tools-test
+mvn -Dtest=CrossDialectDdlExecutionTest test         # MySQL→PG CREATE TABLE; needs Docker+local postgres, skipped otherwise
+mvn -Dtest=CrossDialectExprExecutionTest test        # DDL+expression execution: DATE_ADD→INTERVAL on PG, DATEDIFF→CAST subtraction, ||→CONCAT on MySQL, AUTOINCREMENT on SQLite, NUMERIC(10,2) no truncation; PG/MySQL via Docker, SQLite in-memory
+mvn -Dtest=LocalDatasourceConvertTest test           # reads src/test/resources/datasource, connects to local MySQL/PG/Oracle
+mvn -Dtest=LocalDatasourceFunctionRewriteTest test   # same datasource, executes SUBSTRING/LEFT/RIGHT/LOCATE rewrite results
+mvn -Dtest=ComplexSqlExecutionIT test                # 1200 complex SQL representative cases (001/022/211) original + MySQL→Oracle12/SQL Server rewritten, executed on real databases
+java -jar target/benchmarks.jar com.alianga.test.sql.jmh.SqlSchemaConvertBenchmark -f 1 -wi 1 -i 1
+```
+
+13 first-class dialects (including `DAMENG` / `ORACLE12`), see [design doc §4](../sql-schema-converter-design.md). **New products do not need to change the `SqlDialect` enum**: implement `SqlDialectSpec` (or `SqlDialectWrapper`), reuse the built-in type table via `typeFamily()`, and override individual spellings with `dialectId()` + SPI. `SQL.convert` / `SQL.parse` both accept `SqlDialectSpec`.
+
+`ConversionResult.sqlWithExtras()` includes the appendix `CREATE INDEX` / Oracle SEQUENCE. The built-in `DATE_FORMAT` → `TO_CHAR` goes through `SqlFunctionRegistry`; third parties append or override via `SqlSchemaConverterProvider.registerFunctions` (returning `null` falls back to built-in), **without** changing `FunctionAstRewriter`. `VARCHAR` over-length is promoted to TEXT/CLOB by default.
+
+How to add type aliases, override a dialect's spelling, add a canonical type, add a database, or add a function rewrite: [§9](../sql-schema-converter-design.md).
 
 ## Entity scan → DDL / DML
 

@@ -57,6 +57,7 @@
 - `docs/json.md` / `docs/en/json.md`：Schema 关键字表补 `required`（标准数组写法）与 `must`（自有布尔写法）的区别，新增「必填：required 与 must 选哪个」小节。
 - `docs/csv.md` / `docs/en/csv.md`：补完此前 0 字节的空文档，覆盖 `CSVUtils` 轻量读写、`CSV`/`CSVTable` 带表头与 POJO 映射、`CSVObjectWriter` 流式写对象、流式 `readStream`、字符集与解析细节、异常；从 `srcExclude` 移除并加入中英文侧边栏。
 - `docs/expression.md` / `docs/en/expression.md`：补完此前 0 字节的空文档，覆盖算术/逻辑、`Map` 与 JavaBean 上下文、位置参数 `p0/p1`、`@` 内置函数、自定义函数与静态方法注册、`renderTemplate` 模板渲染、`CacheableExpression` 缓存说明与异常；同包加入侧边栏，`toolkit.md` 新增「表达式引擎」指针小节。
+- `docs/en/sql.md`：跨方言类型转换章节补全到与中文全等——Normal Form 框架与设计文档入口、Phase 0–1 完整 import 代码、`SqlDataTypeRegistry` 校验、`RegistryValidationTest`、Phase 2–3 整句 `SQL.convert` 入口与 `SqlSchemaConvertOptions`/`generateOracleSequence`、完整函数改写清单（含 `CONVERT USING charset` 不误映射、`DATEADD`/`GETDATE`/`FROM_UNIXTIME`、`UCASE`/`LPAD`/`CEIL`/`YEAR` 等）、`SQL.convertBatch` 与 `ALTER` 处理、真库回归命令块、`SqlDialectSpec` 扩展、`ConversionResult.sqlWithExtras()` 与 `SqlSchemaConverterProvider.registerFunctions`、类型别名/函数扩展指引。
 
 ### 修复
 
