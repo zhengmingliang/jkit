@@ -1,7 +1,6 @@
 package com.alianga.jkit.sql;
 
 import com.alianga.jkit.sql.ast.SqlAllColumns;
-import com.alianga.jkit.sql.ast.SqlGuardedStatement;
 import com.alianga.jkit.sql.ast.SqlBetweenExpr;
 import com.alianga.jkit.sql.ast.SqlBinaryExpr;
 import com.alianga.jkit.sql.ast.SqlBinaryOp;
@@ -19,6 +18,7 @@ import com.alianga.jkit.sql.ast.SqlExpr;
 import com.alianga.jkit.sql.ast.SqlFlushStatement;
 import com.alianga.jkit.sql.ast.SqlFunctionExpr;
 import com.alianga.jkit.sql.ast.SqlFunctionTable;
+import com.alianga.jkit.sql.ast.SqlGuardedStatement;
 import com.alianga.jkit.sql.ast.SqlHandlerStatement;
 import com.alianga.jkit.sql.ast.SqlIdentifier;
 import com.alianga.jkit.sql.ast.SqlInExpr;
