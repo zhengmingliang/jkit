@@ -71,6 +71,7 @@ const zhSidebar: DefaultTheme.Sidebar = [
       { text: 'CSV 模块', link: '/csv' },
       { text: '表达式引擎', link: '/expression' },
       { text: '韧性抽包', link: '/resilience' },
+      { text: 'HTML 解析', link: '/html' },
     ],
   },
   {
@@ -129,6 +130,7 @@ const enSidebar: DefaultTheme.Sidebar = [
       { text: 'CSV', link: '/en/csv' },
       { text: 'Expression', link: '/en/expression' },
       { text: 'Resilience', link: '/en/resilience' },
+      { text: 'HTML', link: '/en/html' },
     ],
   },
   {
