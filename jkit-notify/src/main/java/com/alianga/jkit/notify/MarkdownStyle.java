@@ -592,7 +592,7 @@ final class MarkdownStyle {
     }
 
     /**
-     * 正文容器 div 的内联样式，供 {@code wrapHtmlDocument} 直接写进 {@code style} 属性。
+     * 正文容器 div 的内联样式，供 {@code Markdown.wrapDocument} 直接写进 {@code style} 属性。
      *
      * <p>内联样式无法响应断点，这里取桌面端取值；移动端由样式表里带 {@code !important} 的
      * 媒体查询覆盖（{@code !important} 的优先级高于普通内联声明）。

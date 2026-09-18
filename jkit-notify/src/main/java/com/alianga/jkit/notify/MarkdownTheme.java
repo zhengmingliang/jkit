@@ -12,7 +12,7 @@ import java.util.Locale;
  *
  * <p>主题只影响外观，不改变 Markdown 解析结果。用法：
  * <pre>{@code
- * String html = NotifyUtils.markdownToDocument(md,
+ * String html = Markdown.toDocument(md,
  *         MarkdownRenderOptions.create().theme(MarkdownTheme.LARK).inlineStyle(true));
  * }</pre>
  *

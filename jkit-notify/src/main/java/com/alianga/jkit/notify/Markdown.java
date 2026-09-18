@@ -13,12 +13,16 @@ import java.util.Locale;
  * 分割线、链接、图片、加粗 / 斜体 / 删除线 / 行内代码。不是完整 CommonMark。
  *
  * <p>文本节点做 HTML 转义；{@code javascript:}/{@code data:} 链接降为 {@code #}。
- * SMTP 等不原生渲染 Markdown 的渠道通过 {@link NotifyUtils#markdownToHtml(String)} 调用。
+ *
+ * <p>公开入口：{@link #toHtml(String)} 只要片段；{@link #toHtml(String, MarkdownRenderOptions)}
+ * 按主题渲染（高亮 / 内联样式 / 图片内嵌）；{@link #toDocument(String, MarkdownRenderOptions)}
+ * 再套文档壳。SMTP 等不原生渲染 Markdown 的渠道走这里。
+ * {@link NotifyUtils#markdownToHtml(String)} 等 2.0.1 方法仍可用，已过期。
  *
  * @author 郑明亮
  * @since 2.0.1
  */
-final class Markdown {
+public final class Markdown {
     private Markdown() {
     }
 
@@ -39,11 +43,14 @@ final class Markdown {
     /**
      * 把 Markdown 转成 HTML 片段（不含 {@code <html>} 文档壳），代码块仅转义。
      *
+     * <p>不套主题、不做代码高亮。要配色 / 高亮 / 内联样式请用
+     * {@link #toHtml(String, MarkdownRenderOptions)}。
+     *
      * @param markdown 原文，{@code null} 或空串返回空串
      * @return HTML 片段
      */
-    static String toHtml(String markdown) {
-        return toHtml(markdown, null);
+    public static String toHtml(String markdown) {
+        return toHtml(markdown, (CodeRenderer) null);
     }
 
     /**
@@ -59,6 +66,118 @@ final class Markdown {
         }
         String normalized = markdown.replace("\r\n", "\n").replace('\r', '\n');
         return convertBlocks(normalized, renderer);
+    }
+
+    /**
+     * 按主题渲染 Markdown 片段：可切换配色、代码高亮与内联样式。
+     *
+     * <p>{@code inlineStyle=true} 时把主题样式写进每个标签的 {@code style} 属性，适合粘贴到微信、
+     * 发往 Outlook 等会剥离 {@code <style>} 标签的环境；代价是伪元素与斑马纹等选择器式样不生效。
+     *
+     * <p>设置 {@link MarkdownRenderOptions#imageBaseDir(String)} 后，Markdown 里引用本地相对路径的
+     * 图片会内嵌成 {@code data:image/...;base64,...}，正文可脱离原文件独立展示。
+     *
+     * @param markdown 原文
+     * @param options 渲染选项，{@code null} 时同 {@link #toHtml(String)}
+     * @return HTML 片段（不含 html 文档壳）
+     * @since 2.0.2
+     */
+    public static String toHtml(String markdown, MarkdownRenderOptions options) {
+        if (options == null) {
+            return toHtml(markdown);
+        }
+        MarkdownStyle style = MarkdownStyle.of(options.theme());
+        CodeRenderer renderer = options.highlight() ? new HighlightRenderer(style) : null;
+        String fragment = toHtml(markdown, renderer);
+        fragment = ImageInliner.apply(fragment, options);
+        return options.inlineStyle() ? HtmlInliner.apply(fragment, style) : fragment;
+    }
+
+    /**
+     * 把 Markdown 转成带文档壳的 HTML，便于邮件客户端预览。
+     *
+     * @param markdown 原文
+     * @param responsive {@code true} 时带 viewport 与移动端/PC 适配样式
+     * @return 完整 HTML 文档；原文为空时返回空串
+     */
+    public static String toDocument(String markdown, boolean responsive) {
+        return toDocument(markdown, MarkdownRenderOptions.create().responsive(responsive));
+    }
+
+    /**
+     * 按主题把 Markdown 转成带文档壳的 HTML。
+     *
+     * @param markdown 原文
+     * @param options 渲染选项，{@code null} 时使用默认选项
+     * @return 完整 HTML 文档；原文为空时返回空串
+     * @since 2.0.2
+     */
+    public static String toDocument(String markdown, MarkdownRenderOptions options) {
+        MarkdownRenderOptions opts = options == null ? MarkdownRenderOptions.create() : options;
+        String fragment = toHtml(markdown, opts);
+        if (fragment == null || fragment.isEmpty()) {
+            return "";
+        }
+        return wrapDocument(fragment, opts);
+    }
+
+    /**
+     * 给 HTML 片段套文档壳（charset + 可选响应式样式）。
+     *
+     * @param fragment HTML 片段
+     * @param responsive 是否适配手机与桌面预览
+     * @return 完整 HTML 文档
+     */
+    public static String wrapDocument(String fragment, boolean responsive) {
+        return wrapDocument(fragment, MarkdownRenderOptions.create().responsive(responsive));
+    }
+
+    /**
+     * 给 HTML 片段套带主题的文档壳。
+     *
+     * <p>片段本身没内联样式时才需要 {@code <style>}：若片段已由
+     * {@link #toHtml(String, MarkdownRenderOptions)} 内联过，这里再套一层样式表也无害，
+     * 两者来自同一套令牌，不会打架。
+     *
+     * @param fragment HTML 片段
+     * @param options 渲染选项，{@code null} 时使用默认选项
+     * @return 完整 HTML 文档
+     * @since 2.0.2
+     */
+    public static String wrapDocument(String fragment, MarkdownRenderOptions options) {
+        MarkdownRenderOptions opts = options == null ? MarkdownRenderOptions.create() : options;
+        String body = fragment == null ? "" : fragment;
+        StringBuilder html = new StringBuilder(body.length() + 1024);
+        html.append("<!DOCTYPE html><html><head><meta charset=\"UTF-8\">");
+        if (opts.responsive()) {
+            html.append("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
+        }
+        MarkdownStyle style = MarkdownStyle.of(opts.theme());
+        html.append("<style>").append(style.css(opts.responsive()))
+                .append("</style></head><body style=\"margin:0;padding:0;background:")
+                .append(style.background())
+                // 排版挂在这层 div 上：邮件客户端普遍会剥掉 <body>，只保留正文内容
+                .append("\"><div class=\"").append(MarkdownStyle.CONTAINER_CLASS)
+                .append("\" style=\"").append(style.containerInline()).append("\">")
+                .append(body)
+                .append("</div></body></html>");
+        return html.toString();
+    }
+
+    /**
+     * 把代码高亮接进 Markdown 解析：围栏代码块交给 {@link CodeHighlighter}。
+     */
+    private static final class HighlightRenderer implements CodeRenderer {
+        private final MarkdownStyle style;
+
+        HighlightRenderer(MarkdownStyle style) {
+            this.style = style;
+        }
+
+        @Override
+        public String render(String code, String lang) {
+            return CodeHighlighter.render(code, lang, style);
+        }
     }
 
     private static String convertBlocks(String text, CodeRenderer renderer) {

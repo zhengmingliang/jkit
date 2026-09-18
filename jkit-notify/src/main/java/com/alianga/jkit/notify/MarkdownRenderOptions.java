@@ -8,15 +8,15 @@ import java.io.File;
  * <p>典型用法：
  * <pre>{@code
  * // 邮件：默认主题 + 代码高亮，样式放 <head><style>
- * NotifyUtils.markdownToDocument(md, MarkdownRenderOptions.create());
+ * Markdown.toDocument(md, MarkdownRenderOptions.create());
  *
  * // 微信 / Outlook：内联样式，兼容剥离 <style> 的客户端
- * NotifyUtils.markdownToDocument(md, MarkdownRenderOptions.create()
+ * Markdown.toDocument(md, MarkdownRenderOptions.create()
  *         .theme(MarkdownTheme.LARK)
  *         .inlineStyle(true));
  *
  * // 文档里的 ./assets/x.png 内嵌成 Base64，随正文一起发出去
- * NotifyUtils.markdownToDocument(md, MarkdownRenderOptions.create()
+ * Markdown.toDocument(md, MarkdownRenderOptions.create()
  *         .imageBaseDir("/opt/docs/articles"));
  * }</pre>
  *

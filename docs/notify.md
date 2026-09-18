@@ -311,10 +311,10 @@ NotificationManager.sendFailover("dingtalk", msg, Arrays.asList(a, b), policy);
 - **TLS 协议钉扎**：`.sslProtocols("TLSv1.2")`。JDK 大版本会调整默认启用的协议集，握手失败时只报笼统的 `SSLHandshakeException`，显式钉扎是最快的排除手段。
 - **自签证书**：企业自建网关用 `.trustAllCerts(true)`（跳过证书与主机名校验，公网邮箱不要开）。
 - **认证**：AUTH LOGIN（用户名/密码 Base64）。`from` 缺省取 `username`。`to("a@x.com,b@x.com")` 会按逗号/分号拆成多个收件人；`cc` / `bcc` / `replyTo` 可用。Bcc 走 `RCPT TO` 但不出现在 MIME 头。
-- **MIME**：必带 `Date` 与 `Message-ID`。Subject 用 `=?UTF-8?B?...?=`，正文 UTF-8 Base64 按 76 字符折行；DATA 阶段做 RFC 5321 dot-stuffing（行首 `.` 写成 `..`）。HTML 直发 `text/html`；MARKDOWN 经 `NotifyUtils.markdownToHtml` 转成 HTML 再发。转换覆盖标题、嵌套列表（列表项里的代码块/表格）、GFM 表格、`----+----` 形式的 CLI 宽表、缩进围栏代码块（``` / ~~~）、链接与加粗等，不是完整 CommonMark。钉钉/企微/飞书/Server酱本身渲染 markdown，不会走这步转换。
+- **MIME**：必带 `Date` 与 `Message-ID`。Subject 用 `=?UTF-8?B?...?=`，正文 UTF-8 Base64 按 76 字符折行；DATA 阶段做 RFC 5321 dot-stuffing（行首 `.` 写成 `..`）。HTML 直发 `text/html`；MARKDOWN 经 `Markdown.toDocument` 转成 HTML 再发。转换覆盖标题、嵌套列表（列表项里的代码块/表格）、GFM 表格、`----+----` 形式的 CLI 宽表、缩进围栏代码块（``` / ~~~）、链接与加粗等，不是完整 CommonMark。钉钉/企微/飞书/Server酱本身渲染 markdown，不会走这步转换。
 - **附件与拆包**：`Attachment.of(file)` 只保留路径，发送/拆包时按块读，100MB 级文件不必整段进堆。`Attachment.of(name, bytes)` 仍是内存附件。MIME 按后缀和文件头自动识别。开启 `.autoSplit(true)` 后，超过 `maxAttachmentSize`（默认 10 MB）的单个附件会按 `splitChunkSize`（默认 5 MB）切成 `filename.partN` 分多封发送。大小可用 `10MB`、`512KB`、`1.5G` 或纯字节数。正文附带 SHA-256 与 `cat` 拼接说明。
 - **模板变量**：`.var("host", "web-1")` 或 `.vars(map)`。标题和正文里的 `${host}` / `${cpu.value}` 在 `send` / `sendAll` / `sendAsync` 前替换；缺键变空串。原 `Message` 不被改写。
-- **Markdown 预览**：SMTP 把 MARKDOWN 转成 HTML 时默认套响应式文档壳（viewport + 手机/桌面 `@media`）与经典主题样式。只要片段时用 `NotifyUtils.markdownToHtml`；完整文档用 `NotifyUtils.markdownToDocument(md, true/false)`。要换配色与版式见下面的「Markdown 渲染主题」。
+- **Markdown 预览**：SMTP 把 MARKDOWN 转成 HTML 时默认套响应式文档壳（viewport + 手机/桌面 `@media`）与经典主题样式。只要片段时用 `Markdown.toHtml`；完整文档用 `Markdown.toDocument(md, true/false)`。要换配色与版式见下面的「Markdown 渲染主题」。
 
 ### Markdown 渲染主题
 
@@ -343,11 +343,11 @@ NotificationManager.sendFailover("dingtalk", msg, Arrays.asList(a, b), policy);
 
 ```java
 // 完整文档：橙心主题 + 代码高亮（默认开启）
-String html = NotifyUtils.markdownToDocument(md,
+String html = Markdown.toDocument(md,
         MarkdownRenderOptions.create().theme(MarkdownTheme.ORANGE_HEART));
 
 // 只要片段，且内联样式（兼容 Outlook / 微信）
-String fragment = NotifyUtils.markdownToHtml(md, MarkdownRenderOptions.create()
+String fragment = Markdown.toHtml(md, MarkdownRenderOptions.create()
         .theme(MarkdownTheme.LARK)
         .inlineStyle(true));
 
@@ -381,7 +381,7 @@ NotificationManager.register(new SmtpChannel()
 | 表格斑马纹 | 生效 | 退化为表头统一底色 |
 | 体积 | 小 | 大约翻倍 |
 
-判据很简单：客户端会剥掉 `<head><style>` 就用内联，否则用默认。两者来自同一套令牌，不会互相打架——`markdownToDocument` 会同时输出样式表，内联样式只是额外兜底。
+判据很简单：客户端会剥掉 `<head><style>` 就用内联，否则用默认。两者来自同一套令牌，不会互相打架——`Markdown.toDocument` 会同时输出样式表，内联样式只是额外兜底。
 
 #### 代码高亮
 
@@ -394,7 +394,7 @@ NotificationManager.register(new SmtpChannel()
 邮件正文是独立文档，`![](./assets/cover.png)` 这种相对路径到了收件端必然裂图。设置基准目录后，本地图片会被读成 `data:image/png;base64,...` 写进 `src`，正文即可脱离原文件独立展示：
 
 ```java
-String html = NotifyUtils.markdownToDocument(md, MarkdownRenderOptions.create()
+String html = Markdown.toDocument(md, MarkdownRenderOptions.create()
         .theme(MarkdownTheme.BLUE)
         .imageBaseDir("/opt/docs/articles"));   // Markdown 里的 ./assets/x.png 按它解析
 
@@ -409,7 +409,7 @@ new SmtpChannel().markdownImageBaseDir("/opt/docs/articles");
 
 #### 正文容器与响应式
 
-`markdownToDocument` 生成的文档壳是 `<body><div class="jkit-md">…正文…</div></body>`，正文栏的宽度、内边距、字体、颜色、行高全部内联写在这层 div 上。
+`Markdown.toDocument` 生成的文档壳是 `<body><div class="jkit-md">…正文…</div></body>`，正文栏的宽度、内边距、字体、颜色、行高全部内联写在这层 div 上。
 
 **排版不能挂在 `<body>` 上**：Gmail、QQ 邮箱等客户端会剥掉 `<html>/<head>/<body>`，只把正文内容塞进它们自己的容器，写在 `body` 上的 `max-width` / `padding` 会连同标签一起消失（表现为正文铺满读信区、而带内联 `style` 的图片仍有留白）。样式表里 `body` 只铺满视口底色（不限宽）；栏宽、内边距、`margin:0 auto` 居中全部挂在 `div.jkit-md` 上。浏览器打开完整文档时正文栏落在页面中间；邮件客户端剥掉 `body` 后这层 div 仍在。
 
@@ -423,7 +423,7 @@ new SmtpChannel().markdownImageBaseDir("/opt/docs/articles");
 
 #### 其他要点
 
-- **老 API 不变**：`markdownToHtml(md)`、`markdownToDocument(md, true/false)`、`wrapHtmlDocument(fragment, true/false)` 签名与 2.0.2 之前完全一致，只是文档壳改用经典主题生成样式表（五级标题字号、行高 1.75、表格与引用样式比旧版更完整）。
+- **2.0.1 入口已过期**：`NotifyUtils.markdownToHtml(md)` / `markdownToDocument(md, true/false)` / `wrapHtmlDocument(fragment, true/false)` 仍可用，请改用 `Markdown.toHtml` / `toDocument` / `wrapDocument`。文档壳已改用经典主题生成样式表（五级标题字号、行高 1.75、表格与引用样式比旧版更完整）。
 - **主题解析容错**：`MarkdownTheme.of("lark")` 忽略大小写与 `-` / `_`（也认 `ORANGE_HEART` 这样的常量名），无法识别时回退 `default`，配置写错不会让告警发不出去。
 - **零依赖**：主题、高亮、内联、图片内嵌全部自研，不引任何第三方库。
 

@@ -171,6 +171,7 @@ public class NotifyUtilsTruncateTest {
      * 响应式文档壳带 viewport 与媒体查询，非响应式只有 charset。
      */
     @Test
+    @SuppressWarnings("deprecation")
     public void markdownDocumentResponsiveOption() {
         String responsive = NotifyUtils.markdownToDocument("## 标题", true);
         assertTrue(responsive.contains("viewport"));

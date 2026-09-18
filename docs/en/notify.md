@@ -312,10 +312,10 @@ Swapping the two styles guarantees signature failure. DingTalk's signature goes 
 - **TLS protocol pinning**: `.sslProtocols("TLSv1.2")`. Major JDK versions change the default enabled protocol set, and handshake failures are only reported as a generic `SSLHandshakeException` — explicit pinning is the fastest way to rule this out.
 - **Self-signed certificates**: for self-hosted enterprise gateways use `.trustAllCerts(true)` (skips certificate and hostname verification; do not enable for public mailbox providers).
 - **Authentication**: AUTH LOGIN (username/password Base64). `from` defaults to `username`. `to("a@x.com,b@x.com")` is split into multiple recipients on comma/semicolon; `cc` / `bcc` / `replyTo` are available. Bcc goes through `RCPT TO` but does not appear in the MIME headers.
-- **MIME**: `Date` and `Message-ID` are always included. Subject uses `=?UTF-8?B?...?=`, body is UTF-8 Base64 folded at 76 characters; the DATA phase does RFC 5321 dot-stuffing (a leading `.` is written as `..`). HTML is sent directly as `text/html`; MARKDOWN is converted to HTML via `NotifyUtils.markdownToHtml` before sending. The conversion covers headings, nested lists (code blocks/tables inside list items), GFM tables, CLI-style wide tables of the `----+----` form, indented fenced code blocks (``` / ~~~), links, bold, and more — it is not full CommonMark. DingTalk/WeCom/Feishu/ServerChan render markdown themselves and do not go through this conversion.
+- **MIME**: `Date` and `Message-ID` are always included. Subject uses `=?UTF-8?B?...?=`, body is UTF-8 Base64 folded at 76 characters; the DATA phase does RFC 5321 dot-stuffing (a leading `.` is written as `..`). HTML is sent directly as `text/html`; MARKDOWN is converted to HTML via `Markdown.toDocument` before sending. The conversion covers headings, nested lists (code blocks/tables inside list items), GFM tables, CLI-style wide tables of the `----+----` form, indented fenced code blocks (``` / ~~~), links, bold, and more — it is not full CommonMark. DingTalk/WeCom/Feishu/ServerChan render markdown themselves and do not go through this conversion.
 - **Attachments and splitting**: `Attachment.of(file)` only keeps the path and reads in chunks when sending/splitting — 100MB-scale files don't need to enter the heap in full. `Attachment.of(name, bytes)` is still an in-memory attachment. MIME types are detected automatically from extension and file header. With `.autoSplit(true)` enabled, a single attachment exceeding `maxAttachmentSize` (default 10 MB) is cut into `filename.partN` chunks of `splitChunkSize` (default 5 MB) and sent across multiple emails. Sizes accept `10MB`, `512KB`, `1.5G`, or a plain byte count. The body includes the SHA-256 and `cat` reassembly instructions.
 - **Template variables**: `.var("host", "web-1")` or `.vars(map)`. `${host}` / `${cpu.value}` in the title and body are substituted before `send` / `sendAll` / `sendAsync`; missing keys become empty strings. The original `Message` is not modified.
-- **Markdown preview**: when SMTP converts MARKDOWN to HTML it wraps it in a responsive document shell by default (viewport + mobile/desktop `@media`) and applies the classic theme. If you only want a fragment, use `NotifyUtils.markdownToHtml`; for a full document use `NotifyUtils.markdownToDocument(md, true/false)`. To change colors and layout, see "Markdown rendering themes" below.
+- **Markdown preview**: when SMTP converts MARKDOWN to HTML it wraps it in a responsive document shell by default (viewport + mobile/desktop `@media`) and applies the classic theme. If you only want a fragment, use `Markdown.toHtml`; for a full document use `Markdown.toDocument(md, true/false)`. To change colors and layout, see "Markdown rendering themes" below.
 
 ### Markdown rendering themes
 
@@ -344,11 +344,11 @@ A theme is not a blob of CSS: it declares a set of **tokens** (primary / accent 
 
 ```java
 // Full document: orange heart theme + code highlighting (on by default)
-String html = NotifyUtils.markdownToDocument(md,
+String html = Markdown.toDocument(md,
         MarkdownRenderOptions.create().theme(MarkdownTheme.ORANGE_HEART));
 
 // Fragment only, with inlined styles (Outlook / WeChat friendly)
-String fragment = NotifyUtils.markdownToHtml(md, MarkdownRenderOptions.create()
+String fragment = Markdown.toHtml(md, MarkdownRenderOptions.create()
         .theme(MarkdownTheme.LARK)
         .inlineStyle(true));
 
@@ -382,7 +382,7 @@ Every method returns the current instance for chaining, and `MarkdownRenderOptio
 | Zebra striping | Works | Degrades to a uniform header background |
 | Size | Small | Roughly doubles |
 
-The rule of thumb: if the client strips `<head><style>`, go inline; otherwise keep the default. Both come from the same tokens, so they never fight — `markdownToDocument` emits the stylesheet anyway and the inline attributes are just an extra safety net.
+The rule of thumb: if the client strips `<head><style>`, go inline; otherwise keep the default. Both come from the same tokens, so they never fight — `Markdown.toDocument` emits the stylesheet anyway and the inline attributes are just an extra safety net.
 
 #### Code highlighting
 
@@ -395,7 +395,7 @@ Highlighting emits inline `<span style="color:...">`, so it is visible in both m
 An email body is a standalone document, so `![](./assets/cover.png)` is guaranteed to break on the receiving side. Set a base directory and local images are read into `data:image/png;base64,...` and written straight into `src`:
 
 ```java
-String html = NotifyUtils.markdownToDocument(md, MarkdownRenderOptions.create()
+String html = Markdown.toDocument(md, MarkdownRenderOptions.create()
         .theme(MarkdownTheme.BLUE)
         .imageBaseDir("/opt/docs/articles"));   // resolves ./assets/x.png in the Markdown
 
@@ -410,7 +410,7 @@ new SmtpChannel().markdownImageBaseDir("/opt/docs/articles");
 
 #### Body container and responsiveness
 
-The document shell produced by `markdownToDocument` is `<body><div class="jkit-md">…content…</div></body>`. The column width, padding, font, colour and line height are all inlined on that div.
+The document shell produced by `Markdown.toDocument` is `<body><div class="jkit-md">…content…</div></body>`. The column width, padding, font, colour and line height are all inlined on that div.
 
 **Layout must not hang off `<body>`**: Gmail, QQ Mail and similar clients strip `<html>/<head>/<body>` and pour the content into their own container, so `max-width` / `padding` written on `body` disappear with the tag (the symptom: the text fills the whole reading pane while images — which carry inline `style` — still keep their margins). In the stylesheet `body` only paints the full-viewport background (no `max-width`); column width, padding and `margin:0 auto` centering all hang off `div.jkit-md`. Opening the complete document in a browser centres the column; when a mail client strips `body` the div is still there.
 
@@ -424,7 +424,7 @@ Three implementation details matter when writing a custom theme:
 
 #### Other notes
 
-- **Legacy API unchanged**: `markdownToHtml(md)`, `markdownToDocument(md, true/false)` and `wrapHtmlDocument(fragment, true/false)` keep their pre-2.0.2 signatures; only the document shell now builds its stylesheet from the classic theme (five heading sizes, line height 1.75, richer table/quote styling).
+- **2.0.1 entry points are deprecated**: `NotifyUtils.markdownToHtml(md)` / `markdownToDocument(md, true/false)` / `wrapHtmlDocument(fragment, true/false)` still work; switch to `Markdown.toHtml` / `toDocument` / `wrapDocument`. The document shell now builds its stylesheet from the classic theme (five heading sizes, line height 1.75, richer table/quote styling).
 - **Lenient theme lookup**: `MarkdownTheme.of("lark")` ignores case and `-` / `_` (and also accepts constant names like `ORANGE_HEART`), falling back to `default` when unknown — a typo in configuration will never block an alert.
 - **Zero dependencies**: themes, highlighting, inlining and image embedding are all hand-rolled.
 ### Field-tested provider rates and pitfalls (from real-world records in this repository's historical projects)

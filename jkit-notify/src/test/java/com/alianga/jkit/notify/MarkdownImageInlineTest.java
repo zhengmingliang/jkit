@@ -35,7 +35,7 @@ public class MarkdownImageInlineTest {
     }
 
     private static String render(String md, MarkdownRenderOptions options) {
-        return NotifyUtils.markdownToHtml(md, options);
+        return Markdown.toHtml(md, options);
     }
 
     /**

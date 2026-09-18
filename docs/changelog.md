@@ -11,7 +11,7 @@
 **jkit-notify**
 
 - `MarkdownTheme`：Markdown → HTML 的 12 套渲染主题（经典 / 蓝 / 橙心 / 彩虹 / 兰青 / 嫩黄 / 碧蓝 / Vue 绿 / 绿意 / 麦色 / 墨黑 / 姹紫），命名与观感对齐 doocs/md，只改外观、不改解析结果。`MarkdownTheme.of("lark")` 按 id 解析，忽略大小写与 `-` / `_`，未知值回退经典主题。
-- `MarkdownRenderOptions` 与 `NotifyUtils.markdownToHtml(md, options)` / `markdownToDocument(md, options)`：一次指定主题、代码高亮、内联样式与响应式。`inlineStyle(true)` 把样式写进每个标签的 `style` 属性，兼容会剥离 `<head><style>` 的 Outlook / 部分企业邮箱与微信粘贴。
+- `MarkdownRenderOptions` 与 `Markdown.toHtml(md, options)` / `toDocument(md, options)`：一次指定主题、代码高亮、内联样式与响应式。`inlineStyle(true)` 把样式写进每个标签的 `style` 属性，兼容会剥离 `<head><style>` 的 Outlook / 部分企业邮箱与微信粘贴。`Markdown` 升为公开入口；`NotifyUtils.markdownToHtml(md)` / `markdownToDocument(md, boolean)` / `wrapHtmlDocument(fragment, boolean)` 保留并标过期。
 - 代码块语法高亮（默认开启，`.highlight(false)` 关闭）：自研零依赖词法扫描，覆盖 java / js / ts / go / python / sql / shell / yaml / properties / json / xml / html，输出内联 `<span style>`，两种模式下都可见；不认识的语言退化为纯转义。
 - `SmtpChannel.markdownTheme(theme)` / `inlineMarkdownStyle(boolean)`：给 SMTP 渠道固定 Markdown 渲染主题（默认经典 + `<style>` 模式）。
 - 本地图片内嵌：`MarkdownRenderOptions.imageBaseDir(dir)`（对应 `SmtpChannel.markdownImageBaseDir(dir)`）设置基准目录后，Markdown 里引用本地相对路径的图片会转成 `data:image/...;base64,...` 写进 `src`，正文可脱离原文件独立展示。只处理本地路径，`http(s)://` / `//` / `data:` / `cid:` 原样保留；支持 `./`、`../`、绝对路径与 `file:` 前缀。文件不存在、非图片（按后缀与文件头识别 MIME）或超过 `maxInlineImageBytes`（默认 2MB）时保留原 `src`，不抛异常。
@@ -36,7 +36,7 @@
 
 ### 变更
 
-- `jkit-notify`：`markdownToDocument(md, responsive)` / `wrapHtmlDocument(fragment, responsive)` 改为按主题生成样式表（此前是写死的一段 CSS）。输出结构不变，默认观感略调（正文 16px、行高 1.75、标题与表格样式更完整），并默认开启代码高亮。
+- `jkit-notify`：Markdown 渲染入口迁到 `Markdown`（`toHtml` / `toDocument` / `wrapDocument`）。`NotifyUtils` 上 2.0.1 的 `markdownToHtml(md)` / `markdownToDocument(md, boolean)` / `wrapHtmlDocument(fragment, boolean)` 保留并 `@Deprecated`。`toDocument` / `wrapDocument` 按主题生成样式表（此前是写死的一段 CSS），默认观感略调（正文 16px、行高 1.75、标题与表格样式更完整），并默认开启代码高亮。
 - `jkit-notify`：修复 macOS 窗口风格代码块（碧蓝 / Vue 绿 / 墨黑）顶部三个圆点与首行代码重叠——样式表与内联样式都改为顶部留 36px（此前只写 `padding-top:34px`，内联模式与移动端媒体查询的简写 `padding` 都会把它覆盖掉）。
 - `jkit-notify`：移动端媒体查询改为带 `!important`（内联模式下行内 `style` 优先级更高，不带则整段适配不生效），并补上标题字号收敛、表格单元格内边距、图片宽度与表格惯性滚动；移动端不再用简写 `padding` 覆盖代码块上内边距。
 - `jkit-notify`：带引号装饰的引用（姹紫 / 兰青 / 橙心）改为把引号放进左侧 2.6em 留白区，不再压在正文上；内联模式下的引用内边距与样式表保持一致（此前竖条与填充两种风格产出完全相同）。

@@ -60,7 +60,7 @@ public class MarkdownThemeTest {
     public void darkThemeUsesDarkBackground() {
         String css = MarkdownTheme.AYER.css();
         assertTrue(css.contains("background:#1f2430"));
-        assertTrue(NotifyUtils.markdownToDocument(MD,
+        assertTrue(Markdown.toDocument(MD,
                 MarkdownRenderOptions.create().theme(MarkdownTheme.AYER)).contains("#1f2430"));
     }
 
@@ -82,7 +82,7 @@ public class MarkdownThemeTest {
      */
     @Test
     public void styleTagModeKeepsPlainTags() {
-        String html = NotifyUtils.markdownToDocument(MD, MarkdownRenderOptions.create()
+        String html = Markdown.toDocument(MD, MarkdownRenderOptions.create()
                 .theme(MarkdownTheme.LARK));
         assertTrue(html.contains("<style>"));
         assertTrue(html.contains("#3370ff"));
@@ -110,7 +110,7 @@ public class MarkdownThemeTest {
         String divRule = css.substring(divAt, divEnd + 1);
         assertTrue("容器要限宽", divRule.contains("max-width:"));
         assertTrue("容器要水平居中", divRule.contains("margin:0 auto"));
-        String html = NotifyUtils.markdownToDocument("## 标题",
+        String html = Markdown.toDocument("## 标题",
                 MarkdownRenderOptions.create().theme(MarkdownTheme.LAPIS));
         assertTrue(html.contains("<body style=\"margin:0;padding:0;background:"));
         assertTrue(html.contains("class=\"jkit-md\" style=\"max-width:"));
@@ -126,7 +126,7 @@ public class MarkdownThemeTest {
      */
     @Test
     public void inlineModeStylesBlockTags() {
-        String html = NotifyUtils.markdownToHtml(MD, MarkdownRenderOptions.create()
+        String html = Markdown.toHtml(MD, MarkdownRenderOptions.create()
                 .theme(MarkdownTheme.VUE).inlineStyle(true));
         assertTrue(html.contains("<h2 style=\""));
         assertTrue(html.contains("<p style=\""));
@@ -145,7 +145,7 @@ public class MarkdownThemeTest {
      */
     @Test
     public void inlineModeKeepsHighlightSpans() {
-        String html = NotifyUtils.markdownToHtml(MD, MarkdownRenderOptions.create()
+        String html = Markdown.toHtml(MD, MarkdownRenderOptions.create()
                 .inlineStyle(true));
         assertTrue(html.contains("<pre style=\""));
         assertTrue(html.contains("<span style=\"color:#cf222e\">public</span>"));
@@ -159,11 +159,11 @@ public class MarkdownThemeTest {
      */
     @Test
     public void highlightColorsKeywordsAndComments() {
-        String on = NotifyUtils.markdownToHtml(MD, MarkdownRenderOptions.create());
+        String on = Markdown.toHtml(MD, MarkdownRenderOptions.create());
         assertTrue(on.contains("<span style=\"color:#cf222e\">public</span>"));
         assertTrue(on.contains("<span style=\"color:#cf222e\">class</span>"));
         assertTrue(on.contains("<span style=\"color:#6e7781\">// 注释</span>"));
-        String off = NotifyUtils.markdownToHtml(MD, MarkdownRenderOptions.create().highlight(false));
+        String off = Markdown.toHtml(MD, MarkdownRenderOptions.create().highlight(false));
         assertTrue(!off.contains("<span"));
         assertTrue(off.contains("public class A {"));
     }
@@ -174,7 +174,7 @@ public class MarkdownThemeTest {
     @Test
     public void highlightStillEscapesHtml() {
         String md = FENCE + "java\nif (a < b && c > d) { }\n" + FENCE;
-        String html = NotifyUtils.markdownToHtml(md, MarkdownRenderOptions.create());
+        String html = Markdown.toHtml(md, MarkdownRenderOptions.create());
         assertTrue(html.contains("&lt;"));
         assertTrue(html.contains("&gt;"));
         assertTrue(!html.contains("<script"));
@@ -187,18 +187,19 @@ public class MarkdownThemeTest {
     @Test
     public void unknownLanguageStaysPlain() {
         String md = FENCE + "text\nselect * from t where a < 1\n" + FENCE;
-        String html = NotifyUtils.markdownToHtml(md, MarkdownRenderOptions.create());
+        String html = Markdown.toHtml(md, MarkdownRenderOptions.create());
         assertTrue(!html.contains("<span"));
         assertTrue(html.contains("&lt;"));
-        String sql = NotifyUtils.markdownToHtml(FENCE + "sql\nselect * from t\n" + FENCE,
+        String sql = Markdown.toHtml(FENCE + "sql\nselect * from t\n" + FENCE,
                 MarkdownRenderOptions.create());
         assertTrue(sql.contains("<span style=\"color:#cf222e\">select</span>"));
     }
 
     /**
-     * 老 API 行为不变：不带主题时输出裸标签，不加 style 属性。
+     * 2.0.1 入口仍可用：不带主题时输出裸标签，不加 style 属性。
      */
     @Test
+    @SuppressWarnings("deprecation")
     public void legacyApiUnchanged() {
         String html = NotifyUtils.markdownToHtml(MD);
         assertTrue(html.contains("<h2>发布说明</h2>"));
@@ -213,8 +214,8 @@ public class MarkdownThemeTest {
      */
     @Test
     public void emptyMarkdownReturnsEmptyDocument() {
-        assertEquals("", NotifyUtils.markdownToDocument(null, MarkdownRenderOptions.create()));
-        assertEquals("", NotifyUtils.markdownToDocument("", MarkdownRenderOptions.create()
+        assertEquals("", Markdown.toDocument(null, MarkdownRenderOptions.create()));
+        assertEquals("", Markdown.toDocument("", MarkdownRenderOptions.create()
                 .theme(MarkdownTheme.LARK).inlineStyle(true)));
     }
 
@@ -231,7 +232,7 @@ public class MarkdownThemeTest {
             String css = theme.css();
             assertTrue(theme.label() + " 样式表要给圆点留位", css.contains("padding:36px 14px 12px"));
             assertTrue(theme.label() + " 圆点上边距要小于留白", css.contains("top:13px;left:14px"));
-            String inline = NotifyUtils.markdownToHtml(MD, MarkdownRenderOptions.create()
+            String inline = Markdown.toHtml(MD, MarkdownRenderOptions.create()
                     .theme(theme).inlineStyle(true));
             assertTrue(theme.label() + " 内联样式也要留位",
                     inline.contains("padding:36px 14px 12px"));
@@ -281,7 +282,7 @@ public class MarkdownThemeTest {
             assertTrue(theme.label() + " 引用要给引号留左侧空位",
                     css.contains("padding:.4em 1em .4em 2.6em"));
             assertTrue(theme.label() + " 引号要落在留白区", css.contains("left:.5em"));
-            String inline = NotifyUtils.markdownToHtml(MD, MarkdownRenderOptions.create()
+            String inline = Markdown.toHtml(MD, MarkdownRenderOptions.create()
                     .theme(theme).inlineStyle(true));
             assertTrue(theme.label() + " 内联模式同样要留位",
                     inline.contains("padding:.4em 1em .4em 2.6em"));

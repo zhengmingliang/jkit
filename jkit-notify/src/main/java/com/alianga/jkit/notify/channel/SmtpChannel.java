@@ -4,6 +4,7 @@ import com.alianga.jkit.log.Log;
 import com.alianga.jkit.notify.Attachment;
 import com.alianga.jkit.notify.ChannelConfig;
 import com.alianga.jkit.notify.FailureType;
+import com.alianga.jkit.notify.Markdown;
 import com.alianga.jkit.notify.MarkdownRenderOptions;
 import com.alianga.jkit.notify.MarkdownTheme;
 import com.alianga.jkit.notify.Message;
@@ -66,7 +67,7 @@ import java.util.UUID;
  * <li>{@link ChannelConfig#autoSplit(boolean)}：超大附件按块拆成多封发送。</li>
  * </ul>
  *
- * <p>消息：TEXT 按纯文本发送；HTML 直发；MARKDOWN 经 {@link NotifyUtils#markdownToHtml(String)}
+ * <p>消息：TEXT 按纯文本发送；HTML 直发；MARKDOWN 经 {@link Markdown#toDocument(String, MarkdownRenderOptions)}
  * 转成 HTML 后按 {@code text/html} 发送。标题作为邮件主题。附件走 {@link Message#attachment}。
  * MIME 含 {@code Date} 与 {@code Message-ID}；DATA 阶段做 RFC 5321 dot-stuffing。
  *
@@ -751,7 +752,7 @@ public class SmtpChannel implements NotificationChannel {
                 .theme(markdownTheme)
                 .inlineStyle(inlineMarkdownStyle)
                 .imageBaseDir(markdownImageBaseDir);
-        return NotifyUtils.markdownToDocument(message.content(), options);
+        return Markdown.toDocument(message.content(), options);
     }
 
     /**
