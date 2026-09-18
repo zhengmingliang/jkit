@@ -18,6 +18,22 @@ public class Element extends Node {
             "area", "base", "br", "col", "embed", "hr", "img", "input",
             "link", "meta", "param", "source", "track", "wbr"));
 
+    /** 行内元素：文本拼接时不额外补空格。 */
+    private static final Set<String> INLINE = new java.util.HashSet<String>(Arrays.asList(
+            "a", "abbr", "acronym", "b", "bdi", "bdo", "big", "button", "cite", "code",
+            "data", "del", "dfn", "em", "font", "i", "img", "input", "ins", "kbd", "label",
+            "mark", "meter", "noscript", "output", "picture", "progress", "q", "ruby", "s",
+            "samp", "select", "slot", "small", "span", "strike", "strong", "sub", "sup",
+            "svg", "time", "tt", "u", "var", "wbr"));
+
+    /** 保留原始空白的元素。 */
+    private static final Set<String> PRESERVE = new java.util.HashSet<String>(Arrays.asList(
+            "pre", "textarea", "script", "style", "plaintext", "xmp", "listing"));
+
+    /** 内容属于数据而非文本的元素，{@code text()} 不计入其内容。 */
+    private static final Set<String> NO_TEXT = new java.util.HashSet<String>(Arrays.asList(
+            "script", "style"));
+
     private final String tagName;
     private final Map<String, String> attributes = new LinkedHashMap<String, String>();
     private final List<Node> childNodes = new ArrayList<Node>();
@@ -120,23 +136,144 @@ public class Element extends Node {
      */
     public String text() {
         StringBuilder sb = new StringBuilder();
-        appendText(sb);
+        appendText(sb, false);
+        return trim(sb.toString());
+    }
+
+    /**
+     * 返回元素自身持有的文本（只含直接文本子节点，不含后代元素内的文本）。
+     *
+     * @return 自身文本
+     */
+    public String ownText() {
+        StringBuilder sb = new StringBuilder();
+        for (Node child : childNodes) {
+            if (child instanceof TextNode) {
+                sb.append(((TextNode) child).text());
+            }
+        }
         return sb.toString();
     }
 
-    private void appendText(StringBuilder sb) {
+    /**
+     * 返回同一父元素下的下一个兄弟元素，没有则 {@code null}。
+     *
+     * @return 下一个兄弟元素
+     */
+    public Element nextElementSibling() {
+        List<Element> cs = siblings();
+        int idx = cs.indexOf(this);
+        return idx >= 0 && idx + 1 < cs.size() ? cs.get(idx + 1) : null;
+    }
+
+    /**
+     * 返回同一父元素下的上一个兄弟元素，没有则 {@code null}。
+     *
+     * @return 上一个兄弟元素
+     */
+    public Element previousElementSibling() {
+        List<Element> cs = siblings();
+        int idx = cs.indexOf(this);
+        return idx > 0 ? cs.get(idx - 1) : null;
+    }
+
+    /**
+     * 返回在同级元素中的下标，从 0 开始；无父元素时为 0。
+     *
+     * @return 同级下标
+     */
+    public int elementSiblingIndex() {
+        int idx = siblings().indexOf(this);
+        return idx < 0 ? 0 : idx;
+    }
+
+    private List<Element> siblings() {
+        Element p = parentElement();
+        return p == null ? new ArrayList<Element>() : p.children();
+    }
+
+    private void appendText(StringBuilder sb, boolean preserve) {
+        if (NO_TEXT.contains(tagName)) {
+            return;
+        }
+        boolean keep = preserve || PRESERVE.contains(tagName);
         for (Node child : childNodes) {
             if (child instanceof Element) {
-                ((Element) child).appendText(sb);
+                Element el = (Element) child;
+                if (!keep && isBlockish(el) && sb.length() > 0
+                        && !isWhitespace(sb.charAt(sb.length() - 1))) {
+                    sb.append(' ');
+                }
+                el.appendText(sb, keep);
             } else {
-                sb.append(child.nodeText());
+                String t = child.nodeText();
+                sb.append(keep ? t : normalise(t));
             }
         }
     }
 
+    /**
+     * 判断元素是否块级（文本拼接时用于补空格），{@code br} 视为块级。
+     *
+     * @param el 待判断元素
+     * @return 是否块级
+     */
+    private static boolean isBlockish(Element el) {
+        return "br".equals(el.tagName) || !INLINE.contains(el.tagName);
+    }
+
+    private static String normalise(String s) {
+        StringBuilder sb = new StringBuilder(s.length());
+        boolean ws = false;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (isWhitespace(c)) {
+                if (!ws) {
+                    sb.append(' ');
+                    ws = true;
+                }
+            } else {
+                sb.append(c);
+                ws = false;
+            }
+        }
+        return sb.toString();
+    }
+
+    private static boolean isWhitespace(char c) {
+        return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f';
+    }
+
+    /** 去掉首尾空白，与 Jsoup 一致地把 {@code &nbsp;} 也视为可裁剪的空白。 */
+    private static String trim(String s) {
+        int from = 0;
+        int to = s.length();
+        while (from < to && isTrimmable(s.charAt(from))) {
+            from++;
+        }
+        while (to > from && isTrimmable(s.charAt(to - 1))) {
+            to--;
+        }
+        return s.substring(from, to);
+    }
+
+    private static boolean isTrimmable(char c) {
+        return isWhitespace(c) || c == ' ';
+    }
+
+    /**
+     * 返回未做空白归一化的原始文本（含 {@code script}/{@code style} 内容），
+     * 供需要原文的场景使用；日常抽取请用 {@link #text()}。
+     *
+     * @return 原始文本
+     */
     @Override
     public String nodeText() {
-        return text();
+        StringBuilder sb = new StringBuilder();
+        for (Node child : childNodes) {
+            sb.append(child.nodeText());
+        }
+        return sb.toString();
     }
 
     /**
@@ -211,6 +348,16 @@ public class Element extends Node {
      */
     public Element child(int index) {
         return children().get(index);
+    }
+
+    /**
+     * 返回第 {@code index} 个直接子节点（含文本与注释节点，包内使用）。
+     *
+     * @param index 下标，从 0 开始
+     * @return 子节点
+     */
+    Node childNode(int index) {
+        return childNodes.get(index);
     }
 
     /**

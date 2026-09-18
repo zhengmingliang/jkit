@@ -1,6 +1,8 @@
 # HTML Parsing (Lightweight)
 
-`com.alianga.jkit.html` provides a zero-dependency, lightweight HTML parser plus a CSS selector engine, replacing the previously removed Jsoup. It targets **common web content extraction**, covering the daily-use subset of the Jsoup API. It is *not* a full HTML5 spec tree builder (no implicit insertion for `<table>`/`<form>`, no complete `bogus comment` rules).
+`com.alianga.jkit.html` provides a zero-dependency, lightweight HTML parser plus a CSS selector engine, replacing the previously removed Jsoup. It targets **web content extraction**: parse dirty HTML → locate nodes with CSS selectors → extract text/attributes.
+
+The module was differentially validated against Jsoup 1.18.1: on 93 "HTML + selector" cases, 86 produce identical results. The remaining differences are Jsoup-only extensions and the HTML5 adoption agency algorithm (see [§7](#7-differences-from-jsoup)).
 
 ## 1. Quick Start
 
@@ -13,7 +15,12 @@ doc.select("div#main p").text();   // "hello"
 doc.select(".box").attr("id");     // "main"
 ```
 
-`Html.parse` returns a `Document`, the root of the tree, itself an `Element` — so `select` / `text` behave exactly as on elements.
+`Html.parse` returns a `Document`, the root of the tree, itself an `Element` — so `select` / `text` behave exactly as on elements. Even a fragment gets a full `html` / `head` / `body` skeleton:
+
+```java
+Html.parse("<p>hi</p>").outerHtml();
+// <html><head></head><body><p>hi</p></body></html>
+```
 
 ## 2. DOM Model
 
@@ -21,9 +28,10 @@ doc.select(".box").attr("id");     // "main"
 |------|-------------|
 | `Node` | Node base class: `parent()` / `nodeText()` / `outerHtml()` |
 | `Element` | Element: tag name, attributes, child nodes, plus selection/extraction API |
-| `TextNode` | Text between tags |
+| `TextNode` | Text between tags; escaped when serialized |
+| `DataNode` | Raw content of `script` / `style`; never escaped |
 | `Comment` | `<!-- ... -->` comment node |
-| `Document` | Document root; adds `title()` / `head()` / `body()` |
+| `Document` | Document root (tag name `#document`); adds `title()` / `head()` / `body()` |
 | `Elements` | Convenience `List<Element>` (`text()` / `attr()` / `html()` / `eachText()` / `first()` / `select()`) |
 
 ## 3. Element API
@@ -31,24 +39,34 @@ doc.select(".box").attr("id");     // "main"
 ```java
 Element div = doc.selectFirst("div");
 
-div.tagName();          // "div"
-div.attr("id");         // "main"; missing attributes return "" (never null)
-div.hasAttr("id");      // true
-div.attributes();       // copy of the attribute map
-div.id();               // "main"
-div.className();        // "box"
-div.classNames();       // ["box"]
-div.hasClass("box");    // true
-div.text();             // recursive text of all descendants
-div.innerHtml();        // serialized child nodes
-div.outerHtml();        // serialized including this element's tags
-div.children();         // direct child elements (Element only)
-div.child(0);           // first child element
-div.parentElement();    // parent element; null at the document root
-div.val();              // text for textarea, value attribute otherwise
+div.tagName();                  // "div"
+div.attr("id");                 // "main"; missing attributes return "" (never null)
+div.hasAttr("id");              // true
+div.attributes();               // copy of the attribute map
+div.id();                       // "main"
+div.className();                // "box"
+div.classNames();               // ["box"]
+div.hasClass("box");            // true
+div.text();                     // normalised text of all descendants (script/style excluded)
+div.ownText();                  // direct text children only, no descendants
+div.nodeText();                 // raw, un-normalised text (includes script/style)
+div.innerHtml();                // serialized child nodes
+div.outerHtml();                // serialized including this element's tags
+div.children();                 // direct child elements (Element only)
+div.child(0);                   // first child element
+div.childNodeSize();            // direct child nodes, including text and comments
+div.parentElement();            // parent element; null at the document root
+div.nextElementSibling();       // next sibling element
+div.previousElementSibling();   // previous sibling element
+div.elementSiblingIndex();      // index among siblings, from 0
+div.val();                      // text for textarea, value attribute otherwise
+div.select(css);                // query within this subtree
+div.selectFirst(css);           // first match, else null
 ```
 
 Convention: **tag names and attribute names are case-insensitive** (normalized to lower case on parse, matched ignoring case), while `id` / `class` / attribute values are case-sensitive.
+
+`text()` normalisation matches Jsoup: a single space is inserted between block-level elements, runs of whitespace collapse to one space, and leading/trailing whitespace (including `&nbsp;`) is trimmed. `pre` / `textarea` keep their original whitespace.
 
 ## 4. CSS Selector
 
@@ -58,24 +76,29 @@ Supported subset:
 |----------|----------|
 | Type / universal | `div`, `*`, `div.foo` |
 | id / class | `#main`, `.box`, `.a.b` (both classes) |
-| Attribute | `[href]`, `[href=x]`, `[href^=https]`, `[href$=pdf]`, `[href*=img]`, `[title~=a]`, `[lang\|=en]` |
+| Attribute | `[href]`, `[href=x]`, `[href!=x]`, `[href^=https]`, `[href$=pdf]`, `[href*=img]`, `[title~=a]`, `[lang\|=en]` |
 | Descendant / child | `div p`, `ul > li`, `a b > c` |
+| Adjacent / general sibling | `h1 + p`, `h1 ~ p` |
 | Grouping | `p.a, p.b` (comma = union) |
-| Pseudo-class | `:first-child`, `:last-child`, `:only-child`, `:root`, `:empty`, `:not(...)`, `:nth-child(an+b)` |
+| Structural pseudo-class | `:first-child`, `:last-child`, `:only-child`, `:root`, `:empty`, `:not(...)`, `:nth-child(an+b)`, `:nth-last-child(an+b)` |
+| Of-type pseudo-class | `:first-of-type`, `:last-of-type`, `:only-of-type`, `:nth-of-type(an+b)`, `:nth-last-of-type(an+b)` |
+| Text pseudo-class | `:contains(text)`, `:containsOwn(text)`, `:matches(regex)`, `:matchesOwn(regex)` |
 
-`:nth-child` accepts `odd` / `even` / `3` / `2n+1` / `n+1` / `-n+3`, etc.
+The `an+b` form accepts `odd` / `even` / `3` / `2n+1` / `n+1` / `-n+3`, and pseudo-class names are case-insensitive.
 
 ```java
 doc.select("div p");                 // all descendant p
 doc.select("body > div");            // direct children
+doc.select("h1 + p");                // p immediately after an h1
 doc.select("a[href^=https]");        // attribute prefix
 doc.select("li:first-child");        // first li
 doc.select("li:not(.done)");         // exclude li with class done
 doc.select("li:nth-child(2n+1)");    // odd items
+doc.select("p:contains(details)");   // text contains
 doc.selectFirst("title");            // first match, else null
 ```
 
-`Elements.select(css)` queries the subtree of every element in the set and merges the results.
+`Elements.select(css)` queries the subtree of every element in the set and merges the results; `Elements.text()` joins element texts with a space.
 
 ## 5. Entity Escaping
 
@@ -86,29 +109,45 @@ Html.escape("a<b>&");        // "a&lt;b&gt;&amp;"
 Html.unescape("a&amp;b");    // "a&b"
 Html.unescape("&#65;");      // "A"
 Html.unescape("&#x41;");     // "A"
+Html.unescape("&copy;");     // "©"
+Html.unescape("&mdash;");    // "—"
 ```
 
-Named entities: `&amp;` `&lt;` `&gt;` `&quot;` `&apos;` `&nbsp;`. Numeric entities support decimal `&#65;` and hex `&#x41;`. An unrecognised `&` is preserved verbatim.
+About 200 frequently used named entities are built in (`&copy;` `&reg;` `&trade;` `&mdash;` `&hellip;` `&ldquo;`, …); numeric entities support decimal `&#65;` and hex `&#x41;` without length limits. Unlisted named entities are preserved verbatim — use the `&#nnn;` form if you need the full HTML5 table.
 
-## 6. Tolerance and Limits
+## 6. Error Tolerance
 
-The parser tolerates malformed HTML:
+The parser follows the common HTML5 recovery rules:
 
-- An unclosed tag is implicitly closed together with its ancestors when the matching end tag is seen (`<div><span>hi</div>` closes `span` too);
+- **Implicit skeleton**: every input gets `html` / `head` / `body`. Head-only tags (`title` / `meta` / `link` / `base` / `style`) and any `script` appearing before the body go into `head`; everything else goes into `body`;
+- **Optional end tags auto-close**: `<p>one<p>two` yields two sibling `p` elements; `<ul><li>a<li>b</ul>` yields two sibling `li` elements. Same for `dt`/`dd`, `td`/`th`/`tr`, `option`, `rt`/`rp`, and `thead`/`tbody`/`tfoot`. A block-level start tag also closes a `p` buried under inline elements (`<p>a<b>c<div>d` closes both `b` and `p`);
+- **Implicit `tbody`**: `<table><tr><td>x</td></tr></table>` gets a `<tbody>`, like browsers do;
 - Void elements (`br` / `img` / `input` / `meta`, …) are never pushed on the stack and serialize without a closing tag;
 - Self-closing `<tag/>` and truncated forms like `<div/` terminate safely instead of looping;
 - `<script>` / `<style>` content is treated as raw text (no tags parsed inside); `<textarea>` likewise, but with entity decoding.
 
-Known limits (vs Jsoup):
+## 7. Differences from Jsoup
 
-- No HTML5 implicit element insertion/reordering; the DOM mirrors source nesting;
-- Not the full pseudo-class semantics (no `:has()`, `:nth-of-type()`, `::before`, …);
-- `:not()` does not accept combinators — `div:not(a b)` is invalid.
+These are deliberate trade-offs — check the list when migrating:
 
-## 7. Exceptions
+| Difference | Note |
+|------------|------|
+| `:has()` | Not supported; throws `SelectorException` |
+| `:eq()` / `:lt()` / `:gt()` / `:first` / `:last` | Jsoup positional extensions; not supported |
+| `:header` | Not supported (use `h1, h2, h3, h4, h5, h6`) |
+| Combinators inside `:not()` | Not supported, e.g. `div:not(a b)` |
+| Active formatting elements | The HTML5 adoption agency algorithm is not implemented. For `<div><p>a<b>c<div>d</div></div>` Jsoup re-creates `<b>` inside later blocks; this module only closes it. Extracted text is identical, structural queries differ |
+| Document root tag name | `#document` here vs `#root` in Jsoup; only affects all-element queries such as `*` |
+| `doctype` | Skipped during parsing, not kept in the DOM |
+| Output formatting | `outerHtml()` is compact; no pretty printing |
+| Namespaces / XML mode | Not supported; HTML only |
+
+## 8. Exceptions
 
 | Exception | When |
 |-----------|------|
-| `SelectorException` | An unsupported pseudo-class, or a selector string that cannot be parsed |
+| `SelectorException` | An unsupported pseudo-class, a combinator missing its operand, or a selector string that cannot be parsed |
+
+An illegal selector **always throws — it never degrades silently or loops**. `h1 @ p`, `p ~ + p` and `p:not()` each fail immediately with a clear message.
 
 Parsing itself throws nothing — all malformed input is adapted into a DOM rather than aborting on dirty HTML.

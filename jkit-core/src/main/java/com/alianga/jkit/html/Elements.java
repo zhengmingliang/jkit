@@ -34,6 +34,9 @@ public class Elements extends ArrayList<Element> {
     public String text() {
         StringBuilder sb = new StringBuilder();
         for (Element e : this) {
+            if (sb.length() > 0) {
+                sb.append(' ');
+            }
             sb.append(e.text());
         }
         return sb.toString();

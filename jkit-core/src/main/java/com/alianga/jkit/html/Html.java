@@ -139,6 +139,10 @@ public final class Html {
             default:
                 break;
         }
+        String named = Entities.decode(ent);
+        if (named != null) {
+            return named;
+        }
         if (ent.charAt(0) == '#') {
             try {
                 int codePoint;

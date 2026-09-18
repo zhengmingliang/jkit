@@ -9,7 +9,10 @@ import java.util.regex.Pattern;
 
 /**
  * 轻量 CSS 选择器引擎，支持标签、{@code #id}、{@code .class}、属性选择器、
- * 后代/子代组合符、分组以及 {@code :not}/{@code :first-child} 等常用伪类子集。
+ * 后代 / 子代 / 相邻兄弟 / 通用兄弟组合符、分组，以及 {@code :not}、
+ * {@code :first-child}、{@code :nth-child}、{@code :contains} 等常用伪类子集。
+ *
+ * <p>无法解析的选择器抛出 {@link SelectorException}，不做静默降级。
  *
  * @author 郑明亮
  * @since 2.0.2
@@ -82,10 +85,25 @@ public final class Selector {
             return true;
         }
         Combinator comb = c.combs.get(idx - 1);
-        Element parent = el.parentElement();
         if (comb == Combinator.CHILD) {
+            Element parent = el.parentElement();
             return parent != null && matchFrom(c, idx - 1, parent);
         }
+        if (comb == Combinator.NEXT_SIBLING) {
+            Element prev = el.previousElementSibling();
+            return prev != null && matchFrom(c, idx - 1, prev);
+        }
+        if (comb == Combinator.SUBSEQUENT_SIBLING) {
+            Element prev = el.previousElementSibling();
+            while (prev != null) {
+                if (matchFrom(c, idx - 1, prev)) {
+                    return true;
+                }
+                prev = prev.previousElementSibling();
+            }
+            return false;
+        }
+        Element parent = el.parentElement();
         while (parent != null) {
             if (matchFrom(c, idx - 1, parent)) {
                 return true;
@@ -96,7 +114,7 @@ public final class Selector {
     }
 
     private enum Combinator {
-        DESCENDANT, CHILD
+        DESCENDANT, CHILD, NEXT_SIBLING, SUBSEQUENT_SIBLING
     }
 
     private interface Simple {
@@ -172,6 +190,9 @@ public final class Selector {
             if (op.isEmpty()) {
                 return e.hasAttr(name);
             }
+            if ("!=".equals(op)) {
+                return !e.attr(name).equals(value);
+            }
             if (!e.hasAttr(name)) {
                 return false;
             }
@@ -207,11 +228,13 @@ public final class Selector {
         private final String name;
         private final Compound inner;
         private final int[] nth;
+        private final String arg;
 
-        PseudoSimple(String name, Compound inner, int[] nth) {
+        PseudoSimple(String name, Compound inner, int[] nth, String arg) {
             this.name = name;
             this.inner = inner;
             this.nth = nth;
+            this.arg = arg;
         }
 
         public boolean matches(Element e) {
@@ -228,11 +251,31 @@ public final class Selector {
                 case "root":
                     return e.parent() == null;
                 case "empty":
-                    return e.children().isEmpty();
+                    return isEmptyOfContent(e);
                 case "not":
                     return !inner.matches(e);
                 case "nth-child":
                     return nthMatches(e, nth[0], nth[1]);
+                case "nth-last-child":
+                    return reverseNthMatches(e, nth[0], nth[1]);
+                case "nth-of-type":
+                    return typeMatches(e, nth[0], nth[1]);
+                case "nth-last-of-type":
+                    return nth(nth[0], nth[1], sameTypeCount(e) - typeIndexOf(e) + 1);
+                case "first-of-type":
+                    return typeIndexOf(e) == 1;
+                case "last-of-type":
+                    return typeIndexOf(e) == sameTypeCount(e);
+                case "only-of-type":
+                    return sameTypeCount(e) == 1;
+                case "contains":
+                    return e.text().contains(arg);
+                case "containsown":
+                    return e.ownText().contains(arg);
+                case "matches":
+                    return Pattern.compile(arg).matcher(e.text()).matches();
+                case "matchesown":
+                    return Pattern.compile(arg).matcher(e.ownText()).matches();
                 default:
                     throw new SelectorException("unsupported pseudo: " + name);
             }
@@ -248,12 +291,74 @@ public final class Selector {
             if (p == null) {
                 return false;
             }
-            int idx = p.children().indexOf(e) + 1;
+            return nth(a, b, p.children().indexOf(e) + 1);
+        }
+
+        private boolean typeMatches(Element e, int a, int b) {
+            return nth(a, b, typeIndexOf(e));
+        }
+
+        private boolean reverseNthMatches(Element e, int a, int b) {
+            Element p = e.parentElement();
+            if (p == null) {
+                return false;
+            }
+            return nth(a, b, p.children().size() - p.children().indexOf(e));
+        }
+
+        /** 与 Jsoup 一致：空白文本节点与注释不算“有内容”。 */
+        private boolean isEmptyOfContent(Element e) {
+            for (int k = 0; k < e.childNodeSize(); k++) {
+                Node n = e.childNode(k);
+                if (n instanceof Comment) {
+                    continue;
+                }
+                if (n instanceof TextNode && ((TextNode) n).text().trim().isEmpty()) {
+                    continue;
+                }
+                return false;
+            }
+            return true;
+        }
+
+        private boolean nth(int a, int b, int idx) {
             if (a == 0) {
                 return idx == b;
             }
             int diff = idx - b;
             return diff % a == 0 && diff / a >= 0;
+        }
+
+        /** 在同类型兄弟中的序号，从 1 开始。 */
+        private int typeIndexOf(Element e) {
+            Element p = e.parentElement();
+            if (p == null) {
+                return 1;
+            }
+            int idx = 0;
+            for (Element c : p.children()) {
+                if (c.tagName().equals(e.tagName())) {
+                    idx++;
+                    if (c == e) {
+                        return idx;
+                    }
+                }
+            }
+            return idx;
+        }
+
+        private int sameTypeCount(Element e) {
+            Element p = e.parentElement();
+            if (p == null) {
+                return 1;
+            }
+            int count = 0;
+            for (Element c : p.children()) {
+                if (c.tagName().equals(e.tagName())) {
+                    count++;
+                }
+            }
+            return count;
         }
     }
 
@@ -296,7 +401,19 @@ public final class Selector {
                     i++;
                     continue;
                 }
-                if (ws) {
+                if (c == '+') {
+                    flush(cur, comp, Combinator.NEXT_SIBLING);
+                    comp = new Compound();
+                    i++;
+                    continue;
+                }
+                if (c == '~') {
+                    flush(cur, comp, Combinator.SUBSEQUENT_SIBLING);
+                    comp = new Compound();
+                    i++;
+                    continue;
+                }
+                if (ws && !comp.simples.isEmpty()) {
                     flush(cur, comp, Combinator.DESCENDANT);
                     comp = new Compound();
                 }
@@ -311,7 +428,7 @@ public final class Selector {
 
         private void flush(Complex cur, Compound comp, Combinator comb) {
             if (comp.simples.isEmpty()) {
-                return;
+                throw new SelectorException("组合符缺少操作数：" + q);
             }
             cur.steps.add(comp);
             cur.combs.add(comb);
@@ -341,6 +458,9 @@ public final class Selector {
             while (i < n && isIdentPart(q.charAt(i))) {
                 i++;
             }
+            if (i == ks) {
+                throw new SelectorException("无法解析的选择器，位置 " + ks + " 附近：" + q);
+            }
             return new TagSimple(q.substring(ks, i));
         }
 
@@ -360,7 +480,7 @@ public final class Selector {
                     && q.charAt(i) != ']' && q.charAt(i) != '>'
                     && q.charAt(i) != '^' && q.charAt(i) != '$'
                     && q.charAt(i) != '*' && q.charAt(i) != '~'
-                    && q.charAt(i) != '|') {
+                    && q.charAt(i) != '|' && q.charAt(i) != '!') {
                 i++;
             }
             String name = q.substring(ks, i).toLowerCase();
@@ -375,6 +495,9 @@ public final class Selector {
             if (o1 == '=') {
                 op = "=";
                 i++;
+            } else if (o1 == '!' && i + 1 < n && q.charAt(i + 1) == '=') {
+                op = "!=";
+                i += 2;
             } else if (i + 1 < n && q.charAt(i + 1) == '=') {
                 op = "" + o1 + '=';
                 i += 2;
@@ -410,7 +533,7 @@ public final class Selector {
             if (i < n && q.charAt(i) == ':') {
                 i++;
             }
-            String name = readIdent();
+            String name = readIdent().toLowerCase();
             String arg = null;
             if (i < n && q.charAt(i) == '(') {
                 int depth = 1;
@@ -435,15 +558,37 @@ public final class Selector {
         }
 
         private Simple makePseudo(String name, String arg) {
+            if (name.isEmpty()) {
+                throw new SelectorException("伪类名缺失：" + q);
+            }
             if ("not".equals(name)) {
+                if (arg == null || arg.isEmpty()) {
+                    throw new SelectorException(":not() 缺少参数：" + q);
+                }
                 List<Complex> cs = new Parser(arg).parse();
+                if (cs.get(0).steps.isEmpty()) {
+                    throw new SelectorException(":not() 参数无法解析：" + q);
+                }
                 Compound inner = cs.get(0).steps.get(0);
-                return new PseudoSimple(name, inner, null);
+                return new PseudoSimple(name, inner, null, arg);
             }
-            if ("nth-child".equals(name)) {
-                return new PseudoSimple(name, null, parseNth(arg));
+            if ("nth-child".equals(name) || "nth-of-type".equals(name)
+                    || "nth-last-child".equals(name) || "nth-last-of-type".equals(name)) {
+                requireArg(name, arg);
+                return new PseudoSimple(name, null, parseNth(arg), arg);
             }
-            return new PseudoSimple(name, null, null);
+            if ("contains".equals(name) || "containsown".equals(name)
+                    || "matches".equals(name) || "matchesown".equals(name)) {
+                requireArg(name, arg);
+                return new PseudoSimple(name, null, null, arg);
+            }
+            return new PseudoSimple(name, null, null, arg);
+        }
+
+        private void requireArg(String name, String arg) {
+            if (arg == null || arg.isEmpty()) {
+                throw new SelectorException(":" + name + "() 缺少参数：" + q);
+            }
         }
 
         private int[] parseNth(String arg) {
