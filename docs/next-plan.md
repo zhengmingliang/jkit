@@ -270,18 +270,18 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 
 | 项 | 位置 | 要点 |
 | --- | --- | --- |
-| HTTP **可实例化客户端** | `jkit-core` `HttpUtils` / `HttpConfig` | 文档已写「后续提供」。`HttpClient.builder()`，全局 `setXxx` 只影响 `shared()`。测试：两个实例配置互不污染 |
-| 流式 multipart | `HttpUtils.upload` | 现在整包进内存 |
+| HTTP **可实例化客户端** | `jkit-core` `HttpUtils` / `HttpConfig` | 文档已写「后续提供」。`HttpClient.builder()`，全局 `setXxx` 只影响 `shared()`。测试：两个实例配置互不污染 | **已做（HttpClient，ThreadLocal 隔离，8cdc967）** |
+| 流式 multipart | `HttpUtils.upload` | 现在整包进内存 | **已做（HttpBodies.multipart 超阈值落临时文件流式发送，SPOOL_THRESHOLD_BYTES，无单独提交，附在 HTTP 相关提交里）** |
 | JWT + 加密默认值 | `EncryptUtils.RSA` 仍 1024+ECB；DES 仍在门面 | HS256/RS256；RSA 2048+OAEP；AES-GCM；DES/1024 `@Deprecated` | 加密一半已做（8600d5d）；**JWT 已补（JwtUtils，零依赖，16 测试全过）** |
-| 空文档 | `docs/expression.md`、`docs/csv.md` | 现在是空文件，表达式/CSV 两套门面实际存在 |
+| 空文档 | `docs/expression.md`、`docs/csv.md` | 现在是空文件，表达式/CSV 两套门面实际存在 | **已做（305ddae）** |
 | `jkit-llm` | 新模块 | 建立在 HttpClient 实例 + 已有 `sseMerge` 上，本季不要做 |
 | 轻量 HTML | 新模块或 core | 替代已移除的 Jsoup，CSS 选择器子集 |
-| 韧性抽包 | `http.lb` 的 Retry/熔断 | 给 notify / 任意 Callable 用 |
-| zstd | HTTP `Content-Encoding` | 已有 gzip/deflate/br |
-| Consul / K8s 发现 | `ServiceDiscovery` | 已有 Nacos + 静态 |
+| 韧性抽包 | `http.lb` 的 Retry/熔断 | 给 notify / 任意 Callable 用 | **已做（Retryer + CircuitBreaker，com.alianga.jkit.resilience，与 HTTP 解耦，15 测试全过）** |
+| zstd | HTTP `Content-Encoding` | 已有 gzip/deflate/br | 零依赖不可行，保持不做 |
+| Consul / K8s 发现 | `ServiceDiscovery` | 已有 Nacos + 静态 | 需基础设施，暂不验证 |
 | JSON Patch / Schema `required` 别名 | `jkit-core` json | `must` → 兼容标准 `required` | `required` 别名已做（920c014）；**JSON Patch 已补（JSONPatch，RFC 6902，32 测试全过）** |
-| ULID / UUIDv7 | `common.idgenerate` | 小 |
-| 脱敏 | 与 `IdCardUtils` 同包 | 小 |
+| ULID / UUIDv7 | `common.idgenerate` | 小 | **已做（2c1d193）** |
+| 脱敏 | 与 `IdCardUtils` 同包 | 小 | **已做（16b3271）** |
 
 ---
 
