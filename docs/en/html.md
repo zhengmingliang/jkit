@@ -154,22 +154,25 @@ Parsing itself throws nothing — all malformed input is adapted into a DOM rath
 
 ## 9. Performance
 
-Measured on the same machine against Jsoup 1.18.1 (3 warmup rounds, 7 timed rounds, median taken; `-Xms1g -Xmx2g`, JDK 8). Jsoup is used for benchmarking only and is **not** a project dependency. The corpus is a generated article list page: small = 2 items (~1.6 KB), medium = 60 items (~30 KB), large = 600 items (~300 KB). The ratio is `Jsoup time / jkit time`, so values above 1 mean jkit is faster.
+Measured on the same machine against Jsoup 1.18.1 (3 warmup rounds, 7 timed rounds, median taken; `-Xms1g -Xmx2g`, JDK 11). Jsoup is used for benchmarking only and is **not** a project dependency. The corpus is a generated article list page: small = 2 items (~1.6 KB), medium = 60 items (~30 KB), large = 600 items (~300 KB). The ratio is `Jsoup time / jkit time`, so values above 1 mean jkit is faster.
+
+Timing is **pairwise and order-balanced**: every scenario is measured A→B→B→A and the lower of the two medians is kept. Running jkit first and Jsoup second every time penalizes whichever runs first — JIT compilation, branch prediction and cache warmup all land in the opening rounds. With a fixed order, `.post` on the large page reported 0.60x–0.90x; with alternating order it settles at ~1.3x. Without this, the report invents a slowdown that does not exist.
 
 | Scenario | jkit | Jsoup 1.18.1 | jkit faster |
 |----------|------|--------------|-------------|
-| Small page parse | 0.008 ms | 0.017 ms | 2.08x |
-| Medium page parse | 0.144 ms | 0.199 ms | 1.38x |
-| Large page parse | 1.060 ms | 1.925 ms | 1.82x |
-| Large page parse + `text()` | 1.506 ms | 2.148 ms | 1.43x |
-| Medium `#main` | 0.006 ms | 0.010 ms | 1.60x |
-| Medium `.post` | 0.008 ms | 0.013 ms | 1.57x |
-| Medium `article.post h2` | 0.007 ms | 0.016 ms | 2.20x |
-| Medium `a[href^=/p/]` | 0.008 ms | 0.014 ms | 1.81x |
-| Large `#main` | 0.099 ms | 0.098 ms | 0.99x |
-| Large `a[href^=/p/]` | 0.115 ms | 0.126 ms | 1.10x |
-| Retained heap, 200 large DOMs | 262.4 MB | 241.5 MB | 0.92x |
-| End-to-end (parse + 3 queries + text) | 1.894 ms | 2.525 ms | 1.33x |
+| Small page parse | 0.012 ms | 0.023 ms | 1.92x |
+| Medium page parse | 0.134 ms | 0.275 ms | 2.06x |
+| Large page parse | 1.307 ms | 2.638 ms | 2.02x |
+| Large page parse + `text()` | 1.711 ms | 2.865 ms | 1.67x |
+| Medium `#main` | 0.007 ms | 0.012 ms | 1.62x |
+| Medium `.post` | 0.009 ms | 0.014 ms | 1.55x |
+| Medium `article.post h2` | 0.009 ms | 0.019 ms | 2.04x |
+| Medium `a[href^=/p/]` | 0.009 ms | 0.016 ms | 1.82x |
+| Large `#main` | 0.110 ms | 0.141 ms | 1.28x |
+| Large `.post` | 0.132 ms | 0.177 ms | 1.34x |
+| Large `article.post h2` | 0.109 ms | 0.194 ms | 1.77x |
+| Retained heap, 150 large DOMs | 202.1 MB | 179.7 MB | 0.89x |
+| End-to-end (parse + 3 queries + text) | 2.341 ms | 4.715 ms | 2.01x |
 
 ### Real-site validation
 
@@ -177,20 +180,33 @@ Synthetic pages distort results, so a real site was measured too — a Halo 1.4.
 
 | Scenario | jkit | Jsoup 1.18.1 | jkit faster |
 |----------|------|--------------|-------------|
-| Index page parse (70 KB) | 0.179 ms | 0.295 ms | 1.65x |
-| Index parse + `text()` | 0.226 ms | 0.330 ms | 1.46x |
-| `article.post-list-thumb` | 0.006 ms | 0.014 ms | 2.48x |
-| `a.post-title h3` | 0.006 ms | 0.013 ms | 2.27x |
-| `.post-thumb img` | 0.008 ms | 0.016 ms | 1.95x |
-| End-to-end: parse + extract all fields for 10 posts | 0.310 ms | 0.381 ms | 1.23x |
+| Index page parse (70 KB) | 0.203 ms | 0.381 ms | 1.88x |
+| End-to-end: parse + extract all fields for 10 posts | 0.247 ms | 0.428 ms | 1.74x |
+| `article.post-list-thumb` | 0.007 ms | 0.017 ms | 2.25x |
+| `a.post-title h3` | 0.007 ms | 0.017 ms | 2.35x |
+| `.post-thumb img` | 0.011 ms | 0.020 ms | 1.87x |
+| `.post-date span.i18n` | 0.014 ms | 0.026 ms | 1.86x |
 
 On correctness, **all 5 fields of all 10 posts are identical to Jsoup**, and across three detail pages the `pre code` hit counts (11 / 13 / 8), the `class` attribute, and both `text()` and raw `nodeText()` match Jsoup exactly.
 
 Verdict:
 
-- Parsing, selectors and end-to-end throughput are **faster than Jsoup on both synthetic pages and the real site** (1.2x–2.5x).
-- **Retained heap is still about 9% higher.** `Element` stores attributes in parallel arrays and children in an `ArrayList` — simpler and dependency-free, but each DOM is slightly fatter than Jsoup's.
-- Full-tree selectors on large pages (e.g. `#main`) are on par with Jsoup (0.99x), because every query does a complete depth-first traversal with no id / class index.
+- Parsing, selectors and end-to-end throughput are **faster than Jsoup on both synthetic pages and the real site** (1.3x–2.4x).
+- **Retained heap is about 12% higher** (202.1 MB vs 179.7 MB). `Element` stores attributes in parallel arrays and children in an `ArrayList` — simpler and dependency-free, but each DOM is slightly fatter than Jsoup's.
+- Every query does a complete depth-first traversal with no id / class index, so the selector advantage narrows as pages grow (1.3x–1.8x on large pages vs 1.6x–2.2x on medium ones). A lazy id / class index is the next lever.
+
+### Reproducing the benchmark
+
+The benchmark does not live in the jkit repo — Jsoup cannot enter jkit's dependencies — so it sits in the separate **tools-test** project:
+
+- `com.alianga.test.html.HtmlParseBenchTest`: synthetic throughput, differential comparison against Jsoup (119 cases), the script-heavy regression guard, and retained heap.
+- `com.alianga.test.html.HtmlRealSiteBenchTest`: extraction correctness and end-to-end timing on the real alianga.com site.
+
+```bash
+mvn test -Dtest='HtmlParseBenchTest,HtmlRealSiteBenchTest'
+```
+
+Reports are written to `target/html-parse-bench.md` and `target/html-real-site-bench.md`, with finalized copies archived under `reports/`. Assertions only guard against order-of-magnitude regressions rather than exact numbers, so they will not misfire on another machine; the real-site case needs network access and skips itself when the site is unreachable.
 
 The optimizations cluster in four places: attributes moved from `LinkedHashMap` to lazily allocated parallel `String[]`, with tag and attribute names interned through `Names`; the parser replaces O(depth) stack searches with cached indices and writes attributes into a reusable buffer; end-tag lookup for `script`/`style`/`textarea` no longer lower-cases the whole document, scanning character by character with `regionMatches` instead; selector traversal drops intermediate lists and iterators, collapses attribute matching into a single scan, and caches parsed selectors by access order (cap 256).
 
