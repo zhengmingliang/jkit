@@ -411,7 +411,7 @@ new SmtpChannel().markdownImageBaseDir("/opt/docs/articles");
 
 `markdownToDocument` 生成的文档壳是 `<body><div class="jkit-md">…正文…</div></body>`，正文栏的宽度、内边距、字体、颜色、行高全部内联写在这层 div 上。
 
-**排版不能挂在 `<body>` 上**：Gmail、QQ 邮箱等客户端会剥掉 `<html>/<head>/<body>`，只把正文内容塞进它们自己的容器，写在 `body` 上的 `max-width` / `padding` 会连同标签一起消失（表现为正文铺满读信区、而带内联 `style` 的图片仍有留白）。样式表里 `body` 与 `div.jkit-md` 的规则成对输出，`body` 只作文档壳完整保留时的兜底。
+**排版不能挂在 `<body>` 上**：Gmail、QQ 邮箱等客户端会剥掉 `<html>/<head>/<body>`，只把正文内容塞进它们自己的容器，写在 `body` 上的 `max-width` / `padding` 会连同标签一起消失（表现为正文铺满读信区、而带内联 `style` 的图片仍有留白）。样式表里 `body` 只铺满视口底色（不限宽）；栏宽、内边距、`margin:0 auto` 居中全部挂在 `div.jkit-md` 上。浏览器打开完整文档时正文栏落在页面中间；邮件客户端剥掉 `body` 后这层 div 仍在。
 
 `responsive(true)`（默认）除 `viewport` 外还会输出两段媒体查询：桌面端（`min-width:768px`）放宽代码块左右内边距与行高，移动端（`max-width:480px`）收窄正文内边距、下调标题与表格字号、给表格加惯性滚动。
 

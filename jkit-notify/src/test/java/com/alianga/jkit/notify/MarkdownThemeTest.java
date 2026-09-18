@@ -91,6 +91,37 @@ public class MarkdownThemeTest {
     }
 
     /**
+     * 浏览器打开完整文档时，正文栏要落在页面中间：{@code body} 铺满视口，
+     * {@code max-width} + {@code margin:0 auto} 只挂在容器 div 上。
+     *
+     * <p>文档壳给 {@code body} 写了内联 {@code margin:0}（铺满底色）。如果样式表
+     * 再给 body 加 {@code max-width}，限宽会生效、居中外边距会被内联盖掉，栏就贴左边。
+     */
+    @Test
+    public void documentColumnIsCentered() {
+        String css = MarkdownTheme.LAPIS.css();
+        int bodyAt = css.indexOf("body{");
+        int bodyEnd = css.indexOf('}', bodyAt);
+        String bodyRule = css.substring(bodyAt, bodyEnd + 1);
+        assertTrue("body 铺满视口", bodyRule.contains("margin:0;padding:0"));
+        assertTrue("body 不能限宽", !bodyRule.contains("max-width"));
+        int divAt = css.indexOf("div.jkit-md{");
+        int divEnd = css.indexOf('}', divAt);
+        String divRule = css.substring(divAt, divEnd + 1);
+        assertTrue("容器要限宽", divRule.contains("max-width:"));
+        assertTrue("容器要水平居中", divRule.contains("margin:0 auto"));
+        String html = NotifyUtils.markdownToDocument("## 标题",
+                MarkdownRenderOptions.create().theme(MarkdownTheme.LAPIS));
+        assertTrue(html.contains("<body style=\"margin:0;padding:0;background:"));
+        assertTrue(html.contains("class=\"jkit-md\" style=\"max-width:"));
+        assertTrue(html.contains("margin:0 auto"));
+        int mobile = css.indexOf("@media (max-width:480px)");
+        String media = css.substring(mobile);
+        assertTrue("移动端只收容器内边距，不要连 body 一起垫",
+                media.contains("div.jkit-md{padding:") && !media.contains("body,div.jkit-md"));
+    }
+
+    /**
      * 内联模式：块级标签都带上 style，且不产生 {@code </p style=...} 这种畸形闭合标签。
      */
     @Test

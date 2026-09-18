@@ -515,12 +515,17 @@ final class MarkdownStyle {
      */
     String css(boolean responsive) {
         StringBuilder css = new StringBuilder(2048);
-        css.append("html{-webkit-text-size-adjust:100%}");
-        String base = containerBase();
-        css.append("body{").append(base).append("}");
+        css.append("html{-webkit-text-size-adjust:100%;background:").append(background).append("}");
+        // body 只铺满视口底色，不能带 max-width。文档壳会给 body 写内联 margin:0
+        // （让底色铺满），若这里再限宽，限宽留下、居中外边距被盖掉，栏就贴在页面左边。
+        css.append("body{margin:0;padding:0;background:").append(background)
+                .append(";color:").append(text)
+                .append(";font-family:").append(font)
+                .append(";font-size:").append(fontSize).append("px")
+                .append(";line-height:").append(lineHeight).append("}");
         // 邮件客户端（Gmail / QQ 邮箱等）普遍会剥掉 <body>，只把正文塞进自己的容器，
-        // 所以排版必须挂在这层 div 上，body 规则只作为文档壳完整保留时的兜底
-        css.append("div.").append(CONTAINER_CLASS).append("{").append(base).append("}");
+        // 所以栏宽、内边距、居中必须挂在这层 div 上
+        css.append("div.").append(CONTAINER_CLASS).append("{").append(containerBase()).append("}");
         appendHeadingCss(css);
         css.append("p{margin:.9em 0}");
         css.append("a{color:").append(primary).append(";text-decoration:underline;overflow-wrap:anywhere}");
@@ -550,7 +555,7 @@ final class MarkdownStyle {
             // 否则移动端字号/内边距的适配会被内联样式完全吃掉（内联时尤其明显）。
             // pre 只改左右内边距：MAC 风格的 36px 上内边距要留给圆点，不能被简写 padding 覆盖。
             css.append("@media (max-width:480px){")
-                    .append("body,div.").append(CONTAINER_CLASS)
+                    .append("div.").append(CONTAINER_CLASS)
                     .append("{padding:").append(MOBILE_PADDING).append(" !important;font-size:")
                     .append(Math.max(fontSize - 1, 12)).append("px !important}")
                     .append("h1{font-size:1.45em !important}")
@@ -572,7 +577,7 @@ final class MarkdownStyle {
     }
 
     /**
-     * 正文容器的基础样式（{@code <body>} 与容器 div 共用）。
+     * 正文容器 div 的基础样式（栏宽、居中、字体）。
      *
      * @return 样式声明，不含选择符与大括号
      */

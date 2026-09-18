@@ -412,7 +412,7 @@ new SmtpChannel().markdownImageBaseDir("/opt/docs/articles");
 
 The document shell produced by `markdownToDocument` is `<body><div class="jkit-md">…content…</div></body>`. The column width, padding, font, colour and line height are all inlined on that div.
 
-**Layout must not hang off `<body>`**: Gmail, QQ Mail and similar clients strip `<html>/<head>/<body>` and pour the content into their own container, so `max-width` / `padding` written on `body` disappear with the tag (the symptom: the text fills the whole reading pane while images — which carry inline `style` — still keep their margins). The stylesheet emits `body` and `div.jkit-md` rules as a pair; the `body` rule is only a fallback for clients that keep the shell intact.
+**Layout must not hang off `<body>`**: Gmail, QQ Mail and similar clients strip `<html>/<head>/<body>` and pour the content into their own container, so `max-width` / `padding` written on `body` disappear with the tag (the symptom: the text fills the whole reading pane while images — which carry inline `style` — still keep their margins). In the stylesheet `body` only paints the full-viewport background (no `max-width`); column width, padding and `margin:0 auto` centering all hang off `div.jkit-md`. Opening the complete document in a browser centres the column; when a mail client strips `body` the div is still there.
 
 With `responsive(true)` (default) you get the `viewport` plus two media queries: on desktop (`min-width:768px`) code blocks get wider horizontal padding and a taller line height; on mobile (`max-width:480px`) the column padding tightens, heading/table fonts shrink and tables get inertial scrolling.
 
