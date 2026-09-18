@@ -33,6 +33,7 @@
 - `IdGenerator.ulid()` / `uuidV7()` / `uuidV7String()`：与雪花并列的门面入口。
 - `DesensitizeUtils`：常用数据脱敏。`phone` / `idCard` / `bankCard` / `name` / `email` / `address` / `carNo` / `ip` / `password` 语义方法，通用 `mask(value, keepHead, keepTail[, maskChar])` 与 `maskAll`，配置驱动用 `desensitize(value, Type)`（`Type` 枚举十类）。`null` 与空串原样返回不抛异常；`keepHead + keepTail` 覆盖全文时只保留首字符而非原样返回；`password` 固定输出 6 个掩码，不泄漏密码长度。
 - `HttpClient`：可实例化 HTTP 客户端（next-plan 第 4 节）。`HttpUtils` 是进程级全局门面，所有 `setXxx` 改全局默认，多线程下互相覆盖污染；`HttpClient` 每个实例持有独立配置（超时 / 代理 / SSL / CookieJar / 引擎 / 拦截器 / fakeIp / 默认 Content-Type），多实例与多线程互不污染。`builder()` 从当前全局默认起算、链式覆盖；`shared()` 取全局默认单例，与 `HttpUtils` 静态方法等价。隔离通过 ThreadLocal 把实例配置下发到发送链路实现，无需全局加锁。`HttpConfig` 新增 `copy()` 供实例取独立配置副本。
+- `JwtUtils`：JSON Web Token 签发与校验（next-plan 第 4 节「JWT + 加密默认值」项中 JWT 一半）。仅依赖 JDK（`java.util.Base64` 的 url 变体 + `javax.crypto` 的 HMAC / RSA-SHA256），零第三方依赖。`createHs256(secret, payload)` / `createRs256(keyPair, payload)` 签发，`parseHs256(secret, token)` / `parseRs256(publicKey, token)` 校验并回吐 payload（自动采用 `Map` 上下文）；`withExp(minutes)` / `withNbf(minutes)` / `withIssuer` / `withAudience` 等声明快捷构造，`exp` / `nbf` / `iat` 走毫秒或秒两种单位（`expAt(Instant)` / `expSeconds(long)`）。校验严格：签名错误、密钥不符、过期、未生效、载荷被篡改一律拒绝；显式禁止 `alg=none` 与算法混淆（HS256 令牌不会被 RS256 公钥解）；base64url 无填充、载荷支持任意 JSON 对象（含嵌套与标准注册声明）。`JwtUtilsTest` 16 例覆盖 HS256 / RS256 往返、错误密钥、篡改、过期、未生效、声明保留、`alg=none` 拒绝、base64url 边界等。
 
 ### 变更
 
