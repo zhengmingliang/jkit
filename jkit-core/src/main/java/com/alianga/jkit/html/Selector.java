@@ -1,6 +1,7 @@
 package com.alianga.jkit.html;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -83,6 +84,17 @@ public final class Selector {
      * @param dedup 是否去重（仅逗号分组时需要）
      */
     private static void collect(Complex c, int last, Element el, Elements out, boolean dedup) {
+        List<Element> cands = candidates(c, last, el);
+        if (cands != null) {
+            // 索引路径：候选已按文档顺序排好，逐个验证完整条件即可
+            for (int i = 0; i < cands.size(); i++) {
+                Element cand = cands.get(i);
+                if (matchFrom(c, last, cand) && (!dedup || !out.contains(cand))) {
+                    out.add(cand);
+                }
+            }
+            return;
+        }
         if (matchFrom(c, last, el) && (!dedup || !out.contains(el))) {
             out.add(el);
         }
@@ -93,6 +105,30 @@ public final class Selector {
                 collect(c, last, (Element) n, out, dedup);
             }
         }
+    }
+
+    /**
+     * 取索引候选集；用不上索引时返回 {@code null}（调用方退化为全树遍历）。
+     *
+     * <p>只有查询根是 {@link Document} 时才走索引：候选集是以整份文档为范围建的，
+     * 若根是某个子树，还得逐个判断候选是否落在子树内，子树小的时候反而比直接遍历更慢。
+     *
+     * @param c 复合选择器
+     * @param last 最末一步下标
+     * @param el 查询根元素
+     * @return 候选元素列表（按文档顺序），或 {@code null}
+     */
+    private static List<Element> candidates(Complex c, int last, Element el) {
+        if (!(el instanceof Document)) {
+            return null;
+        }
+        String key = c.steps.get(last).indexKey();
+        if (key == null) {
+            return null;
+        }
+        List<Element> cands = ((Document) el).index().get(key);
+        // 索引里没有这个键，说明文档里根本没有带该 tag / id / class 的元素，结果必为空
+        return cands == null ? Collections.<Element>emptyList() : cands;
     }
 
     /**
@@ -116,6 +152,16 @@ public final class Selector {
     }
 
     private static Element findFirst(Complex c, int last, Element el) {
+        List<Element> cands = candidates(c, last, el);
+        if (cands != null) {
+            // 候选按文档顺序排列，第一个匹配的就是全树遍历会先遇到的那个
+            for (int i = 0; i < cands.size(); i++) {
+                if (matchFrom(c, last, cands.get(i))) {
+                    return cands.get(i);
+                }
+            }
+            return null;
+        }
         if (matchFrom(c, last, el)) {
             return el;
         }
@@ -187,6 +233,39 @@ public final class Selector {
                 }
             }
             return true;
+        }
+
+        /**
+         * 取可用于索引查找的键；没有可索引特征时返回 {@code null}。
+         *
+         * <p>键只需保证「候选集是结果的超集」——后续仍会用 {@link #matches} 校验完整条件，
+         * 所以 {@code div.foo} 取 {@code .foo} 或 {@code div} 都对，取更小的一个更快。
+         * 优先级按通常的选择性排：id &gt; class &gt; 标签名。属性选择器与伪类不作为键
+         * （属性值的取值空间无界，建索引不划算）。
+         *
+         * @return 索引键，或 {@code null}
+         */
+        String indexKey() {
+            String cls = null;
+            String tag = null;
+            for (int i = 0; i < simples.size(); i++) {
+                Simple s = simples.get(i);
+                if (s instanceof IdSimple) {
+                    return Document.ID_PREFIX + ((IdSimple) s).id;
+                }
+                if (cls == null && s instanceof ClassSimple) {
+                    cls = ((ClassSimple) s).cls;
+                } else if (tag == null && s instanceof TagSimple) {
+                    tag = ((TagSimple) s).tag;
+                }
+            }
+            if (cls != null) {
+                return Document.CLASS_PREFIX + cls;
+            }
+            if (tag != null && !"*".equals(tag)) {
+                return Document.TAG_PREFIX + tag;
+            }
+            return null;
         }
     }
 

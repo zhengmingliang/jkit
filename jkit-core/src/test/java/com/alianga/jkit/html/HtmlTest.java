@@ -3,6 +3,9 @@ package com.alianga.jkit.html;
 import org.junit.Assert;
 import org.junit.Test;
 
+import java.util.List;
+import java.util.Map;
+
 /**
  * 轻量 HTML 模块测试：解析、抽取、CSS 选择器、容错与实体转义。
  */
@@ -370,5 +373,75 @@ public class HtmlTest {
         Assert.assertEquals("", Html.parse(null).text());
         Assert.assertEquals("", Html.parse("").text());
         Assert.assertNotNull(Html.parse("").body());
+    }
+
+    @Test
+    public void indexAndTraversalReturnTheSameElements() {
+        // 查询根是 Document 时走索引，是普通元素时走全树遍历。同一个查询在两种入口下
+        // 必须给出完全相同的元素序列，否则说明索引路径丢了元素或顺序错了。
+        Document doc = Html.parse("<main id='main'><article class='post'><h2>标题</h2>"
+                + "<p class='lead'>段<i>斜</i></p><ul><li>甲<li>乙</ul></article>"
+                + "<article class='post'><h2>次</h2><p class='lead'>段二</p></article></main>");
+        Element main = doc.selectFirst("main");
+        String[] queries = {"p", ".post", "h2", "article.post h2", "main > article",
+                ".post p", "p i", "li", ".lead", "#main article"};
+        for (String q : queries) {
+            Elements viaIndex = doc.select(q);
+            Elements viaWalk = main.select(q);
+            Assert.assertEquals(q + " 两种入口条数不一致", viaWalk.size(), viaIndex.size());
+            for (int i = 0; i < viaIndex.size(); i++) {
+                Assert.assertSame(q + " 第 " + (i + 1) + " 个元素不一致",
+                        viaWalk.get(i), viaIndex.get(i));
+            }
+        }
+    }
+
+    @Test
+    public void indexKeepsDocumentOrder() {
+        Document doc = Html.parse("<div><span>1</span><p><span>2</span></p></div>"
+                + "<span>3</span><section><span>4</span></section>");
+        Elements spans = doc.select("span");
+        Assert.assertEquals(4, spans.size());
+        Assert.assertEquals("1", spans.get(0).text());
+        Assert.assertEquals("2", spans.get(1).text());
+        Assert.assertEquals("3", spans.get(2).text());
+        Assert.assertEquals("4", spans.get(3).text());
+    }
+
+    @Test
+    public void repeatedIdAndMultiClassAreIndexedCompletely() {
+        Document doc = Html.parse("<p id='x'>1</p><p id='x'>2</p><div class='a b'>3</div>"
+                + "<div class='b'>4</div>");
+        // id 重复时两个都得回来：索引若只留第一个就会漏
+        Assert.assertEquals(2, doc.select("#x").size());
+        Assert.assertEquals("1", doc.select("#x").first().text());
+        Assert.assertEquals("2", doc.select("#x").get(1).text());
+        // class 多值：元素要出现在每个 token 的键下
+        Assert.assertEquals(1, doc.select(".a").size());
+        Assert.assertEquals(2, doc.select(".b").size());
+        Assert.assertEquals(1, doc.select("div.a").size());
+        Assert.assertEquals(2, doc.select("div.b").size());
+    }
+
+    @Test
+    public void missKeyYieldsEmptyInsteadOfCrash() {
+        Document doc = Html.parse("<div><p>x</p></div>");
+        Assert.assertTrue(doc.select(".nope").isEmpty());
+        Assert.assertTrue(doc.select("#nope").isEmpty());
+        Assert.assertTrue(doc.select("table").isEmpty());
+        Assert.assertNull(doc.selectFirst("table"));
+        Assert.assertTrue(doc.select("div .nope").isEmpty());
+    }
+
+    @Test
+    public void indexIsBuiltOnceAndReused() {
+        Document doc = Html.parse("<p class='a'>1</p><p class='b'>2</p>");
+        Map<String, List<Element>> first = doc.index();
+        Assert.assertSame("索引应缓存复用，不能每次查询重建", first, doc.index());
+        Assert.assertTrue(first.containsKey(Document.CLASS_PREFIX + "a"));
+        Assert.assertTrue(first.containsKey(Document.TAG_PREFIX + "p"));
+        // 只建索引不查询的文档，索引应保持未构建（惰性）
+        Document idle = Html.parse("<p class='a'>1</p>");
+        Assert.assertNotNull(idle.body());
     }
 }
