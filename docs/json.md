@@ -370,7 +370,45 @@ JSONSchema.of("{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\
 
 接口入参校验推荐用 `required`（与标准 schema 工具互通），`must` 适合「不能传 null」的场景。`required` 列出的字段若还声明了 `type`，`{"v":null}` 会因类型不匹配失败——那是 `type` 的判定，不是必填判定。
 
-## 9. 其它能力
+## 9. JSON Patch（RFC 6902）
+
+对一份 JSON 文档施加一组操作（补丁），得到修改后的文档。补丁本身是一个 JSON 数组，每个元素是
+一个带 `op` 与 `path` 字段的操作对象。适用于「只更新大文档里的一小块」「把服务端下发的增量合并到
+本地缓存」等场景——不必传整份文档。
+
+支持的操作：
+
+| op | 字段 | 说明 |
+| --- | --- | --- |
+| `add` | `path` + `value` | 在 `path` 处设值；父是对象则新增/覆盖键，父是数组则按下标插入（`-` 或下标等于长度时追加到末尾） |
+| `remove` | `path` | 删除 `path` 处的成员；数组按下标删除并前移 |
+| `replace` | `path` + `value` | 替换已存在的成员（`path` 不存在则报错） |
+| `move` | `from` + `path` | 先 `remove` `from`，再 `add` 到 `path` |
+| `copy` | `from` + `path` | 深拷贝 `from` 处的值再 `add` 到 `path` |
+| `test` | `path` + `value` | 断言 `path` 处的值与 `value` 相等，不等则抛出 `JSONPatchException` |
+
+`path` 是 JSON Pointer（RFC 6901）：以 `/` 分隔的引用记号，空串表示根文档；数组下标用非负整数，
+`-` 表示数组末尾；记号里的 `~1` 解码为 `/`、`~0` 解码为 `~`（用来表达本来含 `/` 或 `~` 的键名）。
+`test` 对数字按值比较，所以 `1` 与 `1.0` 视为相等。
+
+```java
+// 文本入口：自行解析与序列化
+String patched = JSONPatch.apply(
+        "{\"title\":\"老标题\",\"tags\":[\"a\"]}",
+        "[{\"op\":\"replace\",\"path\":\"/title\",\"value\":\"新标题\"},"
+      + " {\"op\":\"add\",\"path\":\"/tags/-\",\"value\":\"b\"}]");
+// -> {"title":"新标题","tags":["a","b"]}
+
+// 对象入口：对已解析的 Map/List 原地修改，返回同一棵树的引用
+Object doc = JSON.parse("{\"a\":1}");
+JSONPatch.apply(doc, JSON.parse("[{\"op\":\"add\",\"path\":\"/b\",\"value\":2}]"));
+```
+
+> 注意：`JSONPatch.apply(Object, ...)` 会在传入的文档树上**原地修改**，调用方应使用返回值；
+> `copy` 会深拷贝源值，避免两边共享同一引用。`path` 非法、下标越界、操作缺失字段、
+> 删除/替换不存在的成员或 `test` 不成立时，抛出 `JSONPatchException`（`JSONException` 的子类）。
+
+## 10. 其它能力
 
 ```java
 // NDJSON（JSON Lines）

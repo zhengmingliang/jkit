@@ -279,7 +279,7 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 | 韧性抽包 | `http.lb` 的 Retry/熔断 | 给 notify / 任意 Callable 用 |
 | zstd | HTTP `Content-Encoding` | 已有 gzip/deflate/br |
 | Consul / K8s 发现 | `ServiceDiscovery` | 已有 Nacos + 静态 |
-| JSON Patch / Schema `required` 别名 | `jkit-core` json | `must` → 兼容标准 `required` |
+| JSON Patch / Schema `required` 别名 | `jkit-core` json | `must` → 兼容标准 `required` | `required` 别名已做（920c014）；**JSON Patch 已补（JSONPatch，RFC 6902，32 测试全过）** |
 | ULID / UUIDv7 | `common.idgenerate` | 小 |
 | 脱敏 | 与 `IdCardUtils` 同包 | 小 |
 
