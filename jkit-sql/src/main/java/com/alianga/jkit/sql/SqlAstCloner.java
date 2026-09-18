@@ -17,6 +17,7 @@ import com.alianga.jkit.sql.ast.SqlExpr;
 import com.alianga.jkit.sql.ast.SqlFlushStatement;
 import com.alianga.jkit.sql.ast.SqlFunctionExpr;
 import com.alianga.jkit.sql.ast.SqlFunctionTable;
+import com.alianga.jkit.sql.ast.SqlGuardedStatement;
 import com.alianga.jkit.sql.ast.SqlHandlerStatement;
 import com.alianga.jkit.sql.ast.SqlIdentifier;
 import com.alianga.jkit.sql.ast.SqlInExpr;
@@ -268,6 +269,9 @@ public final class SqlAstCloner {
         }
         if (node instanceof SqlTableHandlerStatement) {
             return copyTableHandler((SqlTableHandlerStatement) node);
+        }
+        if (node instanceof SqlGuardedStatement) {
+            return copyGuarded((SqlGuardedStatement) node);
         }
         throw new IllegalArgumentException("unsupported AST node: " + node.getClass().getName());
     }
@@ -935,6 +939,14 @@ public final class SqlAstCloner {
         dest.setWithArguments(src.withArguments());
         dest.setParseError(src.parseError());
         dest.setPrivileges(src.privileges());
+        return dest;
+    }
+
+    private static SqlGuardedStatement copyGuarded(SqlGuardedStatement src) {
+        SqlGuardedStatement dest = new SqlGuardedStatement();
+        copyStatementBase(src, dest);
+        dest.setCondition(src.condition());
+        dest.setBody(copyStmt(src.body()));
         return dest;
     }
 

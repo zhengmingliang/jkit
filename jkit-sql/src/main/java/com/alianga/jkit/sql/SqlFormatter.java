@@ -18,6 +18,7 @@ import com.alianga.jkit.sql.ast.SqlExpr;
 import com.alianga.jkit.sql.ast.SqlFlushStatement;
 import com.alianga.jkit.sql.ast.SqlFunctionExpr;
 import com.alianga.jkit.sql.ast.SqlFunctionTable;
+import com.alianga.jkit.sql.ast.SqlGuardedStatement;
 import com.alianga.jkit.sql.ast.SqlHandlerStatement;
 import com.alianga.jkit.sql.ast.SqlIdentifier;
 import com.alianga.jkit.sql.ast.SqlInExpr;
@@ -215,6 +216,8 @@ public final class SqlFormatter {
             writeExplain((SqlExplainStatement) node);
         } else if (node instanceof SqlShowStatement) {
             writeShow((SqlShowStatement) node);
+        } else if (node instanceof SqlGuardedStatement) {
+            writeGuarded((SqlGuardedStatement) node);
         } else if (node instanceof SqlSimpleStatement) {
             writeSimple((SqlSimpleStatement) node);
         } else if (node instanceof SqlExpr) {
@@ -1798,6 +1801,19 @@ public final class SqlFormatter {
 
     private static boolean isNamesIdent(SqlIdentifier name) {
         return name != null && "NAMES".equalsIgnoreCase(name.simpleName());
+    }
+
+    /**
+     * T-SQL 控制流守卫 {@code IF <expr> <stmt>}：condition 原文 + 内层 body 正常格式化。
+     */
+    private void writeGuarded(SqlGuardedStatement g) {
+        out.append("IF");
+        sp();
+        if (g.condition() != null) {
+            out.append(g.condition());
+        }
+        sp();
+        writeNode(g.body());
     }
 
     private void writeFrom(SqlTableSource source) {

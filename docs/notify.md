@@ -311,10 +311,122 @@ NotificationManager.sendFailover("dingtalk", msg, Arrays.asList(a, b), policy);
 - **TLS 协议钉扎**：`.sslProtocols("TLSv1.2")`。JDK 大版本会调整默认启用的协议集，握手失败时只报笼统的 `SSLHandshakeException`，显式钉扎是最快的排除手段。
 - **自签证书**：企业自建网关用 `.trustAllCerts(true)`（跳过证书与主机名校验，公网邮箱不要开）。
 - **认证**：AUTH LOGIN（用户名/密码 Base64）。`from` 缺省取 `username`。`to("a@x.com,b@x.com")` 会按逗号/分号拆成多个收件人；`cc` / `bcc` / `replyTo` 可用。Bcc 走 `RCPT TO` 但不出现在 MIME 头。
-- **MIME**：必带 `Date` 与 `Message-ID`。Subject 用 `=?UTF-8?B?...?=`，正文 UTF-8 Base64 按 76 字符折行；DATA 阶段做 RFC 5321 dot-stuffing（行首 `.` 写成 `..`）。HTML 直发 `text/html`；MARKDOWN 经 `NotifyUtils.markdownToHtml` 转成 HTML 再发。转换覆盖标题、嵌套列表（列表项里的代码块/表格）、GFM 表格、`----+----` 形式的 CLI 宽表、缩进围栏代码块（``` / ~~~）、链接与加粗等，不是完整 CommonMark。钉钉/企微/飞书/Server酱本身渲染 markdown，不会走这步转换。
+- **MIME**：必带 `Date` 与 `Message-ID`。Subject 用 `=?UTF-8?B?...?=`，正文 UTF-8 Base64 按 76 字符折行；DATA 阶段做 RFC 5321 dot-stuffing（行首 `.` 写成 `..`）。HTML 直发 `text/html`；MARKDOWN 经 `Markdown.toDocument` 转成 HTML 再发。转换覆盖标题、嵌套列表（列表项里的代码块/表格）、GFM 表格、`----+----` 形式的 CLI 宽表、缩进围栏代码块（``` / ~~~）、链接与加粗、原文 HTML `<img>`（消毒后透传）等，不是完整 CommonMark。钉钉/企微/飞书/Server酱本身渲染 markdown，不会走这步转换。
 - **附件与拆包**：`Attachment.of(file)` 只保留路径，发送/拆包时按块读，100MB 级文件不必整段进堆。`Attachment.of(name, bytes)` 仍是内存附件。MIME 按后缀和文件头自动识别。开启 `.autoSplit(true)` 后，超过 `maxAttachmentSize`（默认 10 MB）的单个附件会按 `splitChunkSize`（默认 5 MB）切成 `filename.partN` 分多封发送。大小可用 `10MB`、`512KB`、`1.5G` 或纯字节数。正文附带 SHA-256 与 `cat` 拼接说明。
 - **模板变量**：`.var("host", "web-1")` 或 `.vars(map)`。标题和正文里的 `${host}` / `${cpu.value}` 在 `send` / `sendAll` / `sendAsync` 前替换；缺键变空串。原 `Message` 不被改写。
-- **Markdown 预览**：SMTP 把 MARKDOWN 转成 HTML 时默认套响应式文档壳（viewport + 手机/桌面 `@media`）。只要片段时用 `NotifyUtils.markdownToHtml`；完整文档用 `NotifyUtils.markdownToDocument(md, true/false)`。
+- **Markdown 预览**：SMTP 把 MARKDOWN 转成 HTML 时默认套响应式文档壳（viewport + 手机/桌面 `@media`）与经典主题样式。只要片段时用 `Markdown.toHtml`；完整文档用 `Markdown.toDocument(md, true/false)`。要换配色与版式见下面的「Markdown 渲染主题」。
+
+### Markdown 渲染主题
+
+`MarkdownTheme` 提供 13 套主题（前 12 套命名与观感对齐 [doocs/md](https://github.com/doocs/md)，另加 `blog` 复刻 alianga.com / Sakura 正文），只改外观、不改 Markdown 解析结果，也不改变 Markdown 的解析子集。
+
+#### 主题一览
+
+| id | 名称 | 主色 | 标题 | 引用 | 代码块 | 表格 | 适合 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `default` | 经典 | `#0969da` 灰蓝 | 下划线 | 竖条 | 纯底色 | 网格 | 日常告警默认 |
+| `lark` | 蓝 | `#3370ff` 飞书蓝 | 竖条 | 底色填充 | 描边 | 网格 | 对外周报 |
+| `orangeheart` | 橙心 | `#e8590c` 暖橙 | 居中 | 引号装饰 | 纯底色 | 斑马纹 | 运营 / 活动推送 |
+| `rainbow` | 彩虹 | `#d6336c` 玫红 | 下划线 | 底色填充 | 描边 | 斑马纹 | 节日 / 活泼风格（分割线四色渐变） |
+| `lapis` | 兰青 | `#0c8599` 青绿 | 竖条 | 引号装饰 | 纯底色 | 极简 | 技术文档 |
+| `phycat` | 嫩黄 | `#e67700` 琥珀 | 竖条 | 底色填充 | 纯底色 | 网格 | 轻快提示（浅黄底 + 大圆角） |
+| `blue` | 碧蓝 | `#0f4c81` 深蓝 | 下划线 | 竖条 | **Mac 窗口** | 网格 | 含代码的技术周报 |
+| `vue` | Vue 绿 | `#35495e` / 强调 `#42b883` | 竖条 | 底色填充 | **Mac 窗口** | 网格 | 前端团队 |
+| `green` | 绿意 | `#2f9e44` 清新绿 | 下划线 | 竖条 | 纯底色 | 斑马纹 | 数据报表 |
+| `wheat` | 麦色 | `#a16207` 麦黄 | 居中 | 底色填充 | 描边 | 极简 | 长文阅读（衬线字体） |
+| `ayer` | 墨黑 | `#61afef`（深底 `#1f2430`） | 竖条 | 竖条 | **Mac 窗口** | 网格 | 大屏 / 夜间展示 |
+| `purple` | 姹紫 | `#7048e8` 紫 | 居中 | 引号装饰 | 描边 | 斑马纹 | 品牌色推送 |
+| `blog` | 博客 | `#e67474` 珊瑚红 | ¶/# 装饰 | 引号装饰 | 深色 One Dark | 网格 | 复刻 alianga.com |
+
+主题不是整段 CSS：每套主题只声明一组**令牌**（主色 / 强调色 / 正文色 / 底色 / 面板色 / 边框色 / 字体 / 字号 / 行高 / 圆角 / 标题样式 / 引用样式 / 代码块样式 / 表格样式 / 代码高亮配色），由 `MarkdownStyle` 统一生成 `<head><style>` 样式表与行内 `style` 映射。因此两种注入方式观感一致，加主题只需加令牌。
+
+#### 快速开始
+
+```java
+// 完整文档：橙心主题 + 代码高亮（默认开启）
+String html = Markdown.toDocument(md,
+        MarkdownRenderOptions.create().theme(MarkdownTheme.ORANGE_HEART));
+
+// 只要片段，且内联样式（兼容 Outlook / 微信）
+String fragment = Markdown.toHtml(md, MarkdownRenderOptions.create()
+        .theme(MarkdownTheme.LARK)
+        .inlineStyle(true));
+
+// SMTP 渠道固定用某个主题
+NotificationManager.register(new SmtpChannel()
+        .markdownTheme(MarkdownTheme.LAPIS)
+        .inlineMarkdownStyle(true));
+```
+
+#### 渲染选项 `MarkdownRenderOptions`
+
+| 方法 | 默认 | 说明 |
+| --- | --- | --- |
+| `.theme(MarkdownTheme)` | `DEFAULT` | 主题；`null` 视为经典 |
+| `.inlineStyle(boolean)` | `false` | 把样式写进每个标签的 `style` 属性，见下方「两种注入方式」 |
+| `.highlight(boolean)` | `true` | 围栏代码块语法高亮 |
+| `.responsive(boolean)` | `true` | 输出 `viewport` 与移动端 / 桌面端 `@media` |
+| `.imageBaseDir(String\|File)` | 未设置 | 本地图片基准目录，设置后开启相对路径图片内嵌 |
+| `.inlineImage(boolean)` | `true` | 关闭后即使配了基准目录也不内嵌图片 |
+| `.maxInlineImageBytes(long)` | `2MB` | 单张图片内嵌上限，超出保留原 `src`；非正数表示不限 |
+
+全部方法返回当前实例，可链式调用。`MarkdownRenderOptions.create()` 每次返回新实例，配置互不影响。
+
+#### 两种样式注入方式
+
+| | `<style>` 模式（默认） | 内联模式 `inlineStyle(true)` |
+| --- | --- | --- |
+| 产出 | 样式集中在 `<head><style>` | 样式分散在各标签的 `style` 属性 |
+| 适用 | 浏览器、QQ 邮箱、手机邮件客户端、导出 HTML 文件 | Outlook 桌面版、部分企业邮箱、粘贴到微信公众号 |
+| 伪元素装饰 | 生效（Mac 窗口圆点、引用引号、渐变分割线） | 不生效 |
+| 表格斑马纹 | 生效 | 退化为表头统一底色 |
+| 体积 | 小 | 大约翻倍 |
+
+判据很简单：客户端会剥掉 `<head><style>` 就用内联，否则用默认。两者来自同一套令牌，不会互相打架——`Markdown.toDocument` 会同时输出样式表，内联样式只是额外兜底。
+
+#### 代码高亮
+
+默认开启，自研零依赖（不引 highlight.js），支持 java / js / ts / go / python / sql / shell / yaml / properties / json / xml / html；不认识的语言退化为纯转义，不会报错。`.highlight(false)` 可关。
+
+高亮输出的是内联 `<span style="color:...">`，两种注入模式下都可见。着色在 HTML 转义**之前**完成，所以代码块里写 `<script>`、`"` 之类的字符既不会变成真标签，也不会破坏字符串识别。
+
+#### 本地图片内嵌（相对路径 → Base64）
+
+邮件正文是独立文档，`![](./assets/cover.png)` 这种相对路径到了收件端必然裂图。设置基准目录后，本地图片会被读成 `data:image/png;base64,...` 写进 `src`，正文即可脱离原文件独立展示：
+
+```java
+String html = Markdown.toDocument(md, MarkdownRenderOptions.create()
+        .theme(MarkdownTheme.BLUE)
+        .imageBaseDir("/opt/docs/articles"));   // Markdown 里的 ./assets/x.png 按它解析
+
+// SMTP 渠道同理
+new SmtpChannel().markdownImageBaseDir("/opt/docs/articles");
+```
+
+- 只处理**本地路径**：`http(s)://`、`//`、`data:`、`cid:`、`mailto:` 原样保留，图床图片不受影响。
+- 支持 `./`、`../`、绝对路径与 `file:` 前缀，路径里的 `%XX` 会做 URL 解码，`?query` / `#frag` 会被剥掉。
+- **失败不抛异常**：文件不存在、不是图片（按后缀与文件头识别 MIME）、超过 `maxInlineImageBytes` 时保留原 `src`——配图不该拖垮整条告警。
+- 体积要算账：Base64 会膨胀约 1/3，3 张 1.4MB 的 PNG 内嵌后单封邮件约 5.6MB。图多或图大时，优先走图床 URL，或调低上限让超限图片退回原路径。
+
+#### 正文容器与响应式
+
+`Markdown.toDocument` 生成的文档壳是 `<body><div class="jkit-md">…正文…</div></body>`，正文栏的宽度、内边距、字体、颜色、行高全部内联写在这层 div 上。
+
+**排版不能挂在 `<body>` 上**：Gmail、QQ 邮箱等客户端会剥掉 `<html>/<head>/<body>`，只把正文内容塞进它们自己的容器，写在 `body` 上的 `max-width` / `padding` 会连同标签一起消失（表现为正文铺满读信区、而带内联 `style` 的图片仍有留白）。样式表里 `body` 只铺满视口底色（不限宽）；栏宽、内边距、`margin:0 auto` 居中全部挂在 `div.jkit-md` 上。浏览器打开完整文档时正文栏落在页面中间；邮件客户端剥掉 `body` 后这层 div 仍在。
+
+`responsive(true)`（默认）除 `viewport` 外还会输出两段媒体查询：桌面端（`min-width:768px`）放宽代码块左右内边距与行高，移动端（`max-width:480px`）收窄正文内边距、下调标题与表格字号、给表格加惯性滚动。
+
+三个实现细节，写自定义主题时要注意：
+
+- **媒体查询里的规则带 `!important`**：内联模式下行内 `style` 属性的优先级高于样式表，不写 `!important` 的媒体查询会被内联样式完全吃掉，移动端适配形同虚设。容器的移动端内边距也靠这条覆盖内联值。
+- **移动端只改代码块的左右内边距**：Mac 窗口风格靠 36px 上内边距给顶部圆点留位，简写 `padding` 会把留白一起覆盖掉，圆点就会压在首行代码上。同理内联样式里的 `pre` 也必须自带完整 `padding`，不能只写 `12px 14px`。
+- **容器宽度不要在媒体查询里硬编码**：正文栏宽度取自主题自身的 `maxWidth` 令牌（默认 820），硬编码会盖掉个别主题的设定。
+
+#### 其他要点
+
+- **2.0.1 入口已过期**：`NotifyUtils.markdownToHtml(md)` / `markdownToDocument(md, true/false)` / `wrapHtmlDocument(fragment, true/false)` 仍可用，请改用 `Markdown.toHtml` / `toDocument` / `wrapDocument`。文档壳已改用经典主题生成样式表（五级标题字号、行高 1.75、表格与引用样式比旧版更完整）。
+- **主题解析容错**：`MarkdownTheme.of("lark")` 忽略大小写与 `-` / `_`（也认 `ORANGE_HEART` 这样的常量名），无法识别时回退 `default`，配置写错不会让告警发不出去。
+- **零依赖**：主题、高亮、内联、图片内嵌全部自研，不引任何第三方库。
 
 ### 服务商实测速率与坑（来自本仓库历史项目的实测记录）
 

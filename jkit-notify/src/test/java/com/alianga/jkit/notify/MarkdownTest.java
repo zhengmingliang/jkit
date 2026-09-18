@@ -23,8 +23,8 @@ public class MarkdownTest {
      */
     @Test
     public void emptyAndNull() {
-        assertEquals("", NotifyUtils.markdownToHtml(null));
-        assertEquals("", NotifyUtils.markdownToHtml(""));
+        assertEquals("", Markdown.toHtml(null));
+        assertEquals("", Markdown.toHtml(""));
     }
 
     /**
@@ -32,7 +32,7 @@ public class MarkdownTest {
      */
     @Test
     public void headingAndUnorderedList() {
-        String html = NotifyUtils.markdownToHtml("## 本周完成\n- 模块 A");
+        String html = Markdown.toHtml("## 本周完成\n- 模块 A");
         assertEquals("<h2>本周完成</h2>\n<ul><li>模块 A</li></ul>", html);
     }
 
@@ -41,7 +41,7 @@ public class MarkdownTest {
      */
     @Test
     public void paragraphBreaksAndEmphasis() {
-        String html = NotifyUtils.markdownToHtml("CPU **95%**\n内存 *80%*\n命令 `ls`");
+        String html = Markdown.toHtml("CPU **95%**\n内存 *80%*\n命令 `ls`");
         assertEquals("<p>CPU <strong>95%</strong><br>内存 <em>80%</em><br>命令 <code>ls</code></p>",
                 html);
     }
@@ -51,7 +51,7 @@ public class MarkdownTest {
      */
     @Test
     public void orderedListStrikeAndLink() {
-        String html = NotifyUtils.markdownToHtml(
+        String html = Markdown.toHtml(
                 "1. ~~旧~~\n2. [文档](https://example.com)");
         assertEquals("<ol><li><del>旧</del></li><li><a href=\"https://example.com\">文档</a></li></ol>",
                 html);
@@ -62,7 +62,7 @@ public class MarkdownTest {
      */
     @Test
     public void fencedCodeEscapesAndSkipsMarkdown() {
-        String html = NotifyUtils.markdownToHtml("```java\n<a> **bold**\n```");
+        String html = Markdown.toHtml("```java\n<a> **bold**\n```");
         assertEquals("<pre><code class=\"language-java\">&lt;a&gt; **bold**</code></pre>", html);
     }
 
@@ -71,7 +71,7 @@ public class MarkdownTest {
      */
     @Test
     public void quoteHrImage() {
-        String html = NotifyUtils.markdownToHtml("> 注意\n\n---\n\n![logo](https://example.com/a.png)");
+        String html = Markdown.toHtml("> 注意\n\n---\n\n![logo](https://example.com/a.png)");
         assertTrue(html, html.contains("<blockquote><p>注意</p></blockquote>"));
         assertTrue(html, html.contains("<hr>"));
         assertTrue(html, html.contains("<img src=\"https://example.com/a.png\" alt=\"logo\">"));
@@ -82,7 +82,7 @@ public class MarkdownTest {
      */
     @Test
     public void gfmTable() {
-        String html = NotifyUtils.markdownToHtml("| 项 | 值 |\n| --- | --- |\n| CPU | 95% |");
+        String html = Markdown.toHtml("| 项 | 值 |\n| --- | --- |\n| CPU | 95% |");
         assertEquals("<table><thead><tr><th>项</th><th>值</th></tr></thead>"
                 + "<tbody><tr><td>CPU</td><td>95%</td></tr></tbody></table>", html);
     }
@@ -92,8 +92,44 @@ public class MarkdownTest {
      */
     @Test
     public void htmlSpecialCharsEscaped() {
-        String html = NotifyUtils.markdownToHtml("a <b> & \"c\"");
+        String html = Markdown.toHtml("a <b> & \"c\"");
         assertEquals("<p>a &lt;b&gt; &amp; &quot;c&quot;</p>", html);
+    }
+
+    /**
+     * 原文里的 HTML {@code <img>} 消毒后透传，公众号稿常用 {@code width="100%"}。
+     */
+    @Test
+    public void rawHtmlImgIsKept() {
+        String html = Markdown.toHtml(
+                "<img src=\"https://cdn.example.com/a.png\" width=\"100%\" />");
+        assertTrue(html.contains("<img src=\"https://cdn.example.com/a.png\" width=\"100%\">"));
+        assertFalse(html.contains("&lt;img"));
+    }
+
+    /**
+     * {@code onerror} 等事件属性丢掉；{@code javascript:} 的 src 降为 {@code #}。
+     */
+    @Test
+    public void rawHtmlImgDropsUnsafeBits() {
+        String html = Markdown.toHtml("<img src=\"x.png\" onerror=\"alert(1)\">");
+        assertTrue(html.contains("<img src=\"x.png\">"));
+        assertFalse(html.contains("onerror"));
+        assertFalse(html.contains("alert"));
+        String js = Markdown.toHtml("<img src=\"javascript:alert(1)\">");
+        assertTrue(js.contains("<img src=\"#\">"));
+    }
+
+    /**
+     * 行内代码里的 {@code <img>} 仍转义；{@code <imgx>} / {@code <script>} 不当图片。
+     */
+    @Test
+    public void rawHtmlImgDoesNotOpenXssHole() {
+        String code = Markdown.toHtml("用 `<img src=\"a.png\">` 表示图");
+        assertTrue(code.contains("<code>&lt;img src=&quot;a.png&quot;&gt;</code>"));
+        String html = Markdown.toHtml("<imgx src=\"a.png\"><script>x</script>");
+        assertTrue(html.contains("&lt;imgx"));
+        assertTrue(html.contains("&lt;script"));
     }
 
     /**
@@ -101,7 +137,7 @@ public class MarkdownTest {
      */
     @Test
     public void javascriptUrlNeutralized() {
-        String html = NotifyUtils.markdownToHtml("[x](javascript:alert)");
+        String html = Markdown.toHtml("[x](javascript:alert)");
         assertEquals("<p><a href=\"#\">x</a></p>", html);
     }
 
@@ -110,7 +146,7 @@ public class MarkdownTest {
      */
     @Test
     public void nestedList() {
-        String html = NotifyUtils.markdownToHtml("- a\n  - b\n- c");
+        String html = Markdown.toHtml("- a\n  - b\n- c");
         assertEquals("<ul><li>a<ul><li>b</li></ul></li><li>c</li></ul>", html);
     }
 
@@ -119,7 +155,7 @@ public class MarkdownTest {
      */
     @Test
     public void inlineCodeProtectsMarkup() {
-        String html = NotifyUtils.markdownToHtml("用 `**x**` 表示加粗");
+        String html = Markdown.toHtml("用 `**x**` 表示加粗");
         assertEquals("<p>用 <code>**x**</code> 表示加粗</p>", html);
         assertFalse(html.contains("<strong>"));
     }
@@ -129,7 +165,7 @@ public class MarkdownTest {
      */
     @Test
     public void indentedFenceInsideList() {
-        String html = NotifyUtils.markdownToHtml(
+        String html = Markdown.toHtml(
                 "   - 示例：\n     ```sql\n     SELECT 1;\n     ```\n");
         assertTrue(html, html.contains("<pre><code class=\"language-sql\">"));
         assertTrue(html, html.contains("SELECT 1;"));
@@ -142,7 +178,7 @@ public class MarkdownTest {
      */
     @Test
     public void gfmTableInsideList() {
-        String html = NotifyUtils.markdownToHtml(
+        String html = Markdown.toHtml(
                 "- 输出：\n  | A | B |\n  | --- | --- |\n  | 1 | 2 |\n");
         assertTrue(html, html.contains("<table>"));
         assertTrue(html, html.contains("<th>A</th>"));
@@ -155,7 +191,7 @@ public class MarkdownTest {
      */
     @Test
     public void asciiPlusSeparatedTable() {
-        String html = NotifyUtils.markdownToHtml(
+        String html = Markdown.toHtml(
                 "TABLE_VC    |TABLE_SCHEMA\n------------+------------\nvc1         |test\n");
         assertTrue(html, html.contains("<table>"));
         assertTrue(html, html.contains("<th>TABLE_VC</th>"));
@@ -169,7 +205,7 @@ public class MarkdownTest {
      */
     @Test
     public void bareFenceKeepsAsciiTable() {
-        String html = NotifyUtils.markdownToHtml(
+        String html = Markdown.toHtml(
                 "```\nHOST | SIZE\n-----+-----\n10.0.0.1 | 116\n```");
         assertTrue(html, html.startsWith("<pre><code>"));
         assertTrue(html, html.contains("HOST | SIZE"));
@@ -182,7 +218,7 @@ public class MarkdownTest {
      */
     @Test
     public void tildeFence() {
-        String html = NotifyUtils.markdownToHtml("~~~\ncode\n~~~");
+        String html = Markdown.toHtml("~~~\ncode\n~~~");
         assertEquals("<pre><code>code</code></pre>", html);
     }
 
@@ -192,7 +228,7 @@ public class MarkdownTest {
     @Test
     public void gbaseArticleTablesAndFences() throws Exception {
         String markdown = readResource("/gbase-table.md");
-        String html = NotifyUtils.markdownToHtml(markdown);
+        String html = Markdown.toHtml(markdown);
 
         assertFalse("sql fence leaked: " + snippet(html), html.contains("```sql"));
         assertFalse("bash fence leaked", html.contains("```bash"));

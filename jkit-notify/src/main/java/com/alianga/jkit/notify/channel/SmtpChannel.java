@@ -4,6 +4,9 @@ import com.alianga.jkit.log.Log;
 import com.alianga.jkit.notify.Attachment;
 import com.alianga.jkit.notify.ChannelConfig;
 import com.alianga.jkit.notify.FailureType;
+import com.alianga.jkit.notify.Markdown;
+import com.alianga.jkit.notify.MarkdownRenderOptions;
+import com.alianga.jkit.notify.MarkdownTheme;
 import com.alianga.jkit.notify.Message;
 import com.alianga.jkit.notify.MessageType;
 import com.alianga.jkit.notify.NotificationChannel;
@@ -64,7 +67,7 @@ import java.util.UUID;
  * <li>{@link ChannelConfig#autoSplit(boolean)}：超大附件按块拆成多封发送。</li>
  * </ul>
  *
- * <p>消息：TEXT 按纯文本发送；HTML 直发；MARKDOWN 经 {@link NotifyUtils#markdownToHtml(String)}
+ * <p>消息：TEXT 按纯文本发送；HTML 直发；MARKDOWN 经 {@link Markdown#toDocument(String, MarkdownRenderOptions)}
  * 转成 HTML 后按 {@code text/html} 发送。标题作为邮件主题。附件走 {@link Message#attachment}。
  * MIME 含 {@code Date} 与 {@code Message-ID}；DATA 阶段做 RFC 5321 dot-stuffing。
  *
@@ -91,9 +94,73 @@ public class SmtpChannel implements NotificationChannel {
             "trustAllCerts", "timeoutMs", "autoSplit", "maxAttachmentSize", "splitChunkSize"
     };
 
+    private MarkdownTheme markdownTheme = MarkdownTheme.DEFAULT;
+    private boolean inlineMarkdownStyle;
+    private String markdownImageBaseDir;
+
     @Override
     public String id() {
         return ID;
+    }
+
+    /**
+     * MARKDOWN 正文转 HTML 时使用的主题（默认 {@link MarkdownTheme#DEFAULT}）。
+     *
+     * @return 当前主题
+     * @since 2.0.2
+     */
+    public MarkdownTheme markdownTheme() {
+        return markdownTheme;
+    }
+
+    /**
+     * 设置 MARKDOWN 正文的渲染主题。
+     *
+     * @param markdownTheme 主题，{@code null} 视为 {@link MarkdownTheme#DEFAULT}
+     * @return 当前实例，便于链式调用
+     * @since 2.0.2
+     */
+    public SmtpChannel markdownTheme(MarkdownTheme markdownTheme) {
+        this.markdownTheme = markdownTheme == null ? MarkdownTheme.DEFAULT : markdownTheme;
+        return this;
+    }
+
+    /**
+     * 是否把主题样式内联到每个标签（兼容 Outlook 等剥离 {@code <style>} 的邮件客户端）。
+     *
+     * @param inlineMarkdownStyle 内联返回 {@code true}
+     * @return 当前实例，便于链式调用
+     * @since 2.0.2
+     */
+    public SmtpChannel inlineMarkdownStyle(boolean inlineMarkdownStyle) {
+        this.inlineMarkdownStyle = inlineMarkdownStyle;
+        return this;
+    }
+
+    /**
+     * MARKDOWN 正文里本地图片的基准目录。
+     *
+     * <p>设置了之后，正文里 {@code ![](./assets/a.png)} 这类相对路径图片会内嵌成 Base64 data URI
+     * 随邮件一起发出去，收件方不依赖原文件与图床也能看到图。不设置则保留原 {@code src}。
+     *
+     * @return 基准目录；未设置时为 {@code null}
+     * @since 2.0.2
+     */
+    public String markdownImageBaseDir() {
+        return markdownImageBaseDir;
+    }
+
+    /**
+     * 设置 MARKDOWN 正文里本地图片的基准目录，开启图片内嵌。
+     *
+     * @param markdownImageBaseDir 基准目录，{@code null} / 空串表示关闭内嵌
+     * @return 当前实例，便于链式调用
+     * @since 2.0.2
+     */
+    public SmtpChannel markdownImageBaseDir(String markdownImageBaseDir) {
+        this.markdownImageBaseDir = markdownImageBaseDir == null
+                || markdownImageBaseDir.trim().isEmpty() ? null : markdownImageBaseDir.trim();
+        return this;
     }
 
     @Override
@@ -677,11 +744,15 @@ public class SmtpChannel implements NotificationChannel {
         return "localhost";
     }
 
-    private static String bodyOf(Message message) {
+    private String bodyOf(Message message) {
         if (message.type() != MessageType.MARKDOWN) {
             return message.content();
         }
-        return NotifyUtils.markdownToDocument(message.content(), true);
+        MarkdownRenderOptions options = MarkdownRenderOptions.create()
+                .theme(markdownTheme)
+                .inlineStyle(inlineMarkdownStyle)
+                .imageBaseDir(markdownImageBaseDir);
+        return Markdown.toDocument(message.content(), options);
     }
 
     /**
