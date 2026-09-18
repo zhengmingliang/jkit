@@ -97,6 +97,42 @@ public class MarkdownTest {
     }
 
     /**
+     * 原文里的 HTML {@code <img>} 消毒后透传，公众号稿常用 {@code width="100%"}。
+     */
+    @Test
+    public void rawHtmlImgIsKept() {
+        String html = Markdown.toHtml(
+                "<img src=\"https://cdn.example.com/a.png\" width=\"100%\" />");
+        assertTrue(html.contains("<img src=\"https://cdn.example.com/a.png\" width=\"100%\">"));
+        assertFalse(html.contains("&lt;img"));
+    }
+
+    /**
+     * {@code onerror} 等事件属性丢掉；{@code javascript:} 的 src 降为 {@code #}。
+     */
+    @Test
+    public void rawHtmlImgDropsUnsafeBits() {
+        String html = Markdown.toHtml("<img src=\"x.png\" onerror=\"alert(1)\">");
+        assertTrue(html.contains("<img src=\"x.png\">"));
+        assertFalse(html.contains("onerror"));
+        assertFalse(html.contains("alert"));
+        String js = Markdown.toHtml("<img src=\"javascript:alert(1)\">");
+        assertTrue(js.contains("<img src=\"#\">"));
+    }
+
+    /**
+     * 行内代码里的 {@code <img>} 仍转义；{@code <imgx>} / {@code <script>} 不当图片。
+     */
+    @Test
+    public void rawHtmlImgDoesNotOpenXssHole() {
+        String code = Markdown.toHtml("用 `<img src=\"a.png\">` 表示图");
+        assertTrue(code.contains("<code>&lt;img src=&quot;a.png&quot;&gt;</code>"));
+        String html = Markdown.toHtml("<imgx src=\"a.png\"><script>x</script>");
+        assertTrue(html.contains("&lt;imgx"));
+        assertTrue(html.contains("&lt;script"));
+    }
+
+    /**
      * javascript: 链接降为 #。
      */
     @Test

@@ -34,7 +34,7 @@ public class MarkdownThemeTest {
             + "| a | 1 |\n";
 
     /**
-     * 12 个主题都能渲染，且样式表互不相同——防止配色复制粘贴后忘记改。
+     * 每个主题都能渲染，且样式表互不相同——防止配色复制粘贴后忘记改。
      */
     @Test
     public void everyThemeRendersDistinctCss() {
@@ -48,9 +48,24 @@ public class MarkdownThemeTest {
             cssSet.add(css);
             primarySet.add(MarkdownStyle.of(theme).primary());
         }
-        assertEquals("主题数量", 12, MarkdownTheme.values().length);
-        assertEquals("样式表应各不相同", 12, cssSet.size());
-        assertEquals("主色应各不相同", 12, primarySet.size());
+        assertEquals("主题数量", 13, MarkdownTheme.values().length);
+        assertEquals("样式表应各不相同", 13, cssSet.size());
+        assertEquals("主色应各不相同", 13, primarySet.size());
+    }
+
+    /**
+     * 博客主题对齐 alianga.com（Sakura）正文：珊瑚红链接、暖黄行内码、深色代码块、¶ 装饰。
+     */
+    @Test
+    public void blogThemeCopiesSakuraTokens() {
+        assertEquals(MarkdownTheme.BLOG, MarkdownTheme.of("blog"));
+        String css = MarkdownTheme.BLOG.css();
+        assertTrue(css.contains("#e67474"));
+        assertTrue(css.contains("background:#fefac7"));
+        assertTrue(css.contains("background:#21252b"));
+        assertTrue(css.contains("content:\"\\00B6\""));
+        assertTrue(css.contains("border:1px dashed #e4e4e4"));
+        assertTrue(css.contains("#fe9600"));
     }
 
     /**

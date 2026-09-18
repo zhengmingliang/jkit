@@ -151,6 +151,23 @@ final class MarkdownStyle {
     private String codeString = "#0a3069";
     private String codeComment = "#6e7781";
     private String codeNumber = "#0550ae";
+    /**
+     * 代码块（{@code <pre>}）底色，{@code null} 时回退 {@link #panel}。
+     * 与行内码底色解耦：博客等主题可让代码块走深色、行内码走暖黄。
+     */
+    private String codeBlockBg;
+    /**
+     * 代码块默认文字色（未被高亮色覆盖的部分），{@code null} 时回退 {@link #codeText}。
+     */
+    private String codeBlockText;
+    /**
+     * 行内 {@code <code>} 底色，{@code null} 时回退 {@link #panel}。
+     */
+    private String inlineCodeBg;
+    /**
+     * 行内 {@code <code>} 文字色，{@code null} 时回退 {@link #codeText}。
+     */
+    private String inlineCodeText;
     private String extraCss = "";
 
     private MarkdownStyle() {
@@ -200,6 +217,8 @@ final class MarkdownStyle {
                 return ayer();
             case PURPLE:
                 return purple();
+            case BLOG:
+                return blog();
             default:
                 return base();
         }
@@ -400,6 +419,59 @@ final class MarkdownStyle {
     }
 
     /**
+     * 博客主题：复刻 alianga.com（Halo · LIlGG_Sakura）正文区观感。
+     *
+     * <p>对照线上 {@code style.min.css}：链接珊瑚红 {@code #e67474}、导航强调橙 {@code #fe9600}、
+     * 行内码暖黄 {@code #fefac7}、代码块 {@code #21252b} + One Dark 语法色、标题 ¶/#/▌/♯
+     * 装饰、列表虚线圆角框、分割线居中省略号。行内码与代码块底色解耦。
+     */
+    private static MarkdownStyle blog() {
+        MarkdownStyle s = base();
+        s.primary = "#e67474";
+        s.accent = "#ff6d6d";
+        s.text = "#797979";
+        s.muted = "#737373";
+        s.background = "#ffffff";
+        s.panel = "#f5f5f5";
+        s.border = "#e4e4e4";
+        s.font = SANS;
+        s.fontSize = 16;
+        s.lineHeight = 1.875;
+        s.maxWidth = 820;
+        s.radius = 10;
+        s.title = Title.PLAIN;
+        s.quote = Quote.QUOTE;
+        s.code = Code.FLAT;
+        s.table = Table.GRID;
+        s.inlineCodeBg = "#fefac7";
+        s.inlineCodeText = "#e67474";
+        s.codeBlockBg = "#21252b";
+        s.codeBlockText = "#abb2bf";
+        s.codeText = "#abb2bf";
+        s.codeKeyword = "#c678dd";
+        s.codeString = "#98c379";
+        s.codeComment = "#888f96";
+        s.codeNumber = "#d19a66";
+        s.extraCss = "h1,h2{color:#404040}"
+                + "h2::after{content:\"\\00B6\";color:#ff6d6d;font-weight:400;margin-left:6px}"
+                + "h3{color:#737373;padding:0 0 8px 16px;border-bottom:1px dashed #ddd;"
+                + "position:relative}"
+                + "h3::after{content:\"#\";position:absolute;left:0;top:.15em;color:#ff6d6d;"
+                + "font-weight:400}"
+                + "h4,h5{color:#737373;padding-left:16px;position:relative}"
+                + "h4::after{content:\"\\258C\";position:absolute;left:0;color:#ff6d6d}"
+                + "h5::after{content:\"\\266F\";position:absolute;left:0;color:#ff6d6d}"
+                + "ul,ol{border:1px dashed #e4e4e4;padding:15px 10px 15px 2.4em;color:#616161;"
+                + "border-radius:10px;margin-left:0}"
+                + "ul ul,ol ol,ul ol,ol ul{border:0;padding:0 0 0 1.5em;margin:0}"
+                + "hr{border:0;text-align:center;background:none;height:auto;margin:2.4em 0}"
+                + "hr::before{content:\"...\\00A0\\00A0\\00A0\";letter-spacing:.6em;color:#ccc}"
+                + "a:hover{color:#fe9600}"
+                + "blockquote::before{color:orange;opacity:.55}";
+        return s;
+    }
+
+    /**
      * 主色（标题、链接）。
      *
      * @return 十六进制颜色
@@ -505,6 +577,42 @@ final class MarkdownStyle {
      */
     String codeNumber() {
         return codeNumber;
+    }
+
+    /**
+     * 代码块底色（回退 {@link #panel}）。
+     *
+     * @return 十六进制颜色
+     */
+    String codeBlockBg() {
+        return codeBlockBg != null ? codeBlockBg : panel;
+    }
+
+    /**
+     * 代码块默认文字色（回退 {@link #codeText}）。
+     *
+     * @return 十六进制颜色
+     */
+    String codeBlockText() {
+        return codeBlockText != null ? codeBlockText : codeText;
+    }
+
+    /**
+     * 行内代码底色（回退 {@link #panel}）。
+     *
+     * @return 十六进制颜色
+     */
+    String inlineCodeBg() {
+        return inlineCodeBg != null ? inlineCodeBg : panel;
+    }
+
+    /**
+     * 行内代码文字色（回退 {@link #codeText}）。
+     *
+     * @return 十六进制颜色
+     */
+    String inlineCodeText() {
+        return inlineCodeText != null ? inlineCodeText : codeText;
     }
 
     /**
@@ -658,13 +766,13 @@ final class MarkdownStyle {
     }
 
     private void appendCodeCss(StringBuilder css) {
-        css.append("pre{margin:1em 0;padding:12px 14px;background:").append(panel)
-                .append(";color:").append(codeText)
+        css.append("pre{margin:1em 0;padding:12px 14px;background:").append(codeBlockBg())
+                .append(";color:").append(codeBlockText())
                 .append(";font-family:").append(mono)
                 .append(";font-size:13px;line-height:1.6;white-space:pre;overflow:auto;")
                 .append("box-sizing:border-box;border-radius:").append(radius).append("px}");
-        css.append("code{font-family:").append(mono).append(";background:").append(panel)
-                .append(";color:").append(codeText)
+        css.append("code{font-family:").append(mono).append(";background:").append(inlineCodeBg())
+                .append(";color:").append(inlineCodeText())
                 .append(";padding:.15em .4em;border-radius:4px;font-size:.9em}");
         css.append("pre code{background:none;padding:0;font-size:100%;color:inherit}");
         switch (code) {
@@ -733,8 +841,8 @@ final class MarkdownStyle {
         styles.put("li", "margin:.35em 0");
         styles.put("blockquote", quoteInline());
         styles.put("pre", preInline());
-        styles.put("code", "font-family:" + mono + ";background:" + panel + ";color:" + codeText
-                + ";padding:.15em .4em;border-radius:4px;font-size:.9em");
+        styles.put("code", "font-family:" + mono + ";background:" + inlineCodeBg() + ";color:"
+                + inlineCodeText() + ";padding:.15em .4em;border-radius:4px;font-size:.9em");
         styles.put("table", "margin:1em 0;border-collapse:collapse;max-width:100%");
         styles.put("th", "padding:8px 12px;text-align:left;font-weight:600;background:" + panel
                 + ";border:1px solid " + border);
@@ -779,7 +887,8 @@ final class MarkdownStyle {
         // 所以这里必须直接给出完整 padding，否则圆点会压在首行代码上
         String padding = code == Code.MAC ? "36px 14px 12px" : "12px 14px";
         StringBuilder style = new StringBuilder("margin:1em 0;padding:").append(padding)
-                .append(";background:").append(panel).append(";color:").append(codeText)
+                .append(";background:").append(codeBlockBg()).append(";color:")
+                .append(codeBlockText())
                 .append(";font-family:").append(mono)
                 .append(";font-size:13px;line-height:1.6;white-space:pre;overflow:auto;")
                 .append("border-radius:").append(radius).append("px");

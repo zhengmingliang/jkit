@@ -8,7 +8,8 @@ import java.util.Locale;
  * <p>覆盖告警、周报、对外推送等常见排版口味，命名与观感对齐 doocs/md：
  * {@link #DEFAULT} 经典、{@link #LARK} 蓝、{@link #ORANGE_HEART} 橙心、{@link #RAINBOW} 彩虹、
  * {@link #LAPIS} 兰青、{@link #PHYCAT} 嫩黄、{@link #BLUE} 碧蓝、{@link #VUE} Vue 绿、
- * {@link #GREEN} 绿意、{@link #WHEAT} 麦色、{@link #AYER} 墨黑、{@link #PURPLE} 姹紫。
+ * {@link #GREEN} 绿意、{@link #WHEAT} 麦色、{@link #AYER} 墨黑、{@link #PURPLE} 姹紫、
+ * {@link #BLOG} 博客。
  *
  * <p>主题只影响外观，不改变 Markdown 解析结果。用法：
  * <pre>{@code
@@ -81,7 +82,13 @@ public enum MarkdownTheme {
     /**
      * 姹紫：紫色主色，标题居中。
      */
-    PURPLE("purple", "姹紫");
+    PURPLE("purple", "姹紫"),
+
+    /**
+     * 博客：复刻 alianga.com（Halo · LIlGG_Sakura）的观感——珊瑚红强调、暖黄行内码、
+     * 深色 One Dark 代码块、橙色引用引号、浅灰网格表格。
+     */
+    BLOG("blog", "博客");
 
     private final String id;
     private final String label;

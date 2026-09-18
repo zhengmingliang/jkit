@@ -1,8 +1,10 @@
 package com.alianga.jkit.notify;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 /**
  * 面向通知正文的 Markdown → HTML 转换（零依赖）。
@@ -10,9 +12,11 @@ import java.util.Locale;
  * <p>覆盖告警 / 周报 / 技术文档常用子集：ATX 标题、段落（单换行变 {@code <br>}）、
  * 引用、有序/无序列表（列表项内可嵌套代码块、表格、子列表）、GFM 表格、
  * {@code |...|+...+} 形式的 CLI 宽表、围栏代码块（{@code ```}/{@code ~~~}，允许缩进）、
- * 分割线、链接、图片、加粗 / 斜体 / 删除线 / 行内代码。不是完整 CommonMark。
+ * 分割线、链接、图片（含原文里的 HTML {@code <img>}）、加粗 / 斜体 / 删除线 / 行内代码。
+ * 不是完整 CommonMark。
  *
- * <p>文本节点做 HTML 转义；{@code javascript:}/{@code data:} 链接降为 {@code #}。
+ * <p>文本节点做 HTML 转义；原文 {@code <img>} 消毒后透传（只留 src/alt/width 等安全属性，
+ * {@code onerror} 等事件丢掉）；{@code javascript:} 链接降为 {@code #}。
  *
  * <p>公开入口：{@link #toHtml(String)} 只要片段；{@link #toHtml(String, MarkdownRenderOptions)}
  * 按主题渲染（高亮 / 内联样式 / 图片内嵌）；{@link #toDocument(String, MarkdownRenderOptions)}
@@ -443,6 +447,7 @@ public final class Markdown {
 
     private static String renderInline(String text) {
         List<String> codes = new ArrayList<String>();
+        List<String> images = new ArrayList<String>();
         StringBuilder stripped = new StringBuilder(text.length());
         int i = 0;
         while (i < text.length()) {
@@ -455,6 +460,21 @@ public final class Markdown {
                     continue;
                 }
             }
+            int imgEnd = htmlImgEnd(text, i);
+            if (imgEnd > i) {
+                String sanitized = sanitizeImg(text.substring(i, imgEnd));
+                if (sanitized != null) {
+                    images.add(sanitized);
+                    stripped.append('\u0002').append(images.size() - 1).append('\u0002');
+                    i = imgEnd;
+                    continue;
+                }
+            }
+            int closeEnd = htmlImgCloseEnd(text, i);
+            if (closeEnd > i) {
+                i = closeEnd;
+                continue;
+            }
             stripped.append(text.charAt(i));
             i++;
         }
@@ -465,6 +485,9 @@ public final class Markdown {
         html = applyDelimited(html, "__", "<strong>", "</strong>");
         html = applyDelimited(html, "~~", "<del>", "</del>");
         html = applyDelimited(html, "*", "<em>", "</em>");
+        for (int n = images.size() - 1; n >= 0; n--) {
+            html = html.replace("\u0002" + n + "\u0002", images.get(n));
+        }
         for (int n = codes.size() - 1; n >= 0; n--) {
             html = html.replace("\u0001" + n + "\u0001",
                     "<code>" + NotifyUtils.escapeHtml(codes.get(n)) + "</code>");
@@ -508,6 +531,177 @@ public final class Markdown {
             i = paren + 1;
         }
         return out.toString();
+    }
+
+    /**
+     * 原文 HTML {@code <img>} 的结束位置（不含可选的 {@code </img>}），未闭合或不是 img 返回 -1。
+     */
+    private static int htmlImgEnd(String text, int from) {
+        if (!isImgOpen(text, from)) {
+            return -1;
+        }
+        boolean inQuote = false;
+        char quote = 0;
+        for (int i = from + 4; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (inQuote) {
+                if (c == quote) {
+                    inQuote = false;
+                }
+                continue;
+            }
+            if (c == '"' || c == '\'') {
+                inQuote = true;
+                quote = c;
+            } else if (c == '>') {
+                return i + 1;
+            }
+        }
+        return -1;
+    }
+
+    private static boolean isImgOpen(String text, int i) {
+        if (i + 4 >= text.length() || text.charAt(i) != '<') {
+            return false;
+        }
+        if (!text.regionMatches(true, i + 1, "img", 0, 3)) {
+            return false;
+        }
+        char next = text.charAt(i + 4);
+        return next == '>' || next == '/' || next == ' ' || next == '\t'
+                || next == '\n' || next == '\r';
+    }
+
+    /**
+     * 跳过 {@code </img>}，避免消毒后残留转义的闭合标签。
+     */
+    private static int htmlImgCloseEnd(String text, int i) {
+        if (i + 5 >= text.length() || text.charAt(i) != '<' || text.charAt(i + 1) != '/') {
+            return -1;
+        }
+        if (!text.regionMatches(true, i + 2, "img", 0, 3)) {
+            return -1;
+        }
+        int j = i + 5;
+        while (j < text.length() && isHtmlWs(text.charAt(j))) {
+            j++;
+        }
+        if (j < text.length() && text.charAt(j) == '>') {
+            return j + 1;
+        }
+        return -1;
+    }
+
+    /**
+     * 重建安全的 {@code <img>}：只留 src/alt/title/width/height/class/loading，src 走消毒。
+     *
+     * @return 可透传的标签；没有 src 时返回 {@code null}（按普通文本转义）
+     */
+    private static String sanitizeImg(String raw) {
+        Map<String, String> attrs = parseHtmlAttrs(raw);
+        String src = attrs.get("src");
+        if (src == null || src.isEmpty()) {
+            return null;
+        }
+        StringBuilder out = new StringBuilder(64);
+        out.append("<img src=\"").append(NotifyUtils.escapeHtml(safeImgSrc(src))).append('"');
+        appendImgAttr(out, attrs, "alt");
+        appendImgAttr(out, attrs, "title");
+        appendImgAttr(out, attrs, "width");
+        appendImgAttr(out, attrs, "height");
+        appendImgAttr(out, attrs, "class");
+        appendImgAttr(out, attrs, "loading");
+        out.append('>');
+        return out.toString();
+    }
+
+    private static void appendImgAttr(StringBuilder out, Map<String, String> attrs, String name) {
+        String value = attrs.get(name);
+        if (value == null || value.isEmpty()) {
+            return;
+        }
+        out.append(' ').append(name).append("=\"").append(NotifyUtils.escapeHtml(value)).append('"');
+    }
+
+    private static String safeImgSrc(String url) {
+        String trimmed = url.trim();
+        String lower = trimmed.toLowerCase(Locale.ROOT);
+        if (lower.startsWith("javascript:")) {
+            return "#";
+        }
+        if (lower.startsWith("data:") && !lower.startsWith("data:image/")) {
+            return "#";
+        }
+        return trimmed;
+    }
+
+    private static Map<String, String> parseHtmlAttrs(String tag) {
+        Map<String, String> attrs = new LinkedHashMap<String, String>();
+        int i = 0;
+        int n = tag.length();
+        if (n >= 4 && tag.charAt(0) == '<') {
+            i = 4;
+        }
+        while (i < n) {
+            char c = tag.charAt(i);
+            if (c == '>' || c == '/') {
+                i++;
+                continue;
+            }
+            if (isHtmlWs(c)) {
+                i++;
+                continue;
+            }
+            int nameStart = i;
+            while (i < n) {
+                char ch = tag.charAt(i);
+                if (ch == '=' || ch == '>' || ch == '/' || isHtmlWs(ch)) {
+                    break;
+                }
+                i++;
+            }
+            String name = tag.substring(nameStart, i).toLowerCase(Locale.ROOT);
+            while (i < n && isHtmlWs(tag.charAt(i))) {
+                i++;
+            }
+            String value = "";
+            if (i < n && tag.charAt(i) == '=') {
+                i++;
+                while (i < n && isHtmlWs(tag.charAt(i))) {
+                    i++;
+                }
+                if (i < n && (tag.charAt(i) == '"' || tag.charAt(i) == '\'')) {
+                    char quote = tag.charAt(i);
+                    i++;
+                    int valueStart = i;
+                    while (i < n && tag.charAt(i) != quote) {
+                        i++;
+                    }
+                    value = tag.substring(valueStart, i);
+                    if (i < n) {
+                        i++;
+                    }
+                } else {
+                    int valueStart = i;
+                    while (i < n) {
+                        char ch = tag.charAt(i);
+                        if (ch == '>' || ch == '/' || isHtmlWs(ch)) {
+                            break;
+                        }
+                        i++;
+                    }
+                    value = tag.substring(valueStart, i);
+                }
+            }
+            if (!name.isEmpty() && !attrs.containsKey(name)) {
+                attrs.put(name, value);
+            }
+        }
+        return attrs;
+    }
+
+    private static boolean isHtmlWs(char c) {
+        return c == ' ' || c == '\t' || c == '\n' || c == '\r';
     }
 
     private static String applyDelimited(String text, String delim, String openTag, String closeTag) {

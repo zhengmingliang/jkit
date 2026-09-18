@@ -143,6 +143,18 @@ public class MarkdownImageInlineTest {
     }
 
     /**
+     * 原文 HTML {@code <img src="./...">} 同样走内嵌，不只认 {@code ![alt](url)}。
+     */
+    @Test
+    public void htmlImgRelativePathInlined() {
+        String html = render("<img src=\"./assets/shot.png\" width=\"100%\" />",
+                MarkdownRenderOptions.create().imageBaseDir(dir.getAbsolutePath()));
+        assertTrue(html.contains("src=\"data:image/png;base64,"));
+        assertTrue(html.contains("width=\"100%\""));
+        assertFalse(html.contains("./assets/shot.png"));
+    }
+
+    /**
      * {@code <imgx>} 这类长得像 img 的标签不被误判。
      */
     @Test

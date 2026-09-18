@@ -312,14 +312,14 @@ Swapping the two styles guarantees signature failure. DingTalk's signature goes 
 - **TLS protocol pinning**: `.sslProtocols("TLSv1.2")`. Major JDK versions change the default enabled protocol set, and handshake failures are only reported as a generic `SSLHandshakeException` — explicit pinning is the fastest way to rule this out.
 - **Self-signed certificates**: for self-hosted enterprise gateways use `.trustAllCerts(true)` (skips certificate and hostname verification; do not enable for public mailbox providers).
 - **Authentication**: AUTH LOGIN (username/password Base64). `from` defaults to `username`. `to("a@x.com,b@x.com")` is split into multiple recipients on comma/semicolon; `cc` / `bcc` / `replyTo` are available. Bcc goes through `RCPT TO` but does not appear in the MIME headers.
-- **MIME**: `Date` and `Message-ID` are always included. Subject uses `=?UTF-8?B?...?=`, body is UTF-8 Base64 folded at 76 characters; the DATA phase does RFC 5321 dot-stuffing (a leading `.` is written as `..`). HTML is sent directly as `text/html`; MARKDOWN is converted to HTML via `Markdown.toDocument` before sending. The conversion covers headings, nested lists (code blocks/tables inside list items), GFM tables, CLI-style wide tables of the `----+----` form, indented fenced code blocks (``` / ~~~), links, bold, and more — it is not full CommonMark. DingTalk/WeCom/Feishu/ServerChan render markdown themselves and do not go through this conversion.
+- **MIME**: `Date` and `Message-ID` are always included. Subject uses `=?UTF-8?B?...?=`, body is UTF-8 Base64 folded at 76 characters; the DATA phase does RFC 5321 dot-stuffing (a leading `.` is written as `..`). HTML is sent directly as `text/html`; MARKDOWN is converted to HTML via `Markdown.toDocument` before sending. The conversion covers headings, nested lists (code blocks/tables inside list items), GFM tables, CLI-style wide tables of the `----+----` form, indented fenced code blocks (``` / ~~~), links, bold, raw HTML `<img>` (sanitised and passed through), and more — it is not full CommonMark. DingTalk/WeCom/Feishu/ServerChan render markdown themselves and do not go through this conversion.
 - **Attachments and splitting**: `Attachment.of(file)` only keeps the path and reads in chunks when sending/splitting — 100MB-scale files don't need to enter the heap in full. `Attachment.of(name, bytes)` is still an in-memory attachment. MIME types are detected automatically from extension and file header. With `.autoSplit(true)` enabled, a single attachment exceeding `maxAttachmentSize` (default 10 MB) is cut into `filename.partN` chunks of `splitChunkSize` (default 5 MB) and sent across multiple emails. Sizes accept `10MB`, `512KB`, `1.5G`, or a plain byte count. The body includes the SHA-256 and `cat` reassembly instructions.
 - **Template variables**: `.var("host", "web-1")` or `.vars(map)`. `${host}` / `${cpu.value}` in the title and body are substituted before `send` / `sendAll` / `sendAsync`; missing keys become empty strings. The original `Message` is not modified.
 - **Markdown preview**: when SMTP converts MARKDOWN to HTML it wraps it in a responsive document shell by default (viewport + mobile/desktop `@media`) and applies the classic theme. If you only want a fragment, use `Markdown.toHtml`; for a full document use `Markdown.toDocument(md, true/false)`. To change colors and layout, see "Markdown rendering themes" below.
 
 ### Markdown rendering themes
 
-`MarkdownTheme` ships 12 themes (names and look aligned with [doocs/md](https://github.com/doocs/md)). They only change appearance — the Markdown parsing result and the supported syntax subset stay the same.
+`MarkdownTheme` ships 13 themes (the first 12 aligned with [doocs/md](https://github.com/doocs/md), plus `blog` which copies alianga.com / Sakura article styling). They only change appearance — the Markdown parsing result and the supported syntax subset stay the same.
 
 #### Theme catalogue
 
@@ -337,6 +337,7 @@ Swapping the two styles guarantees signature failure. DingTalk's signature goes 
 | `wheat` | Wheat | `#a16207` wheat | Centered | Filled | Bordered | Minimal | Long-form reading (serif) |
 | `ayer` | Ink black | `#61afef` on `#1f2430` | Bar | Bar | **macOS window** | Grid | Wall displays / night reading |
 | `purple` | Purple | `#7048e8` purple | Centered | Quote mark | Bordered | Striped | Brand-coloured pushes |
+| `blog` | Blog | `#e67474` coral | ¶/# marks | Quote mark | Dark One Dark | Grid | alianga.com replica |
 
 A theme is not a blob of CSS: it declares a set of **tokens** (primary / accent / text / muted / background / panel / border colour, font, size, line height, radius, heading style, quote style, code-block style, table style and the syntax-highlight palette). `MarkdownStyle` turns one token set into both the `<head><style>` sheet and the inline `style` map, so the two injection modes look the same and adding a theme means adding tokens only.
 
