@@ -54,6 +54,8 @@
 - `jkit-sql-auto`：`SqlAutoDialects.fromUrl` / `driverForUrl` 委托 `JdbcUrlUtils`（覆盖 Gauss / Kingbase / Hive / ClickHouse / Trino 等更多 URL）。
 - `jkit-sql-auto`：已有表对照实体注释。`DatabaseMetaData.REMARKS` 读入活表/列；实体注释非空且与库不一致时发出 `COMMENT ON` / `ALTER TABLE … COMMENT` / MySQL `MODIFY … COMMENT`。实体未写注释时不覆盖库里已有注释。
 
+- `com.alianga.jkit.html` 真实站点验证（Halo 1.4.5 博客，首页 70 KB，含 24 个 `script`）：抽最近 10 篇文章的链接、标题、懒加载图 `data-src`、占位图 `src`、发布日期，**5 个字段 10 篇逐条与 Jsoup 一致**；3 篇详情页的 `pre code` 命中数与内容同样一致。效率上首页解析 0.179 ms vs Jsoup 0.295 ms（1.65x），端到端（解析 + 抽 10 篇全部字段）0.310 ms vs 0.381 ms（1.23x）。
+
 ### 文档
 
 - `docs/sql.md` / `docs/en/sql.md`：实体表 / 列注释补充本模块 `com.alianga.jkit.sql.entity.Comment`。
@@ -69,6 +71,8 @@
 
 ### 修复
 
+- `jkit-core`：`com.alianga.jkit.html` 的 `script` / `style` / `textarea` 结束标签查找是 O(标签数 × 文档长度)——每次查找都对整篇文档做一次 `toLowerCase()` 再 `indexOf`。合成页面只有 1 个 `script` 时看不出来，真实页面（含 24 个 `script` 的 70 KB 首页）解析耗时 3.929 ms，比 Jsoup 慢 14 倍。改为逐字符扫描 + `regionMatches` 忽略大小写比较，零分配；同一页面 3.929 ms → 0.179 ms（快 21 倍），合成大页面解析也由 1.775 ms 降到 1.060 ms。结束标签的大小写、`</script >` 这类带空白写法、以及内容里的 `<` 均由 `rawTextCloseTagIsCaseInsensitive` 回归覆盖。
+- `jkit-core`：`com.alianga.jkit.html` 的 `pre` 上下文没有向上传递保留空白。`pre > code` 里的换行会被折叠成空格（`<pre><code>int a = 1;\n    int b = 2;</code></pre>` 的 `text()` 得到 `int a = 1; int b = 2;`），代码块抽取结果失真。现在与 Jsoup 一致：从父元素逐级向上，命中 `pre` / `textarea` 等即保留原始空白，中途遇到非行内元素则不再保留——所以 `pre > code > span` 保留而 `pre > div > code` 不保留。由 `preContextKeepsNewlines` 回归覆盖。
 - `jkit-core`：JSON Schema 的 `required` 关键字此前只被解析、从未参与校验——按标准写法声明的必填字段缺失时 `validateSuccess` 仍返回 `true`，是静默失效。`JSONNode#validateSchemaObject` 现在校验 `required` 列出的字段是否存在（标准语义：只要求字段存在，值为 `null` 也算存在；类型判定仍由 `type` 负责）；`required` 无需配合 `properties` 也能生效，嵌套对象同样覆盖。本库自有的 `must` 语义不变（要求字段存在且值不为 `null`），两者混用时都要满足。
 - `jkit-sql`：回写不再丢表达式括号。`(a - b) / c` 此前回写成 `a - b / c`、`-(a + b)` 回写成 `-a + b`、`ROUND((SELECT …), 2)` 回写成 `ROUND(SELECT …, 2)`——求值顺序被改，函数参数里的子查询还会写成非法 SQL。parser 现在保留源文括号标记，函数参数中的标量子查询照常带括号。复杂 SQL 语料 1200 条里 172 条受影响；L2 文本保真率由 45.75% 升到 91.83%，并新增「有效括号不减少」门禁（折叠 `(col)` 这类冗余原子括号不算丢失）。
 - `jkit-sql`：经典 Oracle 对带 `ORDER BY` 的 UNION / INTERSECT / EXCEPT / MINUS 做 ROWNUM 分页时，先包成 `SELECT * FROM (set-op) ORDER BY …` 再套 ROWNUM，避免子查询里对集合运算列别名排序报 `ORA-00904`。双层包装外层只投影原查询列，不再把中间层的 `RN` 输出给调用方（原查询为 `SELECT *` 时仍会带出 `RN`）。

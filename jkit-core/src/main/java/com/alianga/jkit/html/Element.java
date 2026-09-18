@@ -214,8 +214,35 @@ public class Element extends Node {
      */
     public String text() {
         StringBuilder sb = new StringBuilder();
-        appendText(sb, false);
+        appendText(sb, preserveContext());
         return trim(sb.toString());
+    }
+
+    /**
+     * 判断自身是否处在保留空白的上下文（如 {@code pre > code}）中。
+     *
+     * <p>与 Jsoup 一致：从父元素逐级向上，命中 {@code pre}/{@code textarea} 等即保留，
+     * 中途遇到非行内元素则不再保留——所以 {@code pre > div > code} 不保留，
+     * 而 {@code pre > code > span} 保留。
+     *
+     * @return 是否保留原始空白
+     */
+    private boolean preserveContext() {
+        if (PRESERVE.contains(tagName)) {
+            return true;
+        }
+        Node p = parentNode;
+        while (p instanceof Element) {
+            Element el = (Element) p;
+            if (PRESERVE.contains(el.tagName)) {
+                return true;
+            }
+            if (!INLINE.contains(el.tagName)) {
+                return false;
+            }
+            p = el.parentNode;
+        }
+        return false;
     }
 
     /**

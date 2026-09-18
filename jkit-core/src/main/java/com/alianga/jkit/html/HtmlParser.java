@@ -145,19 +145,36 @@ public final class HtmlParser {
         return new HashSet<String>(Arrays.asList(items));
     }
 
+    /**
+     * 定位 {@code </tag>} 的起始下标（大小写不敏感）。
+     *
+     * <p>按字符扫描并用 {@code regionMatches} 做忽略大小写比较，
+     * 不做整串 {@code toLowerCase()}——此前每个 script/style 都要复制并扫描一遍全文，
+     * 真实页面含几十个 script 时会退化成 O(标签数 × 文档长度)。
+     *
+     * @param html HTML 文本
+     * @param tag 标签名（小写）
+     * @param from 起始查找位置
+     * @param n 文本长度
+     * @return {@code <} 的下标，找不到返回 {@code n}
+     */
     private static int findClose(String html, String tag, int from, int n) {
-        String marker = "</" + tag;
+        int len = tag.length();
         int idx = from;
         while (idx < n) {
-            idx = html.toLowerCase().indexOf(marker, idx);
-            if (idx < 0) {
+            int lt = html.indexOf('<', idx);
+            if (lt < 0) {
                 return n;
             }
-            int p = idx + marker.length();
-            if (p >= n || html.charAt(p) == '>' || Character.isWhitespace(html.charAt(p))) {
-                return idx;
+            int q = lt + 2;
+            if (lt + 1 < n && html.charAt(lt + 1) == '/'
+                    && q + len <= n && html.regionMatches(true, q, tag, 0, len)) {
+                int e = q + len;
+                if (e >= n || html.charAt(e) == '>' || isWs(html.charAt(e))) {
+                    return lt;
+                }
             }
-            idx = p;
+            idx = lt + 1;
         }
         return n;
     }

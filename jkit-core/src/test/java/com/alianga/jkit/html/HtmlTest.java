@@ -212,6 +212,39 @@ public class HtmlTest {
     }
 
     @Test
+    public void rawTextCloseTagIsCaseInsensitive() {
+        // 结束标签大小写不敏感，且内容里的 < 不能误判为结束
+        Document doc = Html.parse("<SCRIPT>var s = \"<div>\"; if (a < b) {}</SCRIPT>"
+                + "<STYLE>.a{color:red}</style>"
+                + "<TEXTAREA>a &lt; b</TEXTAREA>");
+        Assert.assertEquals("var s = \"<div>\"; if (a < b) {}", doc.selectFirst("script").nodeText());
+        Assert.assertEquals(".a{color:red}", doc.selectFirst("style").nodeText());
+        Assert.assertEquals("a < b", doc.selectFirst("textarea").text());
+        // 结束标签后带空白也要认（</script >）
+        Document d2 = Html.parse("<script>var a=1</script ><p>后</p>");
+        Assert.assertEquals("var a=1", d2.selectFirst("script").nodeText());
+        Assert.assertEquals("后", d2.selectFirst("p").text());
+    }
+
+    @Test
+    public void preContextKeepsNewlines() {
+        // pre 内的 code 必须保留换行，与 Jsoup 一致（此前被折叠成空格）
+        Document doc = Html.parse("<pre><code class=\"language-java\">"
+                + "int a = 1;\n    int b = 2;\n</code></pre>");
+        Element code = doc.selectFirst("pre code");
+        Assert.assertEquals("language-java", code.attr("class"));
+        Assert.assertEquals("int a = 1;\n    int b = 2;", code.text());
+        // 直接取 pre 同样保留
+        Assert.assertEquals("int a = 1;\n    int b = 2;", doc.selectFirst("pre").text());
+        // pre 内嵌套非行内元素后不再保留：pre > div > code 走普通归一化
+        Document d2 = Html.parse("<pre><div><code>x\n   y</code></div></pre>");
+        Assert.assertEquals("x y", d2.selectFirst("code").text());
+        // pre 外仍然是折叠空白
+        Document d3 = Html.parse("<div><code>x\n   y</code></div>");
+        Assert.assertEquals("x y", d3.selectFirst("code").text());
+    }
+
+    @Test
     public void ownTextAndSiblings() {
         Document doc = Html.parse("<ul><li>A<span>s</span></li><li>B</li><li>C</li></ul>");
         Element first = doc.selectFirst("li");
