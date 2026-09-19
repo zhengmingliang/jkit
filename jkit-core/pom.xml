@@ -234,6 +234,29 @@
                                    <source>8</source>
                                    <target>8</target>
 <!--                                   <release>8</release>-->
+                                   <jdkToolchain>
+                                       <version>8</version>
+                                   </jdkToolchain>
+                               </configuration>
+                           </execution>
+
+                           <!--
+                              JDK 8 下 Maven 自身就是 8，但 maven-toolchains-plugin 会把默认 toolchain 换成
+                              声明里的 9 / 11，默认 testCompile 跟着用 JDK 11 的 javac：字节码虽然是 52，
+                              方法签名却按 JDK 11 解析（ByteBuffer#flip() 变成返回 ByteBuffer 的协变版本），
+                              用 JDK 8 跑测试就会 NoSuchMethodError。这里显式指回 JDK 8 toolchain。
+                           -->
+                           <execution>
+                               <id>default-testCompile</id>
+                               <goals>
+                                   <goal>testCompile</goal>
+                               </goals>
+                               <configuration>
+                                   <source>8</source>
+                                   <target>8</target>
+                                   <jdkToolchain>
+                                       <version>8</version>
+                                   </jdkToolchain>
                                </configuration>
                            </execution>
 
@@ -327,6 +350,29 @@
                                     <!--<release>8</release>-->
                                     <source>8</source>
                                     <target>8</target>
+                                    <jdkToolchain>
+                                        <version>8</version>
+                                    </jdkToolchain>
+                                </configuration>
+                            </execution>
+
+                            <!--
+                              测试源码同样按 JDK 8 编译：默认 testCompile 会跟着 Maven 的 JDK / 默认 toolchain
+                              走，在 JDK 11 下 javac 会把 ByteBuffer#flip() 这类 JDK 9 协变方法编进字节码，
+                              用 JDK 8 跑测试时直接 NoSuchMethodError。显式指回 JDK 8 toolchain，
+                              保证测试字节码与 API 签名都落在 jkit 声明支持的最低版本上。
+                            -->
+                            <execution>
+                                <id>default-testCompile</id>
+                                <goals>
+                                    <goal>testCompile</goal>
+                                </goals>
+                                <configuration>
+                                    <source>8</source>
+                                    <target>8</target>
+                                    <jdkToolchain>
+                                        <version>8</version>
+                                    </jdkToolchain>
                                 </configuration>
                             </execution>
 
