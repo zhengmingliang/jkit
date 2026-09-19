@@ -122,6 +122,7 @@
 - `jkit-notify`：SPI 加载逐 provider 容错，单个扩展渠道损坏（缺依赖 / 构造抛异常）只告警跳过，不再让整个模块以 `ExceptionInInitializerError` 崩掉。
 - `jkit-notify-extra`：阿里云短信 `RegionId` 跟随 `CFG_REGION`（可配地域），不再硬编码 `cn-hangzhou`。
 - `jkit-core`：表达式求值器 `com.alianga.jkit.expression` 修复两处正确性问题。`&&` / `||` 此前**不做短路求值**——进入运算符分派前就急切算出了右操作数，导致 `true || (1/0)`、`false && (1/0)` 这类本应短路的表达式反而抛除零异常，右操作数的副作用也无法被跳过；现在 `ExprEvaluator` 在左操作数已能决定结果时直接返回、不再计算右操作数，与 Java 语义一致。`>` / `<` / `>=` / `<=` 此前硬性按 `Number` 转型，字符串比较直接抛异常；改为数字按数值、其余 `Comparable` 按自然序（如字符串字典序）比较，类型不可比时给出清晰错误。新增 `ExpressionRegressionTest`（23 例）固化短路、字符串关系比较、运算符优先级、类型强制、内置函数与三元等语义——该包此前零测试。
+- `jkit-core`：`com.alianga.jkit.beans` 修复两处正确性问题。`BeanUtils.copyProperties(srcMap, tgtMap, excludeFields)` 带忽略字段时，循环把源值写回了**源 Map** 而非目标 Map，导致目标 Map 完全没被更新（源反而被原地重写）；改为写入目标 Map，与不带 `excludeFields` 的 `putAll` 分支行为一致。`ObjectUtils.set(collection, "[n]", value)` 此前即便下标赋值成功也会在设完元素后**无条件抛 `TypeNotMatchExecption`**，使集合下标赋值不可用；改为仅当 key 不是 `[n]` 形态时才抛错。新增 `BeansTest`（17 例）覆盖四向拷贝、merge、集合下标赋值、多级路径、非空字段与 `isEmpty` 等语义——该包此前零测试。
 
 ## 2.0.1 - 2026-09-13
 
