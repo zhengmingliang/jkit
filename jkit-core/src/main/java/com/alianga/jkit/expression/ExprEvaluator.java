@@ -241,7 +241,8 @@ public class ExprEvaluator {
                         // |
                         return result = ExprCalculateUtils.or(leftValue, rightValue);
                     case LOGICAL_AND:
-                        // && 短路：左为假（或 null）时直接返回假，不计算右操作数
+                        // && 短路：左为假时直接返回假，不计算右操作数；
+                        // 左为 null 时拆箱 NPE，由下方 catch 经 throwEvalOperatorException 转换（最终返回 null）
                         boolean andLeft = (Boolean) leftValue;
                         if (!andLeft) {
                             this.constant = left.constant;
@@ -251,7 +252,8 @@ public class ExprEvaluator {
                         this.constant = left.constant && right.constant;
                         return result = (Boolean) andRight;
                     case LOGICAL_OR:
-                        // || 短路：左为真时直接返回真，不计算右操作数
+                        // || 短路：左为真时直接返回真，不计算右操作数；
+                        // 左为 null 时拆箱 NPE，由下方 catch 经 throwEvalOperatorException 转换（最终返回 null）
                         boolean orLeft = (Boolean) leftValue;
                         if (orLeft) {
                             this.constant = left.constant;
@@ -335,8 +337,8 @@ public class ExprEvaluator {
         return value == null ? "null" : value.getClass().getSimpleName();
     }
 
-    private void throwEvalOperatorException(RuntimeException exception, ElOperator operator, Object leftValue,
-                                            Object rightValue, ExprEvaluator left, ExprEvaluator right) {
+    private static void throwEvalOperatorException(RuntimeException exception, ElOperator operator, Object leftValue,
+                                                    Object rightValue, ExprEvaluator left, ExprEvaluator right) {
         if (exception instanceof NullPointerException) {
             if (leftValue == null) {
                 left.throwNotAllowNullException();
@@ -942,7 +944,8 @@ public class ExprEvaluator {
         public Object evaluate(EvaluatorContext context, EvaluateEnvironment evaluateEnvironment) {
             Object leftValue = left.evaluate(context, evaluateEnvironment);
             Object rightValue = right.evaluate(context, evaluateEnvironment);
-            return ((Number) leftValue).doubleValue() > ((Number) rightValue).doubleValue();
+            // 与通用路径一致：数字按数值比较，其余 Comparable 按自然序（如字符串字典序）
+            return compareRelational(leftValue, rightValue) > 0;
         }
     }
 
@@ -963,7 +966,7 @@ public class ExprEvaluator {
         public Object evaluate(EvaluatorContext context, EvaluateEnvironment evaluateEnvironment) {
             Object leftValue = left.evaluate(context, evaluateEnvironment);
             Object rightValue = right.evaluate(context, evaluateEnvironment);
-            return ((Number) leftValue).doubleValue() < ((Number) rightValue).doubleValue();
+            return compareRelational(leftValue, rightValue) < 0;
         }
     }
 
@@ -984,7 +987,7 @@ public class ExprEvaluator {
         public Object evaluate(EvaluatorContext context, EvaluateEnvironment evaluateEnvironment) {
             Object leftValue = left.evaluate(context, evaluateEnvironment);
             Object rightValue = right.evaluate(context, evaluateEnvironment);
-            return ((Number) leftValue).doubleValue() >= ((Number) rightValue).doubleValue();
+            return compareRelational(leftValue, rightValue) >= 0;
         }
     }
 
@@ -1005,7 +1008,7 @@ public class ExprEvaluator {
         public Object evaluate(EvaluatorContext context, EvaluateEnvironment evaluateEnvironment) {
             Object leftValue = left.evaluate(context, evaluateEnvironment);
             Object rightValue = right.evaluate(context, evaluateEnvironment);
-            return ((Number) leftValue).doubleValue() <= ((Number) rightValue).doubleValue();
+            return compareRelational(leftValue, rightValue) <= 0;
         }
     }
 
@@ -1051,10 +1054,23 @@ public class ExprEvaluator {
 
         @Override
         public Object evaluate(EvaluatorContext context, EvaluateEnvironment evaluateEnvironment) {
+            // 与通用路径语义一致：短路求值，右操作数按需计算，不触发其副作用
             Object leftValue = left.evaluate(context, evaluateEnvironment);
-            Object rightValue = right.evaluate(context, evaluateEnvironment);
-            // &&
-            return (Boolean) leftValue && (Boolean) rightValue;
+            try {
+                Boolean andLeft = (Boolean) leftValue;
+                if (andLeft == null) {
+                    left.throwNotAllowNullException();
+                    return null;
+                }
+                if (!andLeft) {
+                    return Boolean.FALSE;
+                }
+                Object andRight = right.evaluate(context, evaluateEnvironment);
+                return (Boolean) andRight;
+            } catch (RuntimeException exception) {
+                throwEvalOperatorException(exception, ElOperator.LOGICAL_AND, leftValue, null, left, right);
+                return null;
+            }
         }
     }
 
@@ -1073,10 +1089,23 @@ public class ExprEvaluator {
 
         @Override
         public Object evaluate(EvaluatorContext context, EvaluateEnvironment evaluateEnvironment) {
+            // 与通用路径语义一致：短路求值，右操作数按需计算，不触发其副作用
             Object leftValue = left.evaluate(context, evaluateEnvironment);
-            Object rightValue = right.evaluate(context, evaluateEnvironment);
-            // ||
-            return (Boolean) leftValue || (Boolean) rightValue;
+            try {
+                Boolean orLeft = (Boolean) leftValue;
+                if (orLeft == null) {
+                    left.throwNotAllowNullException();
+                    return null;
+                }
+                if (orLeft) {
+                    return Boolean.TRUE;
+                }
+                Object orRight = right.evaluate(context, evaluateEnvironment);
+                return (Boolean) orRight;
+            } catch (RuntimeException exception) {
+                throwEvalOperatorException(exception, ElOperator.LOGICAL_OR, leftValue, null, left, right);
+                return null;
+            }
         }
     }
 

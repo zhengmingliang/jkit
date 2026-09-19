@@ -239,4 +239,39 @@ public class ExpressionRegressionTest {
         Assert.assertEquals("hello", str("s.toLowerCase()", ctx));
         Assert.assertEquals("HELLO", str("s.toUpperCase()", ctx));
     }
+
+    // ------------------------------------------------------------------
+    // 修复回归：解析后的表达式复用求值（第 3 次起走压缩后的 Impl 快速路径），
+    // 快速路径此前仍是急切求值 + (Number) 强转，短路与字符串比较在复用场景失效
+    // ------------------------------------------------------------------
+
+    @Test
+    public void shortCircuitSurvivesEvaluatorCompression() {
+        Map<String, Object> falseCtx = new HashMap<String, Object>();
+        falseCtx.put("flag", Boolean.FALSE);
+        Expression andExpr = Expression.parse("flag && (1/0)");
+        for (int i = 0; i < 5; i++) {
+            Assert.assertEquals("复用求值第 " + (i + 1) + " 次仍应短路", Boolean.FALSE, andExpr.evaluate(falseCtx));
+        }
+        Map<String, Object> trueCtx = new HashMap<String, Object>();
+        trueCtx.put("flag", Boolean.TRUE);
+        Expression orExpr = Expression.parse("flag || (1/0)");
+        for (int i = 0; i < 5; i++) {
+            Assert.assertEquals("复用求值第 " + (i + 1) + " 次仍应短路", Boolean.TRUE, orExpr.evaluate(trueCtx));
+        }
+    }
+
+    @Test
+    public void stringRelationalCompareSurvivesEvaluatorCompression() {
+        Map<String, Object> ctx = new HashMap<String, Object>();
+        ctx.put("a", "abc");
+        ctx.put("b", "abd");
+        for (String expr : new String[]{"a < b", "a <= b", "b > a", "b >= a"}) {
+            Expression parsed = Expression.parse(expr);
+            for (int i = 0; i < 5; i++) {
+                Assert.assertEquals("表达式 " + expr + " 复用求值第 " + (i + 1) + " 次",
+                        Boolean.TRUE, parsed.evaluate(ctx));
+            }
+        }
+    }
 }
