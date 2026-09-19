@@ -47,11 +47,14 @@ public final class HttpConfig {
     }
 
     /**
-     * 深拷贝一份独立配置，用于实例化客户端的初始值，保证实例之间、实例与
-     * 全局默认之间的配置互不污染。基本类型与不可变引用直接复制；
+     * 拷贝一份配置作为实例化客户端的初始值，基本类型字段与拦截器列表为独立副本，
+     * 保证实例之间、实例与全局默认之间的常规配置互不污染。
+     *
+     * <p>注意：{@code executor}、{@code endpointPool}、{@code sslContext}、{@code retryPolicy}
+     * 四个复杂对象仍是共享引用（实例与全局默认共用同一个执行器、端点池与 SSL 上下文）；
      * 拦截器列表重新包装为新的并发列表，但元素仍是同一批实例（拦截器本身多实例共享安全）。
      *
-     * @return 与当前配置等价的独立副本
+     * @return 常规字段独立、复杂对象共享的配置副本
      */
     public HttpConfig copy() {
         HttpConfig c = new HttpConfig();

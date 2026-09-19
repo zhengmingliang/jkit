@@ -1,5 +1,6 @@
 package com.alianga.jkit.http;
 
+import com.alianga.jkit.HttpUtils;
 import com.alianga.jkit.http.encoding.ContentEncodings;
 import com.alianga.jkit.jdk.UnsafeUtils;
 
@@ -25,13 +26,13 @@ import java.util.Map;
  */
 public final class UrlConnectionHttpEngine implements HttpEngine {
     /**
-     * {@link HttpURLConnection} 的 method 字段，延迟查找
+     * {@link HttpURLConnection} 的 method 字段，延迟查找；volatile 保证并发首次访问的可见性
      */
-    private static Field methodField;
+    private static volatile Field methodField;
     /**
      * method 字段查找失败标记，避免每次请求重复抛异常
      */
-    private static boolean methodFieldMissed;
+    private static volatile boolean methodFieldMissed;
 
     @Override
     public String name() {
@@ -146,7 +147,8 @@ public final class UrlConnectionHttpEngine implements HttpEngine {
         }
         conn.setDoOutput(true);
         setRequestMethod(conn, request.getMethod() == null ? HttpRequest.GET : request.getMethod());
-        int bufferSize = HttpConfig.shared().getDownloadBufferSize();
+        // 走 active-aware 的 config()：实例客户端在作用域内设置的超时/缓冲对引擎生效
+        int bufferSize = HttpUtils.config().getDownloadBufferSize();
         if (bodyFile != null) {
             conn.setFixedLengthStreamingMode(bodyFile.length());
             OutputStream out = conn.getOutputStream();

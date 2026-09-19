@@ -586,15 +586,6 @@ public class HttpUtils {
     }
 
     /**
-     * 仅包内可见：取当前默认 Content-Type（可能来自活跃的实例客户端）。
-     *
-     * @return 默认 Content-Type
-     */
-    static String currentDefaultMediaType() {
-        return defaultMediaType;
-    }
-
-    /**
      * 设置 HTTP 代理（无认证）。
      *
      * @param host 主机名或 IP
