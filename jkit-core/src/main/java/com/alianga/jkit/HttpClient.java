@@ -115,8 +115,11 @@ public final class HttpClient {
     }
 
     /**
-     * 进入本客户端的请求作用域并发送，结束后清理，确保整条发送链路（超时/代理/SSL/
-     * CookieJar/引擎/拦截器）都读到本实例的配置，且不会污染其它实例或全局状态。
+     * 进入本客户端的请求作用域并发送，结束后恢复进入前的旧作用域，确保整条发送链路
+     * （超时/代理/SSL/CookieJar/引擎/拦截器）都读到本实例的配置，且不会污染其它实例或全局状态。
+     *
+     * <p>保存/恢复而不是无条件清空：拦截器（如 token 刷新）里嵌套调用其它客户端实例时，
+     * 内层结束后外层实例的作用域必须还在，否则外层剩余链路会静默回退到全局配置。
      *
      * @param request 请求
      * @return 响应
@@ -126,6 +129,7 @@ public final class HttpClient {
         if (request == null) {
             throw new IllegalArgumentException("request must not be null");
         }
+        HttpClient previous = HttpUtils.active();
         HttpUtils.scope(this);
         try {
             if (request.getHeaders().isEmpty()) {
@@ -137,7 +141,7 @@ public final class HttpClient {
             HttpUtils.applyDefaults(request);
             return HttpUtils.send(request);
         } finally {
-            HttpUtils.scope(null);
+            HttpUtils.scope(previous);
         }
     }
 

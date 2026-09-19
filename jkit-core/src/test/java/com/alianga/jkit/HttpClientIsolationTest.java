@@ -193,8 +193,9 @@ public class HttpClientIsolationTest {
     }
 
     @Test
-    public void scopeIsClearedAfterExecute() {
-        // 执行结束后不应在 ThreadLocal 里残留客户端，避免影响后续静态调用
+    public void scopeIsRestoredAfterExecute() {
+        // 执行结束后 ThreadLocal 恢复进入前的旧值；顶层调用恢复后为 null，
+        // 不会残留客户端影响后续静态调用
         HttpClient a = HttpClient.builder().engine(new ProbeEngine("A")).build();
         try {
             a.get("http://svc.test/x");
@@ -202,5 +203,33 @@ public class HttpClientIsolationTest {
             // 探针引擎不会真正发请求，正常不会到这里
         }
         assertNull("执行后 ThreadLocal 应已清理", HttpUtils.active());
+    }
+
+    @Test
+    public void nestedExecuteKeepsOuterScope() throws IOException {
+        // 修复回归：作用域此前是"执行后清空"而非"恢复旧值"，拦截器里嵌套调用
+        // 另一实例（如 token 刷新）后，外层剩余链路会静默回退到全局配置
+        final HttpClient inner = HttpClient.builder()
+                .proxy(PROXY_B)
+                .engine(new ProbeEngine("B"))
+                .build();
+        HttpClient outer = HttpClient.builder()
+                .proxy(PROXY_A)
+                .engine(new ProbeEngine("A"))
+                .addInterceptor(new HttpInterceptor() {
+                    @Override
+                    public HttpResponse intercept(Chain chain) throws IOException {
+                        // 模拟 token 刷新：拦截器内用另一个实例发请求
+                        runProbe(inner, "http://inner.test/refresh");
+                        return chain.proceed(chain.request());
+                    }
+                })
+                .build();
+
+        HttpResponse ra = runProbe(outer, "http://svc.test/x");
+        // 内层实例返回后，外层剩余链路必须仍读外层配置：
+        // 旧实现此时作用域已被清空，请求代理会静默变成全局值（此处为 none）
+        assertEquals("proxy-a.test", ra.header("X-Probe-Proxy"));
+        assertEquals("A", ra.header("X-Probe-Tag"));
     }
 }
