@@ -1,6 +1,7 @@
 package com.alianga.jkit.http;
 
 import com.alianga.jkit.http.encoding.ContentEncodings;
+import com.alianga.jkit.jdk.UnsafeUtils;
 
 import javax.net.ssl.HttpsURLConnection;
 
@@ -23,6 +24,15 @@ import java.util.Map;
  * @author 郑明亮
  */
 public final class UrlConnectionHttpEngine implements HttpEngine {
+    /**
+     * {@link HttpURLConnection} 的 method 字段，延迟查找
+     */
+    private static Field methodField;
+    /**
+     * method 字段查找失败标记，避免每次请求重复抛异常
+     */
+    private static boolean methodFieldMissed;
+
     @Override
     public String name() {
         return HttpEngines.URL_CONNECTION;
@@ -165,14 +175,56 @@ public final class UrlConnectionHttpEngine implements HttpEngine {
         try {
             conn.setRequestMethod(method);
         } catch (ProtocolException e) {
-            try {
-                Field field = HttpURLConnection.class.getDeclaredField("method");
-                field.setAccessible(true);
-                field.set(conn, method);
-            } catch (Exception ignored) {
+            // HttpURLConnection 只承认白名单内的标准方法，PATCH 之类扩展方法会被拒绝，
+            // 此时需要直接改写其 method 字段；JDK 9+ 的模块封装会让 setAccessible 失效，故优先走 Unsafe
+            if (!forceRequestMethod(conn, method)) {
                 throw e;
             }
         }
+    }
+
+    /**
+     * 直接改写 {@link HttpURLConnection} 的 method 字段，用于支持 PATCH 等非白名单方法。
+     *
+     * @param conn   连接
+     * @param method 目标方法名
+     * @return 写入成功返回 {@code true}
+     */
+    private static boolean forceRequestMethod(HttpURLConnection conn, String method) {
+        Field field = methodField();
+        if (field == null) {
+            return false;
+        }
+        if (UnsafeUtils.UNSAFE != null) {
+            try {
+                long offset = UnsafeUtils.objectFieldOffset(field);
+                UnsafeUtils.putObject(conn, offset, method);
+                return method.equals(UnsafeUtils.getObject(conn, offset));
+            } catch (Throwable ignored) {
+                // 继续尝试反射方式
+            }
+        }
+        try {
+            field.setAccessible(true);
+            field.set(conn, method);
+            return true;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    /**
+     * @return {@link HttpURLConnection} 的 method 字段，不可用时为 {@code null}
+     */
+    private static Field methodField() {
+        if (methodField == null && !methodFieldMissed) {
+            try {
+                methodField = HttpURLConnection.class.getDeclaredField("method");
+            } catch (Throwable ignored) {
+                methodFieldMissed = true;
+            }
+        }
+        return methodField;
     }
 
     private static InputStream responseStream(HttpURLConnection conn, int code) {
