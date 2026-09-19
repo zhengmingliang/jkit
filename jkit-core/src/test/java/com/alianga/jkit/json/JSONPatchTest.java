@@ -192,4 +192,50 @@ public class JSONPatchTest {
                         + "{\"op\":\"add\",\"path\":\"/list/-\",\"value\":3}]",
                 "{\"list\":[1,2,3],\"b\":2}");
     }
+
+    // ------------------------------------------------------------------
+    // 修复回归：test 操作的数值比较此前走 doubleValue()，>2^53 的整数会截断产生假相等，
+    // 乐观锁场景会在前置条件不成立时误放行
+    // ------------------------------------------------------------------
+
+    @Test
+    public void testOpComparesLargeLongExactly() {
+        assertPatch("{\"a\":9007199254740993}",
+                "[{\"op\":\"test\",\"path\":\"/a\",\"value\":9007199254740993}]",
+                "{\"a\":9007199254740993}");
+        assertThrows("{\"a\":9007199254740993}",
+                "[{\"op\":\"test\",\"path\":\"/a\",\"value\":9007199254740992}]");
+    }
+
+    @Test
+    public void testOpComparesBigIntegerExactly() {
+        String big = "123456789012345678901234567890";
+        String bigPlusOne = "123456789012345678901234567891";
+        assertPatch("{\"a\":" + big + "}",
+                "[{\"op\":\"test\",\"path\":\"/a\",\"value\":" + big + "}]",
+                "{\"a\":" + big + "}");
+        assertThrows("{\"a\":" + big + "}",
+                "[{\"op\":\"test\",\"path\":\"/a\",\"value\":" + bigPlusOne + "}]");
+    }
+
+    @Test
+    public void testOpStillTreatsIntAndDoubleAsEqual() {
+        // 数值语义相等仍应通过：1 与 1.0
+        assertPatch("{\"a\":1}",
+                "[{\"op\":\"test\",\"path\":\"/a\",\"value\":1.0}]",
+                "{\"a\":1}");
+        assertPatch("{\"a\":0.5}",
+                "[{\"op\":\"test\",\"path\":\"/a\",\"value\":0.5}]",
+                "{\"a\":0.5}");
+    }
+
+    @Test
+    public void arrayIndexWithLeadingZeroOrSignRejected() {
+        // RFC 6901 的 array-index 不允许前导零（"0" 除外）与 '+'，此前 Integer.parseInt 宽松放行
+        assertThrows("{\"a\":[1,2]}", "[{\"op\":\"remove\",\"path\":\"/a/01\"}]");
+        assertThrows("{\"a\":[1,2]}", "[{\"op\":\"remove\",\"path\":\"/a/+1\"}]");
+        assertThrows("{\"a\":[1,2]}", "[{\"op\":\"add\",\"path\":\"/a/01\",\"value\":3}]");
+        // 合法形式不受影响
+        assertPatch("{\"a\":[1,2]}", "[{\"op\":\"remove\",\"path\":\"/a/0\"}]", "{\"a\":[2]}");
+    }
 }

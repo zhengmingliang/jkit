@@ -4,6 +4,7 @@ import com.alianga.jkit.json.exceptions.JSONPatchException;
 import com.alianga.jkit.json.options.ReadOption;
 
 import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -282,6 +283,10 @@ public final class JSONPatch {
     }
 
     private static int parseIndexRaw(String token) {
+        // RFC 6901 的 array-index 语法要求：至少一位数字、无前导零（"0" 本身除外）、不允许 '+'
+        if (!isArrayIndex(token)) {
+            throw new JSONPatchException("invalid array index: '" + token + "'");
+        }
         int idx;
         try {
             idx = Integer.parseInt(token);
@@ -289,6 +294,31 @@ public final class JSONPatch {
             throw new JSONPatchException("invalid array index: '" + token + "'");
         }
         return idx;
+    }
+
+    /**
+     * 按 RFC 6901 的 {@code array-index} 产生式校验：{@code 0} / 无前导零的十进制数字串。
+     *
+     * @param token 路径记号
+     * @return 合法数组索引返回 {@code true}
+     */
+    private static boolean isArrayIndex(String token) {
+        if (token == null || token.isEmpty()) {
+            return false;
+        }
+        if ("0".equals(token)) {
+            return true;
+        }
+        if (token.charAt(0) == '0' || token.charAt(0) == '+') {
+            return false;
+        }
+        for (int i = 0; i < token.length(); i++) {
+            char c = token.charAt(i);
+            if (c < '0' || c > '9') {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static List<String> parsePointer(String path) {
@@ -380,15 +410,23 @@ public final class JSONPatch {
     }
 
     private static boolean numEquals(Number a, Number b) {
-        if (a instanceof BigDecimal || b instanceof BigDecimal) {
-            return toBigDecimal(a).compareTo(toBigDecimal(b)) == 0;
+        // NaN / Infinity 无法转 BigDecimal，退回 double 语义比较
+        if (Double.isNaN(a.doubleValue()) || Double.isInfinite(a.doubleValue())
+                || Double.isNaN(b.doubleValue()) || Double.isInfinite(b.doubleValue())) {
+            return a.doubleValue() == b.doubleValue();
         }
-        return a.doubleValue() == b.doubleValue();
+        // 统一走 BigDecimal 精确比较：doubleValue() 在 >2^53 的整数上会截断，
+        // 造成雪花 ID 级别大数假相等，test 操作会误放行
+        return toBigDecimal(a).compareTo(toBigDecimal(b)) == 0;
     }
 
     private static BigDecimal toBigDecimal(Number n) {
         if (n instanceof BigDecimal) {
             return (BigDecimal) n;
+        }
+        if (n instanceof BigInteger) {
+            // 不能经 longValue() 中转，超 long 范围会截断
+            return new BigDecimal((BigInteger) n);
         }
         if (n instanceof Double || n instanceof Float) {
             return BigDecimal.valueOf(n.doubleValue());
