@@ -160,7 +160,9 @@ public class ExprEvaluator {
             return result;
         } else if (evalType == EVAL_TYPE_OPERATOR) {
             Object leftValue = left.evaluate(context, evaluateEnvironment);
-            Object rightValue = right.evaluate(context, evaluateEnvironment);
+            // 短路求值：&& / || 的右操作数按需计算，不能在此处急切求值，否则破坏语义且会触发右操作数的副作用
+            Object rightValue = (operator == ElOperator.LOGICAL_AND || operator == ElOperator.LOGICAL_OR)
+                    ? null : right.evaluate(context, evaluateEnvironment);
             if (evaluateEnvironment.isAutoParseStringAsDouble()) {
                 if (leftValue instanceof String) {
                     leftValue = Double.parseDouble(leftValue.toString());
@@ -199,11 +201,11 @@ public class ExprEvaluator {
                         // << 位运算左移
                         return result = ((Number) leftValue).longValue() << ((Number) rightValue).longValue();
                     case GT:
-                        // >
-                        return result = ((Number) leftValue).doubleValue() > ((Number) rightValue).doubleValue();
+                        // > ：数字按数值比较，其余 Comparable 按自然序（如字符串字典序）
+                        return result = compareRelational(leftValue, rightValue) > 0;
                     case LT:
                         // <
-                        return result = ((Number) leftValue).doubleValue() < ((Number) rightValue).doubleValue();
+                        return result = compareRelational(leftValue, rightValue) < 0;
                     case EQ:
                         // ==
                         if (leftValue instanceof Number && rightValue instanceof Number) {
@@ -215,10 +217,10 @@ public class ExprEvaluator {
                         return result = leftValue != null && leftValue.equals(rightValue);
                     case GE:
                         // >=
-                        return result = ((Number) leftValue).doubleValue() >= ((Number) rightValue).doubleValue();
+                        return result = compareRelational(leftValue, rightValue) >= 0;
                     case LE:
                         // <=
-                        return result = ((Number) leftValue).doubleValue() <= ((Number) rightValue).doubleValue();
+                        return result = compareRelational(leftValue, rightValue) <= 0;
                     case NE:
                         // !=
                         if (leftValue instanceof Number && rightValue instanceof Number) {
@@ -239,11 +241,25 @@ public class ExprEvaluator {
                         // |
                         return result = ExprCalculateUtils.or(leftValue, rightValue);
                     case LOGICAL_AND:
-                        // &&
-                        return result = (Boolean) leftValue && (Boolean) rightValue;
+                        // && 短路：左为假（或 null）时直接返回假，不计算右操作数
+                        boolean andLeft = (Boolean) leftValue;
+                        if (!andLeft) {
+                            this.constant = left.constant;
+                            return result = Boolean.FALSE;
+                        }
+                        Object andRight = right.evaluate(context, evaluateEnvironment);
+                        this.constant = left.constant && right.constant;
+                        return result = (Boolean) andRight;
                     case LOGICAL_OR:
-                        // ||
-                        return result = (Boolean) leftValue || (Boolean) rightValue;
+                        // || 短路：左为真时直接返回真，不计算右操作数
+                        boolean orLeft = (Boolean) leftValue;
+                        if (orLeft) {
+                            this.constant = left.constant;
+                            return result = Boolean.TRUE;
+                        }
+                        Object orRight = right.evaluate(context, evaluateEnvironment);
+                        this.constant = left.constant && right.constant;
+                        return result = (Boolean) orRight;
                     case IN:
                         /// in
                         return result = this.evaluateIn(leftValue, rightValue);
@@ -291,6 +307,32 @@ public class ExprEvaluator {
             return result;
         }
         return null;
+    }
+
+    /**
+     * 关系运算符（&gt; &lt; &gt;= &lt;=）的比较入口：数字按数值比较，其余 {@link Comparable} 按自然序比较（如字符串字典序）。
+     * 两侧类型不同且不可比时抛出 {@link ExpressionException}。
+     *
+     * @param left  左操作数
+     * @param right 右操作数
+     * @return 负数表示 left 小于 right，0 表示相等，正数表示 left 大于 right
+     */
+    private static int compareRelational(Object left, Object right) {
+        if (left instanceof Number && right instanceof Number) {
+            return Double.compare(((Number) left).doubleValue(), ((Number) right).doubleValue());
+        }
+        if (left instanceof Comparable && right instanceof Comparable
+                && left.getClass() == right.getClass()) {
+            @SuppressWarnings("unchecked")
+            int cmp = ((Comparable<Object>) left).compareTo(right);
+            return cmp;
+        }
+        throw new ExpressionException(
+                "relational operator not supported between " + typeName(left) + " and " + typeName(right));
+    }
+
+    private static String typeName(Object value) {
+        return value == null ? "null" : value.getClass().getSimpleName();
     }
 
     private void throwEvalOperatorException(RuntimeException exception, ElOperator operator, Object leftValue,
