@@ -54,8 +54,8 @@ public final class SqlAutoHistory {
                 SqlAutoChange c = applied.get(i);
                 insert(connection, dialect, table, host, mode, c.kind().name(), c.table(), c.sql());
             }
-        } catch (Throwable e) {
-            // 老驱动可能抛 AbstractMethodError 等 Error，审计失败不影响主流程
+        } catch (Exception | LinkageError e) {
+            // 老驱动可能抛 AbstractMethodError 等 LinkageError，审计失败不影响主流程
             LOG.warn("record schema history failed: {}", String.valueOf(e));
         }
     }

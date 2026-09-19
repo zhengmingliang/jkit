@@ -42,14 +42,15 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class SqlAutoAutoConfiguration {
     /**
      * @param properties 绑定配置
-     * @param dataSource 数据源
+     * @param dataSources 数据源（多实例时取唯一 / @Primary 的那个）
      * @return 启动监听
      */
     @Bean
     @ConditionalOnMissingBean(SqlAutoStartupListener.class)
     public SqlAutoStartupListener sqlAutoStartupListener(SqlAutoProperties properties,
                                                          ObjectProvider<DataSource> dataSources) {
-        return new SqlAutoStartupListener(properties, dataSources.getIfAvailable());
+        return new SqlAutoStartupListener(properties, dataSources.getIfUnique(),
+                (int) dataSources.stream().count());
     }
 
     /**
@@ -61,15 +62,19 @@ public class SqlAutoAutoConfiguration {
 
         private final SqlAutoProperties properties;
         private final DataSource dataSource;
+        private final int dataSourceCount;
         private final AtomicBoolean ran = new AtomicBoolean();
 
         /**
          * @param properties 配置
-         * @param dataSource 数据源
+         * @param dataSource 数据源；容器里存在多个 DataSource 且无唯一候选时为 null
+         * @param dataSourceCount 容器中 DataSource bean 数量，用于多数据源告警
          */
-        public SqlAutoStartupListener(SqlAutoProperties properties, DataSource dataSource) {
+        public SqlAutoStartupListener(SqlAutoProperties properties, DataSource dataSource,
+                                      int dataSourceCount) {
             this.properties = properties;
             this.dataSource = dataSource;
+            this.dataSourceCount = dataSourceCount;
         }
 
         /**
@@ -109,10 +114,17 @@ public class SqlAutoAutoConfiguration {
             if (!ran.compareAndSet(false, true)) {
                 return SqlAutoPlan.empty();
             }
+            warnUnknownPhase();
             SqlAutoOptions options = properties.toOptions();
             if (dataSource == null && (options.url() == null || options.url().isEmpty())) {
-                // 组件化引入 starter、又没配数据源的场景：跳过而不是让应用启动失败
-                LOG.warn("jkit-sql-auto: no DataSource bean and no jkit.sql.auto.url configured, skipped");
+                if (dataSourceCount > 1) {
+                    LOG.warn("jkit-sql-auto: {} DataSource beans found and none is unique,"
+                                    + " skipped; mark one @Primary or configure jkit.sql.auto.url",
+                            dataSourceCount);
+                } else {
+                    // 组件化引入 starter、又没配数据源的场景：跳过而不是让应用启动失败
+                    LOG.warn("jkit-sql-auto: no DataSource bean and no jkit.sql.auto.url configured, skipped");
+                }
                 return SqlAutoPlan.empty();
             }
             if (dataSource != null) {
@@ -134,6 +146,15 @@ public class SqlAutoAutoConfiguration {
                 }
             }
             return SqlAuto.run(options);
+        }
+
+        private void warnUnknownPhase() {
+            String phase = properties.getPhase();
+            if (phase != null && !phase.trim().isEmpty()
+                    && !"eager".equalsIgnoreCase(phase.trim())
+                    && !"ready".equalsIgnoreCase(phase.trim())) {
+                LOG.warn("jkit-sql-auto: unknown phase '{}', expected eager / ready; use eager", phase);
+            }
         }
 
         private boolean isEager() {

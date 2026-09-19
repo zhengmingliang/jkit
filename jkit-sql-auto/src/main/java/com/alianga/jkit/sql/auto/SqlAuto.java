@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -44,6 +45,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public final class SqlAuto {
     private static final Log LOG = Log.get(SqlAuto.class);
     private static final AtomicBoolean DROP_HOOK = new AtomicBoolean();
+    /** 元数据锁等待秒数。 */
+    private static final int LOCK_TIMEOUT_SECONDS = 60;
 
     private SqlAuto() {
     }
@@ -92,32 +95,38 @@ public final class SqlAuto {
                 opt.gbase8a(true);
             }
             SqlAutoPlan plan = plan(types, conn, dialect, opt);
-            if (SqlAutoDialects.isGbase8a(opt) && opt.createIndex()) {
-                LOG.info("jkit-sql-auto: GBase 8a 不支持二级索引，已跳过 CREATE INDEX");
-            }
-            writeExport(plan, opt);
             if (opt.mode() == SqlAutoMode.VALIDATE) {
+                writeExport(plan, opt);
                 List<SqlAutoChange> bad = plan.ofKind(SqlAutoChange.Kind.VALIDATE);
                 if (!bad.isEmpty()) {
                     throw new SqlAutoException("schema validate failed: " + bad);
                 }
                 return plan;
             }
-            boolean locked = opt.lock() && !plan.isEmpty() && SqlAutoLock.acquire(conn, dialect, 60);
+            if (plan.isEmpty()) {
+                return plan;
+            }
+            // 先取锁再在锁内重算计划：plan 与执行之间可能有其他实例建表，
+            // 持锁后按最新元数据重新 inspect，避免拿过期计划去重复 CREATE
+            boolean locked = tryLock(conn, dialect, opt);
             try {
+                if (locked) {
+                    plan = plan(types, conn, dialect, opt);
+                }
+                writeExport(plan, opt);
                 List<SqlAutoChange> applied = SqlAutoExecutor.execute(conn, plan, opt);
                 if (opt.history()) {
                     SqlAutoHistory.record(conn, dialect, opt.historyTable(), opt.mode().name(), applied);
                 }
+                if (opt.mode() == SqlAutoMode.CREATE_DROP) {
+                    registerDropHook(types, opt, dialect, holder.owns);
+                }
+                return plan;
             } finally {
                 if (locked) {
                     SqlAutoLock.release(conn, dialect);
                 }
             }
-            if (opt.mode() == SqlAutoMode.CREATE_DROP) {
-                registerDropHook(types, opt, dialect, holder.owns);
-            }
-            return plan;
         } finally {
             holder.close();
         }
@@ -213,37 +222,45 @@ public final class SqlAuto {
         }
         List<Class<?>> types = collectEntities(opt);
         SqlDialect dialect = SqlAutoDialects.resolve(opt, connection);
+        detectIdentifierCase(connection, opt);
         if (SqlAutoDialects.isGbase8a(opt) || SqlAutoDialects.isGbase8a(connection)) {
             opt.gbase8a(true);
         }
         SqlAutoPlan plan = plan(types, connection, dialect, opt);
-        if (SqlAutoDialects.isGbase8a(opt) && opt.createIndex()) {
-            LOG.info("jkit-sql-auto: GBase 8a 不支持二级索引，已跳过 CREATE INDEX");
-        }
-        writeExport(plan, opt);
         if (opt.mode() == SqlAutoMode.VALIDATE) {
+            writeExport(plan, opt);
             List<SqlAutoChange> bad = plan.ofKind(SqlAutoChange.Kind.VALIDATE);
             if (!bad.isEmpty()) {
                 throw new SqlAutoException("schema validate failed: " + bad);
             }
             return plan;
         }
-        boolean locked = opt.lock() && !plan.isEmpty() && SqlAutoLock.acquire(connection, dialect, 60);
+        if (plan.isEmpty() || opt.dryRun()) {
+            writeExport(plan, opt);
+            SqlAutoExecutor.execute(connection, plan, opt);
+            return plan;
+        }
+        boolean locked = tryLock(connection, dialect, opt);
         try {
+            if (locked) {
+                // 持锁后按最新元数据重算，避免 plan 与执行之间其他实例已建表导致重复 CREATE
+                plan = plan(types, connection, dialect, opt);
+            }
+            writeExport(plan, opt);
             List<SqlAutoChange> applied = SqlAutoExecutor.execute(connection, plan, opt);
             if (opt.history()) {
                 SqlAutoHistory.record(connection, dialect, opt.historyTable(), opt.mode().name(), applied);
             }
+            if (opt.mode() == SqlAutoMode.CREATE_DROP && !opt.dryRun()
+                    && (opt.dataSource() != null || (opt.url() != null && opt.url().length() > 0))) {
+                registerDropHook(types, opt, dialect, true);
+            }
+            return plan;
         } finally {
             if (locked) {
                 SqlAutoLock.release(connection, dialect);
             }
         }
-        if (opt.mode() == SqlAutoMode.CREATE_DROP && !opt.dryRun()
-                && (opt.dataSource() != null || (opt.url() != null && opt.url().length() > 0))) {
-            registerDropHook(types, opt, dialect, true);
-        }
-        return plan;
     }
 
     /**
@@ -257,6 +274,7 @@ public final class SqlAuto {
         SqlAutoOptions opt = options == null ? SqlAutoOptions.defaults() : options;
         List<Class<?>> types = collectEntities(opt);
         SqlDialect dialect = SqlAutoDialects.resolve(opt, connection);
+        detectIdentifierCase(connection, opt);
         List<Class<?>> ordered = SqlEntities.orderByForeignKeys(types);
         List<SqlAutoChange> changes = new ArrayList<SqlAutoChange>(ordered.size());
         SqlAutoInspector inspector = new SqlAutoInspector(connection, opt, dialect);
@@ -292,6 +310,27 @@ public final class SqlAuto {
         } finally {
             holder.close();
         }
+    }
+
+    /**
+     * 尝试取元数据锁。方言不支持时静默跳过；取锁失败（超时等）打告警后返回 false，
+     * 由调用方决定是否无锁继续。
+     *
+     * @param connection 连接
+     * @param dialect 方言
+     * @param opt 选项
+     * @return 取到返回 {@code true}
+     */
+    private static boolean tryLock(Connection connection, SqlDialect dialect, SqlAutoOptions opt) {
+        if (!opt.lock() || !SqlAutoLock.supports(dialect)) {
+            return false;
+        }
+        boolean locked = SqlAutoLock.acquire(connection, dialect, LOCK_TIMEOUT_SECONDS);
+        if (!locked) {
+            LOG.warn("jkit-sql-auto: metadata lock not acquired within {}s, continue WITHOUT lock;"
+                            + " concurrent instances may conflict", LOCK_TIMEOUT_SECONDS);
+        }
+        return locked;
     }
 
     /**
@@ -392,8 +431,9 @@ public final class SqlAuto {
     private static SqlEntityModel prefixedModel(Class<?> type, SqlAutoOptions opt) {
         SqlEntityModel m = SqlEntities.inspect(type);
         String prefix = opt == null ? null : opt.tablePrefix();
+        String table = foldName(m.tableName(), opt);
         if (prefix == null || prefix.isEmpty()) {
-            return m;
+            return new SqlEntityModel(m.type(), table, m.columns(), m.indexes(), m.comment());
         }
         List<SqlEntityColumn> cols = m.columns();
         boolean ref = false;
@@ -405,7 +445,7 @@ public final class SqlAuto {
             }
         }
         if (!ref) {
-            return new SqlEntityModel(m.type(), prefix + m.tableName(), cols,
+            return new SqlEntityModel(m.type(), prefix + table, cols,
                     m.indexes(), m.comment());
         }
         List<SqlEntityColumn> out = new ArrayList<SqlEntityColumn>(cols.size());
@@ -415,12 +455,32 @@ public final class SqlAuto {
             if (rt != null && !rt.isEmpty()) {
                 out.add(new SqlEntityColumn(c.columnName(), c.canonical(), c.precision(), c.scale(),
                         c.nullable(), c.primaryKey(), c.autoIncrement(), c.unique(), c.rawType(),
-                        prefix + rt, c.referencesColumn(), c.comment(), c.defaultValue(), c.field()));
+                        prefix + foldName(rt, opt), c.referencesColumn(), c.comment(), c.defaultValue(), c.field()));
             } else {
                 out.add(c);
             }
         }
-        return new SqlEntityModel(m.type(), prefix + m.tableName(), out, m.indexes(), m.comment());
+        return new SqlEntityModel(m.type(), prefix + table, out, m.indexes(), m.comment());
+    }
+
+    /**
+     * 按连接元数据探测到的折叠方向折叠表名。CREATE TABLE 表名不带引号时会按库的
+     * 规则折叠成同样的形式，预折叠让引号 DDL（quote-identifiers / 保留字兜底）
+     * 与不带引号的建表名保持一致。
+     *
+     * @param name 表名
+     * @param opt 选项
+     * @return 折叠后的表名
+     */
+    private static String foldName(String name, SqlAutoOptions opt) {
+        String fold = opt == null ? null : opt.identifierCase();
+        if ("upper".equals(fold)) {
+            return name.toUpperCase(Locale.ROOT);
+        }
+        if ("lower".equals(fold)) {
+            return name.toLowerCase(Locale.ROOT);
+        }
+        return name;
     }
 
     static List<Class<?>> collectEntities(SqlAutoOptions options) {

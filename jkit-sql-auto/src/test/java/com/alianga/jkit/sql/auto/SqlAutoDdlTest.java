@@ -14,6 +14,7 @@ import com.alianga.jkit.sql.schema.model.CanonicalType;
 import org.junit.Test;
 
 import java.sql.Types;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -84,6 +85,90 @@ public class SqlAutoDdlTest {
         assertTrue(kind(changes, SqlAutoChange.Kind.CREATE_TABLE));
         assertFalse(kind(changes, SqlAutoChange.Kind.COMMENT));
         assertTrue(changes.get(0).sql(), changes.get(0).sql().contains("COMMENT 't'"));
+    }
+
+    @Test
+    public void mysqlReservedWordsAutoQuoted() {
+        // 默认（不加引号）：表名 order / 列名 desc 撞 MySQL 保留字时自动加反引号并兜底
+        @SqlTable(name = "order", indexes = {"desc"})
+        class OrderKw {
+            @SqlId
+            @SqlGenerated
+            long id;
+            @SqlColumn(length = 64)
+            String desc;
+        }
+        SqlAutoPlan plan = SqlAuto.plan(Arrays.<Class<?>>asList(OrderKw.class), null,
+                SqlDialect.MYSQL, SqlAutoOptions.defaults().showSql(false));
+        String create = change(plan, SqlAutoChange.Kind.CREATE_TABLE);
+        assertTrue(create, create.contains("CREATE TABLE `order` ("));
+        assertTrue(create, create.contains("`desc`"));
+        String index = change(plan, SqlAutoChange.Kind.CREATE_INDEX);
+        assertTrue(index, index.contains("ON `order` (`desc`)"));
+        assertFalse(index, index.contains("ON \""));
+    }
+
+    @Test
+    public void h2FoldedKeywordTableStaysConsistent() {
+        // 大写折叠库（H2）：表名 order 先折叠成 ORDER，再统一加引号，
+        // CREATE 与 DROP 的标识符必须一致
+        @SqlTable(name = "order")
+        class OrderKw {
+            @SqlId
+            @SqlGenerated
+            long id;
+            @SqlColumn(length = 64)
+            String desc;
+        }
+        SqlAutoOptions opt = SqlAutoOptions.defaults().dialect(SqlDialect.H2)
+                .identifierCase("upper").showSql(false);
+        SqlAutoPlan plan = SqlAuto.plan(Arrays.<Class<?>>asList(OrderKw.class), null,
+                SqlDialect.H2, opt);
+        String create = change(plan, SqlAutoChange.Kind.CREATE_TABLE);
+        assertTrue(create, create.contains("CREATE TABLE \"ORDER\" ("));
+        assertTrue(create, create.contains("\"desc\""));
+        String drop = SqlAutoDdl.dropTableSql("ORDER", SqlDialect.H2, opt);
+        assertTrue(drop, drop.contains("DROP TABLE IF EXISTS \"ORDER\""));
+    }
+
+    @Test
+    public void postgresKeywordCommentQuoted() {
+        // PG 注释同步：COMMENT ON COLUMN 的保留字列名必须与建表同形态加引号
+        @SqlTable(name = "order")
+        class OrderKw {
+            @SqlId
+            @SqlGenerated
+            long id;
+            @SqlColumn(length = 64, comment = "描述")
+            String desc;
+        }
+        SqlAutoPlan plan = SqlAuto.plan(Arrays.<Class<?>>asList(OrderKw.class), null,
+                SqlDialect.POSTGRES, SqlAutoOptions.defaults().showSql(false));
+        List<SqlAutoChange> comments = plan.ofKind(SqlAutoChange.Kind.COMMENT);
+        assertTrue(plan.toString(), !comments.isEmpty());
+        boolean sawColumnComment = false;
+        for (int i = 0; i < comments.size(); i++) {
+            if (comments.get(i).sql().contains("COMMENT ON COLUMN \"order\".\"desc\"")) {
+                sawColumnComment = true;
+            }
+        }
+        assertTrue(comments.toString(), sawColumnComment);
+    }
+
+    @Test
+    public void nonKeywordIdentifiersStayUnquoted() {
+        // 普通名字不受影响：不加引号靠库折叠
+        SqlAutoPlan plan = SqlAuto.plan(Arrays.<Class<?>>asList(AutoUser.class), null,
+                SqlDialect.MYSQL, SqlAutoOptions.defaults().showSql(false));
+        String create = change(plan, SqlAutoChange.Kind.CREATE_TABLE);
+        assertFalse(create, create.contains("`"));
+        assertFalse(create, create.contains("\""));
+    }
+
+    private static String change(SqlAutoPlan plan, SqlAutoChange.Kind kind) {
+        List<SqlAutoChange> changes = plan.ofKind(kind);
+        assertTrue(kind + " expected", !changes.isEmpty());
+        return changes.get(0).sql();
     }
 
     @Test

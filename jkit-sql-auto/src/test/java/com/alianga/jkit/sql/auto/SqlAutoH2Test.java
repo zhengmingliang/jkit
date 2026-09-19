@@ -2,6 +2,7 @@ package com.alianga.jkit.sql.auto;
 
 import com.alianga.jkit.sql.SqlDialect;
 import com.alianga.jkit.sql.auto.fixture.AutoOrg;
+import com.alianga.jkit.sql.auto.fixture.AutoOrder;
 import com.alianga.jkit.sql.auto.fixture.AutoStaff;
 import com.alianga.jkit.sql.auto.fixture.AutoTag;
 import com.alianga.jkit.sql.auto.fixture.AutoUser;
@@ -320,6 +321,31 @@ public class SqlAutoH2Test {
         assertFalse(SqlAuto.run(connection, opt).isEmpty());
         assertTrue(tableExists("AUTO_USER"));
         assertTrue("second run should be a no-op", SqlAuto.run(connection, opt).isEmpty());
+    }
+
+    @Test
+    public void reservedWordTableAndColumnsAutoQuoted() {
+        // 表名 order、列名 desc / value 均为 H2 保留字：默认不加引号，撞保留字时自动加引号
+        SqlAutoOptions opt = options().entities(AutoOrder.class);
+        SqlAutoPlan first = SqlAuto.run(connection, opt);
+        assertTrue(first.toString(), !first.ofKind(SqlAutoChange.Kind.CREATE_TABLE).isEmpty());
+        assertTrue(first.toString(), !first.ofKind(SqlAutoChange.Kind.CREATE_INDEX).isEmpty());
+        String createSql = first.ofKind(SqlAutoChange.Kind.CREATE_TABLE).get(0).sql();
+        assertTrue(createSql, createSql.contains("\"ORDER\""));
+        assertTrue(createSql, createSql.contains("\"desc\""));
+        assertTrue(createSql, createSql.contains("\"value\""));
+        assertTrue(tableExists("ORDER"));
+        assertTrue(columnExists("ORDER", "desc"));
+        assertTrue(columnExists("ORDER", "value"));
+
+        // 二次运行必须为空计划：验证引号建出来的表 / 列与元数据对照一致，
+        // 不会因为名字形态不一致再次触发 ADD COLUMN / CREATE INDEX
+        assertTrue("second run should be a no-op", SqlAuto.run(connection, opt).isEmpty());
+
+        // drop 走 identTable（折叠 + 引号），必须能删掉引号建的表
+        SqlAutoPlan dropped = SqlAuto.drop(connection, opt);
+        assertFalse(dropped.ofKind(SqlAutoChange.Kind.DROP_TABLE).isEmpty());
+        assertFalse(tableExists("ORDER"));
     }
 
     private long countRows(String table) throws SQLException {

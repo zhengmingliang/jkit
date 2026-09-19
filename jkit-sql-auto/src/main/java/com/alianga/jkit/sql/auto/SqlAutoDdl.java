@@ -1,6 +1,8 @@
 package com.alianga.jkit.sql.auto;
 
+import com.alianga.jkit.log.Log;
 import com.alianga.jkit.sql.SqlDialect;
+import com.alianga.jkit.sql.SqlReservedWords;
 import com.alianga.jkit.sql.entity.SqlEntities;
 import com.alianga.jkit.sql.entity.SqlEntityColumn;
 import com.alianga.jkit.sql.entity.SqlEntityModel;
@@ -22,6 +24,20 @@ import java.util.Set;
  * @since 2.0.1
  */
 public final class SqlAutoDdl {
+    private static final Log LOG = Log.get(SqlAutoDdl.class);
+    /** GBase 8a 索引跳过日志只打一次，避免多表刷屏。 */
+    private static final java.util.concurrent.atomic.AtomicBoolean GBASE_INDEX_LOGGED =
+            new java.util.concurrent.atomic.AtomicBoolean();
+    /** 保留字自动引号告警：同一标识符全局只回调一次（去重在 SqlReservedWords 内）。 */
+    private static final java.util.function.BiConsumer<SqlDialect, String> AUTO_QUOTE_WARN =
+            new java.util.function.BiConsumer<SqlDialect, String>() {
+                @Override
+                public void accept(SqlDialect dialect, String identifier) {
+                    LOG.warn("jkit-sql-auto: identifier '{}' is a {} reserved word, auto-quoted",
+                            identifier, dialect.name());
+                }
+            };
+
     private SqlAutoDdl() {
     }
 
@@ -102,7 +118,7 @@ public final class SqlAutoDdl {
             }
         }
         if (mode != SqlAutoMode.VALIDATE) {
-            addCommentSync(out, model, live, d);
+            addCommentSync(out, model, live, d, opt);
         }
         addIndexChanges(out, model, live, d, opt);
         return out;
@@ -398,13 +414,15 @@ public final class SqlAutoDdl {
      * 实体未写注释时不覆盖库里已有注释。
      */
     private static void addCommentSync(List<SqlAutoChange> out, SqlEntityModel model,
-                                       SqlAutoLiveTable live, SqlDialect dialect) {
+                                       SqlAutoLiveTable live, SqlDialect dialect,
+                                       SqlAutoOptions options) {
         if (model == null || live == null) {
             return;
         }
         String table = model.tableName();
         if (!sameComment(model.comment(), live.comment())) {
-            String sql = SqlEntities.tableCommentSql(table, model.comment(), dialect);
+            String sql = SqlEntities.tableCommentSql(table, model.comment(), dialect,
+                    convertOptions(options));
             if (sql != null) {
                 out.add(new SqlAutoChange(SqlAutoChange.Kind.COMMENT, table, "", sql));
             }
@@ -422,7 +440,7 @@ public final class SqlAutoDdl {
             if (sameComment(col.comment(), existing.comment())) {
                 continue;
             }
-            String sql = SqlEntities.columnCommentSql(table, col, dialect);
+            String sql = SqlEntities.columnCommentSql(table, col, dialect, convertOptions(options));
             if (sql != null) {
                 out.add(new SqlAutoChange(SqlAutoChange.Kind.COMMENT, table, col.columnName(), sql));
             }
@@ -497,6 +515,9 @@ public final class SqlAutoDdl {
         }
         // GBase 8a 分析型引擎不支持二级索引，强行建会整条 CREATE INDEX 失败；识别到即跳过。
         if (SqlAutoDialects.isGbase8a(options)) {
+            if (!model.indexes().isEmpty() && GBASE_INDEX_LOGGED.compareAndSet(false, true)) {
+                LOG.info("jkit-sql-auto: GBase 8a 不支持二级索引，已跳过 CREATE INDEX");
+            }
             return;
         }
         List<String> indexes = model.indexes();
@@ -510,10 +531,7 @@ public final class SqlAutoDdl {
             if (live != null && indexPresent(live, name, spec)) {
                 continue;
             }
-            String sql = createIndexSql(table, name, spec);
-            if (options.quoteIdentifiers() && dialect != null) {
-                sql = sql.replace(" ON " + table + " ", " ON " + dialect.quoteIdent(table) + " ");
-            }
+            String sql = createIndexSql(model, name, spec, dialect, options);
             if (options.mode() == SqlAutoMode.VALIDATE) {
                 out.add(new SqlAutoChange(SqlAutoChange.Kind.VALIDATE, table,
                         "missing index " + name, ""));
@@ -557,19 +575,45 @@ public final class SqlAutoDdl {
     }
 
     /**
-     * {@code CREATE INDEX} 语句，索引名与建表名可独立控制（索引名可不加表前缀）。
+     * {@code CREATE INDEX} 语句。索引名做保留字兜底，表名与建表语句同一引号规则，
+     * spec 里的列名只有能对上实体列时才按列的引号规则处理（其余视为表达式原样保留）。
      *
-     * @param table 表名（已带表前缀）
+     * @param model 实体（用于识别 spec 中的列名）
      * @param name 索引名
      * @param spec 索引定义
+     * @param dialect 方言
+     * @param options 选项
      * @return DDL
      */
-    private static String createIndexSql(String table, String name, String spec) {
+    private static String createIndexSql(SqlEntityModel model, String name, String spec,
+                                         SqlDialect dialect, SqlAutoOptions options) {
         String cols = indexColumns(spec);
-        if (!cols.startsWith("(")) {
-            cols = "(" + cols + ")";
+        StringBuilder sb = new StringBuilder("CREATE INDEX ")
+                .append(ident(name, dialect, false, options))
+                .append(" ON ").append(identTable(model.tableName(), dialect, options)).append(" (");
+        String[] parts = cols.split(",");
+        for (int i = 0; i < parts.length; i++) {
+            if (i > 0) {
+                sb.append(',');
+            }
+            sb.append(identIndexColumn(model, parts[i].trim(), dialect, options));
         }
-        return "CREATE INDEX " + name + " ON " + table + " " + cols;
+        return sb.append(')').toString();
+    }
+
+    /**
+     * 索引列片段：与实体列名（忽略大小写）完全一致时按列引号规则处理，
+     * 否则视为函数 / 表达式等原样保留。
+     */
+    private static String identIndexColumn(SqlEntityModel model, String part, SqlDialect dialect,
+                                           SqlAutoOptions options) {
+        List<SqlEntityColumn> cols = model.columns();
+        for (int i = 0; i < cols.size(); i++) {
+            if (cols.get(i).columnName().equalsIgnoreCase(part)) {
+                return ident(cols.get(i).columnName(), dialect, options);
+            }
+        }
+        return part;
     }
 
     private static boolean coveredByUniqueColumn(SqlEntityModel model, String spec) {
@@ -629,19 +673,26 @@ public final class SqlAutoDdl {
         convert.includeForeignKeys(options.foreignKeys());
         convert.includeAutoIncrement(options.autoIncrement());
         convert.quoteIdentifiers(options.quoteIdentifiers());
+        // 标识符默认不加引号靠库折叠，但撞目标库保留字时自动加引号兜底并告警
+        convert.keywordQuote(true);
+        convert.keywordQuotedListener(AUTO_QUOTE_WARN);
         return convert;
     }
 
     private static String ident(String name, SqlDialect dialect, SqlAutoOptions options) {
-        if (options != null && options.quoteIdentifiers() && dialect != null) {
-            return dialect.quoteIdent(name);
-        }
-        return name;
+        return SqlReservedWords.protect(dialect, name,
+                options != null && options.quoteIdentifiers(), true, AUTO_QUOTE_WARN);
+    }
+
+    private static String ident(String name, SqlDialect dialect, boolean quoteAll,
+                                SqlAutoOptions options) {
+        return SqlReservedWords.protect(dialect, name, quoteAll, true, AUTO_QUOTE_WARN);
     }
 
     /**
      * 表名标识符：先按连接元数据折叠大小写再加方言引号。
-     * 表在建表时是不带引号的（会按库的大小写规则折叠），DROP / ALTER 必须与之一致。
+     * 表在建表时是不带引号的（会按库的大小写规则折叠），DROP / ALTER 必须与之一致；
+     * 表名本身是目标库保留字时（如 order）自动加引号兜底。
      *
      * @param name 表名
      * @param dialect 方言

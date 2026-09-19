@@ -1,5 +1,7 @@
 package com.alianga.jkit.sql.auto;
 
+import com.alianga.jkit.log.Log;
+
 /**
  * 启动时对表结构的处理模式，对标 JPA {@code spring.jpa.hibernate.ddl-auto}。
  *
@@ -28,8 +30,10 @@ public enum SqlAutoMode {
      */
     CREATE_DROP;
 
+    private static final Log LOG = Log.get(SqlAutoMode.class);
+
     /**
-     * 按名称解析，无法识别时返回 {@link #UPDATE}。
+     * 按名称解析，无法识别时返回 {@link #UPDATE} 并告警。
      *
      * @param name 名称，空则 UPDATE
      * @return 模式
@@ -58,6 +62,8 @@ public enum SqlAutoMode {
         if ("NONE".equals(key) || "OFF".equals(key) || "FALSE".equals(key)) {
             return NONE;
         }
+        // 写错 mode 会静默变成 UPDATE 改库，必须让用户看见
+        LOG.warn("jkit-sql-auto: unknown mode '{}', falling back to UPDATE", name);
         return UPDATE;
     }
 }
