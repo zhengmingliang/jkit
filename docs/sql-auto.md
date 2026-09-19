@@ -248,7 +248,7 @@ List<String> sqls = plan.sql();
 | `create-index` | `true` | 是否补 `CREATE INDEX` |
 | `table-prefix` | （空） | 表名统一前缀，如 `t_`；作用于建表 / 改表 / 删表 / 索引 / 序列 / 外键目标表 |
 | `index-prefix-enabled` | `true` | 自动派生的索引名是否也带 `table-prefix`（如 `t_user` 的索引是 `t_user_idx` 还是 `user_idx`）；实体里显式写的 `@Index(name=…)` 始终原样保留，不受此开关影响 |
-| `quote-identifiers` | `false` | 标识符加方言引号 |
+| `quote-identifiers` | `false` | 标识符加方言引号：表名按连接元数据折叠大小写后引用，列名在 CREATE / ADD / ALTER / DROP 中原样引用。列名撞目标库保留字时开启（真实实体实测：Oracle / GBase 8a 的 `LEVEL`、`MODE` 会直接 ORA-00904 / 语法错误） |
 | `foreign-keys` | `true` | 是否在 CREATE TABLE 里写 FOREIGN KEY；GBase 8a 等不支持时设 `false` |
 | `auto-increment` | `true` | 是否生成自增子句；DuckDB 等不认 IDENTITY 时设 `false` |
 | `postgres-identity-style` | `identity` | PG / OpenGauss 自增写法：`identity` 或 `serial`（老版 OpenGauss 不认 GENERATED…IDENTITY） |

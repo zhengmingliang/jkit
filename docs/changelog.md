@@ -54,6 +54,9 @@
 
 - `com.alianga.jkit.html` 选择器索引：`Document` 上新增惰性 id / class / 标签索引（键前缀 `t:` / `#:` / `.:`，首次查询时建，之后复用）。`doc.select(...)` / `doc.selectFirst(...)` 不再每次全树深度优先遍历，而是「取候选 + 逐个校验」；键的优先级是 id > class > 标签名，`div.foo` 取 `.foo`、`a[href^=/p/]` 取 `a`（标签名也算索引键，所以带属性的查询一样受益），只有纯属性 / 伪类查询（如 `[data-x]`、`:empty`）才退回全树遍历。查询根是子元素时（如 `article.selectFirst("a.post-title")`）仍走遍历——候选集以整份文档为范围，逐个判断是否落在子树内反而更慢，所以抽取类代码里能提到文档级的查询尽量提到文档级。索引敢这么用，是因为本模块 DOM 解析完即不可变（没有 setter、没有增删子节点的入口），建一次就再也不会失效，不需要任何失效逻辑。实测（合成页面，成对交替计时）：选择器由 1.3x–2.2x 提升到中页面 4.6x–80x、大页面 8.6x–749x，端到端 1.89x；真实站点 alianga.com 首页解析 1.74x、解析 + 抽 10 篇全部字段 1.73x、4 个抽取选择器 4.5x–37.1x。常驻堆只解析仍为 202.6 MB（不查询就不建索引，与建索引前一模一样），解析 + 一次查询 209.1 MB vs Jsoup 181.0 MB，索引约占一份 DOM 的 3.5%。`HtmlTest` 由 34 例扩充到 39 例，新增 `indexAndTraversalReturnTheSameElements`（同一批查询分别在文档级走索引、在元素级走遍历，断言元素序列逐个 `assertSame`）、`indexKeepsDocumentOrder`、`repeatedIdAndMultiClassAreIndexedCompletely`、`missKeyYieldsEmptyInsteadOfCrash`、`indexIsBuiltOnceAndReused`；与 Jsoup 的差分验证仍是 112 组一致 / 7 组已知差异，真实站点 10 篇文章 5 个字段逐条一致。
 
+- `jkit-sql-auto`：配置绑定补齐。`foreign-keys` / `auto-increment` / `postgres-identity-style` 此前只有 Java 链式 API 能设，`jkit.sql.auto.*` 配置与 Spring 绑定都到不了（docs 推荐的 OpenGauss / DuckDB 规避手段对 Spring 用户实际不可用）；现在两个入口都支持。Spring starter 的 `additional-spring-configuration-metadata.json` 补全全部 24 个配置键，IDE 里 `jkit.sql.auto.*` 有完整补全与说明。
+- `jkit-sql-auto`：多实例并发保护与审计三件套。`lock: true`（默认）执行前在当前连接取元数据锁（MySQL `GET_LOCK` / PG `pg_advisory_lock`，其它方言自动跳过），多实例同时冷启动串行化，避免「都读到表不存在、都去 CREATE」的竞态；`history: true` 把实际执行的 DDL 写入历史表 `jkit_schema_history`（自动创建，行含时间 / 主机 / 模式 / 语句，空计划不产生行）；`export: 路径` 把本次计划落盘（UTF-8，每条一行分号结尾），配合 `dry-run` 即纯 schema 生成器。
+
 ### 变更
 
 - `jkit-core`：`EncryptUtils.RSA.buildKeyPair()` 默认密钥长度由 1024 位上调到 **2048 位**。1024 位 RSA 已不满足当前安全基线（NIST / PCI-DSS 均要求 ≥2048）；确需沿用旧长度改为显式调用 `buildKeyPair(1024)`，小于 512 位抛 `IllegalArgumentException`。
