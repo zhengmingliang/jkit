@@ -6,11 +6,19 @@ package com.alianga.jkit.collection;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.BiFunction;
+import java.util.function.Function;
 
 /**
  * <p> 可以映射多个key到一个value的HashMap实现(获取值时可忽略key的大小写，优先获取匹配大小写的值)</p>
- * <p> 忽略大小写只对通过 {@link #put(Object, Object)} 及其衍生方法写入的 key 生效，
- *     写入与删除都会同步维护内部的 {@code keyMap}，保证读写两侧语义一致。</p>
+ * <p> 忽略大小写只对通过 {@link #put(Object, Object)} 及 {@link #putIfAbsent} /
+ *     {@link #compute}/{@link #computeIfAbsent}/{@link #computeIfPresent}/{@link #merge}
+ *     等写入方法写入的 key 生效，写入与删除都会同步维护内部的 {@code keyMap}，
+ *     保证读写两侧语义一致。</p>
+ * <p> 注意：通过 {@code keySet()}/{@code entrySet()} 的迭代器删除条目时，{@code HashMap}
+ *     直接摘除节点、子类无法拦截，对应别名不会同步清理——残留别名不影响 {@code get} 的
+ *     正确性（会回退精确查找），但「视图删除后再 {@code put} 同形 key」的别名归属以
+ *     后写者为准。需要严格一致时请使用 {@link #remove(Object)} 删除。</p>
  *
  * @author 郑明亮
  * @time 2022/3/13 09:27
@@ -41,6 +49,11 @@ public class MultiKeyHashMap<K, V> extends HashMap<K, V> {
         if (v != null) {
             return v;
         }
+        if (key == null) {
+            // null key 不参与忽略大小写匹配，避免 lowerKey(null) 塌缩成 "null"
+            // 后误命中键为字面量 "null" 的条目
+            return null;
+        }
         K k = keyMap.get(lowerKey(key));
         if (k != null) {
             return super.get(k);
@@ -53,6 +66,9 @@ public class MultiKeyHashMap<K, V> extends HashMap<K, V> {
     public boolean containsKey(Object key) {
         if (super.containsKey(key)) {
             return true;
+        }
+        if (key == null) {
+            return false;
         }
         K k = keyMap.get(lowerKey(key));
         return k != null && super.containsKey(k);
@@ -113,8 +129,73 @@ public class MultiKeyHashMap<K, V> extends HashMap<K, V> {
 
     @Override
     public V put(K key, V value) {
-        keyMap.put(lowerKey(key), key);
+        if (key != null) {
+            // null key 不登记：lowerKey(null) 会塌缩成 "null"，
+            // 覆盖键为字面量 "null" 条目的别名
+            keyMap.put(lowerKey(key), key);
+        }
         return super.put(key, value);
+    }
+
+    @Override
+    public V putIfAbsent(K key, V value) {
+        V existing = super.putIfAbsent(key, value);
+        if (existing == null && key != null) {
+            // 返回 null 表示插入了新条目（HashMap.putIfAbsent 不走子类 put，需自行登记）
+            keyMap.put(lowerKey(key), key);
+        }
+        return existing;
+    }
+
+    @Override
+    public V computeIfAbsent(K key, Function<? super K, ? extends V> mappingFunction) {
+        V v = super.computeIfAbsent(key, mappingFunction);
+        if (v != null && key != null) {
+            keyMap.put(lowerKey(key), key);
+        }
+        return v;
+    }
+
+    @Override
+    public V computeIfPresent(K key, BiFunction<? super K, ? super V, ? extends V> remappingFunction) {
+        V v = super.computeIfPresent(key, remappingFunction);
+        if (key == null) {
+            return v;
+        }
+        if (v != null) {
+            keyMap.put(lowerKey(key), key);
+        } else {
+            refreshAliasAfterRemove(key);
+        }
+        return v;
+    }
+
+    @Override
+    public V compute(K key, BiFunction<? super K, ? super V, ? extends V> remappingFunction) {
+        V v = super.compute(key, remappingFunction);
+        if (key == null) {
+            return v;
+        }
+        if (v != null) {
+            keyMap.put(lowerKey(key), key);
+        } else {
+            refreshAliasAfterRemove(key);
+        }
+        return v;
+    }
+
+    @Override
+    public V merge(K key, V value, BiFunction<? super V, ? super V, ? extends V> remappingFunction) {
+        V v = super.merge(key, value, remappingFunction);
+        if (key == null) {
+            return v;
+        }
+        if (v != null) {
+            keyMap.put(lowerKey(key), key);
+        } else {
+            refreshAliasAfterRemove(key);
+        }
+        return v;
     }
 
     /**
@@ -137,25 +218,54 @@ public class MultiKeyHashMap<K, V> extends HashMap<K, V> {
     }
 
     /**
-     * 忽略大小写地删除条目，并同步清理 {@code keyMap} 中的登记。
+     * 忽略大小写地删除条目，并同步维护 {@code keyMap} 中的登记。
      * <p>未覆写时 {@code remove} 只按精确 key 删除：写入 {@code "UserName"} 后调用
      * {@code remove("username")} 会静默失败，而 {@code get("username")} 仍能取到值，
      * 读写语义自相矛盾。</p>
+     * <p>删除后按现存条目重建别名：map 中可能同时存在仅大小写不同的多个条目
+     * （如 {@code "A"} 与 {@code "a"}），删除其一后别名必须指向幸存条目，
+     * 否则幸存条目的忽略大小写查找会失效。</p>
      *
      * @param key 待删除的键
      * @return 被删除的值，键不存在时返回 {@code null}
      */
     @Override
     public V remove(Object key) {
-        String lower = lowerKey(key);
-        K real = keyMap.get(lower);
         V removed = super.remove(key);
-        if (removed == null && real != null) {
-            removed = super.remove(real);
+        if (key == null) {
+            // null key 不参与忽略大小写匹配，避免误删键为字面量 "null" 的条目
+            return removed;
         }
-        // 无论走哪条路径，登记都要失效，避免 keyMap 长期持有已删除 key 的引用
-        keyMap.remove(lower);
+        if (removed == null) {
+            K real = keyMap.get(lowerKey(key));
+            if (real != null) {
+                removed = super.remove(real);
+            }
+        }
+        refreshAliasAfterRemove(key);
         return removed;
+    }
+
+    /**
+     * 删除条目后重建 {@code lower} 形态的别名：存在同形幸存条目则指向之，否则移除别名，
+     * 避免 keyMap 长期持有已删除 key 的引用。
+     *
+     * @param key 刚被（尝试）删除的原始键
+     */
+    private void refreshAliasAfterRemove(Object key) {
+        String lower = lowerKey(key);
+        K alias = null;
+        for (K k : this.keySet()) {
+            if (k != null && lowerKey(k).equals(lower)) {
+                alias = k;
+                break;
+            }
+        }
+        if (alias != null) {
+            keyMap.put(lower, alias);
+        } else {
+            keyMap.remove(lower);
+        }
     }
 
     /**
