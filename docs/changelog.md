@@ -121,6 +121,9 @@
 - `jkit-notify`：渠道注册表 `register/unregister/get/list` 加同步，并发读写不再可能丢渠道或抛 `ConcurrentModificationException`；`NotifyPolicy` 去重占位与限流计数前移到 `beforeSend` 原子完成（`afterAttempt` 保留兼容、不再重复记账），并发下同一条消息不会同时通过去重检查、也不会放行超额消息；默认异步线程池改为 8 线程 + 1000 有界队列 + CallerRunsPolicy 背压，不再无限积压。
 - `jkit-notify`：SPI 加载逐 provider 容错，单个扩展渠道损坏（缺依赖 / 构造抛异常）只告警跳过，不再让整个模块以 `ExceptionInInitializerError` 崩掉。
 - `jkit-notify-extra`：阿里云短信 `RegionId` 跟随 `CFG_REGION`（可配地域），不再硬编码 `cn-hangzhou`。
+- `jkit-core`：默认包（无名包）类的反射包装与 JSON 序列化不再抛 `NullPointerException`。`ClassStrucWrap.checkClassStructure` 与 JSON POJO 序列化代码生成都直接取 `getPackage().getName()`，而默认包类的 `getPackage()` 在 JDK 8 下返回 `null`（JDK 9+ 返回空名包，代码生成会写出非法的 `package ;`）。现在两处都做空保护：拿不到包名时不生成 `package` 语句、也不再误判成 JDK 内置模块，默认包 POJO 在 JDK 8 能序列化、在 JDK 9+ 能走代码生成的快路径。该缺陷与上游 wast 同源（`ClassStrucWrap.java:614`、`JSONPojoSerializerCodeGen.java:40`：JDK 8 直接 NPE，JDK 11+ 生成 `package ;` 后静默退回反射序列化）。新增 `ReflectNullPackageTest`（2 例）与 `DefaultPackageSerializationTest`（3 例）。
+- `jkit-core`：JDK 17+ 上回退引擎的 PATCH 之类的扩展 HTTP 方法不再抛 `ProtocolException`。`HttpURLConnection.setRequestMethod` 只承认白名单方法，旧实现在抛异常后用 `setAccessible(true)` 改写 `method` 字段；JDK 9 起模块封装生效，JDK 17 起该反射直接抛 `InaccessibleObjectException`，回退引擎上的 PATCH 必然失败。现在优先用 `Unsafe` 写 `method` 字段（反射保留为兜底），JDK 8 / 11 / 17 / 21 / 25 实测均可真正发出 PATCH。新增 `UrlConnectionPatchMethodTest`（3 例，直接驱动引擎、不经过上层引擎选择）。
+- `jkit-core`：测试源码改按 JDK 8 toolchain 编译。`maven-toolchains-plugin` 会把默认 toolchain 换成声明里的 9 / 11，默认 `testCompile` 跟着用 JDK 11 的 javac——字节码虽是 52，方法签名却按 JDK 11 解析（`ByteBuffer#flip()` 变成返回 `ByteBuffer` 的协变版本），用 JDK 8 跑测试就是 `NoSuchMethodError`。现在 `base-compile` 与 `default-testCompile` 在两个 profile 里都指回 JDK 8 toolchain，五个 JDK 上 `mvn clean test` 均为 870 例通过（3 例跳过）。
 
 ## 2.0.1 - 2026-09-13
 
