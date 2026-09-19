@@ -2,6 +2,7 @@ package com.alianga.jkit.sql.entity;
 
 import com.alianga.jkit.sql.SqlBuilder;
 import com.alianga.jkit.sql.SqlDialect;
+import com.alianga.jkit.sql.SqlReservedWords;
 import com.alianga.jkit.sql.ast.SqlExpr;
 import com.alianga.jkit.sql.ast.SqlLiteral;
 import com.alianga.jkit.sql.schema.convert.ConversionReport;
@@ -109,6 +110,22 @@ public final class SqlEntities {
         return name;
     }
 
+    /**
+     * 标识符最终文本：quote-identifiers 开启全量加引号；否则 keywordQuote 开启时
+     * 撞目标库保留字的标识符自动加引号并回调告警。
+     */
+    private static String ident(String name, SqlDialect dialect, SqlSchemaConvertOptions options) {
+        return SqlReservedWords.protect(dialect, name,
+                options != null && options.quoteIdentifiers(),
+                options != null && options.keywordQuote(),
+                options == null ? null : options.keywordQuotedListener());
+    }
+
+    private static String ident(String name, SqlDialect dialect, boolean quoteAll,
+                                boolean keywordAware) {
+        return SqlReservedWords.protect(dialect, name, quoteAll, keywordAware, null);
+    }
+
     public static String createTable(SqlEntityModel model, SqlDialect dialect, boolean includeIndexes,
                                      SqlSchemaConvertOptions convertOptions) {
         SqlDialect d = dialect == null ? SqlDialect.MYSQL : dialect;
@@ -117,9 +134,10 @@ public final class SqlEntities {
                 ? SqlSchemaConvertOptions.defaults() : convertOptions;
         ConversionReport.Builder report = new ConversionReport.Builder();
         StringBuilder sb = new StringBuilder();
-        // 表名不加引号：Oracle 等按大写折叠，引号小写表名会让触发器 / 后续元数据查找失配；
-        // 引号只用于列名（撞保留字的真实场景）
-        sb.append("CREATE TABLE ").append(model.tableName()).append(" (");
+        // 表名默认不加引号：Oracle 等按大写折叠，引号小写表名会让触发器 / 后续元数据查找失配；
+        // 引号只用于列名（撞保留字的真实场景）；表名本身撞保留字时（如 order）仍需引号兜底
+        sb.append("CREATE TABLE ")
+                .append(ident(model.tableName(), d, false, options.keywordQuote())).append(" (");
         List<SqlEntityColumn> cols = model.columns();
         List<SqlEntityColumn> ids = model.idColumns();
         boolean tablePk = ids.size() > 1;
@@ -135,8 +153,7 @@ public final class SqlEntities {
                 if (i > 0) {
                     sb.append(", ");
                 }
-                sb.append(options.quoteIdentifiers()
-                        ? d.quoteIdent(ids.get(i).columnName()) : ids.get(i).columnName());
+                sb.append(ident(ids.get(i).columnName(), d, options));
             }
             sb.append(')');
         }
@@ -144,11 +161,11 @@ public final class SqlEntities {
             for (int i = 0; i < cols.size(); i++) {
                 SqlEntityColumn c = cols.get(i);
                 if (c.referencesTable() != null) {
-                    sb.append(", FOREIGN KEY (").append(ident(c.columnName(), d, options.quoteIdentifiers()))
+                    sb.append(", FOREIGN KEY (").append(ident(c.columnName(), d, options))
                             .append(") REFERENCES ")
-                            .append(ident(c.referencesTable(), d, options.quoteIdentifiers())).append('(')
+                            .append(ident(c.referencesTable(), d, options)).append('(')
                             .append(c.referencesColumn() == null ? "id"
-                                    : ident(c.referencesColumn(), d, options.quoteIdentifiers()))
+                                    : ident(c.referencesColumn(), d, options))
                             .append(')');
                 }
             }
@@ -158,7 +175,7 @@ public final class SqlEntities {
         if (includeIndexes) {
             List<String> indexes = model.indexes();
             for (int i = 0; i < indexes.size(); i++) {
-                sb.append("; ").append(indexSql(model.tableName(), indexes.get(i), d));
+                sb.append("; ").append(indexSql(model.tableName(), indexes.get(i), d, options));
             }
             List<String> extras = extraSql(model, d, options);
             for (int i = 0; i < extras.size(); i++) {
@@ -183,7 +200,7 @@ public final class SqlEntities {
                 ? SqlSchemaConvertOptions.defaults() : convertOptions;
         List<String> out = new ArrayList<String>(4);
         if (!inlinesTableComment(d) && model.comment() != null && model.comment().length() > 0) {
-            String c = commentOnSql(d, "TABLE", model.tableName(), null, model.comment());
+            String c = commentOnSql(d, "TABLE", model.tableName(), null, model.comment(), options);
             if (c != null) {
                 out.add(c);
             }
@@ -195,7 +212,8 @@ public final class SqlEntities {
                 if (col.comment() == null || col.comment().isEmpty()) {
                     continue;
                 }
-                String c = commentOnSql(d, "COLUMN", model.tableName(), col.columnName(), col.comment());
+                String c = commentOnSql(d, "COLUMN", model.tableName(), col.columnName(),
+                        col.comment(), options);
                 if (c != null) {
                     out.add(c);
                 }
@@ -208,7 +226,8 @@ public final class SqlEntities {
                 if (!col.autoIncrement()) {
                     continue;
                 }
-                String seq = sequenceSql(model.tableName(), col, d, options.quoteIdentifiers());
+                String seq = sequenceSql(model.tableName(), col, d, options.quoteIdentifiers(),
+                        options.keywordQuote());
                 if (seq == null) {
                     continue;
                 }
@@ -244,18 +263,36 @@ public final class SqlEntities {
      * @since 2.0.2
      */
     public static String tableCommentSql(String table, String comment, SqlDialect dialect) {
+        return tableCommentSql(table, comment, dialect, null);
+    }
+
+    /**
+     * 已有表更新表注释，支持标识符引号选项。
+     *
+     * @param table 表名
+     * @param comment 注释
+     * @param dialect 方言
+     * @param convertOptions 转换选项（quote-identifiers / keywordQuote）
+     * @return DDL，无法表达时 null
+     * @since 2.0.3
+     */
+    public static String tableCommentSql(String table, String comment, SqlDialect dialect,
+                                         SqlSchemaConvertOptions convertOptions) {
         if (table == null || table.isEmpty() || comment == null || comment.isEmpty()) {
             return null;
         }
         SqlDialect d = dialect == null ? SqlDialect.MYSQL : dialect;
+        SqlSchemaConvertOptions options = convertOptions == null
+                ? SqlSchemaConvertOptions.defaults() : convertOptions;
         String body = escapeComment(comment);
+        String t = ident(table, d, options);
         if (d == SqlDialect.MYSQL || d == SqlDialect.HIVE || d == SqlDialect.CLICKHOUSE) {
-            return "ALTER TABLE " + table + " COMMENT '" + body + "'";
+            return "ALTER TABLE " + t + " COMMENT '" + body + "'";
         }
         if (d == SqlDialect.PRESTO) {
             return null;
         }
-        String on = commentOnSql(d, "TABLE", table, null, comment);
+        String on = commentOnSql(d, "TABLE", table, null, comment, options);
         if (on == null) {
             return null;
         }
@@ -275,14 +312,33 @@ public final class SqlEntities {
      * @since 2.0.2
      */
     public static String columnCommentSql(String table, SqlEntityColumn column, SqlDialect dialect) {
+        return columnCommentSql(table, column, dialect, null);
+    }
+
+    /**
+     * 已有列更新注释，支持标识符引号选项。
+     *
+     * @param table 表名
+     * @param column 列
+     * @param dialect 方言
+     * @param convertOptions 转换选项（quote-identifiers / keywordQuote）
+     * @return DDL，无法表达时 null
+     * @since 2.0.3
+     */
+    public static String columnCommentSql(String table, SqlEntityColumn column, SqlDialect dialect,
+                                          SqlSchemaConvertOptions convertOptions) {
         if (table == null || column == null || column.comment() == null || column.comment().isEmpty()) {
             return null;
         }
         SqlDialect d = dialect == null ? SqlDialect.MYSQL : dialect;
+        SqlSchemaConvertOptions options = convertOptions == null
+                ? SqlSchemaConvertOptions.defaults() : convertOptions;
+        String t = ident(table, d, options);
         if (d == SqlDialect.MYSQL || d == SqlDialect.HIVE || d == SqlDialect.CLICKHOUSE) {
-            return "ALTER TABLE " + table + " MODIFY " + columnSql(column, d, false);
+            return "ALTER TABLE " + t + " MODIFY " + columnSql(column, d, false, options);
         }
-        String on = commentOnSql(d, "COLUMN", table, column.columnName(), column.comment());
+        String on = commentOnSql(d, "COLUMN", table, column.columnName(), column.comment(),
+                options);
         if (on == null) {
             return null;
         }
@@ -301,7 +357,7 @@ public final class SqlEntities {
      * @return SQL 或 null
      */
     public static String sequenceSql(String table, SqlEntityColumn column, SqlDialect dialect) {
-        return sequenceSql(table, column, dialect, false);
+        return sequenceSql(table, column, dialect, false, false);
     }
 
     /**
@@ -315,6 +371,22 @@ public final class SqlEntities {
      */
     public static String sequenceSql(String table, SqlEntityColumn column, SqlDialect dialect,
                                      boolean quoteIdentifiers) {
+        return sequenceSql(table, column, dialect, quoteIdentifiers, false);
+    }
+
+    /**
+     * 自增序列（及经典 Oracle 触发器）SQL，支持保留字自动引号。
+     *
+     * @param table 表名
+     * @param column 列
+     * @param dialect 方言
+     * @param quoteIdentifiers 是否全量加引号
+     * @param keywordQuote 是否对保留字列名自动加引号
+     * @return SQL 或 null
+     * @since 2.0.3
+     */
+    public static String sequenceSql(String table, SqlEntityColumn column, SqlDialect dialect,
+                                     boolean quoteIdentifiers, boolean keywordQuote) {
         if (table == null || column == null || !column.autoIncrement()) {
             return null;
         }
@@ -323,13 +395,13 @@ public final class SqlEntities {
             return null;
         }
         String col = column.columnName();
-        String quotedCol = quoteIdentifiers && d != null ? d.quoteIdent(col) : col;
+        String quotedCol = ident(col, d, quoteIdentifiers, keywordQuote);
         String seq = sequenceName(table, col, d);
         if (d == SqlDialect.ORACLE) {
             String trg = d.fitIdentifier(table + "_" + col + "_bi");
             return "CREATE SEQUENCE " + seq
                     + "\n/\nCREATE OR REPLACE TRIGGER " + trg
-                    + " BEFORE INSERT ON " + table
+                    + " BEFORE INSERT ON " + ident(table, d, false, keywordQuote)
                     + " FOR EACH ROW WHEN (NEW." + quotedCol + " IS NULL) BEGIN SELECT "
                     + seq + ".NEXTVAL INTO :NEW." + quotedCol + " FROM DUAL; END;";
         }
@@ -396,12 +468,16 @@ public final class SqlEntities {
     }
 
     private static String commentOnSql(SqlDialect dialect, String kind, String table, String column,
-                                       String comment) {
+                                       String comment, SqlSchemaConvertOptions options) {
         if (comment == null || comment.isEmpty()) {
             return null;
         }
+        SqlDialect d = dialect == null ? SqlDialect.MYSQL : dialect;
+        SqlSchemaConvertOptions opts = options == null
+                ? SqlSchemaConvertOptions.defaults() : options;
         String body = escapeComment(comment);
-        if (dialect == SqlDialect.SQLSERVER) {
+        if (d == SqlDialect.SQLSERVER) {
+            // sp_addextendedproperty 的对象名是字符串字面量，保持原文，不加标识符引号
             if ("TABLE".equals(kind)) {
                 return "EXEC sp_addextendedproperty N'MS_Description', N'" + body
                         + "', N'SCHEMA', N'dbo', N'TABLE', N'" + table + "'";
@@ -409,14 +485,15 @@ public final class SqlEntities {
             return "EXEC sp_addextendedproperty N'MS_Description', N'" + body
                     + "', N'SCHEMA', N'dbo', N'TABLE', N'" + table + "', N'COLUMN', N'" + column + "'";
         }
-        if (dialect == SqlDialect.SQLITE || dialect == SqlDialect.HIVE
-                || dialect == SqlDialect.PRESTO || dialect == SqlDialect.CLICKHOUSE) {
+        if (d == SqlDialect.SQLITE || d == SqlDialect.HIVE
+                || d == SqlDialect.PRESTO || d == SqlDialect.CLICKHOUSE) {
             return null;
         }
+        String t = ident(table, d, opts);
         if ("TABLE".equals(kind)) {
-            return "COMMENT ON TABLE " + table + " IS '" + body + "'";
+            return "COMMENT ON TABLE " + t + " IS '" + body + "'";
         }
-        return "COMMENT ON COLUMN " + table + "." + column + " IS '" + body + "'";
+        return "COMMENT ON COLUMN " + t + "." + ident(column, d, opts) + " IS '" + body + "'";
     }
 
     private static String escapeComment(String comment) {
@@ -567,13 +644,23 @@ public final class SqlEntities {
     }
 
     private static String indexSql(String table, String spec, SqlDialect dialect) {
+        return indexSql(table, spec, dialect, null);
+    }
+
+    private static String indexSql(String table, String spec, SqlDialect dialect,
+                                   SqlSchemaConvertOptions options) {
         String name = indexName(table, spec, dialect);
         int colon = spec.indexOf(':');
         String cols = colon > 0 ? spec.substring(colon + 1).trim() : spec;
         if (!cols.startsWith("(")) {
             cols = "(" + cols + ")";
         }
-        return "CREATE INDEX " + name + " ON " + table + " " + cols;
+        SqlSchemaConvertOptions opts = options == null
+                ? SqlSchemaConvertOptions.defaults() : options;
+        // 索引名只做保留字兜底（与库折叠行为一致）；表名与建表语句同规则
+        String n = ident(name, dialect, false, opts.keywordQuote());
+        String t = ident(table, dialect, opts);
+        return "CREATE INDEX " + n + " ON " + t + " " + cols;
     }
 
     private static String defaultIndexName(String table, String cols) {
@@ -887,7 +974,7 @@ public final class SqlEntities {
         String type = col.rawType() != null && col.rawType().length() > 0
                 ? col.rawType()
                 : registry.toDialect(col.canonical(), dialect, p, s);
-        String name = options.quoteIdentifiers() ? dialect.quoteIdent(col.columnName()) : col.columnName();
+        String name = ident(col.columnName(), dialect, options);
         if (col.autoIncrement() && options.includeAutoIncrement()) {
             AutoIncrementStrategy.Result auto = AutoIncrementStrategy.apply(
                     new ColumnConstraint.AutoIncrement(

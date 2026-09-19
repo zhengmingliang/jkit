@@ -1,5 +1,9 @@
 package com.alianga.jkit.sql.schema.convert;
 
+import com.alianga.jkit.sql.SqlDialect;
+
+import java.util.function.BiConsumer;
+
 /**
  * 跨方言转换选项。
  *
@@ -39,6 +43,8 @@ public final class SqlSchemaConvertOptions {
     private boolean includeForeignKeys = true;
     private boolean includeAutoIncrement = true;
     private boolean quoteIdentifiers;
+    private boolean keywordQuote;
+    private BiConsumer<SqlDialect, String> keywordQuotedListener;
 
     private SqlSchemaConvertOptions() {
     }
@@ -206,6 +212,49 @@ public final class SqlSchemaConvertOptions {
      */
     public SqlSchemaConvertOptions quoteIdentifiers(boolean quoteIdentifiers) {
         this.quoteIdentifiers = quoteIdentifiers;
+        return this;
+    }
+
+    /**
+     * @return 是否对撞目标库保留字的标识符自动加引号并告警（quote-identifiers 关闭时也生效）
+     * @since 2.0.3
+     */
+    public boolean keywordQuote() {
+        return keywordQuote;
+    }
+
+    /**
+     * 开启后，标识符默认仍不加引号（大小写交给库折叠），但检测到是目标库保留字时
+     * 自动加方言引号并打印一次告警。与 {@link #quoteIdentifiers(boolean)} 叠加：
+     * 后者无条件全量加引号。
+     *
+     * @param keywordQuote 是否启用保留字自动引号
+     * @return this
+     * @since 2.0.3
+     */
+    public SqlSchemaConvertOptions keywordQuote(boolean keywordQuote) {
+        this.keywordQuote = keywordQuote;
+        return this;
+    }
+
+    /**
+     * @return 保留字自动引号的告警回调，可空；入参为 (方言, 标识符原文)
+     * @since 2.0.3
+     */
+    public BiConsumer<SqlDialect, String> keywordQuotedListener() {
+        return keywordQuotedListener;
+    }
+
+    /**
+     * 注册保留字自动引号的告警回调。同一标识符（同方言）全局只回调一次；
+     * jkit-sql 自身不打日志，由宿主（如 jkit-sql-auto）决定输出方式。
+     *
+     * @param listener 回调，可空
+     * @return this
+     * @since 2.0.3
+     */
+    public SqlSchemaConvertOptions keywordQuotedListener(BiConsumer<SqlDialect, String> listener) {
+        this.keywordQuotedListener = listener;
         return this;
     }
 
