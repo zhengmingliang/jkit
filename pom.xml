@@ -85,6 +85,23 @@
                     </toolchains>
                 </configuration>
             </plugin>
+
+            <!--
+              JPMS 第一步：只固定自动模块名（写进 MANIFEST），不引入 module-info。
+              模块名由各子模块的 jkit.module.name 属性提供；对 JDK8 / classpath
+              用户完全无影响，模块路径上的用户拿到稳定模块名，不再随文件名变化。
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <configuration>
+                    <archive>
+                        <manifestEntries>
+                            <Automatic-Module-Name>${jkit.module.name}</Automatic-Module-Name>
+                        </manifestEntries>
+                    </archive>
+                </configuration>
+            </plugin>
         </plugins>
     </build>
 

@@ -21,6 +21,7 @@
         <maven.compiler.source>8</maven.compiler.source>
         <maven.compiler.target>8</maven.compiler.target>
         <jkit.version>${project.version}</jkit.version>
+        <jkit.module.name>com.alianga.jkit.notify.extra</jkit.module.name>
     </properties>
 
     <dependencies>
