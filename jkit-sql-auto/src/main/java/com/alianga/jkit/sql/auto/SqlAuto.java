@@ -8,11 +8,18 @@ import com.alianga.jkit.sql.entity.SqlEntityModel;
 
 import javax.sql.DataSource;
 
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.OutputStreamWriter;
+import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -84,9 +91,10 @@ public final class SqlAuto {
                 opt.gbase8a(true);
             }
             SqlAutoPlan plan = plan(types, conn, dialect, opt);
-            if (opt.gbase8a() && opt.createIndex()) {
+            if (SqlAutoDialects.isGbase8a(opt) && opt.createIndex()) {
                 LOG.info("jkit-sql-auto: GBase 8a 不支持二级索引，已跳过 CREATE INDEX");
             }
+            writeExport(plan, opt);
             if (opt.mode() == SqlAutoMode.VALIDATE) {
                 List<SqlAutoChange> bad = plan.ofKind(SqlAutoChange.Kind.VALIDATE);
                 if (!bad.isEmpty()) {
@@ -94,7 +102,17 @@ public final class SqlAuto {
                 }
                 return plan;
             }
-            SqlAutoExecutor.execute(conn, plan, opt);
+            boolean locked = opt.lock() && !plan.isEmpty() && SqlAutoLock.acquire(conn, dialect, 60);
+            try {
+                List<SqlAutoChange> applied = SqlAutoExecutor.execute(conn, plan, opt);
+                if (opt.history()) {
+                    SqlAutoHistory.record(conn, dialect, opt.historyTable(), opt.mode().name(), applied);
+                }
+            } finally {
+                if (locked) {
+                    SqlAutoLock.release(conn, dialect);
+                }
+            }
             if (opt.mode() == SqlAutoMode.CREATE_DROP) {
                 registerDropHook(types, opt, dialect, holder.owns);
             }
@@ -197,9 +215,10 @@ public final class SqlAuto {
             opt.gbase8a(true);
         }
         SqlAutoPlan plan = plan(types, connection, dialect, opt);
-        if (opt.gbase8a() && opt.createIndex()) {
+        if (SqlAutoDialects.isGbase8a(opt) && opt.createIndex()) {
             LOG.info("jkit-sql-auto: GBase 8a 不支持二级索引，已跳过 CREATE INDEX");
         }
+        writeExport(plan, opt);
         if (opt.mode() == SqlAutoMode.VALIDATE) {
             List<SqlAutoChange> bad = plan.ofKind(SqlAutoChange.Kind.VALIDATE);
             if (!bad.isEmpty()) {
@@ -207,7 +226,17 @@ public final class SqlAuto {
             }
             return plan;
         }
-        SqlAutoExecutor.execute(connection, plan, opt);
+        boolean locked = opt.lock() && !plan.isEmpty() && SqlAutoLock.acquire(connection, dialect, 60);
+        try {
+            List<SqlAutoChange> applied = SqlAutoExecutor.execute(connection, plan, opt);
+            if (opt.history()) {
+                SqlAutoHistory.record(connection, dialect, opt.historyTable(), opt.mode().name(), applied);
+            }
+        } finally {
+            if (locked) {
+                SqlAutoLock.release(connection, dialect);
+            }
+        }
         if (opt.mode() == SqlAutoMode.CREATE_DROP && !opt.dryRun()
                 && (opt.dataSource() != null || (opt.url() != null && opt.url().length() > 0))) {
             registerDropHook(types, opt, dialect, true);
@@ -273,6 +302,7 @@ public final class SqlAuto {
     private static SqlAutoPlan dryRun(List<Class<?>> types, SqlAutoOptions opt) {
         SqlDialect dialect = SqlAutoDialects.resolve(opt, null);
         SqlAutoPlan plan = plan(types, null, dialect, opt);
+        writeExport(plan, opt);
         if (opt.mode() == SqlAutoMode.VALIDATE) {
             List<SqlAutoChange> bad = plan.ofKind(SqlAutoChange.Kind.VALIDATE);
             if (!bad.isEmpty()) {
@@ -282,6 +312,49 @@ public final class SqlAuto {
         }
         SqlAutoExecutor.execute(null, plan, opt);
         return plan;
+    }
+
+    /**
+     * 把计划里的可执行 SQL 写到配置的导出文件（UTF-8，每条一行分号结尾）。
+     * 空计划不写；父目录自动创建；失败只记日志，不影响主流程。
+     *
+     * @param plan 规划结果
+     * @param opt 选项
+     */
+    private static void writeExport(SqlAutoPlan plan, SqlAutoOptions opt) {
+        String path = opt.export();
+        if (path == null || path.isEmpty() || plan == null || plan.isEmpty()) {
+            return;
+        }
+        File file = new File(path);
+        File parent = file.getParentFile();
+        if (parent != null && !parent.exists() && !parent.mkdirs()) {
+            LOG.warn("jkit-sql-auto: create export dir failed: {}", parent);
+            return;
+        }
+        BufferedWriter writer = null;
+        try {
+            writer = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(file), StandardCharsets.UTF_8));
+            writer.write("-- jkit-sql-auto plan, mode=" + opt.mode() + ", at=" + new Date());
+            writer.newLine();
+            List<String> sqls = plan.sql();
+            for (int i = 0; i < sqls.size(); i++) {
+                writer.write(sqls.get(i));
+                writer.write(";");
+                writer.newLine();
+            }
+            LOG.info("jkit-sql-auto: plan exported to {}", file.getAbsolutePath());
+        } catch (IOException e) {
+            LOG.warn("jkit-sql-auto: export plan failed: {}", e.getMessage());
+        } finally {
+            if (writer != null) {
+                try {
+                    writer.close();
+                } catch (IOException ignored) {
+                    // 忽略
+                }
+            }
+        }
     }
 
     /**

@@ -12,9 +12,12 @@ import org.junit.Test;
 
 import javax.sql.DataSource;
 
+import java.io.File;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
@@ -24,6 +27,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
@@ -280,6 +284,56 @@ public class SqlAutoH2Test {
             String sql = idxOff.get(i).sql().toLowerCase();
             assertTrue(sql, sql.contains("auto_tag_code_idx"));
             assertFalse(sql, sql.contains("t_auto_tag_code_idx"));
+        }
+    }
+
+    @Test
+    public void historyAndExportRecordAppliedChanges() throws Exception {
+        File export = File.createTempFile("jkit-sql-auto-export", ".sql");
+        assertTrue(export.delete());
+        SqlAutoOptions opt = options().entities(AutoUser.class).mode(SqlAutoMode.UPDATE)
+                .history(true).export(export.getAbsolutePath());
+        SqlAutoPlan first = SqlAuto.run(connection, opt);
+        assertFalse(first.isEmpty());
+
+        // 导出文件包含计划 SQL
+        String content = new String(Files.readAllBytes(export.toPath()), StandardCharsets.UTF_8);
+        assertTrue("export should contain CREATE TABLE", content.contains("CREATE TABLE"));
+
+        // 历史表行数 = 实际执行的变更数
+        long rows = countRows("JKIT_SCHEMA_HISTORY");
+        assertEquals("history rows should match applied changes",
+                first.sql().size(), rows);
+
+        // 第二次运行无变更：历史不新增
+        assertTrue(SqlAuto.run(connection, opt).isEmpty());
+        assertEquals(rows, countRows("JKIT_SCHEMA_HISTORY"));
+    }
+
+    @Test
+    public void lockDefaultsOnAndIsNoOpOnH2() {
+        // H2 不支持 GET_LOCK / pg_advisory_lock，lock(true)（默认）应自动跳过且不影响执行
+        SqlAutoOptions opt = options().entities(AutoUser.class).mode(SqlAutoMode.UPDATE).lock(true);
+        assertTrue(SqlAutoLock.supports(SqlDialect.MYSQL));
+        assertTrue(SqlAutoLock.supports(SqlDialect.POSTGRES));
+        assertFalse(SqlAutoLock.supports(SqlDialect.H2));
+        assertFalse(SqlAuto.run(connection, opt).isEmpty());
+        assertTrue(tableExists("AUTO_USER"));
+        assertTrue("second run should be a no-op", SqlAuto.run(connection, opt).isEmpty());
+    }
+
+    private long countRows(String table) throws SQLException {
+        Statement st = connection.createStatement();
+        try {
+            ResultSet rs = st.executeQuery("SELECT COUNT(*) FROM " + table);
+            try {
+                rs.next();
+                return rs.getLong(1);
+            } finally {
+                rs.close();
+            }
+        } finally {
+            st.close();
         }
     }
 
