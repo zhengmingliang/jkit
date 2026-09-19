@@ -77,6 +77,8 @@
 
 - `com.alianga.jkit.html` 真实站点验证（Halo 1.4.5 博客，首页 70 KB，含 24 个 `script`）：抽最近 10 篇文章的链接、标题、懒加载图 `data-src`、占位图 `src`、发布日期，**5 个字段 10 篇逐条与 Jsoup 一致**；3 篇详情页的 `pre code` 命中数与内容同样一致。效率上首页解析 0.179 ms vs Jsoup 0.295 ms（1.65x），端到端（解析 + 抽 10 篇全部字段）0.310 ms vs 0.381 ms（1.23x）。
 
+- `jkit-sql-auto`：Spring Boot starter 执行阶段默认改为 `phase: eager`——在上下文刷新期（DataSource 就绪后、Web 端口开放前）完成表结构同步，`fail-fast` 失败时应用在接收流量前就退出（此前挂在 ApplicationReadyEvent，端口已绑定）；恢复 2.0.1 行为配 `phase: ready`。同时，没有 DataSource bean 且未配置 `jkit.sql.auto.url` 时改为跳过并打 warn 日志，不再让应用启动失败。
+
 ### 文档
 
 - `docs/sql.md` / `docs/en/sql.md`：实体表 / 列注释补充本模块 `com.alianga.jkit.sql.entity.Comment`。

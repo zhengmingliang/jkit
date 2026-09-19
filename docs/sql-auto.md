@@ -72,6 +72,12 @@ public class FileStorage {
 
 加对应 starter，配 `jkit.sql.auto.packages`（或 `entities`），**不必**在 `main` 里调 `SqlAuto.run`。`ApplicationReadyEvent` 时自动执行一次，数据源用容器里的 `DataSource`（通常就是 `spring.datasource.*`）。
 
+默认 `phase=eager`：同步在上下文刷新期完成（DataSource 就绪后、Web 端口开放前），
+`fail-fast` 失败时应用在接收流量前就退出；要恢复「应用就绪后再执行」的行为，
+配 `jkit.sql.auto.phase: ready`。没有 DataSource bean 且未配置 `jkit.sql.auto.url`
+时 starter 直接跳过（warn 日志），不会让应用启动失败。MyBatis / JPA 等 Bean 若
+依赖表已存在，可加 `@DependsOn("sqlAutoStartupListener")` 保证初始化顺序。
+
 ### Boot 2.x（JDK 8+）
 
 ```xml
@@ -243,11 +249,19 @@ List<String> sqls = plan.sql();
 | `table-prefix` | （空） | 表名统一前缀，如 `t_`；作用于建表 / 改表 / 删表 / 索引 / 序列 / 外键目标表 |
 | `index-prefix-enabled` | `true` | 自动派生的索引名是否也带 `table-prefix`（如 `t_user` 的索引是 `t_user_idx` 还是 `user_idx`）；实体里显式写的 `@Index(name=…)` 始终原样保留，不受此开关影响 |
 | `quote-identifiers` | `false` | 标识符加方言引号 |
+| `foreign-keys` | `true` | 是否在 CREATE TABLE 里写 FOREIGN KEY；GBase 8a 等不支持时设 `false` |
+| `auto-increment` | `true` | 是否生成自增子句；DuckDB 等不认 IDENTITY 时设 `false` |
+| `postgres-identity-style` | `identity` | PG / OpenGauss 自增写法：`identity` 或 `serial`（老版 OpenGauss 不认 GENERATED…IDENTITY） |
+| `lock` | `true` | 执行前在当前连接上取元数据锁（MySQL `GET_LOCK` / PG `pg_advisory_lock`），多实例并发冷启动串行化；不支持的方言自动跳过 |
+| `history` | `false` | 把已应用的变更写入历史表（审计用），行含时间 / 主机 / 模式 / 语句 |
+| `history-table` | `jkit_schema_history` | 历史表名，不存在自动创建 |
+| `export` | （空） | 每次规划后把将执行的 DDL 写入该文件（UTF-8，每条一行分号结尾），配合 `dry-run` 可当 schema 生成器用 |
+| `phase` | `eager` | Spring Starter 专用：`eager` 在上下文刷新期执行（端口开放前完成）；`ready` 恢复 2.0.1 的应用就绪事件后执行 |
 | `show-sql` | `true` | 打日志 |
 | `dry-run` | `false` | 只规划不执行 |
 | `catalog` / `schema` | JDBC 默认 | `DatabaseMetaData` 查找范围。未配 `catalog` 时用连接 `getCatalog()`；未配 `schema` 时用 `getSchema()`，再不行从 JDBC URL 解析（PG 系 `currentSchema` 缺省 `public`，SQL Server `dbo`）。dry-run 无连接时同样从 URL 取 |
 
-链式 API 与配置一一对应，例如 `.mode(SqlAutoMode.UPDATE)`、`.packages("a","b")`、`.alterColumn(true)`。另有只在代码里设的项：`postgresIdentityStyle(SERIAL)`、`foreignKeys(false)`、`autoIncrement(false)`。
+链式 API 与配置一一对应，例如 `.mode(SqlAutoMode.UPDATE)`、`.packages("a","b")`、`.alterColumn(true)`、`.lock(false)`、`.history(true)`、`.export("target/schema.sql")`。
 
 ---
 
@@ -318,7 +332,19 @@ SqlAuto.drop(SqlAutoOptions.defaults().url(url).entities(User.class));
 
 **窄产品**
 
-- OpenGauss 老版本：`.postgresIdentityStyle(SERIAL)`
+- OpenGauss 老版本：`.postgresIdentityStyle(SERIAL)` 或 `jkit.sql.auto.postgres-identity-style: serial`
 - GBase 8a：`.foreignKeys(false).createIndex(false)`
 - DuckDB：`.autoIncrement(false).foreignKeys(false).createIndex(false)`
 - H2 内存库 `CREATE_DROP`：URL 加 `DB_CLOSE_DELAY=-1`，否则连接一关库就没了
+
+**多实例与审计**
+
+- 并发冷启动：`lock: true`（默认）让多实例串行执行 DDL，避免「都读到表不存在、都去 CREATE」的竞态；MySQL / PostgreSQL 系有效，其它方言自动跳过
+- 审计：`history: true` 把每次实际执行的 DDL 写入 `jkit_schema_history`（时间 / 主机 / 模式 / 语句），历史表不存在自动创建，不在实体清单里因此永远不会被同步或删除
+- 评审：`export: target/schema.sql` 把本次计划落盘，走 DBA 变更评审流程；配合 `dry-run` 就是纯 schema 生成器
+
+**MySQL 注释同步提示**
+
+Connector/J 默认 `useInformationSchema=false` 时 `getColumns` 的 REMARKS 恒为空，
+注释同步会认为库里没有注释、每次启动都重发 `MODIFY … COMMENT`（幂等但有噪音）。
+URL 加 `useInformationSchema=true` 即可让注释比对基于真实值。
