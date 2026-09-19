@@ -45,7 +45,7 @@ features:
     linkText: SQL docs
   - icon: 🚀
     title: HTML Extraction, Benchmarked Against Jsoup
-    details: Zero-dependency HTML parsing with CSS selectors. Against Jsoup 1.18.1: parsing up to 1.76x faster, selectors up to 1344x, retained heap 15% lower, and 112 of 119 differential cases match result-for-result.
+    details: Zero-dependency HTML parsing with CSS selectors. Against Jsoup 1.18.1 — parsing up to 1.76x faster, selectors up to 1344x, retained heap 15% lower, and 112 of 119 differential cases match result-for-result.
     link: /en/html
     linkText: HTML docs
   - icon: 📣
