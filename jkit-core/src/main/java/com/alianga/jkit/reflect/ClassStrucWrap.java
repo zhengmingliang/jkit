@@ -732,9 +732,13 @@ public final class ClassStrucWrap {
     }
 
     private void checkClassStructure() {
-        String pckName = sourceClass.getPackage().getName();
-        if (pckName.startsWith("java.") || pckName.startsWith("sun.")) {
-            this.javaBuiltInModule = true;
+        // 无名包（默认包）类的 getPackage() 返回 null，必须空保护，否则序列化/反射包装时会抛 NPE
+        Package pck = sourceClass.getPackage();
+        if (pck != null) {
+            String pckName = pck.getName();
+            if (pckName.startsWith("java.") || pckName.startsWith("sun.")) {
+                this.javaBuiltInModule = true;
+            }
         }
 
         // jdk17 java.lang.Record

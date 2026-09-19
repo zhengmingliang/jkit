@@ -23,6 +23,10 @@ final class JSONPojoSerializerCodeGen {
 
     static String getCanonicalName(Class<?> targetClass) {
         String canonicalName = targetClass.getCanonicalName();
+        // 无名包（默认包）类的 getCanonicalName() 返回 null，退化为简单名
+        if (canonicalName == null) {
+            return targetClass.getSimpleName();
+        }
         if (canonicalName.startsWith("java.lang.")) {
             return targetClass.getSimpleName();
         }
@@ -33,11 +37,17 @@ final class JSONPojoSerializerCodeGen {
                                                    boolean runtime) {
         final Class<?> pojoClass = jsonPojoStructure.getSourceClass();
         final String simpleName = pojoClass.getSimpleName();
-        final String canonicalName = pojoClass.getCanonicalName();
+        // 无名包（默认包）类的 getCanonicalName() 可能返回 null，退化为简单名
+        final String canonicalName = pojoClass.getCanonicalName() != null
+                ? pojoClass.getCanonicalName() : pojoClass.getSimpleName();
         final String genClassName = "__JPS_" + simpleName + "_" + IdGenerator.hex();
-        final String packageName = pojoClass.getPackage().getName();
+        // 无名包（默认包）类的 getPackage() 返回 null，此时生成类不带 package 语句
+        final Package pkg = pojoClass.getPackage();
+        final String packageName = pkg != null ? pkg.getName() : "";
         StringBuilder codeBuilder = new StringBuilder(2048);
-        codeBuilder.append("package ").append(packageName).append(";\n");
+        if (packageName.length() > 0) {
+            codeBuilder.append("package ").append(packageName).append(";\n");
+        }
         codeBuilder.append(IMPORT_CODE_TEXT);
         if (!runtime) {
             codeBuilder.append("/**\n");
