@@ -2,6 +2,7 @@ package com.alianga.jkit.sql.auto;
 
 import com.alianga.jkit.config.ConfigPropertyResolver;
 import com.alianga.jkit.sql.SqlDialect;
+import com.alianga.jkit.sql.schema.convert.SqlSchemaConvertOptions;
 import com.alianga.jkit.sql.auto.fixture.AutoUser;
 
 import org.junit.Test;
@@ -39,6 +40,13 @@ public class SqlAutoOptionsTest {
             w.write("jkit.sql.auto.alter-column=true\n");
             w.write("jkit.sql.auto.create-index=false\n");
             w.write("jkit.sql.auto.dry-run=true\n");
+            w.write("jkit.sql.auto.foreign-keys=false\n");
+            w.write("jkit.sql.auto.auto-increment=false\n");
+            w.write("jkit.sql.auto.postgres-identity-style=serial\n");
+            w.write("jkit.sql.auto.lock=false\n");
+            w.write("jkit.sql.auto.history=true\n");
+            w.write("jkit.sql.auto.history-table=my_history\n");
+            w.write("jkit.sql.auto.export=target/schema.sql\n");
         } finally {
             w.close();
         }
@@ -55,6 +63,45 @@ public class SqlAutoOptionsTest {
         assertTrue(o.dryRun());
         assertTrue(o.packages().toString(), o.packages().contains("com.example.a"));
         assertTrue(o.packages().toString(), o.packages().contains("com.example.b"));
+        assertFalse(o.foreignKeys());
+        assertFalse(o.autoIncrement());
+        assertEquals(SqlSchemaConvertOptions.PostgresIdentityStyle.SERIAL, o.postgresIdentityStyle());
+        assertFalse(o.lock());
+        assertTrue(o.history());
+        assertEquals("my_history", o.historyTable());
+        assertEquals("target/schema.sql", o.export());
+    }
+
+    @Test
+    public void defaultsForNewOptions() {
+        SqlAutoOptions o = SqlAutoOptions.defaults();
+        assertTrue(o.foreignKeys());
+        assertTrue(o.autoIncrement());
+        assertTrue(o.lock());
+        assertFalse(o.history());
+        assertEquals("jkit_schema_history", o.historyTable());
+        assertEquals(null, o.export());
+    }
+
+    @Test
+    public void settingsCarryNewOptions() {
+        SqlAutoSettings settings = new SqlAutoSettings();
+        settings.setForeignKeys(false);
+        settings.setAutoIncrement(false);
+        settings.setPostgresIdentityStyle("SERIAL");
+        settings.setPhase("ready");
+        settings.setLock(false);
+        settings.setHistory(true);
+        settings.setHistoryTable("audit_history");
+        settings.setExport("out/ddl.sql");
+        SqlAutoOptions o = settings.toOptions();
+        assertFalse(o.foreignKeys());
+        assertFalse(o.autoIncrement());
+        assertEquals(SqlSchemaConvertOptions.PostgresIdentityStyle.SERIAL, o.postgresIdentityStyle());
+        assertFalse(o.lock());
+        assertTrue(o.history());
+        assertEquals("audit_history", o.historyTable());
+        assertEquals("out/ddl.sql", o.export());
     }
 
     @Test

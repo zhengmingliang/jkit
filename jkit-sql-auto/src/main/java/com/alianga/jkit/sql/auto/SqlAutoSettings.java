@@ -1,9 +1,11 @@
 package com.alianga.jkit.sql.auto;
 
 import com.alianga.jkit.sql.SqlDialect;
+import com.alianga.jkit.sql.schema.convert.SqlSchemaConvertOptions;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Spring / 配置绑定用的扁平设置，再转成 {@link SqlAutoOptions}。
@@ -32,6 +34,15 @@ public class SqlAutoSettings {
     private String schema;
     private String tablePrefix;
     private boolean indexPrefixEnabled = true;
+    private boolean foreignKeys = true;
+    private boolean autoIncrement = true;
+    private String postgresIdentityStyle;
+    /** 执行阶段：eager = 上下文刷新期（默认，端口开放前完成）；ready = 应用就绪事件（2.0.1 行为）。 */
+    private String phase = "eager";
+    private boolean lock = true;
+    private boolean history;
+    private String historyTable = "jkit_schema_history";
+    private String export;
 
     /**
      * @return 是否启用
@@ -314,6 +325,118 @@ public class SqlAutoSettings {
     }
 
     /**
+     * @return 是否生成外键（GBase 8a 等窄产品关掉）
+     */
+    public boolean isForeignKeys() {
+        return foreignKeys;
+    }
+
+    /**
+     * @param foreignKeys 是否生成外键
+     */
+    public void setForeignKeys(boolean foreignKeys) {
+        this.foreignKeys = foreignKeys;
+    }
+
+    /**
+     * @return 是否生成自增子句（DuckDB 等窄产品关掉）
+     */
+    public boolean isAutoIncrement() {
+        return autoIncrement;
+    }
+
+    /**
+     * @param autoIncrement 是否生成自增子句
+     */
+    public void setAutoIncrement(boolean autoIncrement) {
+        this.autoIncrement = autoIncrement;
+    }
+
+    /**
+     * @return PostgreSQL / OpenGauss 自增写法：IDENTITY（默认）或 SERIAL
+     */
+    public String getPostgresIdentityStyle() {
+        return postgresIdentityStyle;
+    }
+
+    /**
+     * @param postgresIdentityStyle IDENTITY 或 SERIAL
+     */
+    public void setPostgresIdentityStyle(String postgresIdentityStyle) {
+        this.postgresIdentityStyle = postgresIdentityStyle;
+    }
+
+    /**
+     * @return 执行阶段：eager（默认，上下文刷新期）或 ready（应用就绪事件）
+     */
+    public String getPhase() {
+        return phase;
+    }
+
+    /**
+     * @param phase eager 或 ready
+     */
+    public void setPhase(String phase) {
+        this.phase = phase;
+    }
+
+    /**
+     * @return 执行前是否取数据库元数据锁（多实例并发冷启动保护）
+     */
+    public boolean isLock() {
+        return lock;
+    }
+
+    /**
+     * @param lock 是否取元数据锁
+     */
+    public void setLock(boolean lock) {
+        this.lock = lock;
+    }
+
+    /**
+     * @return 是否把已应用的变更写入历史表
+     */
+    public boolean isHistory() {
+        return history;
+    }
+
+    /**
+     * @param history 是否记录变更历史
+     */
+    public void setHistory(boolean history) {
+        this.history = history;
+    }
+
+    /**
+     * @return 变更历史表名
+     */
+    public String getHistoryTable() {
+        return historyTable;
+    }
+
+    /**
+     * @param historyTable 变更历史表名
+     */
+    public void setHistoryTable(String historyTable) {
+        this.historyTable = historyTable;
+    }
+
+    /**
+     * @return 计划 SQL 导出路径
+     */
+    public String getExport() {
+        return export;
+    }
+
+    /**
+     * @param export 计划 SQL 导出路径
+     */
+    public void setExport(String export) {
+        this.export = export;
+    }
+
+    /**
      * @return 选项
      */
     public SqlAutoOptions toOptions() {
@@ -335,10 +458,19 @@ public class SqlAutoSettings {
                 .catalog(catalog)
                 .schema(schema)
                 .tablePrefix(tablePrefix)
-                .indexPrefixEnabled(indexPrefixEnabled);
+                .indexPrefixEnabled(indexPrefixEnabled)
+                .foreignKeys(foreignKeys)
+                .autoIncrement(autoIncrement);
         if (dialect != null && dialect.length() > 0) {
             o.dialect(SqlDialect.fromName(dialect));
         }
+        if (postgresIdentityStyle != null && postgresIdentityStyle.length() > 0) {
+            o.postgresIdentityStyle(parsePostgresIdentityStyle(postgresIdentityStyle));
+        }
+        o.lock(lock)
+                .history(history)
+                .historyTable(historyTable)
+                .export(export);
         if (entities != null && !entities.isEmpty()) {
             List<Class<?>> types = new ArrayList<Class<?>>(entities.size());
             ClassLoader cl = Thread.currentThread().getContextClassLoader();
@@ -359,5 +491,15 @@ public class SqlAutoSettings {
             o.entities(types);
         }
         return o;
+    }
+
+    static SqlSchemaConvertOptions.PostgresIdentityStyle parsePostgresIdentityStyle(String name) {
+        String n = name.trim().toUpperCase(Locale.ROOT);
+        try {
+            return SqlSchemaConvertOptions.PostgresIdentityStyle.valueOf(n);
+        } catch (IllegalArgumentException e) {
+            throw new SqlAutoException(
+                    "unknown postgres-identity-style '" + name + "', expected IDENTITY or SERIAL");
+        }
     }
 }
