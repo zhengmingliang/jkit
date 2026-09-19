@@ -90,11 +90,17 @@ public final class SqlAutoLock {
             try {
                 if (rs.next()) {
                     Object v = rs.getObject(1);
-                    // MySQL GET_LOCK 成功返回 1；pg_advisory_lock 无结果集值（void）视为成功
                     if (v == null) {
+                        // pg_advisory_lock / pg_advisory_unlock 返回 void（NULL 结果），视为成功
                         return true;
                     }
-                    return v instanceof Number ? ((Number) v).intValue() != 0 : Boolean.parseBoolean(String.valueOf(v));
+                    if (v instanceof Number) {
+                        // MySQL GET_LOCK / RELEASE_LOCK 成功返回 1
+                        return ((Number) v).intValue() != 0;
+                    }
+                    String s = String.valueOf(v);
+                    // 部分驱动把 void 映射成空串，同样视为成功
+                    return s.isEmpty() || Boolean.parseBoolean(s);
                 }
                 return false;
             } finally {
