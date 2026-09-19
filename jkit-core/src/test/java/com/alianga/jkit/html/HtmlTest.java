@@ -444,4 +444,149 @@ public class HtmlTest {
         Document idle = Html.parse("<p class='a'>1</p>");
         Assert.assertNotNull(idle.body());
     }
+
+    // ------------------------------------------------------------------
+    // 修复回归：畸形选择器一律抛 SelectorException，不再崩溃或静默错配
+    // ------------------------------------------------------------------
+
+    private static void assertSelectorFails(String query) {
+        try {
+            Html.parse("<p>x</p>").select(query);
+            Assert.fail("选择器 '" + query + "' 应抛 SelectorException");
+        } catch (SelectorException expected) {
+            // 期望路径
+        }
+    }
+
+    @Test
+    public void emptySelectorFailsInsteadOfCrash() {
+        // 空串此前抛 IndexOutOfBoundsException，空白串静默匹配全文档
+        assertSelectorFails("");
+        assertSelectorFails("   ");
+    }
+
+    @Test
+    public void danglingGroupOperandFails() {
+        // 前置/连续/末尾逗号此前会静默匹配整个文档（含 #document 根）
+        assertSelectorFails(",p");
+        assertSelectorFails("p,");
+        assertSelectorFails("p,,p");
+    }
+
+    @Test
+    public void danglingCombinatorFails() {
+        // 末尾悬空组合符此前被静默忽略，"p > " 等价于 "p"
+        assertSelectorFails("p >");
+        assertSelectorFails("> p");
+    }
+
+    @Test
+    public void malformedAttrSelectorFails() {
+        // 未闭合 [ 此前抛 StringIndexOutOfBoundsException；
+        // 操作符缺 '=' 此前被静默丢弃，退化成存在性匹配
+        assertSelectorFails("img[src");
+        assertSelectorFails("[src");
+        assertSelectorFails("[src^png]");
+        assertSelectorFails("[src!]");
+        assertSelectorFails("[src='a.png");
+        assertSelectorFails("[src=a.png");
+    }
+
+    @Test
+    public void validAttrSelectorStillWorks() {
+        Document doc = Html.parse("<img src='a.png' alt='x'>");
+        Assert.assertEquals(1, doc.select("img[src]").size());
+        Assert.assertEquals(1, doc.select("img[src='a.png']").size());
+        Assert.assertEquals(1, doc.select("img[src^='a.']").size());
+        Assert.assertEquals(1, doc.select("img[src$='.png']").size());
+        Assert.assertEquals(1, doc.select("img[src*='pn']").size());
+        Assert.assertEquals(0, doc.select("img[src='b.png']").size());
+    }
+
+    @Test
+    public void notSupportsSelectorListAndComplex() {
+        Document doc = Html.parse("<div><a>1</a><p>2</p><span>3</span></div>");
+        // 选择器列表：:not(a,p) 此前只取第一个参数，p 会被错误排除
+        Assert.assertEquals(1, doc.select("div :not(a,p)").size());
+        Assert.assertEquals("3", doc.select("div :not(a,p)").text());
+        // 含组合器的复杂选择器
+        Document nested = Html.parse("<div><a><b>x</b></a><b>y</b></div>");
+        Assert.assertEquals(1, nested.select("div b:not(a b)").size());
+        Assert.assertEquals("y", nested.select("div b:not(a b)").text());
+    }
+
+    @Test
+    public void unterminatedPseudoParenFails() {
+        // 此前 "p:nth-child(23" 被静默截成 nth-child(2) 返回错误结果
+        assertSelectorFails("p:nth-child(23");
+        assertSelectorFails("p:nth-child(2");
+    }
+
+    @Test
+    public void unsupportedPseudoFailsEvenWithoutCandidate() {
+        // 不支持的伪类必须在解析期报错，不能因文档无候选元素而静默返回空结果
+        assertSelectorFails("table:hover");
+    }
+
+    @Test
+    public void emptyCommentDoesNotSwallowRest() {
+        // HTML5：<!--> 与 <!---> 是完整的空注释，此前会把剩余整个文档吞进注释
+        Document doc = Html.parse("<!-->x<p>y</p>");
+        Assert.assertEquals(1, doc.select("p").size());
+        Assert.assertEquals("x y", doc.text());
+        Document dashed = Html.parse("<!--->z<p>w</p>");
+        Assert.assertEquals(1, dashed.select("p").size());
+        Assert.assertEquals("z w", dashed.text());
+        // 常规注释与未闭合注释行为不变
+        Assert.assertEquals("1", Html.parse("<!-- c -->hi<p>1</p>").select("p").text());
+        Assert.assertEquals("hi 1", Html.parse("<!-- c -->hi<p>1</p>").text());
+        Assert.assertEquals(0, Html.parse("<div>a<!--broken<p>b</p></div>").select("p").size());
+    }
+
+    @Test
+    public void astralNumericEntityProducesSurrogatePair() {
+        // >0xFFFF 的码点此前被强转 char 截断成 U+F600 乱码
+        Assert.assertEquals("\uD83D\uDE00", Html.unescape("&#128512;"));
+        Assert.assertEquals("\uD83D\uDE00", Html.unescape("&#x1F600;"));
+        Assert.assertEquals("\uD83D\uDE00", Html.parse("<p>&#128512;</p>").select("p").text());
+        // 基本平面行为不变
+        Assert.assertEquals("A", Html.unescape("&#65;"));
+        Assert.assertEquals("a&b", Html.unescape("a&b"));
+    }
+
+    @Test
+    public void deepNestingDoesNotStackOverflow() {
+        // 解析是迭代的，但 text/outerHtml/select 此前是递归的，万层嵌套直接栈溢出
+        int depth = 20000;
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < depth; i++) {
+            sb.append("<div class='d'>");
+        }
+        sb.append("leaf");
+        for (int i = 0; i < depth; i++) {
+            sb.append("</div>");
+        }
+        Document doc = Html.parse(sb.toString());
+        Assert.assertTrue(doc.text().contains("leaf"));
+        Assert.assertTrue(doc.outerHtml().contains("leaf"));
+        Assert.assertEquals(depth, doc.select("div.d").size());
+        Assert.assertNotNull(doc.selectFirst("div"));
+    }
+
+    @Test
+    public void htmlTagAttributesPreserved() {
+        // <html> 标签上的属性此前被静默丢弃（head/body 都保留，唯独 html 丢）
+        Document doc = Html.parse("<html lang='en'><body>x</body></html>");
+        Assert.assertEquals("en", doc.selectFirst("html").attr("lang"));
+    }
+
+    @Test
+    public void elementsSelectDeduplicates() {
+        // 嵌套 div 都命中 "div"，两个子树的 p 查询会命中同一个元素，去重后只保留一次
+        Document doc = Html.parse("<div id='a'><div id='b'><p>1</p></div></div>");
+        Assert.assertEquals(2, doc.select("div").size());
+        Assert.assertEquals(1, doc.select("div").select("p").size());
+        // 分组选择器内部重复的项也去重
+        Assert.assertEquals(2, doc.select("div, .x, div").size());
+    }
 }

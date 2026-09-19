@@ -1,11 +1,16 @@
 package com.alianga.jkit.html;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -37,6 +42,9 @@ public final class Selector {
      * @return 解析后的复合选择器列表
      */
     private static List<Complex> parseCached(String query) {
+        if (query == null) {
+            throw new SelectorException("选择器为 null");
+        }
         synchronized (CACHE) {
             List<Complex> hit = CACHE.get(query);
             if (hit != null) {
@@ -66,43 +74,52 @@ public final class Selector {
         List<Complex> complexes = parseCached(query);
         Elements out = new Elements();
         boolean dedup = complexes.size() > 1;
+        // 分组去重用 HashSet 标记，避免对结果集线性 contains 退化成 O(n²)
+        Set<Element> seen = dedup ? new HashSet<Element>() : null;
         for (int i = 0; i < complexes.size(); i++) {
             Complex c = complexes.get(i);
             int last = c.steps.size() - 1;
-            collect(c, last, root, out, dedup);
+            collect(c, last, root, out, seen);
         }
         return out;
     }
 
     /**
-     * 深度优先收集匹配元素。直接走子节点表，不构建中间列表、不分配迭代器。
+     * 深度优先收集匹配元素，显式栈迭代实现，深嵌套文档不会栈溢出。
+     * 直接走子节点表，不构建中间列表、不分配迭代器。
      *
      * @param c 复合选择器
      * @param last 最末一步下标
-     * @param el 当前元素
+     * @param root 查询根元素
      * @param out 结果容器
-     * @param dedup 是否去重（仅逗号分组时需要）
+     * @param seen 分组去重标记集，非分组查询传 {@code null}
      */
-    private static void collect(Complex c, int last, Element el, Elements out, boolean dedup) {
-        List<Element> cands = candidates(c, last, el);
-        if (cands != null) {
-            // 索引路径：候选已按文档顺序排好，逐个验证完整条件即可
-            for (int i = 0; i < cands.size(); i++) {
-                Element cand = cands.get(i);
-                if (matchFrom(c, last, cand) && (!dedup || !out.contains(cand))) {
-                    out.add(cand);
+    private static void collect(Complex c, int last, Element root, Elements out, Set<Element> seen) {
+        ArrayDeque<Element> stack = new ArrayDeque<Element>();
+        stack.push(root);
+        while (!stack.isEmpty()) {
+            Element el = stack.pop();
+            List<Element> cands = candidates(c, last, el);
+            if (cands != null) {
+                // 索引路径：候选已按文档顺序排好，逐个验证完整条件即可；
+                // 只有 Document 根会走此路径，候选已覆盖整棵树，无需再下钻
+                for (int i = 0; i < cands.size(); i++) {
+                    Element cand = cands.get(i);
+                    if (matchFrom(c, last, cand) && (seen == null || seen.add(cand))) {
+                        out.add(cand);
+                    }
                 }
+                continue;
             }
-            return;
-        }
-        if (matchFrom(c, last, el) && (!dedup || !out.contains(el))) {
-            out.add(el);
-        }
-        int size = el.childCount();
-        for (int k = 0; k < size; k++) {
-            Node n = el.childAt(k);
-            if (n instanceof Element) {
-                collect(c, last, (Element) n, out, dedup);
+            if (matchFrom(c, last, el) && (seen == null || seen.add(el))) {
+                out.add(el);
+            }
+            // 逆序压栈，弹出顺序与文档顺序（深度优先前序）一致
+            for (int k = el.childCount() - 1; k >= 0; k--) {
+                Node n = el.childAt(k);
+                if (n instanceof Element) {
+                    stack.push((Element) n);
+                }
             }
         }
     }
@@ -151,27 +168,29 @@ public final class Selector {
         return null;
     }
 
-    private static Element findFirst(Complex c, int last, Element el) {
-        List<Element> cands = candidates(c, last, el);
-        if (cands != null) {
-            // 候选按文档顺序排列，第一个匹配的就是全树遍历会先遇到的那个
-            for (int i = 0; i < cands.size(); i++) {
-                if (matchFrom(c, last, cands.get(i))) {
-                    return cands.get(i);
+    private static Element findFirst(Complex c, int last, Element root) {
+        ArrayDeque<Element> stack = new ArrayDeque<Element>();
+        stack.push(root);
+        while (!stack.isEmpty()) {
+            Element el = stack.pop();
+            List<Element> cands = candidates(c, last, el);
+            if (cands != null) {
+                // 候选按文档顺序排列，第一个匹配的就是全树遍历会先遇到的那个；
+                // 只有 Document 根会走此路径，候选已覆盖整棵树
+                for (int i = 0; i < cands.size(); i++) {
+                    if (matchFrom(c, last, cands.get(i))) {
+                        return cands.get(i);
+                    }
                 }
+                return null;
             }
-            return null;
-        }
-        if (matchFrom(c, last, el)) {
-            return el;
-        }
-        int size = el.childCount();
-        for (int k = 0; k < size; k++) {
-            Node n = el.childAt(k);
-            if (n instanceof Element) {
-                Element hit = findFirst(c, last, (Element) n);
-                if (hit != null) {
-                    return hit;
+            if (matchFrom(c, last, el)) {
+                return el;
+            }
+            for (int k = el.childCount() - 1; k >= 0; k--) {
+                Node n = el.childAt(k);
+                if (n instanceof Element) {
+                    stack.push((Element) n);
                 }
             }
         }
@@ -225,14 +244,14 @@ public final class Selector {
     private static final class Compound {
         final List<Simple> simples = new ArrayList<Simple>();
 
-        /** 按下标遍历，避免每个被测试元素都分配一次 Iterator。 */
+        /** 按下标遍历，避免每个被测试元素都分配一次 Iterator。空复合不匹配任何元素（解析已禁止，纯防御）。 */
         boolean matches(Element e) {
             for (int i = 0; i < simples.size(); i++) {
                 if (!simples.get(i).matches(e)) {
                     return false;
                 }
             }
-            return true;
+            return !simples.isEmpty();
         }
 
         /**
@@ -278,8 +297,9 @@ public final class Selector {
         private final String tag;
 
         TagSimple(String tag) {
-            // DOM 标签名解析时已统一小写，选择器侧也归一，匹配退化为 equals
-            this.tag = "*".equals(tag) ? tag : tag.toLowerCase();
+            // DOM 标签名解析时已统一小写，选择器侧也归一，匹配退化为 equals；
+            // 用 Locale.ROOT 避免土耳其语等环境下 I→ı 导致失配
+            this.tag = "*".equals(tag) ? tag : tag.toLowerCase(Locale.ROOT);
         }
 
         public boolean matches(Element e) {
@@ -379,15 +399,21 @@ public final class Selector {
         }
     }
 
+    /** 支持的无参数伪类，解析期校验，不依赖文档内容是否命中。 */
+    private static final Set<String> SUPPORTED_PSEUDOS = new HashSet<String>(Arrays.asList(
+            "first-child", "last-child", "only-child", "root", "empty",
+            "first-of-type", "last-of-type", "only-of-type"));
+
     private static final class PseudoSimple implements Simple {
         private final String name;
-        private final Compound inner;
+        /** 仅 {@code :not} 使用：参数选择器列表，命中任一即排除。 */
+        private final List<Complex> nots;
         private final int[] nth;
         private final String arg;
 
-        PseudoSimple(String name, Compound inner, int[] nth, String arg) {
+        PseudoSimple(String name, List<Complex> nots, int[] nth, String arg) {
             this.name = name;
-            this.inner = inner;
+            this.nots = nots;
             this.nth = nth;
             this.arg = arg;
         }
@@ -405,7 +431,13 @@ public final class Selector {
                 case "empty":
                     return isEmptyOfContent(e);
                 case "not":
-                    return !inner.matches(e);
+                    for (int k = 0; k < nots.size(); k++) {
+                        Complex nc = nots.get(k);
+                        if (matchFrom(nc, nc.steps.size() - 1, e)) {
+                            return false;
+                        }
+                    }
+                    return true;
                 case "nth-child":
                     return nthMatches(e, nth[0], nth[1]);
                 case "nth-last-child":
@@ -575,6 +607,9 @@ public final class Selector {
                 }
                 char c = q.charAt(i);
                 if (c == ',') {
+                    if (comp.simples.isEmpty()) {
+                        throw new SelectorException("分组选择器缺少操作数：" + q);
+                    }
                     cur.steps.add(comp);
                     comp = new Compound();
                     complexes.add(cur);
@@ -608,6 +643,12 @@ public final class Selector {
             }
             if (!comp.simples.isEmpty()) {
                 cur.steps.add(comp);
+            } else if (!cur.steps.isEmpty()) {
+                // 末尾悬空组合符（如 "p >"），右侧缺少操作数
+                throw new SelectorException("组合符缺少操作数：" + q);
+            }
+            if (cur.steps.isEmpty()) {
+                throw new SelectorException("空选择器：" + q);
             }
             complexes.add(cur);
             return complexes;
@@ -670,37 +711,50 @@ public final class Selector {
                     && q.charAt(i) != '|' && q.charAt(i) != '!') {
                 i++;
             }
-            String name = q.substring(ks, i).toLowerCase();
+            if (i == ks) {
+                throw new SelectorException("属性选择器缺少属性名：" + q);
+            }
+            String name = q.substring(ks, i).toLowerCase(Locale.ROOT);
             skipWs();
-            String op = "";
-            String value = "";
-            if (i < n && q.charAt(i) == ']') {
+            if (i >= n) {
+                throw new SelectorException("属性选择器未闭合：" + q);
+            }
+            if (q.charAt(i) == ']') {
                 i++;
                 return new AttrSimple(name, "", "");
             }
             char o1 = q.charAt(i);
+            String op;
             if (o1 == '=') {
                 op = "=";
                 i++;
-            } else if (o1 == '!' && i + 1 < n && q.charAt(i + 1) == '=') {
-                op = "!=";
-                i += 2;
-            } else if (i + 1 < n && q.charAt(i + 1) == '=') {
+            } else if (o1 == '!' || o1 == '^' || o1 == '$' || o1 == '*'
+                    || o1 == '~' || o1 == '|') {
+                if (i + 1 >= n || q.charAt(i + 1) != '=') {
+                    throw new SelectorException("属性选择器操作符后缺少 '='：" + q);
+                }
                 op = "" + o1 + '=';
                 i += 2;
+            } else {
+                throw new SelectorException("无法解析的属性选择器，位置 " + i + " 附近：" + q);
             }
             skipWs();
-            if (i < n && (q.charAt(i) == '"' || q.charAt(i) == '\'')) {
+            if (i >= n) {
+                throw new SelectorException("属性选择器缺少属性值：" + q);
+            }
+            String value;
+            if (q.charAt(i) == '"' || q.charAt(i) == '\'') {
                 char qc = q.charAt(i);
                 i++;
                 int vs = i;
                 while (i < n && q.charAt(i) != qc) {
                     i++;
                 }
-                value = q.substring(vs, i);
-                if (i < n) {
-                    i++;
+                if (i >= n) {
+                    throw new SelectorException("属性值引号未闭合：" + q);
                 }
+                value = q.substring(vs, i);
+                i++;
             } else {
                 int vs = i;
                 while (i < n && !isWs(q.charAt(i)) && q.charAt(i) != ']' && q.charAt(i) != '>') {
@@ -709,9 +763,10 @@ public final class Selector {
                 value = q.substring(vs, i);
             }
             skipWs();
-            if (i < n && q.charAt(i) == ']') {
-                i++;
+            if (i >= n || q.charAt(i) != ']') {
+                throw new SelectorException("属性选择器未闭合：" + q);
             }
+            i++;
             return new AttrSimple(name, op, value);
         }
 
@@ -720,7 +775,7 @@ public final class Selector {
             if (i < n && q.charAt(i) == ':') {
                 i++;
             }
-            String name = readIdent().toLowerCase();
+            String name = readIdent().toLowerCase(Locale.ROOT);
             String arg = null;
             if (i < n && q.charAt(i) == '(') {
                 int depth = 1;
@@ -732,12 +787,11 @@ public final class Selector {
                         depth++;
                     } else if (ch == ')') {
                         depth--;
-                        if (depth == 0) {
-                            i++;
-                            break;
-                        }
                     }
                     i++;
+                }
+                if (depth > 0) {
+                    throw new SelectorException("伪类参数括号未闭合：" + q);
                 }
                 arg = q.substring(start, i - 1).trim();
             }
@@ -752,12 +806,10 @@ public final class Selector {
                 if (arg == null || arg.isEmpty()) {
                     throw new SelectorException(":not() 缺少参数：" + q);
                 }
+                // 支持选择器列表（如 :not(a,b)）与含组合器的复杂选择器（如 :not(div p)），
+                // 解析器已保证非空，不会出现空复合
                 List<Complex> cs = new Parser(arg).parse();
-                if (cs.get(0).steps.isEmpty()) {
-                    throw new SelectorException(":not() 参数无法解析：" + q);
-                }
-                Compound inner = cs.get(0).steps.get(0);
-                return new PseudoSimple(name, inner, null, arg);
+                return new PseudoSimple(name, cs, null, arg);
             }
             if ("nth-child".equals(name) || "nth-of-type".equals(name)
                     || "nth-last-child".equals(name) || "nth-last-of-type".equals(name)) {
@@ -768,6 +820,10 @@ public final class Selector {
                     || "matches".equals(name) || "matchesown".equals(name)) {
                 requireArg(name, arg);
                 return new PseudoSimple(name, null, null, arg);
+            }
+            if (!SUPPORTED_PSEUDOS.contains(name)) {
+                // 解析期拒绝，避免「索引无候选时静默返回空结果」绕过运行期校验
+                throw new SelectorException("不支持的伪类 :" + name + "（选择器：" + q + "）");
             }
             return new PseudoSimple(name, null, null, arg);
         }
@@ -801,7 +857,11 @@ public final class Selector {
                 int b = bStr == null ? 0 : Integer.parseInt(bStr);
                 return new int[]{a, b};
             }
-            return new int[]{0, Integer.parseInt(s)};
+            try {
+                return new int[]{0, Integer.parseInt(s)};
+            } catch (NumberFormatException e) {
+                throw new SelectorException("nth 伪类参数无法解析：" + arg);
+            }
         }
 
         private void skipWs() {

@@ -152,7 +152,8 @@ public final class Html {
                     codePoint = Integer.parseInt(ent.substring(1));
                 }
                 if (codePoint >= 0 && codePoint <= 0x10FFFF) {
-                    return String.valueOf((char) codePoint);
+                    // 高于 BMP 的码点（如 emoji）必须转代理对，强转 char 会截断成错字
+                    return new String(Character.toChars(codePoint));
                 }
             } catch (NumberFormatException ignored) {
                 return null;

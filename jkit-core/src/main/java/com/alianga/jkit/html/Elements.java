@@ -1,7 +1,9 @@
 package com.alianga.jkit.html;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * 元素集合，对 {@link Element} 列表的常见批量操作做便捷封装。
@@ -88,15 +90,20 @@ public class Elements extends ArrayList<Element> {
     }
 
     /**
-     * 在集合每个元素子树中查询，合并去重后的结果。
+     * 在集合每个元素子树中查询，合并去重后的结果（与 jsoup 行为一致：同一元素只出现一次）。
      *
      * @param css CSS 选择器
      * @return 匹配元素集合
      */
     public Elements select(String css) {
         Elements result = new Elements();
+        Set<Element> seen = new LinkedHashSet<Element>();
         for (Element e : this) {
-            result.addAll(e.select(css));
+            for (Element hit : e.select(css)) {
+                if (seen.add(hit)) {
+                    result.add(hit);
+                }
+            }
         }
         return result;
     }

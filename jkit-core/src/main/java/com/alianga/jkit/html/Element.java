@@ -1,10 +1,12 @@
 package com.alianga.jkit.html;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -271,32 +273,65 @@ public class Element extends Node {
     @Override
     public String nodeText() {
         StringBuilder sb = new StringBuilder();
-        int size = childCount();
-        for (int k = 0; k < size; k++) {
-            sb.append(childNodes.get(k).nodeText());
+        ArrayDeque<Node> stack = new ArrayDeque<Node>();
+        stack.push(this);
+        while (!stack.isEmpty()) {
+            Node node = stack.pop();
+            if (node instanceof Element) {
+                Element el = (Element) node;
+                for (int k = el.childCount() - 1; k >= 0; k--) {
+                    stack.push(el.childAt(k));
+                }
+            } else {
+                sb.append(node.nodeText());
+            }
         }
         return sb.toString();
     }
 
+    /**
+     * 显式栈迭代拼接文本，深嵌套文档不会栈溢出。
+     * 帧内记录当前元素与待访问子节点下标，keep 状态随帧传播（进入保留空白元素后其子树整体保留）。
+     */
     private void appendText(StringBuilder sb, boolean preserve) {
         if (NO_TEXT.contains(tagName)) {
             return;
         }
-        boolean keep = preserve || PRESERVE.contains(tagName);
-        int size = childCount();
-        for (int k = 0; k < size; k++) {
-            Node child = childNodes.get(k);
+        ArrayDeque<TextFrame> stack = new ArrayDeque<TextFrame>();
+        stack.push(new TextFrame(this, preserve || PRESERVE.contains(tagName)));
+        while (!stack.isEmpty()) {
+            TextFrame f = stack.pop();
+            if (f.next >= f.el.childCount()) {
+                continue;
+            }
+            Node child = f.el.childAt(f.next);
+            f.next++;
+            stack.push(f);
             if (child instanceof Element) {
                 Element el = (Element) child;
-                if (!keep && isBlockish(el) && sb.length() > 0
+                if (!f.keep && isBlockish(el) && sb.length() > 0
                         && !isWhitespace(sb.charAt(sb.length() - 1))) {
                     sb.append(' ');
                 }
-                el.appendText(sb, keep);
+                if (!NO_TEXT.contains(el.tagName)) {
+                    stack.push(new TextFrame(el, f.keep || PRESERVE.contains(el.tagName)));
+                }
             } else {
                 String t = child.nodeText();
-                sb.append(keep ? t : normalise(t));
+                sb.append(f.keep ? t : normalise(t));
             }
+        }
+    }
+
+    /** {@link #appendText} 的迭代帧：待遍历元素与其保留空白状态。 */
+    private static final class TextFrame {
+        final Element el;
+        final boolean keep;
+        int next;
+
+        TextFrame(Element el, boolean keep) {
+            this.el = el;
+            this.keep = keep;
         }
     }
 
@@ -350,30 +385,47 @@ public class Element extends Node {
     }
 
     /**
-     * 返回外联 HTML（含起始与结束标签）。
+     * 返回外联 HTML（含起始与结束标签），显式栈迭代实现，深嵌套文档不会栈溢出。
+     * 栈中元素为节点、结束标签字符串与元素帧三种。
      *
      * @return HTML 字符串
      */
     @Override
     public String outerHtml() {
         StringBuilder sb = new StringBuilder();
-        sb.append('<').append(tagName);
-        for (int i = 0; i < attrCount; i++) {
-            sb.append(' ').append(attrKeys[i]).append("=\"").append(Html.escapeAttr(attrValues[i])).append('"');
-        }
-        int size = childCount();
-        if (size == 0) {
-            if (VOID.contains(tagName)) {
-                return sb.append('>').toString();
+        ArrayDeque<Object> stack = new ArrayDeque<Object>();
+        stack.push(this);
+        while (!stack.isEmpty()) {
+            Object o = stack.pop();
+            if (o instanceof String) {
+                sb.append((String) o);
+                continue;
             }
-            sb.append('>').append("</").append(tagName).append('>');
-            return sb.toString();
+            if (!(o instanceof Element)) {
+                sb.append(((Node) o).outerHtml());
+                continue;
+            }
+            Element el = (Element) o;
+            sb.append('<').append(el.tagName);
+            for (int i = 0; i < el.attrCount; i++) {
+                sb.append(' ').append(el.attrKeys[i]).append("=\"").append(Html.escapeAttr(el.attrValues[i])).append('"');
+            }
+            int size = el.childCount();
+            if (size == 0) {
+                if (VOID.contains(el.tagName)) {
+                    sb.append('>');
+                } else {
+                    sb.append('>').append("</").append(el.tagName).append('>');
+                }
+                continue;
+            }
+            sb.append('>');
+            // 先压结束标签再逆序压子节点，弹出顺序即子节点正序、最后闭合
+            stack.push("</" + el.tagName + '>');
+            for (int k = size - 1; k >= 0; k--) {
+                stack.push(el.childAt(k));
+            }
         }
-        sb.append('>');
-        for (int k = 0; k < size; k++) {
-            sb.append(childNodes.get(k).outerHtml());
-        }
-        sb.append("</").append(tagName).append('>');
         return sb.toString();
     }
 
@@ -582,7 +634,7 @@ public class Element extends Node {
      * @param value 属性值
      */
     void setAttr(String key, String value) {
-        String k = key.toLowerCase();
+        String k = key.toLowerCase(Locale.ROOT);
         for (int i = 0; i < attrCount; i++) {
             if (attrKeys[i].equals(k)) {
                 attrValues[i] = value;

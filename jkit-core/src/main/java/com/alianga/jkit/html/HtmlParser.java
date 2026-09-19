@@ -5,6 +5,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -86,12 +87,24 @@ public final class HtmlParser {
             html = "";
         }
         Document doc = new Document();
-        Ctx ctx = new Ctx(doc);
+        Ctx ctx = new Ctx(doc, html.length());
         int i = 0;
         int n = html.length();
         while (i < n) {
             if (html.charAt(i) == '<') {
                 if (i + 4 <= n && html.startsWith("<!--", i)) {
+                    // HTML5：<!--> 与 <!---> 是完整的空注释（abrupt-closing-of-empty-comment），
+                    // 不能当作未闭合注释吞掉后续内容
+                    if (i + 4 < n && html.charAt(i + 4) == '>') {
+                        ctx.container(null).appendChild(new Comment(""));
+                        i += 5;
+                        continue;
+                    }
+                    if (i + 5 < n && html.charAt(i + 4) == '-' && html.charAt(i + 5) == '>') {
+                        ctx.container(null).appendChild(new Comment(""));
+                        i += 6;
+                        continue;
+                    }
                     int end = html.indexOf("-->", i + 4);
                     if (end < 0) {
                         end = n;
@@ -112,7 +125,7 @@ public final class HtmlParser {
                         end = n;
                     }
                     int from = Math.min(i + 2, end);
-                    String name = html.substring(from, end).trim().split("\\s")[0].toLowerCase();
+                    String name = html.substring(from, end).trim().split("\\s")[0].toLowerCase(Locale.ROOT);
                     i = end < n ? end + 1 : n;
                     ctx.closeTag(name);
                     continue;
@@ -194,7 +207,12 @@ public final class HtmlParser {
         while (j < n && isTagChar(html.charAt(j))) {
             j++;
         }
-        String name = Names.tag(html.substring(ks, j).toLowerCase());
+        String rawName = html.substring(ks, j).toLowerCase(Locale.ROOT);
+        String name = Names.tag(rawName);
+        if (name == rawName) {
+            // 未收录进驻留表的名字（如自定义元素）才走解析期字符串缓存
+            name = ctx.dedupe(rawName);
+        }
         ctx.resetAttrs();
         boolean selfClose = false;
         while (j < n) {
@@ -224,7 +242,11 @@ public final class HtmlParser {
                     && html.charAt(j) != '/') {
                 j++;
             }
-            String an = Names.attr(html.substring(as, j).toLowerCase());
+            String rawKey = html.substring(as, j).toLowerCase(Locale.ROOT);
+            String an = Names.attr(rawKey);
+            if (an == rawKey) {
+                an = ctx.dedupe(rawKey);
+            }
             while (j < n && isWs(html.charAt(j))) {
                 j++;
             }
@@ -307,16 +329,25 @@ public final class HtmlParser {
         private int headIdx = -1;
         private int bodyIdx = -1;
 
+        /** 字符串驻留缓存：把重复的文本、属性值合并为同一实例，降低常驻内存。 */
+        private final StringCache strings;
+
         /** 属性复用缓冲区：一次解析内反复使用，避免每标签分配 Map。 */
         private String[] attrKeys = new String[8];
         private String[] attrValues = new String[8];
         private int attrCount;
 
-        Ctx(Document doc) {
+        Ctx(Document doc, int inputLength) {
             this.htmlEl = new Element("html");
             doc.appendChild(htmlEl);
             stack.add(doc);
             stack.add(htmlEl);
+            this.strings = new StringCache(inputLength);
+        }
+
+        /** 返回与 {@code s} 内容相同的驻留实例。 */
+        String dedupe(String s) {
+            return strings.dedupe(s);
         }
 
         Element top() {
@@ -389,7 +420,7 @@ public final class HtmlParser {
             }
             if (bodyIdx < 0) {
                 if (headIdx >= 0) {
-                    top().appendChild(new TextNode(Html.unescape(s)));
+                    top().appendChild(new TextNode(dedupe(Html.unescape(s))));
                     return;
                 }
                 if (isBlank(s)) {
@@ -397,7 +428,7 @@ public final class HtmlParser {
                 }
                 openBody();
             }
-            top().appendChild(new TextNode(Html.unescape(s)));
+            top().appendChild(new TextNode(dedupe(Html.unescape(s))));
         }
 
         /** 清空属性缓冲区。 */
@@ -421,16 +452,18 @@ public final class HtmlParser {
             attrCount++;
         }
 
-        /** 把缓冲区中的属性写入元素。 */
+        /** 把缓冲区中的属性写入元素（值经驻留缓存去重）。 */
         void applyAttrs(Element el) {
             for (int i = 0; i < attrCount; i++) {
-                el.setAttr(attrKeys[i], attrValues[i]);
+                el.setAttr(attrKeys[i], dedupe(attrValues[i]));
             }
         }
 
         int startTag(StartTag tag, String html) {
             String name = tag.name;
             if ("html".equals(name)) {
+                // 保留 <html> 上的属性（如 lang），不再静默丢弃
+                applyAttrs(htmlEl);
                 return tag.next;
             }
             if ("head".equals(name)) {
@@ -461,9 +494,9 @@ public final class HtmlParser {
                 int closeIdx = findClose(html, name, tag.next, html.length());
                 String raw = html.substring(tag.next, closeIdx);
                 if ("textarea".equals(name)) {
-                    el.appendChild(new TextNode(Html.unescape(raw)));
+                    el.appendChild(new TextNode(dedupe(Html.unescape(raw))));
                 } else {
-                    el.appendChild(new DataNode(raw));
+                    el.appendChild(new DataNode(dedupe(raw)));
                 }
                 return closeIdx;
             }

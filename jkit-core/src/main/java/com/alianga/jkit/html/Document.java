@@ -1,5 +1,6 @@
 package com.alianga.jkit.html;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -87,21 +88,26 @@ public class Document extends Element {
         return idx;
     }
 
-    private static void indexInto(Map<String, List<Element>> idx, Element el) {
-        put(idx, TAG_PREFIX + el.tagName(), el);
-        String id = el.id();
-        if (!id.isEmpty()) {
-            put(idx, ID_PREFIX + id, el);
-        }
-        List<String> names = el.classNames();
-        for (int i = 0; i < names.size(); i++) {
-            put(idx, CLASS_PREFIX + names.get(i), el);
-        }
-        int size = el.childCount();
-        for (int k = 0; k < size; k++) {
-            Node n = el.childAt(k);
-            if (n instanceof Element) {
-                indexInto(idx, (Element) n);
+    private static void indexInto(Map<String, List<Element>> idx, Element root) {
+        ArrayDeque<Element> stack = new ArrayDeque<Element>();
+        stack.push(root);
+        while (!stack.isEmpty()) {
+            Element el = stack.pop();
+            put(idx, TAG_PREFIX + el.tagName(), el);
+            String id = el.id();
+            if (!id.isEmpty()) {
+                put(idx, ID_PREFIX + id, el);
+            }
+            List<String> names = el.classNames();
+            for (int i = 0; i < names.size(); i++) {
+                put(idx, CLASS_PREFIX + names.get(i), el);
+            }
+            // 逆序压栈保证弹出顺序为深度优先前序，与文档顺序一致
+            for (int k = el.childCount() - 1; k >= 0; k--) {
+                Node n = el.childAt(k);
+                if (n instanceof Element) {
+                    stack.push((Element) n);
+                }
             }
         }
     }
