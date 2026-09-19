@@ -235,7 +235,7 @@ Prefix is always `jkit.sql.auto.`. The Spring Boot starters bind the same set; n
 | `create-index` | `true` | emit `CREATE INDEX` |
 | `table-prefix` | empty | uniform table-name prefix, e.g. `t_`; applies to create / alter / drop / index / sequence / FK target table |
 | `index-prefix-enabled` | `true` | whether auto-derived index names also carry `table-prefix` (so `t_user`'s index is `t_user_idx` vs `user_idx`); an explicit `@Index(name=…)` is always kept verbatim and ignores this switch |
-| `quote-identifiers` | `false` | quote identifiers in the dialect |
+| `quote-identifiers` | `false` | quote identifiers unconditionally in the dialect; when off, reserved-word identifiers are still auto-quoted (see section 8 "Reserved-word auto-quoting"), so this is rarely needed |
 | `show-sql` | `true` | log SQL |
 | `dry-run` | `false` | plan only |
 | `catalog` / `schema` | JDBC default | `DatabaseMetaData` lookup scope. If `catalog` is unset, uses `Connection.getCatalog()`; if `schema` is unset, uses `getSchema()`, then the JDBC URL (`currentSchema` on PostgreSQL-family URLs, default `public`; SQL Server `dbo`). Dry-run (no connection) also reads the URL |
@@ -304,6 +304,10 @@ When `dialect` is unset:
 **Index names / identifier length**
 
 Unnamed indexes are `{table}_{col}_idx`. Classic Oracle caps identifiers at 30 characters and truncates with a 4-hex hash; `ORACLE12` allows 128. Sequence and trigger names use the same rule.
+
+**Reserved-word auto-quoting**
+
+Table / column / index names are unquoted by default (the database folds the case), but they are checked against the target dialect's reserved words (`SqlReservedWords`: SQL-standard core plus MySQL / PostgreSQL / Oracle / SQL Server / H2 / DB2 / DM extensions). When a name collides (e.g. `order`, `desc`, `value`), it is quoted automatically as a fallback and a WARN is logged once per identifier. CREATE / ADD / ALTER / DROP / CREATE INDEX / comment statements all stay in the same form, so the next startup will not re-alter tables because of a shape mismatch. Always on, no configuration needed; `quote-identifiers: true` remains an unconditional quote-everything mode.
 
 **Inherited columns**
 

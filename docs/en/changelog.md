@@ -4,7 +4,32 @@
 
 This document records user-visible changes in each jkit release. Each version number appears once, listed from newest to oldest.
 
-Unreleased changes are appended to the **current version** section (currently 2.0.2); once released, that section is frozen and a new version section is added above it. Do not rewrite frozen historical versions, and do not open a new `unreleased` heading for the same version number.
+Unreleased changes are appended to the **current version** section (currently 2.0.3); once released, that section is frozen and a new version section is added above it. Do not rewrite frozen historical versions, and do not open a new `unreleased` heading for the same version number.
+
+## 2.0.3 - unreleased
+
+### Added
+
+**jkit-sql**
+
+- `SqlReservedWords`: per-dialect reserved-word registry (SQL-standard core plus MySQL / PostgreSQL / Oracle / SQL Server / H2 / DB2 / DM / Hive / ClickHouse extensions) with `isKeyword(dialect, name)`. `SqlSchemaConvertOptions` gains `keywordQuote` and `keywordQuotedListener`: identifiers stay unquoted by default (case folding is left to the database), but reserved-word collisions are quoted automatically and reported through the callback once per identifier; jkit-sql itself does no logging, the host decides how to warn.
+
+**jkit-sql-auto**
+
+- Reserved-word auto-quoting: table / column / index names stay unquoted by default; when one matches a target-database reserved word (e.g. `order`, `desc`, `value`) it is quoted automatically as a fallback with a WARN (once per identifier). CREATE / ADD / ALTER / DROP / CREATE INDEX / COMMENT all stay in the same form, so subsequent startups do not re-alter tables due to a shape mismatch. Always on, no configuration.
+
+### Fixed
+
+**jkit-sql-auto**
+
+- With `quote-identifiers` on, the `CREATE INDEX` table name was quoted without case folding, breaking on upper-folding databases (Oracle / H2 / DM); index columns were never quoted, so reserved-word columns always failed to get indexed. Index statements are now generated with the same quoting rules as CREATE TABLE.
+- `SqlAuto.run(Connection, options)` (the Spring Boot starter entry) skipped identifier-case detection, so quote-identifiers and reserved-word quoting never took effect on the starter path; the `drop` entry is fixed the same way.
+- The PostgreSQL metadata lock was never actually acquired: `pg_advisory_lock` returns void, which PG JDBC maps to an empty string, and `Boolean.parseBoolean("")` is always false — the lock silently never worked on PostgreSQL since 2.0.2. Void / empty-string results are now treated as success, so the lock genuinely engages on PostgreSQL.
+- Reserved-word list completed from multi-database testing: GBase 8a additionally reserves `LEVEL` / `SORT` (collapsed into the MYSQL dialect in jkit; unquoted they are straight syntax errors).
+- Metadata-lock timing: the plan (metadata inspection) used to run before acquiring the lock, so two concurrently cold-starting instances could replay stale plans. The plan is now recomputed under the lock; lock-acquisition failure (60s default wait) logs a WARN and continues without the lock instead of failing silently.
+- Spring Boot starter with multiple DataSource beans and no unique candidate now logs a WARN and skips (hinting to mark one `@Primary` or set `jkit.sql.auto.url`) instead of throwing `NoUniqueBeanDefinitionException`; an invalid `phase` value logs a WARN.
+- An unknown `jkit.sql.auto.mode` value (e.g. `valdate`) silently fell back to `UPDATE` and modified the schema; it now logs a WARN.
+- History-table write failures are caught as `Exception | LinkageError` instead of `Throwable`; the GBase 8a "CREATE INDEX skipped" log is emitted once and only when the plan actually contains indexes.
 
 ## 2.0.2 - 2026-09-19
 

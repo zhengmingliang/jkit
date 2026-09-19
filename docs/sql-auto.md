@@ -248,11 +248,11 @@ List<String> sqls = plan.sql();
 | `create-index` | `true` | 是否补 `CREATE INDEX` |
 | `table-prefix` | （空） | 表名统一前缀，如 `t_`；作用于建表 / 改表 / 删表 / 索引 / 序列 / 外键目标表 |
 | `index-prefix-enabled` | `true` | 自动派生的索引名是否也带 `table-prefix`（如 `t_user` 的索引是 `t_user_idx` 还是 `user_idx`）；实体里显式写的 `@Index(name=…)` 始终原样保留，不受此开关影响 |
-| `quote-identifiers` | `false` | 标识符加方言引号：表名按连接元数据折叠大小写后引用，列名在 CREATE / ADD / ALTER / DROP 中原样引用。列名撞目标库保留字时开启（真实实体实测：Oracle / GBase 8a 的 `LEVEL`、`MODE` 会直接 ORA-00904 / 语法错误） |
+| `quote-identifiers` | `false` | 标识符全量加方言引号：表名按连接元数据折叠大小写后引用，列名在 CREATE / ADD / ALTER / DROP 中原样引用。关闭时也有保留字兜底（见第 8 节「保留字自动引号」），一般无需开启 |
 | `foreign-keys` | `true` | 是否在 CREATE TABLE 里写 FOREIGN KEY；GBase 8a 等不支持时设 `false` |
 | `auto-increment` | `true` | 是否生成自增子句；DuckDB 等不认 IDENTITY 时设 `false` |
 | `postgres-identity-style` | `identity` | PG / OpenGauss 自增写法：`identity` 或 `serial`（老版 OpenGauss 不认 GENERATED…IDENTITY） |
-| `lock` | `true` | 执行前在当前连接上取元数据锁（MySQL `GET_LOCK` / PG `pg_advisory_lock`），多实例并发冷启动串行化；不支持的方言自动跳过 |
+| `lock` | `true` | 执行前在当前连接上取元数据锁（MySQL `GET_LOCK` / PG `pg_advisory_lock`），多实例并发冷启动串行化；不支持的方言自动跳过。取锁失败（默认等 60s）打 WARN 后无锁继续 |
 | `history` | `false` | 把已应用的变更写入历史表（审计用），行含时间 / 主机 / 模式 / 语句 |
 | `history-table` | `jkit_schema_history` | 历史表名，不存在自动创建 |
 | `export` | （空） | 每次规划后把将执行的 DDL 写入该文件（UTF-8，每条一行分号结尾），配合 `dry-run` 可当 schema 生成器用 |
@@ -326,6 +326,10 @@ SqlAuto.drop(SqlAutoOptions.defaults().url(url).entities(User.class));
 
 未命名索引 `{table}_{col}_idx`。经典 Oracle 上限 30 字符，超长截断并追加 4 位散列；`ORACLE12` 为 128。序列名、触发器名同一规则。
 
+**保留字自动引号**
+
+表名 / 列名 / 索引名默认一律不加引号（大小写交给库折叠），但会对照目标方言的保留字表（`SqlReservedWords`：SQL 标准核心 + MySQL / PostgreSQL / Oracle / SQL Server / H2 / DB2 / 达梦等扩展）：检测到撞保留字（如 `order`、`desc`、`value`）时自动加方言引号兜底，并打一次 WARN 日志（每个标识符只告警一次，不刷屏）。CREATE / ADD / ALTER / DROP / CREATE INDEX / 注释语句全链路保持同一形态，二次启动不会因为名字形态不一致而重复改表。默认开启、无需配置；`quote-identifiers: true` 仍是无条件全量加引号。
+
 **继承列**
 
 子类与 `MappedSuperclass` / 父类同时声明 `create_time` 时只生成一次，避免 PostgreSQL `column specified more than once`。
@@ -339,7 +343,7 @@ SqlAuto.drop(SqlAutoOptions.defaults().url(url).entities(User.class));
 
 **多实例与审计**
 
-- 并发冷启动：`lock: true`（默认）让多实例串行执行 DDL，避免「都读到表不存在、都去 CREATE」的竞态；MySQL / PostgreSQL 系有效，其它方言自动跳过
+- 并发冷启动：`lock: true`（默认）让多实例串行执行 DDL，避免「都读到表不存在、都去 CREATE」的竞态；MySQL / PostgreSQL 系有效，其它方言自动跳过。持锁后会按最新元数据重算一次计划，消除「检查与执行之间别的实例已建表」的窗口；取锁失败打 WARN 后无锁继续
 - 审计：`history: true` 把每次实际执行的 DDL 写入 `jkit_schema_history`（时间 / 主机 / 模式 / 语句），历史表不存在自动创建，不在实体清单里因此永远不会被同步或删除
 - 评审：`export: target/schema.sql` 把本次计划落盘，走 DBA 变更评审流程；配合 `dry-run` 就是纯 schema 生成器
 

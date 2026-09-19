@@ -2,7 +2,32 @@
 
 本文记录 jkit 各版本的用户可见变更。每个版本号只出现一次，按新到旧排列。
 
-未发版的改动追加到**当前版本**小节（现在是 2.0.2）；发版后冻结该小节，在上方新建下一版本。不要改写已冻结的历史版本，也不要为同一版本再开 `unreleased` 标题。
+未发版的改动追加到**当前版本**小节（现在是 2.0.3）；发版后冻结该小节，在上方新建下一版本。不要改写已冻结的历史版本，也不要为同一版本再开 `unreleased` 标题。
+
+## 2.0.3 - 未发布
+
+### 新增
+
+**jkit-sql**
+
+- `SqlReservedWords`：各方言保留字注册表（SQL 标准核心 + MySQL / PostgreSQL / Oracle / SQL Server / H2 / DB2 / 达梦 / Hive / ClickHouse 扩展），`isKeyword(dialect, name)` 按方言探测。`SqlSchemaConvertOptions` 新增 `keywordQuote` 与 `keywordQuotedListener`：开启后标识符默认仍不加引号（大小写交给库折叠），撞目标库保留字时自动加方言引号，并通过回调告警（同一标识符全局只回调一次）；jkit-sql 自身不打日志，告警方式由宿主决定。
+
+**jkit-sql-auto**
+
+- 保留字自动引号：表名 / 列名 / 索引名默认不加引号，检测到是目标库保留字（如 `order`、`desc`、`value`）时自动加引号兜底并打 WARN（每个标识符只告警一次）。CREATE / ADD / ALTER / DROP / CREATE INDEX / COMMENT 全链路同形态，二次启动不会因名字形态不一致重复改表；无需配置，默认开启。
+
+### 修复
+
+**jkit-sql-auto**
+
+- quote-identifiers 开启时 `CREATE INDEX` 的表名引号未按连接元数据折叠大小写，在大写折叠库（Oracle / H2 / 达梦）上找不到表；索引列名从不加引号，撞保留字的列建索引必失败。索引语句改为与建表同一引号规则生成。
+- `SqlAuto.run(Connection, options)`（Spring Boot starter 走的入口）漏了标识符大小写折叠探测，quote-identifiers 与保留字引号在 starter 路径不生效；`drop` 入口同样补齐。
+- PostgreSQL 元数据锁从未真正取到：`pg_advisory_lock` 返回 void，PG JDBC 将其映射为空串，`Boolean.parseBoolean("")` 恒为 false，2.0.2 起锁在 PG 上一直静默失效。现在 void / 空串结果正确视为成功，锁在 PG 上真实生效。
+- 保留字表按多库实测补齐：GBase 8a 额外保留 `LEVEL` / `SORT`（jkit 内归并为 MYSQL 方言，实测不加引号直接语法错误）。
+- 多实例元数据锁时序：原实现 plan（元数据检查）发生在取锁之前，两个实例并发冷启动会按各自的旧计划重复执行。现在持锁后按最新元数据重算一次计划再执行；取锁失败（默认等 60s）打 WARN 后无锁继续，不再静默降级。
+- Spring Boot starter 多数据源场景：容器里有多个 DataSource 且无唯一候选时，从抛 `NoUniqueBeanDefinitionException` 改为 WARN 并跳过（提示标 `@Primary` 或配 `jkit.sql.auto.url`）；`phase` 配错值（非 eager / ready）打 WARN。
+- `jkit.sql.auto.mode` 配错值（如 `valdate`）此前静默回落 `UPDATE` 改库，现在打 WARN。
+- 历史表写入失败的捕获从 `Throwable` 收窄为 `Exception | LinkageError`；GBase 8a「已跳过 CREATE INDEX」日志只在计划里确有索引时打一次。
 
 ## 2.0.2 - 2026-09-19
 
