@@ -352,7 +352,7 @@ long when = UUIDv7.timestamp(v7);
 
 ULID 的 `next()` 每次取 80 位随机数，同一毫秒内顺序不确定；`nextMonotonic()` 在同一毫秒内在上一个随机值上 `+1`，需要严格有序时用后者（多实例部署时同毫秒仍可能交错）。UUIDv7 的 `nextMonotonic()` 用 12 位计数器，一毫秒内用满会把逻辑时钟推进 1ms，保证不回退。
 
-解析时 `I` / `L` 视作 `1`、`O` 视作 `0`、大小写不敏感（Crockford 容错），含 `U` 或其它非法字符一律拒绝；`ULID.isUlid(s)` 只做校验不抛异常。
+解析时 `I` / `L` 视作 `1`、`O` 视作 `0`、大小写不敏感（Crockford 容错），含 `U` 或其它非法字符一律拒绝；时间戳超出 48 位范围的输入 `parse` 直接拒绝，与编码侧对称，`parse(x).toString()` 可往返；`ULID.isUlid(s)` 只做校验不抛异常。
 
 ## CSV / 身份证
 

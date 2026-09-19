@@ -66,7 +66,7 @@ try {
 | --- | --- |
 | `CLOSED` | Calls pass through; after `failureThreshold` consecutive failures, transitions to `OPEN` |
 | `OPEN` | Calls are rejected with `CircuitBreakerOpenException`; after `cooldownMs` transitions to `HALF_OPEN` |
-| `HALF_OPEN` | A probe is allowed; `successThreshold` consecutive successes close it, any failure re-opens |
+| `HALF_OPEN` | Exactly **one** probe is admitted at a time; other calls are rejected as open. `successThreshold` consecutive successes close it (further probes are admitted while the threshold is unmet), any failure re-opens |
 
 ```java
 CircuitBreaker.Config config = new CircuitBreaker.Config()

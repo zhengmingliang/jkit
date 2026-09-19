@@ -40,7 +40,7 @@ HttpResponse s = b.get("https://api.example.com/y");   // B's config, unaffected
 - Configurable: connect/read timeouts (`connectTimeout` / `readTimeout`), proxy (`proxy` / `httpProxy` / `proxyAuth`), SSL (`ignoreSsl` / `sslContext` + `hostnameVerifier`), `cookieJar`, `engine` (inject a transport engine, handy for tests), `fakeIp`, `defaultMediaType`, retries (`retryPolicy` / `maxRedirects`), `http2`, `throwOnHttpError`, `endpointPool`, and interceptors (`addInterceptor` / `interceptors`).
 - `HttpClient.shared()` returns the global default singleton, sharing the same process-wide config with `HttpUtils` static methods—fully equivalent.
 - Instance methods cover common cases: `execute(HttpRequest)`, `get(...)`, `post(...)`, `postJson(...)`, `put(...)`, `delete(...)`. The request scope is set inside `execute` and cleared afterward, so even static `HttpUtils` calls are never polluted by an instance's config.
-- Isolation is done via a thread-local that propagates the instance config down the send chain (timeouts, proxy, SSL, CookieJar, engine, interceptors all read the "currently active client"), guaranteeing no cross-instance or cross-thread leakage.
+- Isolation is done via a thread-local that propagates the instance config down the send chain (timeouts, proxy, SSL, CookieJar, engine, interceptors all read the "currently active client"), guaranteeing no cross-instance or cross-thread leakage. When an interceptor executes a request on another instance (e.g. token refresh), the outer pipeline still reads the outer instance's own config afterwards — the previous scope is saved and restored.
 
 ## 1. GET
 

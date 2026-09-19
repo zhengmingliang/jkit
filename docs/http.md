@@ -39,8 +39,8 @@ HttpResponse s = b.get("https://api.example.com/y");   // B 的配置，互不�
 - 构建器 `HttpClient.builder()` 初始值取自当前全局默认，只需覆盖关心的项；所有 setter 返回 `this`，可链式编排。
 - 可配置项：连接/读取超时（`connectTimeout` / `readTimeout`）、代理（`proxy` / `httpProxy` / `proxyAuth`）、SSL（`ignoreSsl` / `sslContext` + `hostnameVerifier`）、`cookieJar`、`engine`（注入传输引擎，常用于测试）、`fakeIp`、`defaultMediaType`、重试（`retryPolicy` / `maxRedirects`）、`http2`、`throwOnHttpError`、`endpointPool`、拦截器（`addInterceptor` / `interceptors`）。
 - `HttpClient.shared()` 取全局默认单例，与 `HttpUtils` 的静态方法共享同一份进程级配置，二者行为完全等价。
-- 实例方法覆盖常用场景：`execute(HttpRequest)`、`get(...)`、`post(...)`、`postJson(...)`、`put(...)`、`delete(...)`；请求作用域在 `execute` 内部设置并在结束后清理，因此连静态 `HttpUtils` 调用也不会被某个实例的配置污染。
-- 隔离实现：实例配置通过线程局部（ThreadLocal）下发到发送链路（超时、代理、SSL、CookieJar、引擎、拦截器均读取"当前活跃客户端"），保证多实例与多线程互不污染。
+- 实例方法覆盖常用场景：`execute(HttpRequest)`、`get(...)`、`post(...)`、`postJson(...)`、`put(...)`、`delete(...)`；请求作用域在 `execute` 内部设置、结束后恢复进入前的旧值（顶层调用恢复为空），因此连静态 `HttpUtils` 调用也不会被某个实例的配置污染。
+- 隔离实现：实例配置通过线程局部（ThreadLocal）下发到发送链路（超时、代理、SSL、CookieJar、引擎、拦截器均读取"当前活跃客户端"），保证多实例与多线程互不污染；拦截器里嵌套调用其它实例（如 token 刷新）后，外层剩余链路读到的仍是外层自己的配置。
 
 ## 1. GET
 

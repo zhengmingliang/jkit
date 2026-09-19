@@ -66,7 +66,7 @@ try {
 | --- | --- |
 | `CLOSED` | 正常放行；连续失败达到 `failureThreshold` 转入 `OPEN` |
 | `OPEN` | 直接拒绝，抛出 `CircuitBreakerOpenException`；冷却 `cooldownMs` 后转 `HALF_OPEN` |
-| `HALF_OPEN` | 放行探测请求；`successThreshold` 次连续成功转 `CLOSED`，任一次失败重新 `OPEN` |
+| `HALF_OPEN` | 同一时刻只放行**一个**探测请求，其余按熔断拒绝；`successThreshold` 次连续成功转 `CLOSED`（未达阈值会继续放行下一个探测），任一次失败重新 `OPEN` |
 
 ```java
 CircuitBreaker.Config config = new CircuitBreaker.Config()

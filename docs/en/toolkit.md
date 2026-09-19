@@ -352,7 +352,7 @@ long when = UUIDv7.timestamp(v7);
 
 `ULID.next()` draws a fresh 80-bit random value, so ordering within one millisecond is undefined; `nextMonotonic()` adds 1 to the previous random value inside the same millisecond — use it when strict ordering matters (across instances, the same millisecond can still interleave). `UUIDv7.nextMonotonic()` uses a 12-bit counter and advances the logical clock by 1ms when the counter is exhausted, so it never goes backwards.
 
-Parsing follows Crockford tolerances: `I` / `L` count as `1`, `O` counts as `0`, and case does not matter; a `U` or any other illegal character is rejected. `ULID.isUlid(s)` validates without throwing.
+Parsing follows Crockford tolerances: `I` / `L` count as `1`, `O` counts as `0`, and case does not matter; a `U` or any other illegal character is rejected. Input whose timestamp exceeds the 48-bit range is rejected by `parse`, symmetric with encoding, so `parse(x).toString()` round-trips. `ULID.isUlid(s)` validates without throwing.
 
 ## CSV / ID Card
 

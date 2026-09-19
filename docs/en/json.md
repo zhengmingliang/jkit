@@ -389,9 +389,12 @@ Supported operations:
 | `test` | `path` + `value` | assert the value at `path` equals `value`; throws `JSONPatchException` otherwise |
 
 `path` is a JSON Pointer (RFC 6901): reference tokens separated by `/`, an empty string means the root
-document; array indexes use non-negative integers, `-` means the array end; inside a token `~1` decodes
+document; array indexes are decimal non-negative integers (no leading zeros except `0` itself, no `+`),
+`-` means the array end (`add` only); inside a token `~1` decodes
 to `/` and `~0` decodes to `~` (so a key that literally contains `/` or `~` can be addressed). `test`
-compares numbers by value, so `1` and `1.0` are considered equal.
+compares numbers by exact value (`BigDecimal` semantics), so `1` and `1.0` are considered equal while
+`9007199254740993` and `9007199254740992` are not — large integers are never truncated into false
+equality by `double`.
 
 ```java
 // String entry point: parses and serializes for you
