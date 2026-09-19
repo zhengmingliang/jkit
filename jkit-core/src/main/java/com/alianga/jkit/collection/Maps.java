@@ -5,7 +5,7 @@ import com.alianga.jkit.valid.Preconditions;
 
 import java.io.PrintStream;
 import java.text.NumberFormat;
-import java.text.ParseException;
+import java.text.ParsePosition;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.EnumMap;
@@ -257,11 +257,15 @@ public class Maps {
     }
 
     /**
-     * 从 Map 中获取 Number；字符串使用系统默认 NumberFormat 解析。
+     * 从 Map 中获取 Number；字符串先去除首尾空白，再使用系统默认 NumberFormat 解析。
+     * <p>字符串必须被<b>完整</b>解析才视为数字：{@code NumberFormat#parse(String)} 只做前缀解析，
+     * 会把 {@code "123abc"} 静默解析成 {@code 123}、把 {@code "2024-01"} 解析成 {@code 2024}。
+     * 这里额外校验解析位置是否消费了整串，未被识别的输入一律按不可解析返回 {@code null}，
+     * 避免把格式错误的数据当成合法数值传下去。</p>
      *
      * @param map 数据来源 Map，可为 null
      * @param key 要查询的键
-     * @return 转换后的 Number，值既不是数字也不是可解析的字符串时返回 null
+     * @return 转换后的 Number，值既不是数字也不是可完整解析的字符串时返回 null
      */
     public static Number getNumber(final Map map, final Object key) {
         Object answer = map == null ? null : map.get(key);
@@ -269,9 +273,18 @@ public class Maps {
             return (Number) answer;
         }
         if (answer instanceof String) {
+            String text = ((String) answer).trim();
+            if (text.length() == 0) {
+                return null;
+            }
             try {
-                return NumberFormat.getInstance().parse((String) answer);
-            } catch (ParseException ignored) {
+                ParsePosition position = new ParsePosition(0);
+                Number parsed = NumberFormat.getInstance().parse(text, position);
+                if (parsed != null && position.getIndex() == text.length()) {
+                    return parsed;
+                }
+            } catch (Exception ignored) {
+                // 个别 JDK 实现在解析异常输入时可能抛出，统一按不可解析处理
             }
         }
         return null;
