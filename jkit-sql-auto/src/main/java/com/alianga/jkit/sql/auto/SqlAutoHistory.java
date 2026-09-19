@@ -5,12 +5,14 @@ import com.alianga.jkit.sql.SqlDialect;
 
 import java.net.InetAddress;
 import java.sql.Connection;
+import java.sql.DatabaseMetaData;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Timestamp;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 
 /**
@@ -52,8 +54,9 @@ public final class SqlAutoHistory {
                 SqlAutoChange c = applied.get(i);
                 insert(connection, dialect, table, host, mode, c.kind().name(), c.table(), c.sql());
             }
-        } catch (SQLException e) {
-            LOG.warn("record schema history failed: {}", e.getMessage());
+        } catch (Throwable e) {
+            // 老驱动可能抛 AbstractMethodError 等 Error，审计失败不影响主流程
+            LOG.warn("record schema history failed: {}", String.valueOf(e));
         }
     }
 
@@ -74,7 +77,7 @@ public final class SqlAutoHistory {
                 + "id " + varchar(dialect, 36) + " NOT NULL, "
                 + "installed_on " + timestamp(dialect) + ", "
                 + "host " + varchar(dialect, 128) + ", "
-                + "mode " + varchar(dialect, 32) + ", "
+                + "sync_mode " + varchar(dialect, 32) + ", "
                 + "change_type " + varchar(dialect, 32) + ", "
                 + "table_name " + varchar(dialect, 128) + ", "
                 + "sql_text " + textType + ", "
@@ -91,7 +94,7 @@ public final class SqlAutoHistory {
                                String mode, String kind, String tableName, String sql) throws SQLException {
         PreparedStatement ps = connection.prepareStatement(
                 "INSERT INTO " + table
-                        + " (id, installed_on, host, mode, change_type, table_name, sql_text) "
+                        + " (id, installed_on, host, sync_mode, change_type, table_name, sql_text) "
                         + "VALUES (?, ?, ?, ?, ?, ?, ?)");
         try {
             ps.setString(1, UUID.randomUUID().toString());
@@ -108,12 +111,37 @@ public final class SqlAutoHistory {
     }
 
     private static boolean exists(Connection connection, String table) throws SQLException {
-        ResultSet rs = connection.getMetaData().getTables(
-                connection.getCatalog(), connection.getSchema(), table, new String[] {"TABLE", "BASE TABLE"});
+        DatabaseMetaData meta = connection.getMetaData();
+        // Oracle / H2(UPPER) 等按大小写折叠，原始名与大小写变体都探测一遍
+        String[] candidates = new String[] {table,
+                table.toUpperCase(Locale.ROOT), table.toLowerCase(Locale.ROOT)};
+        String schema = schema(connection);
+        for (int i = 0; i < candidates.length; i++) {
+            ResultSet rs = meta.getTables(connection.getCatalog(), schema,
+                    candidates[i], new String[] {"TABLE", "BASE TABLE"});
+            try {
+                if (rs.next()) {
+                    return true;
+                }
+            } finally {
+                rs.close();
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 连接当前 schema；老驱动没实现 {@code Connection#getSchema()} 时返回 {@code null}。
+     *
+     * @param connection 连接
+     * @return schema，可空
+     */
+    private static String schema(Connection connection) {
         try {
-            return rs.next();
-        } finally {
-            rs.close();
+            return connection.getSchema() == null ? null : connection.getSchema();
+        } catch (AbstractMethodError | SQLException e) {
+            // JDBC 4.0 及更老的驱动没有 Connection#getSchema
+            return null;
         }
     }
 

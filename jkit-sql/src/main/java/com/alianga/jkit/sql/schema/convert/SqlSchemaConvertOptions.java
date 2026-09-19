@@ -38,6 +38,7 @@ public final class SqlSchemaConvertOptions {
     private boolean promoteLongVarchar = true;
     private boolean includeForeignKeys = true;
     private boolean includeAutoIncrement = true;
+    private boolean quoteIdentifiers;
 
     private SqlSchemaConvertOptions() {
     }
@@ -192,6 +193,22 @@ public final class SqlSchemaConvertOptions {
      * @param includeAutoIncrement 是否自增
      * @return this
      */
+    /**
+     * @return 是否给表名 / 列名等标识符加方言引号（用于列名撞目标库保留字的场景）
+     */
+    public boolean quoteIdentifiers() {
+        return quoteIdentifiers;
+    }
+
+    /**
+     * @param quoteIdentifiers 是否给标识符加方言引号
+     * @return this
+     */
+    public SqlSchemaConvertOptions quoteIdentifiers(boolean quoteIdentifiers) {
+        this.quoteIdentifiers = quoteIdentifiers;
+        return this;
+    }
+
     public SqlSchemaConvertOptions includeAutoIncrement(boolean includeAutoIncrement) {
         this.includeAutoIncrement = includeAutoIncrement;
         return this;

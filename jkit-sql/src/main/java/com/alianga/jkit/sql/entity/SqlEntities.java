@@ -101,6 +101,14 @@ public final class SqlEntities {
      * @param convertOptions 转换选项，null 则用默认
      * @return DDL
      */
+    /** 标识符加方言引号（quoteIdentifiers 开启时），null / 空串原样返回。 */
+    private static String ident(String name, SqlDialect dialect, boolean quote) {
+        if (quote && dialect != null && name != null && !name.isEmpty()) {
+            return dialect.quoteIdent(name);
+        }
+        return name;
+    }
+
     public static String createTable(SqlEntityModel model, SqlDialect dialect, boolean includeIndexes,
                                      SqlSchemaConvertOptions convertOptions) {
         SqlDialect d = dialect == null ? SqlDialect.MYSQL : dialect;
@@ -109,6 +117,8 @@ public final class SqlEntities {
                 ? SqlSchemaConvertOptions.defaults() : convertOptions;
         ConversionReport.Builder report = new ConversionReport.Builder();
         StringBuilder sb = new StringBuilder();
+        // 表名不加引号：Oracle 等按大写折叠，引号小写表名会让触发器 / 后续元数据查找失配；
+        // 引号只用于列名（撞保留字的真实场景）
         sb.append("CREATE TABLE ").append(model.tableName()).append(" (");
         List<SqlEntityColumn> cols = model.columns();
         List<SqlEntityColumn> ids = model.idColumns();
@@ -125,7 +135,8 @@ public final class SqlEntities {
                 if (i > 0) {
                     sb.append(", ");
                 }
-                sb.append(ids.get(i).columnName());
+                sb.append(options.quoteIdentifiers()
+                        ? d.quoteIdent(ids.get(i).columnName()) : ids.get(i).columnName());
             }
             sb.append(')');
         }
@@ -133,9 +144,11 @@ public final class SqlEntities {
             for (int i = 0; i < cols.size(); i++) {
                 SqlEntityColumn c = cols.get(i);
                 if (c.referencesTable() != null) {
-                    sb.append(", FOREIGN KEY (").append(c.columnName()).append(") REFERENCES ")
-                            .append(c.referencesTable()).append('(')
-                            .append(c.referencesColumn() == null ? "id" : c.referencesColumn())
+                    sb.append(", FOREIGN KEY (").append(ident(c.columnName(), d, options.quoteIdentifiers()))
+                            .append(") REFERENCES ")
+                            .append(ident(c.referencesTable(), d, options.quoteIdentifiers())).append('(')
+                            .append(c.referencesColumn() == null ? "id"
+                                    : ident(c.referencesColumn(), d, options.quoteIdentifiers()))
                             .append(')');
                 }
             }
@@ -195,7 +208,7 @@ public final class SqlEntities {
                 if (!col.autoIncrement()) {
                     continue;
                 }
-                String seq = sequenceSql(model.tableName(), col, d);
+                String seq = sequenceSql(model.tableName(), col, d, options.quoteIdentifiers());
                 if (seq == null) {
                     continue;
                 }
@@ -288,6 +301,20 @@ public final class SqlEntities {
      * @return SQL 或 null
      */
     public static String sequenceSql(String table, SqlEntityColumn column, SqlDialect dialect) {
+        return sequenceSql(table, column, dialect, false);
+    }
+
+    /**
+     * 自增序列（及经典 Oracle 触发器）SQL。
+     *
+     * @param table 表名
+     * @param column 列
+     * @param dialect 方言
+     * @param quoteIdentifiers 是否给触发器里的列引用加引号（列名撞保留字时与建表语句保持一致）
+     * @return SQL 或 null
+     */
+    public static String sequenceSql(String table, SqlEntityColumn column, SqlDialect dialect,
+                                     boolean quoteIdentifiers) {
         if (table == null || column == null || !column.autoIncrement()) {
             return null;
         }
@@ -296,14 +323,15 @@ public final class SqlEntities {
             return null;
         }
         String col = column.columnName();
+        String quotedCol = quoteIdentifiers && d != null ? d.quoteIdent(col) : col;
         String seq = sequenceName(table, col, d);
         if (d == SqlDialect.ORACLE) {
             String trg = d.fitIdentifier(table + "_" + col + "_bi");
             return "CREATE SEQUENCE " + seq
                     + "\n/\nCREATE OR REPLACE TRIGGER " + trg
                     + " BEFORE INSERT ON " + table
-                    + " FOR EACH ROW WHEN (NEW." + col + " IS NULL) BEGIN SELECT "
-                    + seq + ".NEXTVAL INTO :NEW." + col + " FROM DUAL; END;";
+                    + " FOR EACH ROW WHEN (NEW." + quotedCol + " IS NULL) BEGIN SELECT "
+                    + seq + ".NEXTVAL INTO :NEW." + quotedCol + " FROM DUAL; END;";
         }
         return "CREATE SEQUENCE " + seq + " START WITH 1 INCREMENT BY 1";
     }
@@ -859,6 +887,7 @@ public final class SqlEntities {
         String type = col.rawType() != null && col.rawType().length() > 0
                 ? col.rawType()
                 : registry.toDialect(col.canonical(), dialect, p, s);
+        String name = options.quoteIdentifiers() ? dialect.quoteIdent(col.columnName()) : col.columnName();
         if (col.autoIncrement() && options.includeAutoIncrement()) {
             AutoIncrementStrategy.Result auto = AutoIncrementStrategy.apply(
                     new ColumnConstraint.AutoIncrement(
@@ -868,7 +897,7 @@ public final class SqlEntities {
                 type = auto.overrideType();
             }
             StringBuilder sb = new StringBuilder();
-            sb.append(col.columnName()).append(' ').append(type);
+            sb.append(name).append(' ').append(type);
             if (auto.afterPrimaryKey() && inlinePk && col.primaryKey()) {
                 // SQLite / 达梦：自增子句必须排在 PRIMARY KEY 之后。
                 sb.append(" PRIMARY KEY");
@@ -893,7 +922,7 @@ public final class SqlEntities {
             return sb.toString();
         }
         StringBuilder sb = new StringBuilder();
-        sb.append(col.columnName()).append(' ').append(type);
+        sb.append(name).append(' ').append(type);
         if (!col.nullable()) {
             sb.append(" NOT NULL");
         }

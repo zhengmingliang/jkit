@@ -87,6 +87,7 @@ public final class SqlAuto {
         try {
             Connection conn = holder.connection;
             SqlDialect dialect = SqlAutoDialects.resolve(opt, conn);
+            detectIdentifierCase(conn, opt);
             if (SqlAutoDialects.isGbase8a(opt) || SqlAutoDialects.isGbase8a(conn)) {
                 opt.gbase8a(true);
             }
@@ -137,6 +138,7 @@ public final class SqlAuto {
         ConnectionHolder holder = open(opt);
         try {
             SqlDialect dialect = SqlAutoDialects.resolve(opt, holder.connection);
+            detectIdentifierCase(holder.connection, opt);
             return plan(types, holder.connection, dialect, opt);
         } finally {
             holder.close();
@@ -289,6 +291,26 @@ public final class SqlAuto {
             return drop(holder.connection, opt);
         } finally {
             holder.close();
+        }
+    }
+
+    /**
+     * 从连接元数据探测标识符大小写折叠方向（upper / lower / null），写入选项，
+     * 供 quote-identifiers 的 DDL 生成折叠标识符大小写。
+     *
+     * @param conn 连接
+     * @param opt 选项
+     */
+    private static void detectIdentifierCase(Connection conn, SqlAutoOptions opt) {
+        try {
+            java.sql.DatabaseMetaData meta = conn.getMetaData();
+            if (meta.storesUpperCaseIdentifiers()) {
+                opt.identifierCase("upper");
+            } else if (meta.storesLowerCaseIdentifiers()) {
+                opt.identifierCase("lower");
+            }
+        } catch (SQLException | AbstractMethodError ignored) {
+            // 老驱动不支持则保持 null（不折叠）
         }
     }
 

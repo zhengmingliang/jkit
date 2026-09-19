@@ -49,6 +49,8 @@ public final class SqlAutoOptions {
     private boolean history;
     private String historyTable = "jkit_schema_history";
     private String export;
+    /** 标识符大小写折叠方向（upper / lower / null），由连接元数据探测，供引号 DDL 使用。 */
+    private String identifierCase;
 
     private SqlAutoOptions() {
     }
@@ -659,6 +661,22 @@ public final class SqlAutoOptions {
      */
     public SqlAutoOptions export(String export) {
         this.export = export;
+        return this;
+    }
+
+    /**
+     * @return 标识符大小写折叠方向（upper / lower / null）
+     */
+    public String identifierCase() {
+        return identifierCase;
+    }
+
+    /**
+     * @param identifierCase upper / lower / null
+     * @return this
+     */
+    public SqlAutoOptions identifierCase(String identifierCase) {
+        this.identifierCase = identifierCase;
         return this;
     }
 
