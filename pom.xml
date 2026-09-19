@@ -6,7 +6,10 @@
 
     <groupId>com.alianga</groupId>
     <artifactId>jkit-parent</artifactId>
-    <version>2.0.2</version>
+    <!-- CI-friendly 版本：全工程唯一版本号来源是下面 properties 里的 revision，
+         发版只改那一处；也可用 mvn -Drevision=2.0.3 覆盖。flatten-maven-plugin
+         会把发布 POM 里的 ${revision} 替换成具体版本，外部消费方无感知。 -->
+    <version>${revision}</version>
     <packaging>pom</packaging>
 
     <name>jkit-parent</name>
@@ -47,6 +50,8 @@
     </modules>
 
     <properties>
+        <!-- 全工程唯一版本号：升级版本只改这里（或命令行 -Drevision=x.y.z 覆盖） -->
+        <revision>2.0.3-SNAPSHOT</revision>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <maven.build.timestamp.format>yyyy-MM-dd HH:mm:ss</maven.build.timestamp.format>
@@ -101,6 +106,38 @@
                         </manifestEntries>
                     </archive>
                 </configuration>
+            </plugin>
+
+            <!--
+              CI-friendly 版本（${revision}）配套：install/deploy 时发布的是 flatten 生成的
+              .flattened-pom.xml（${revision} 已被替换成具体版本号），而不是源码 POM。
+              否则外部消费方拿到带 ${revision} 的 POM 会无法解析。
+              resolveCiFriendliesOnly：只替换 revision/sha1/changelist 三个变量，
+              POM 其余内容原样保留，发布 POM 与源码 POM 差异最小。
+            -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>flatten-maven-plugin</artifactId>
+                <version>1.6.0</version>
+                <configuration>
+                    <flattenMode>resolveCiFriendliesOnly</flattenMode>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>flatten</id>
+                        <phase>process-resources</phase>
+                        <goals>
+                            <goal>flatten</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>flatten.clean</id>
+                        <phase>clean</phase>
+                        <goals>
+                            <goal>clean</goal>
+                        </goals>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>

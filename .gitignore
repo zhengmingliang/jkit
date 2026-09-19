@@ -1,6 +1,9 @@
 target/
 target1/
 
+# flatten-maven-plugin 生成的发布用 POM（${revision} 解析后的临时产物）
+.flattened-pom.xml
+
 # WorkBuddy agent workspace (memory, tasks, scratch)
 .workbuddy/
 *.class
