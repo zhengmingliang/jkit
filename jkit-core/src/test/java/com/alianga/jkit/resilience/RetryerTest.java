@@ -137,4 +137,25 @@ public class RetryerTest {
         }, config));
         Assert.assertEquals(2, calls.get());
     }
+
+    @Test
+    public void taskInterruptedStopsRetryAndRestoresFlag() {
+        // 中断是协作式取消信号：不当作普通失败重试，且恢复中断标志
+        final AtomicInteger calls = new AtomicInteger(0);
+        try {
+            Retryer.retry(() -> {
+                calls.incrementAndGet();
+                throw new InterruptedException("stopped");
+            });
+            Assert.fail("应抛出 InterruptedException");
+        } catch (InterruptedException expected) {
+            // 期望路径
+        } catch (Exception unexpected) {
+            Assert.fail("应原样抛出 InterruptedException: " + unexpected);
+        }
+        Assert.assertEquals("中断后不应继续重试", 1, calls.get());
+        Assert.assertTrue("中断标志应恢复", Thread.currentThread().isInterrupted());
+        // 清除本线程中断标志，避免影响同线程的后续测试
+        Thread.interrupted();
+    }
 }

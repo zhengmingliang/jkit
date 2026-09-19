@@ -170,6 +170,10 @@ public final class Retryer {
         for (int attempt = 1; attempt <= attempts; attempt++) {
             try {
                 return task.call();
+            } catch (InterruptedException ie) {
+                // 中断是协作式取消信号：恢复中断标志并立即终止，不当作普通失败重试
+                Thread.currentThread().interrupt();
+                throw ie;
             } catch (Throwable t) {
                 last = t;
                 if (attempt >= attempts || !cfg.getRetryOn().test(t)) {
@@ -181,7 +185,11 @@ public final class Retryer {
                         cfg.getSleeper().sleep(wait);
                     } catch (InterruptedException ie) {
                         Thread.currentThread().interrupt();
-                        throw new ResilienceException("retry interrupted", ie);
+                        ResilienceException interrupted = new ResilienceException("retry interrupted", ie);
+                        if (last != null) {
+                            interrupted.addSuppressed(last);
+                        }
+                        throw interrupted;
                     }
                 }
             }

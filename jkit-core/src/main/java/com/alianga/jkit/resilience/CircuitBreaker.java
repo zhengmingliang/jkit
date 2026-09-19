@@ -30,7 +30,7 @@ public final class CircuitBreaker {
         CLOSED,
         /** 已熔断，直接拒绝任务并抛出 {@link CircuitBreakerOpenException}。 */
         OPEN,
-        /** 半开，冷却结束后放行探测请求以探测上游是否恢复。 */
+        /** 半开，冷却结束后同一时刻只放行一个探测请求，探测成功则恢复（CLOSED）。 */
         HALF_OPEN
     }
 
@@ -102,6 +102,8 @@ public final class CircuitBreaker {
     private final AtomicInteger consecutiveFailures = new AtomicInteger(0);
     private final AtomicInteger halfOpenSuccesses = new AtomicInteger(0);
     private final AtomicLong openedAt = new AtomicLong(0L);
+    /** 半开探测许可：进入 HALF_OPEN 时置 1，赢得许可的调用才能执行探测任务，其余拒绝。 */
+    private final AtomicInteger probePermit = new AtomicInteger(0);
 
     /**
      * @return 当前熔断器状态
@@ -141,50 +143,85 @@ public final class CircuitBreaker {
         if (current == State.OPEN) {
             throw new CircuitBreakerOpenException();
         }
+        if (current == State.HALF_OPEN && !probePermit.compareAndSet(1, 0)) {
+            // 半开状态下同一时刻只放行一个探测请求，其余按熔断拒绝，
+            // 避免冷却结束瞬间全量并发流量涌入打挂未恢复的上游
+            throw new CircuitBreakerOpenException();
+        }
         try {
             T result = task.call();
-            onSuccess(current, cfg);
+            onSuccess(cfg);
             return result;
         } catch (Throwable t) {
             onFailure(cfg);
             if (t instanceof Exception) {
                 throw (Exception) t;
             }
+            if (t instanceof Error) {
+                // OOM/StackOverflow 等保持原类型抛出，与 Retryer 语义一致
+                throw (Error) t;
+            }
             throw new ResilienceException("circuit breaker task failed", t);
         }
     }
 
     private void maybeHalfOpen(Config cfg) {
-        if (state.get() == State.OPEN) {
-            if (cfg.getClock().getAsLong() - openedAt.get() >= cfg.getCooldownMs()) {
-                if (state.compareAndSet(State.OPEN, State.HALF_OPEN)) {
-                    halfOpenSuccesses.set(0);
-                }
+        if (state.get() == State.OPEN
+                && cfg.getClock().getAsLong() - openedAt.get() >= cfg.getCooldownMs()) {
+            if (state.compareAndSet(State.OPEN, State.HALF_OPEN)) {
+                halfOpenSuccesses.set(0);
+                probePermit.set(1);
             }
         }
     }
 
-    private void onSuccess(State before, Config cfg) {
-        if (before == State.HALF_OPEN) {
-            if (halfOpenSuccesses.incrementAndGet() >= cfg.getSuccessThreshold()) {
-                state.set(State.CLOSED);
+    private void onSuccess(Config cfg) {
+        while (true) {
+            State s = state.get();
+            if (s == State.HALF_OPEN) {
+                if (halfOpenSuccesses.incrementAndGet() >= cfg.getSuccessThreshold()) {
+                    if (state.compareAndSet(State.HALF_OPEN, State.CLOSED)) {
+                        consecutiveFailures.set(0);
+                        return;
+                    }
+                    // 状态已被并发改变（如另一路径先转 OPEN），重读后重新裁决
+                    continue;
+                }
+                // 未达恢复阈值：保持半开，放行下一个探测
+                probePermit.set(1);
+                return;
+            }
+            if (s == State.CLOSED) {
                 consecutiveFailures.set(0);
             }
-        } else {
-            consecutiveFailures.set(0);
+            // OPEN：本次成功来自已被裁决过的过期探测，忽略
+            return;
         }
     }
 
     private void onFailure(Config cfg) {
-        State current = state.get();
-        if (current == State.HALF_OPEN) {
-            state.set(State.OPEN);
-            openedAt.set(cfg.getClock().getAsLong());
+        while (true) {
+            State s = state.get();
+            if (s == State.HALF_OPEN) {
+                // 先写 openedAt 再 CAS，保证 OPEN 对外可见时冷却计时已生效，
+                // 避免并发 maybeHalfOpen 用旧时间戳立即又转回半开
+                openedAt.set(cfg.getClock().getAsLong());
+                if (state.compareAndSet(State.HALF_OPEN, State.OPEN)) {
+                    return;
+                }
+                continue;
+            }
+            if (s == State.OPEN) {
+                return;
+            }
+            if (consecutiveFailures.incrementAndGet() >= cfg.getFailureThreshold()) {
+                openedAt.set(cfg.getClock().getAsLong());
+                if (state.compareAndSet(State.CLOSED, State.OPEN)) {
+                    return;
+                }
+                continue;
+            }
             return;
-        }
-        if (consecutiveFailures.incrementAndGet() >= cfg.getFailureThreshold()) {
-            state.set(State.OPEN);
-            openedAt.set(cfg.getClock().getAsLong());
         }
     }
 }
