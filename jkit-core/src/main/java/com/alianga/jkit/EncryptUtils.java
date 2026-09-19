@@ -1079,17 +1079,14 @@ public class EncryptUtils {
          *
          * @param content   待加密文本
          * @param publicKey base64 编码的公钥字符串
-         * @return base64 密文；失败时返回空字符串
+         * @return base64 密文
+         * @throws Exception 加密算法不可用、公钥非法或数据长度非法时抛出，
+         *                   不吞异常返回空串，避免调用方把失败当成功
          * @since 2.0.2
          */
-        public static String encryptOaep(String content, String publicKey) {
-            try {
-                byte[] encrypted = encryptOaep(content.getBytes(charset), getPublicKey(publicKey));
-                return Base64Utils.encodeToString(encrypted);
-            } catch (Exception e) {
-                log.error("RSA OAEP encrypt failed: %s", e.getMessage());
-                return "";
-            }
+        public static String encryptOaep(String content, String publicKey) throws Exception {
+            byte[] encrypted = encryptOaep(content.getBytes(charset), getPublicKey(publicKey));
+            return Base64Utils.encodeToString(encrypted);
         }
 
         /**
@@ -1097,17 +1094,14 @@ public class EncryptUtils {
          *
          * @param content    待解密的 base64 密文
          * @param privateKey base64 编码的私钥字符串
-         * @return 明文；失败时返回空字符串
+         * @return 明文
+         * @throws Exception 解密算法不可用、私钥非法或密文被篡改时抛出，
+         *                   密文被篡改（{@code BadPaddingException}）必须暴露而不是静默返回空串
          * @since 2.0.2
          */
-        public static String decryptOaep(String content, String privateKey) {
-            try {
-                byte[] decrypted = decryptOaep(Base64Utils.decode(content), getPrivateKey(privateKey));
-                return new String(decrypted, charset);
-            } catch (Exception e) {
-                log.error("RSA OAEP decrypt failed: %s", e.getMessage());
-                return "";
-            }
+        public static String decryptOaep(String content, String privateKey) throws Exception {
+            byte[] decrypted = decryptOaep(Base64Utils.decode(content), getPrivateKey(privateKey));
+            return new String(decrypted, charset);
         }
 
         /**

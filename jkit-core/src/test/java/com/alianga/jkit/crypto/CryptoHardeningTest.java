@@ -16,6 +16,7 @@ import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -220,9 +221,10 @@ public class CryptoHardeningTest {
     }
 
     @Test
-    public void rsaOaepStringReturnsEmptyOnBadKey() {
-        assertEquals("", EncryptUtils.RSA.encryptOaep("x", "not-a-base64-key"));
-        assertEquals("", EncryptUtils.RSA.decryptOaep("x", "not-a-base64-key"));
+    public void rsaOaepStringFailsLoudlyOnBadKey() {
+        // 加解密失败必须抛出而不是返回空串：调用方需要能区分"解密失败"与"明文为空"
+        assertThrows(Exception.class, () -> EncryptUtils.RSA.encryptOaep("x", "not-a-base64-key"));
+        assertThrows(Exception.class, () -> EncryptUtils.RSA.decryptOaep("x", "not-a-base64-key"));
     }
 
     @SuppressWarnings("deprecation")

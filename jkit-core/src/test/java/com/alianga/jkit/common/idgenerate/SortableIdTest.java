@@ -15,6 +15,7 @@ import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -253,5 +254,20 @@ public class SortableIdTest {
         // 既有雪花入口不受影响
         assertTrue(IdGenerator.id() > 0);
         assertEquals(16, IdGenerator.hex().length());
+    }
+
+    @Test
+    public void parseRejectsTimestampOutOfRange() {
+        // 26 个 'Z'（时间戳 10 字符每位全 1）超出 48 位上限：此前 parse 放行而 encode 拒绝，
+        // parse(x).toString() 会抛异常，往返不自洽；现在两侧校验对称
+        String overflow = "ZZZZZZZZZZZZZZZZZZZZZZZZZZ";
+        assertThrows(IllegalArgumentException.class, () -> ULID.parse(overflow));
+        assertFalse(ULID.isUlid(overflow));
+        // 合法 ULID 往返与校验不受影响
+        String id = ULID.next();
+        assertEquals(id, ULID.parse(id).toString());
+        assertTrue(ULID.isUlid(id));
+        assertFalse(ULID.isUlid(null));
+        assertFalse(ULID.isUlid("short"));
     }
 }

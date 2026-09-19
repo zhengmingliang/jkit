@@ -147,11 +147,13 @@ public final class ULID {
             lastTime = now;
             random.nextBytes(lastRandomBytes);
         } else {
-            // 时钟回拨或同一毫秒：沿用上一个时间戳，随机部分进位
-            now = lastTime;
-            increment(lastRandomBytes);
+            // 时钟回拨或同一毫秒：沿用上一个时间戳，随机部分进位；
+            // 80 位随机位溢出时进位到下一毫秒，保持严格递增（与 UUIDv7 的处理一致）
+            if (!increment(lastRandomBytes)) {
+                lastTime++;
+            }
         }
-        return encode(now, lastRandomBytes);
+        return encode(lastTime, lastRandomBytes);
     }
 
     /**
@@ -159,31 +161,16 @@ public final class ULID {
      *
      * @param ulid ULID 字符串（26 字符，大小写不敏感）
      * @return 解析出的时间戳与随机部分
-     * @throws IllegalArgumentException 长度不为 26 或含非法字符时抛出
+     * @throws IllegalArgumentException 长度不为 26、含非法字符或时间戳超出 48 位范围时抛出
      */
     public static Value parse(String ulid) {
         byte[] values = decodeChars(ulid);
-        long time = 0;
-        for (int i = 0; i < TIME_CHARS; i++) {
-            time = time << 5 | values[i];
-        }
-        byte[] entropy = new byte[RANDOM_BYTES];
-        // 每个字符 5 位，按与 encode 相同的位序（高位在前）还原成 10 字节
-        int bit = 0;
-        for (int i = 0; i < RANDOM_CHARS; i++) {
-            int v = values[TIME_CHARS + i];
-            for (int b = 4; b >= 0; b--) {
-                if ((v >>> b & 1) != 0) {
-                    entropy[bit >>> 3] |= (byte) (1 << (8 - (bit & 7) - 1));
-                }
-                bit++;
-            }
-        }
-        return new Value(time, entropy);
+        long time = parseTimestamp(values, ulid);
+        return new Value(time, unpackEntropy(values));
     }
 
     /**
-     * 判断字符串是否是合法 ULID。
+     * 判断字符串是否是合法 ULID（含时间戳 48 位范围校验）。
      *
      * @param ulid 待校验字符串，可为 {@code null}
      * @return 合法返回 {@code true}
@@ -193,7 +180,7 @@ public final class ULID {
             return false;
         }
         try {
-            decodeChars(ulid);
+            parse(ulid);
             return true;
         } catch (IllegalArgumentException ex) {
             return false;
@@ -209,15 +196,12 @@ public final class ULID {
     public static byte[] toBytes(String ulid) {
         byte[] values = decodeChars(ulid);
         byte[] out = new byte[16];
-        long time = 0;
-        for (int i = 0; i < TIME_CHARS; i++) {
-            time = time << 5 | values[i];
-        }
+        long time = parseTimestamp(values, ulid);
         for (int i = 5; i >= 0; i--) {
             out[i] = (byte) time;
             time >>>= 8;
         }
-        System.arraycopy(parse(ulid).randomBytes(), 0, out, 6, RANDOM_BYTES);
+        System.arraycopy(unpackEntropy(values), 0, out, 6, RANDOM_BYTES);
         return out;
     }
 
@@ -370,21 +354,63 @@ public final class ULID {
     }
 
     /**
-     * 80 位随机部分 {@code +1}，从最低字节向高位进位；溢出后从 0 重新开始。
+     * 从解码值中解析毫秒时间戳，并校验 48 位上限，与 {@link #encode(long, byte[])} 的校验对称，
+     * 保证 {@code parse(x).toString()} 可往返。
+     *
+     * @param values 26 个 0–31 的解码值
+     * @param ulid 原始字符串，用于错误信息
+     * @return 毫秒时间戳
+     * @throws IllegalArgumentException 时间戳超出 48 位范围时抛出
+     */
+    private static long parseTimestamp(byte[] values, String ulid) {
+        long time = 0;
+        for (int i = 0; i < TIME_CHARS; i++) {
+            time = time << 5 | values[i];
+        }
+        if (time >= MAX_TIMESTAMP) {
+            throw new IllegalArgumentException("ULID timestamp out of range: " + ulid);
+        }
+        return time;
+    }
+
+    /**
+     * 把 16 个 5 位解码值按与 {@link #encode(long, byte[])} 相同的位序（高位在前）还原成 10 字节。
+     *
+     * @param values 26 个 0–31 的解码值
+     * @return 随机部分字节数组
+     */
+    private static byte[] unpackEntropy(byte[] values) {
+        byte[] entropy = new byte[RANDOM_BYTES];
+        int bit = 0;
+        for (int i = 0; i < RANDOM_CHARS; i++) {
+            int v = values[TIME_CHARS + i];
+            for (int b = 4; b >= 0; b--) {
+                if ((v >>> b & 1) != 0) {
+                    entropy[bit >>> 3] |= (byte) (1 << (8 - (bit & 7) - 1));
+                }
+                bit++;
+            }
+        }
+        return entropy;
+    }
+
+    /**
+     * 80 位随机部分 {@code +1}，从最低字节向高位进位。
      *
      * @param bytes 随机部分
+     * @return 未溢出返回 {@code true}；80 位全 1 溢出时全部归零并返回 {@code false}，
+     *         由调用方进位到时间戳
      */
-    private static void increment(byte[] bytes) {
+    private static boolean increment(byte[] bytes) {
         for (int i = bytes.length - 1; i >= 0; i--) {
             int v = bytes[i] & 0xFF;
             if (v == 0xFF) {
                 bytes[i] = 0;
             } else {
                 bytes[i] = (byte) (v + 1);
-                return;
+                return true;
             }
         }
-        // 80 位全 1 后归零，实际概率极低
-        Arrays.fill(bytes, (byte) 0);
+        return false;
     }
 }

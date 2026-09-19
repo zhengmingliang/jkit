@@ -241,8 +241,8 @@ public final class DesensitizeUtils {
     /**
      * 通用脱敏，可指定掩码字符。
      *
-     * <p>保留位数之和大于等于长度时不打码（原样返回）；长度不足保留位数时只保留首字符，
-     * 其余打码——宁可多打码也不因为「长度异常」把明文放出去。
+     * <p>保留位数之和大于等于长度时只保留首字符、其余打码——宁可多打码也不因为「长度异常」
+     * 把明文放出去；单字符字段整条都是敏感信息，直接整体打码。
      *
      * @param value 原始值，可为 {@code null}
      * @param keepHead 保留的前缀字符数，负数按 0 处理
@@ -261,7 +261,11 @@ public final class DesensitizeUtils {
         int head = keepHead < 0 ? 0 : keepHead;
         int tail = keepTail < 0 ? 0 : keepTail;
         if (head + tail >= len) {
-            // 保留位数已覆盖全部内容：只保留首字符，其余打码，避免原样返回
+            // 保留位数已覆盖全部内容：只保留首字符，其余打码，避免原样返回；
+            // 单字符无从保留，整条打码，否则敏感信息原样漏出
+            if (len == 1) {
+                return String.valueOf(maskChar);
+            }
             return value.charAt(0) + repeat(maskChar, len - 1);
         }
         StringBuilder sb = new StringBuilder(len);

@@ -110,8 +110,10 @@ public class DesensitizeUtilsTest {
         // 长度不足保留位数：宁可多打码
         assertEquals("1***", DesensitizeUtils.mask("1380", 3, 4));
         assertEquals(4, DesensitizeUtils.mask("1380", 3, 4).length());
-        // 单字符无从打码，原样返回（不抛异常、不补位）
-        assertEquals("1", DesensitizeUtils.mask("1", 1, 4));
+        // 单字符整条都是敏感信息，直接整体打码，不原样漏出
+        assertEquals("*", DesensitizeUtils.mask("1", 1, 4));
+        assertEquals("*", DesensitizeUtils.mask("王", 1, 0));
+        assertEquals("*", DesensitizeUtils.name("王"));
     }
 
     @Test
