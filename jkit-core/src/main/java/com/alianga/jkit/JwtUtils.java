@@ -417,17 +417,19 @@ public final class JwtUtils {
          * 使用 HS256 算法与共享密钥对当前声明签名，返回完整令牌。
          *
          * @param algorithm 签名算法（应为 {@link Algorithm#HS256}）
-         * @param secret 共享密钥（按 UTF-8 取字节）
+         * @param secret 共享密钥（按 UTF-8 取字节），长度不足 32 字节（256 位）时拒绝签发，
+         *               短密钥签出的令牌可被离线爆破
          * @return 形如 {@code header.payload.signature} 的 JWT 字符串
          */
         public String compact(Algorithm algorithm, String secret) {
             if (algorithm.asymmetric()) {
                 throw new JwtException("算法 " + algorithm.jwsName() + " 需要 PrivateKey，而非密钥字符串");
             }
+            byte[] secretBytes = secret.getBytes(StandardCharsets.UTF_8);
+            checkHs256Secret(secretBytes);
             Map<String, Object> header = buildHeader(algorithm);
             String input = encode(header, claims);
-            byte[] sig = hmac(algorithm.jcaName(), input.getBytes(StandardCharsets.UTF_8),
-                    secret.getBytes(StandardCharsets.UTF_8));
+            byte[] sig = hmac(algorithm.jcaName(), input.getBytes(StandardCharsets.UTF_8), secretBytes);
             return input + DOT + B64.encodeToString(sig);
         }
 
@@ -511,7 +513,14 @@ public final class JwtUtils {
         String[] parts = split(token);
         Map<String, Object> header = decodeJson(parts[0]);
         Map<String, Object> payload = decodeJson(parts[1]);
-        byte[] signature = parts.length == 3 && !parts[2].isEmpty() ? B64D.decode(parts[2]) : new byte[0];
+        byte[] signature = new byte[0];
+        if (parts.length == 3 && !parts[2].isEmpty()) {
+            try {
+                signature = B64D.decode(parts[2]);
+            } catch (RuntimeException e) {
+                throw new JwtException("JWT 签名段 base64url 解码失败", e);
+            }
+        }
         return new DecodedJwt(token, header, payload, signature);
     }
 
@@ -519,12 +528,25 @@ public final class JwtUtils {
      * 用 HS256 与共享密钥验签，并校验 exp / nbf 时间声明。
      *
      * @param token 待验签的令牌字符串
-     * @param secret 共享密钥
+     * @param secret 共享密钥，长度不足 32 字节（256 位）时拒绝验签
      * @return 验签通过的 {@link DecodedJwt}
      * @throws JwtException 签名不符、算法不匹配或时间声明不通过时抛出
      */
     public static DecodedJwt verify(String token, String secret) {
-        return verify(token, Algorithm.HS256, secret.getBytes(StandardCharsets.UTF_8), null);
+        return verify(token, Algorithm.HS256, secret.getBytes(StandardCharsets.UTF_8), null, 0L);
+    }
+
+    /**
+     * 用 HS256 与共享密钥验签，并校验 exp / nbf 时间声明，允许配置时钟偏移余量。
+     *
+     * @param token 待验签的令牌字符串
+     * @param secret 共享密钥，长度不足 32 字节（256 位）时拒绝验签
+     * @param leewaySeconds 时间声明校验的时钟偏移余量（秒），多机部署时钟略有偏差时使用，非负
+     * @return 验签通过的 {@link DecodedJwt}
+     * @throws JwtException 签名不符、算法不匹配或时间声明不通过时抛出
+     */
+    public static DecodedJwt verify(String token, String secret, long leewaySeconds) {
+        return verify(token, Algorithm.HS256, secret.getBytes(StandardCharsets.UTF_8), null, leewaySeconds);
     }
 
     /**
@@ -536,10 +558,27 @@ public final class JwtUtils {
      * @throws JwtException 签名不符、算法不匹配或时间声明不通过时抛出
      */
     public static DecodedJwt verify(String token, PublicKey publicKey) {
-        return verify(token, Algorithm.RS256, null, publicKey);
+        return verify(token, Algorithm.RS256, null, publicKey, 0L);
     }
 
-    private static DecodedJwt verify(String token, Algorithm expected, byte[] secretBytes, PublicKey publicKey) {
+    /**
+     * 用 RS256 与 RSA 公钥验签，并校验 exp / nbf 时间声明，允许配置时钟偏移余量。
+     *
+     * @param token 待验签的令牌字符串
+     * @param publicKey RSA 公钥
+     * @param leewaySeconds 时间声明校验的时钟偏移余量（秒），非负
+     * @return 验签通过的 {@link DecodedJwt}
+     * @throws JwtException 签名不符、算法不匹配或时间声明不通过时抛出
+     */
+    public static DecodedJwt verify(String token, PublicKey publicKey, long leewaySeconds) {
+        return verify(token, Algorithm.RS256, null, publicKey, leewaySeconds);
+    }
+
+    private static DecodedJwt verify(String token, Algorithm expected, byte[] secretBytes, PublicKey publicKey,
+                                     long leewaySeconds) {
+        if (leewaySeconds < 0) {
+            throw new IllegalArgumentException("leewaySeconds 不能为负");
+        }
         String[] parts = split(token);
         if (parts.length != 3) {
             throw new JwtException("JWT 必须包含 header.payload.signature 三段");
@@ -554,27 +593,47 @@ public final class JwtUtils {
         if (!algName.equals(expected.jwsName())) {
             throw new JwtException("JWT alg 与期望不符: " + algName + " != " + expected.jwsName());
         }
-        byte[] expectedSig = B64D.decode(parts[2]);
+        byte[] expectedSig;
+        try {
+            expectedSig = B64D.decode(parts[2]);
+        } catch (RuntimeException e) {
+            throw new JwtException("JWT 签名段 base64url 解码失败", e);
+        }
         String signingInput = parts[0] + DOT + parts[1];
         boolean ok;
         if (expected.asymmetric()) {
             ok = rsaVerify(expected.jcaName(), signingInput.getBytes(StandardCharsets.UTF_8), expectedSig, publicKey);
         } else {
+            checkHs256Secret(secretBytes);
             byte[] actual = hmac(expected.jcaName(), signingInput.getBytes(StandardCharsets.UTF_8), secretBytes);
             ok = slowEquals(actual, expectedSig);
         }
         if (!ok) {
             throw new JwtException("JWT 签名校验失败");
         }
-        validateTimeClaims(payload);
+        validateTimeClaims(payload, leewaySeconds);
         return new DecodedJwt(token, header, payload, expectedSig);
+    }
+
+    /**
+     * HS256 共享密钥最低长度校验：密钥不足 32 字节（256 位）时拒绝，
+     * 与类文档「建议不小于 32 字节」对齐，避免低熵密钥签出的令牌被离线爆破。
+     *
+     * @param secretBytes 共享密钥字节
+     */
+    private static void checkHs256Secret(byte[] secretBytes) {
+        if (secretBytes == null || secretBytes.length < 32) {
+            throw new IllegalArgumentException(
+                    "HS256 共享密钥长度不足 32 字节（256 位），易被离线爆破，请使用更长的密钥");
+        }
     }
 
     private static String[] split(String token) {
         if (token == null) {
             throw new JwtException("token 为 null");
         }
-        String[] parts = token.split("\\.");
+        // 保留尾部空串："h.p.sig.." 这类多余分段直接判非法，而不是被 split 默默吞掉
+        String[] parts = token.split("\\.", -1);
         if (parts.length < 2 || parts.length > 3) {
             throw new JwtException("JWT 格式不合法，应为 2 或 3 段");
         }
@@ -645,14 +704,20 @@ public final class JwtUtils {
         }
     }
 
-    private static void validateTimeClaims(Map<String, Object> payload) {
+    /**
+     * 校验 exp / nbf 时间声明，允许指定的时钟偏移余量。
+     *
+     * @param payload 载荷声明
+     * @param leewaySeconds 时钟偏移余量（秒），非负；0 表示严格比较
+     */
+    private static void validateTimeClaims(Map<String, Object> payload, long leewaySeconds) {
         long now = System.currentTimeMillis() / 1000;
         Long exp = toLong(payload.get(CLAIM_EXP));
-        if (exp != null && now > exp) {
+        if (exp != null && now - leewaySeconds > exp) {
             throw new JwtException("JWT 已过期");
         }
         Long nbf = toLong(payload.get(CLAIM_NBF));
-        if (nbf != null && now < nbf) {
+        if (nbf != null && now + leewaySeconds < nbf) {
             throw new JwtException("JWT 尚未生效");
         }
     }

@@ -191,4 +191,57 @@ public class JwtUtilsTest {
         DecodedJwt parsed = JwtUtils.parse(token);
         assertTrue(parsed.getClaims().isEmpty() || parsed.getClaim("exp") == null);
     }
+
+    // ------------------------------------------------------------------
+    // 加固回归：HS256 最小密钥长度、时间声明 leeway、分段解析严格性、签名段解码异常包装
+    // ------------------------------------------------------------------
+
+    @Test
+    public void shortSecretRejected() {
+        // 不足 32 字节（256 位）的 HS256 密钥签出的令牌可被离线爆破，签发与验签均拒绝
+        assertThrows(IllegalArgumentException.class,
+                () -> JwtUtils.createHS256(new HashMap<String, Object>(), "short"));
+        String token = JwtUtils.builder().subject("u").compact(Algorithm.HS256, SECRET);
+        assertThrows(IllegalArgumentException.class, () -> JwtUtils.verify(token, "0123456789abcdef0123456789abcde"));
+        // 恰好 32 字节：放行，且同密钥往返正常
+        String token32 = JwtUtils.builder().subject("u").compact(Algorithm.HS256, "0123456789abcdef0123456789abcdef");
+        assertEquals("u", JwtUtils.verify(token32, "0123456789abcdef0123456789abcdef").getSubject());
+    }
+
+    @Test
+    public void expLeewayToleratesClockSkew() {
+        long nowSec = System.currentTimeMillis() / 1000;
+        Map<String, Object> expired = new HashMap<String, Object>();
+        expired.put("sub", "u");
+        expired.put("exp", nowSec - 5);
+        String expiredToken = JwtUtils.createHS256(expired, SECRET);
+        assertThrows(JwtException.class, () -> JwtUtils.verify(expiredToken, SECRET));
+        assertEquals("u", JwtUtils.verify(expiredToken, SECRET, 30L).getSubject());
+
+        Map<String, Object> future = new HashMap<String, Object>();
+        future.put("sub", "u");
+        future.put("nbf", nowSec + 5);
+        String futureToken = JwtUtils.createHS256(future, SECRET);
+        assertThrows(JwtException.class, () -> JwtUtils.verify(futureToken, SECRET));
+        assertEquals("u", JwtUtils.verify(futureToken, SECRET, 30L).getSubject());
+    }
+
+    @Test
+    public void trailingDotTokensRejected() {
+        // 多余的分段此前会被 split 默默吞掉尾部空串后按 3 段接受
+        String header = b64url("{\"alg\":\"HS256\",\"typ\":\"JWT\"}");
+        String payload = b64url("{\"sub\":\"x\"}");
+        String sig = b64url("signature");
+        assertThrows(JwtException.class, () -> JwtUtils.parse(header + "." + payload + "." + sig + "."));
+        assertThrows(JwtException.class, () -> JwtUtils.verify(header + "." + payload + "." + sig + ".", SECRET));
+    }
+
+    @Test
+    public void badBase64InSignatureThrowsJwtException() {
+        // 签名段含 base64url 非法字符：此前裸抛 IllegalArgumentException，破坏 @throws 契约
+        String header = b64url("{\"alg\":\"HS256\",\"typ\":\"JWT\"}");
+        String payload = b64url("{\"sub\":\"x\"}");
+        assertThrows(JwtException.class, () -> JwtUtils.verify(header + "." + payload + ".a+b/c", SECRET));
+        assertThrows(JwtException.class, () -> JwtUtils.parse(header + "." + payload + ".a+b/c"));
+    }
 }
