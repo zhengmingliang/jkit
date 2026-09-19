@@ -122,10 +122,11 @@ public class SqlSchemaConvertOutputTest {
     }
 
     @Test
-    public void dateAddOnOracleUsesStandardIntervalLiteral() {
+    public void dateAddOnOracleUsesNumericDays() {
+        // INTERVAL 'n' DAY 默认前导精度 2，n>=100 会 ORA-01873；日间隔改成数字加减。
         String ora = SQL.convert("SELECT DATE_ADD(a, INTERVAL 3 DAY) FROM t",
                 SqlDialect.MYSQL, SqlDialect.ORACLE);
-        assertEquals(ora, "SELECT (CAST(a AS DATE) + INTERVAL '3' DAY) FROM t", norm(ora));
+        assertEquals(ora, "SELECT (CAST(a AS DATE) + 3) FROM t", norm(ora));
     }
 
     @Test

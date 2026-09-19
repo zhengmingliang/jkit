@@ -5,6 +5,7 @@ import static org.junit.Assert.assertTrue;
 
 import com.alianga.jkit.sql.ast.SqlBinaryExpr;
 import com.alianga.jkit.sql.ast.SqlExpr;
+import com.alianga.jkit.sql.ast.SqlIdentifier;
 import com.alianga.jkit.sql.ast.SqlLimit;
 import com.alianga.jkit.sql.ast.SqlSelect;
 import com.alianga.jkit.sql.ast.SqlSelectItem;
@@ -79,5 +80,62 @@ public class SqlAstToStringTest {
         String fnSql = select.selectItems().get(1).expr().toString();
         assertFalse(fnSql, fnSql.contains("@"));
         assertTrue(fnSql.toUpperCase(), fnSql.toUpperCase().contains("COALESCE"));
+    }
+
+    @Test
+    public void toStringUsesMysqlIdentQuotes() {
+        SqlIdentifier id = SqlIdentifier.of("10086");
+        id.setQuoted(true);
+        String s = id.toString();
+        assertTrue("default toString is MySQL backticks: " + s, s.contains("`10086`"));
+        assertFalse(s, s.contains("\"10086\""));
+    }
+
+    @Test
+    public void addCommentBareTextBecomesBlockComment() {
+        SqlStatement stmt = SQL.parse("SELECT * FROM t");
+        stmt.addComment("我是注释");
+        String compact = stmt.toString();
+        assertTrue(compact, compact.contains("/*") && compact.contains("我是注释"));
+        assertFalse(compact, compact.startsWith("我是注释"));
+        SQL.parse(compact, SqlDialect.MYSQL);
+
+        String pretty = SQL.format(stmt, SqlDialect.MYSQL);
+        assertTrue(pretty, pretty.contains("我是注释"));
+        SQL.parse(pretty, SqlDialect.MYSQL);
+    }
+
+    @Test
+    public void addCommentKeepsDelimitedAndEscapesBlockClose() {
+        SqlStatement already = SQL.parse("SELECT 1");
+        already.addComment("/* already */");
+        String sql = already.toString();
+        assertTrue(sql, sql.contains("/* already */"));
+        assertFalse(sql, sql.contains("/* /* already */"));
+        SQL.parse(sql, SqlDialect.MYSQL);
+
+        SqlStatement line = SQL.parse("SELECT 1");
+        line.addComment("-- keep line");
+        String compact = SQL.toSqlString(line);
+        assertTrue(compact, compact.contains("/*") && compact.contains("keep line"));
+        assertFalse("compact must not start with line-comment: " + compact, compact.trim().startsWith("--"));
+        SQL.parse(compact, SqlDialect.MYSQL);
+
+        SqlStatement evil = SQL.parse("SELECT 1");
+        evil.addComment("a */ DROP");
+        String escaped = evil.toString();
+        assertTrue(escaped, escaped.contains("* /"));
+        assertFalse(escaped, escaped.contains("*/ DROP"));
+        SQL.parse(escaped, SqlDialect.MYSQL);
+    }
+
+    @Test
+    public void addHintBareTextIsWrapped() {
+        SqlSelect select = (SqlSelect) SQL.parse("SELECT * FROM t");
+        select.addHint("INDEX(t pk)");
+        String sql = select.toString();
+        assertTrue(sql, sql.contains("/*+") || sql.contains("/* +"));
+        assertTrue(sql, sql.contains("INDEX(t pk)"));
+        SQL.parse(sql, SqlDialect.MYSQL);
     }
 }

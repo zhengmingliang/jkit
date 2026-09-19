@@ -90,7 +90,11 @@ public abstract class SqlStatement extends SqlNode {
     }
 
     /**
-     * @param comment 追加一条注释原文
+     * 追加一条语句前注释。可传正文（{@code 我是注释}）或带分隔符的原文
+     * （行注释 {@code -- x} / {@code # x}，或块注释）；format / {@code toString()}
+     * 时保证输出合法 SQL 注释，不会把后续语句拼成普通文本。
+     *
+     * @param comment 注释正文或原文
      * @since 2.0.1
      */
     public void addComment(String comment) {

@@ -126,7 +126,9 @@ public final class SqlSelect extends SqlStatement {
     }
 
     /**
-     * @param hint 优化器提示原文
+     * 追加一条优化器提示。可传已带 slash-star-plus 包装的原文，或只传正文（回写时自动补包装）。
+     *
+     * @param hint 优化器提示原文或正文
      * @since 2.0.1
      */
     public void addHint(String hint) {

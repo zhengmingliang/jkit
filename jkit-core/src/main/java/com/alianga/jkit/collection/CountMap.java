@@ -7,6 +7,10 @@ import java.util.HashMap;
 
 /**
  * <p> 计数map</p>
+ * <p> 只覆写了 {@link #get(Object)}：未计数的 key 返回 {@code 0} 而不是 {@code null}。
+ *     继承而来的 {@link #containsKey(Object)} 与 {@link #getOrDefault(Object, Object)}
+ *     仍按 HashMap 原语义工作，因此 {@code get(k) != 0} 与 {@code containsKey(k)} 可能给出
+ *     不同答案——判断"是否发生过计数"请统一使用 {@code containsKey}。</p>
  *
  * @author 郑明亮
  * @version 1.0.0

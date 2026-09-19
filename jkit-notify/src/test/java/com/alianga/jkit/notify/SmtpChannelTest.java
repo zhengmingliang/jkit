@@ -7,6 +7,7 @@ import org.junit.Test;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.InputStreamReader;
+import java.io.StringWriter;
 import java.io.OutputStreamWriter;
 import java.net.ServerSocket;
 import java.net.Socket;
@@ -40,6 +41,8 @@ public class SmtpChannelTest {
         private volatile String dataReply;
         private volatile String authReply;
         private volatile byte[] mailFromReplyBytes;
+        private volatile boolean advertisePlain;
+        private volatile String rejectRcptContaining;
 
         private FakeSmtp() throws Exception {
             serverSocket = new ServerSocket(0);
@@ -80,7 +83,13 @@ public class SmtpChannelTest {
                 commands.add(line);
                 String upper = line.toUpperCase(Locale.ROOT);
                 if (upper.startsWith("EHLO")) {
-                    out.write("250-fake.local\r\n250-AUTH LOGIN\r\n250 8BITMIME\r\n");
+                    if (advertisePlain) {
+                        out.write("250-fake.local\r\n250-AUTH PLAIN LOGIN\r\n250 8BITMIME\r\n");
+                    } else {
+                        out.write("250-fake.local\r\n250-AUTH LOGIN\r\n250 8BITMIME\r\n");
+                    }
+                } else if (upper.startsWith("AUTH PLAIN ")) {
+                    out.write("235 authentication successful\r\n");
                 } else if (upper.startsWith("AUTH")) {
                     out.write("334 " + Base64.getEncoder()
                             .encodeToString("Username:".getBytes(StandardCharsets.UTF_8)) + "\r\n");
@@ -96,7 +105,11 @@ public class SmtpChannelTest {
                     }
                     out.write("250 ok\r\n");
                 } else if (upper.startsWith("RCPT")) {
-                    out.write("250 ok\r\n");
+                    if (rejectRcptContaining != null && line.contains(rejectRcptContaining)) {
+                        out.write("550 no such user\r\n");
+                    } else {
+                        out.write("250 ok\r\n");
+                    }
                 } else if (upper.startsWith("DATA")) {
                     out.write("354 go ahead\r\n");
                     // 先 flush 再读正文：客户端在等 354，不 flush 会双方互等死锁
@@ -446,5 +459,125 @@ public class SmtpChannelTest {
                 .username("user")
                 .password("pass")
                 .to("ops@example.com");
+    }
+
+    /**
+     * EHLO 声明 PLAIN 时优先用 AUTH PLAIN（单行载荷），不再只会 AUTH LOGIN。
+     */
+    @Test
+    public void authPlainUsedWhenAdvertised() throws Exception {
+        smtp = new FakeSmtp();
+        smtp.advertisePlain = true;
+        smtp.start();
+        try {
+            SendResult result = NotificationManager.send(SmtpChannel.ID,
+                    Message.text("t", "body"), config());
+            assertTrue(result.toString(), result.isSuccess());
+            String expected = "AUTH PLAIN " + Base64.getEncoder()
+                    .encodeToString("\0user\0pass".getBytes(StandardCharsets.UTF_8));
+            boolean plain = false;
+            for (String command : smtp.commands) {
+                if (command.startsWith("AUTH PLAIN ")) {
+                    plain = true;
+                    assertEquals(expected, command);
+                }
+                assertFalse("不应再退回 AUTH LOGIN", "AUTH LOGIN".equals(command));
+            }
+            assertTrue("AUTH PLAIN missing: " + smtp.commands, plain);
+        } finally {
+            smtp.stop();
+        }
+    }
+
+    /**
+     * 单个 RCPT 被拒不再中断整封邮件：其余收件人照常发，结果里带被拒清单。
+     */
+    @Test
+    public void rcptRejectionDoesNotAbortOtherRecipients() throws Exception {
+        smtp = new FakeSmtp();
+        smtp.rejectRcptContaining = "bad@";
+        smtp.start();
+        try {
+            SendResult result = NotificationManager.send(SmtpChannel.ID,
+                    Message.text("t", "body"), config().cc("bad@example.com"));
+            assertTrue(result.toString(), result.isSuccess());
+            assertTrue(String.valueOf(result.response()),
+                    result.response().contains("rejected recipients"));
+            assertTrue(smtp.commands.contains("RCPT TO:<ops@example.com>"));
+            boolean dataSent = false;
+            for (String command : smtp.commands) {
+                if (command.startsWith("DATA:")) {
+                    dataSent = true;
+                }
+            }
+            assertTrue("被拒一个 RCPT 后 DATA 仍应发出", dataSent);
+        } finally {
+            smtp.stop();
+        }
+    }
+
+    /**
+     * 所有 RCPT 都被拒时整封失败，按永久错误归类。
+     */
+    @Test
+    public void allRcptRejectedFails() throws Exception {
+        smtp = new FakeSmtp();
+        smtp.rejectRcptContaining = "@";
+        smtp.start();
+        try {
+            SendResult result = NotificationManager.send(SmtpChannel.ID,
+                    Message.text("t", "body"), config());
+            assertTrue(result.toString(), result.isFailed());
+        } finally {
+            smtp.stop();
+        }
+    }
+
+    /**
+     * DATA 阶段行首的 '.' 在写线上被双写，而非只靠 base64 正文恰好不出现。
+     */
+    @Test
+    public void dotStuffingWriterDoublesLeadingDotsOnWire() throws Exception {
+        final StringWriter sw = new StringWriter();
+        String stuffed = new SmtpChannel() {
+            String apply(String text) throws Exception {
+                DotStuffingWriter w = new DotStuffingWriter(sw);
+                w.write(text);
+                w.flush();
+                return sw.toString();
+            }
+        }.apply("keep\r\n.secret\r\n..x\r\nend");
+        assertEquals("keep\r\n..secret\r\n...x\r\nend", stuffed);
+    }
+
+    /**
+     * 配置层：地址里的 CR/LF 被剥掉，无法注入 MIME 头或 SMTP 命令。
+     */
+    @Test
+    public void crlfInAddressIsStrippedAtConfigLevel() {
+        ChannelConfig c = ChannelConfig.smtp("127.0.0.1", 25)
+                .to("a@x.com\r\nBCC: evil@x.com", "b@x.com");
+        assertFalse(c.to().isEmpty());
+        for (String addr : c.to()) {
+            assertFalse(addr, addr.contains("\r"));
+            assertFalse(addr, addr.contains("\n"));
+        }
+    }
+
+    /**
+     * 渠道层防御：带 CR/LF 的地址直接拒绝。
+     */
+    @Test
+    public void crlfInMailboxRejectedAtChannelLayer() {
+        try {
+            new SmtpChannel() {
+                void check() {
+                    requireSafeMailbox("a@x.com\nBCC:evil@x.com");
+                }
+            }.check();
+        } catch (IllegalArgumentException e) {
+            return;
+        }
+        throw new AssertionError("expected IllegalArgumentException");
     }
 }

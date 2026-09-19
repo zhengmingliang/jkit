@@ -73,8 +73,45 @@ public class SqlAstVisitor implements SqlVisitor {
      */
     @Override
     public final boolean visit(SqlNode node) {
+        // 查询热路径靠前，减少 bind / 改写时的 instanceof 链
         if (node instanceof SqlSelect) {
             return visitSelect((SqlSelect) node);
+        }
+        if (node instanceof SqlSelectItem) {
+            return visitSelectItem((SqlSelectItem) node);
+        }
+        if (node instanceof SqlAllColumns) {
+            return visitAllColumns((SqlAllColumns) node);
+        }
+        if (node instanceof SqlTable) {
+            return visitTable((SqlTable) node);
+        }
+        if (node instanceof SqlIdentifier) {
+            return visitIdentifier((SqlIdentifier) node);
+        }
+        if (node instanceof SqlLiteral) {
+            return visitLiteral((SqlLiteral) node);
+        }
+        if (node instanceof SqlBinaryExpr) {
+            return visitBinaryExpr((SqlBinaryExpr) node);
+        }
+        if (node instanceof SqlJoin) {
+            return visitJoin((SqlJoin) node);
+        }
+        if (node instanceof SqlFunctionExpr) {
+            return visitFunctionExpr((SqlFunctionExpr) node);
+        }
+        if (node instanceof SqlUnaryExpr) {
+            return visitUnaryExpr((SqlUnaryExpr) node);
+        }
+        if (node instanceof SqlInExpr) {
+            return visitInExpr((SqlInExpr) node);
+        }
+        if (node instanceof SqlOrderByItem) {
+            return visitOrderByItem((SqlOrderByItem) node);
+        }
+        if (node instanceof SqlLimit) {
+            return visitLimit((SqlLimit) node);
         }
         if (node instanceof SqlInsert) {
             return visitInsert((SqlInsert) node);
@@ -145,12 +182,6 @@ public class SqlAstVisitor implements SqlVisitor {
         if (node instanceof SqlSimpleStatement) {
             return visitSimple((SqlSimpleStatement) node);
         }
-        if (node instanceof SqlTable) {
-            return visitTable((SqlTable) node);
-        }
-        if (node instanceof SqlJoin) {
-            return visitJoin((SqlJoin) node);
-        }
         if (node instanceof SqlPivotTable) {
             return visitPivotTable((SqlPivotTable) node);
         }
@@ -163,21 +194,6 @@ public class SqlAstVisitor implements SqlVisitor {
         if (node instanceof SqlValuesTable) {
             return visitValuesTable((SqlValuesTable) node);
         }
-        if (node instanceof SqlIdentifier) {
-            return visitIdentifier((SqlIdentifier) node);
-        }
-        if (node instanceof SqlLiteral) {
-            return visitLiteral((SqlLiteral) node);
-        }
-        if (node instanceof SqlBinaryExpr) {
-            return visitBinaryExpr((SqlBinaryExpr) node);
-        }
-        if (node instanceof SqlUnaryExpr) {
-            return visitUnaryExpr((SqlUnaryExpr) node);
-        }
-        if (node instanceof SqlFunctionExpr) {
-            return visitFunctionExpr((SqlFunctionExpr) node);
-        }
         if (node instanceof SqlCaseExpr) {
             return visitCaseExpr((SqlCaseExpr) node);
         }
@@ -187,29 +203,14 @@ public class SqlAstVisitor implements SqlVisitor {
         if (node instanceof SqlBetweenExpr) {
             return visitBetweenExpr((SqlBetweenExpr) node);
         }
-        if (node instanceof SqlInExpr) {
-            return visitInExpr((SqlInExpr) node);
-        }
         if (node instanceof SqlListExpr) {
             return visitListExpr((SqlListExpr) node);
         }
         if (node instanceof SqlQueryExpr) {
             return visitQueryExpr((SqlQueryExpr) node);
         }
-        if (node instanceof SqlAllColumns) {
-            return visitAllColumns((SqlAllColumns) node);
-        }
         if (node instanceof SqlOverExpr) {
             return visitOverExpr((SqlOverExpr) node);
-        }
-        if (node instanceof SqlSelectItem) {
-            return visitSelectItem((SqlSelectItem) node);
-        }
-        if (node instanceof SqlOrderByItem) {
-            return visitOrderByItem((SqlOrderByItem) node);
-        }
-        if (node instanceof SqlLimit) {
-            return visitLimit((SqlLimit) node);
         }
         if (node instanceof SqlWithItem) {
             return visitWithItem((SqlWithItem) node);

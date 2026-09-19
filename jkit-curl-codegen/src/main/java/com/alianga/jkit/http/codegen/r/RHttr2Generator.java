@@ -59,7 +59,8 @@ public final class RHttr2Generator extends AbstractCodeGenerator {
             src.append("  req_headers(\n");
             for (int i = 0; i < headerOut.size(); i++) {
                 Header h = headerOut.get(i);
-                src.append("    `").append(h.name()).append("` = ").append(CodeQuote.r(h.value()));
+                src.append("    ").append(CodeQuote.rName(h.name()))
+                        .append(" = ").append(CodeQuote.r(h.value()));
                 src.append(i == headerOut.size() - 1 ? "\n" : ",\n");
             }
             src.append("  ) |>\n");
@@ -71,10 +72,10 @@ public final class RHttr2Generator extends AbstractCodeGenerator {
             for (int i = 0; i < body.parts().size(); i++) {
                 FormPart p = body.parts().get(i);
                 if (p.file()) {
-                    src.append("    `").append(p.name()).append("` = curl::form_file(")
+                    src.append("    ").append(CodeQuote.rName(p.name())).append(" = curl::form_file(")
                             .append(CodeQuote.r(p.filePath())).append(")");
                 } else {
-                    src.append("    `").append(p.name()).append("` = ")
+                    src.append("    ").append(CodeQuote.rName(p.name())).append(" = ")
                             .append(CodeQuote.r(p.value() == null ? "" : p.value()));
                 }
                 src.append(i == body.parts().size() - 1 ? "\n" : ",\n");

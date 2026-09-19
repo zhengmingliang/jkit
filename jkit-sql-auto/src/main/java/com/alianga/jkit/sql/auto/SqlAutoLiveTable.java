@@ -14,6 +14,7 @@ public final class SqlAutoLiveTable {
     private final String name;
     private final Map<String, SqlAutoLiveColumn> columns;
     private final Map<String, SqlAutoLiveIndex> indexes;
+    private final String comment;
 
     /**
      * @param name 表名（库中原文）
@@ -22,6 +23,18 @@ public final class SqlAutoLiveTable {
      */
     public SqlAutoLiveTable(String name, Map<String, SqlAutoLiveColumn> columns,
                             Map<String, SqlAutoLiveIndex> indexes) {
+        this(name, columns, indexes, null);
+    }
+
+    /**
+     * @param name 表名（库中原文）
+     * @param columns 列，key 为小写列名
+     * @param indexes 索引，key 为小写索引名
+     * @param comment 表注释（{@code REMARKS}），可空
+     * @since 2.0.2
+     */
+    public SqlAutoLiveTable(String name, Map<String, SqlAutoLiveColumn> columns,
+                            Map<String, SqlAutoLiveIndex> indexes, String comment) {
         this.name = name == null ? "" : name;
         this.columns = columns == null
                 ? Collections.<String, SqlAutoLiveColumn>emptyMap()
@@ -29,6 +42,7 @@ public final class SqlAutoLiveTable {
         this.indexes = indexes == null
                 ? Collections.<String, SqlAutoLiveIndex>emptyMap()
                 : Collections.unmodifiableMap(new LinkedHashMap<String, SqlAutoLiveIndex>(indexes));
+        this.comment = comment;
     }
 
     /**
@@ -50,6 +64,14 @@ public final class SqlAutoLiveTable {
      */
     public Map<String, SqlAutoLiveIndex> indexes() {
         return indexes;
+    }
+
+    /**
+     * @return 表注释，可空
+     * @since 2.0.2
+     */
+    public String comment() {
+        return comment;
     }
 
     /**

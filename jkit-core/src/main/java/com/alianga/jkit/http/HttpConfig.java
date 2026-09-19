@@ -37,13 +37,45 @@ public final class HttpConfig {
     private volatile ExecutorService executor;
     private volatile EndpointPool endpointPool;
     private volatile boolean countReadTimeoutAsEndpointFailure = true;
-    private final List<HttpInterceptor> interceptors = new CopyOnWriteArrayList<HttpInterceptor>();
+    private List<HttpInterceptor> interceptors = new CopyOnWriteArrayList<HttpInterceptor>();
 
     /**
      * @return 进程内共享配置
      */
     public static HttpConfig shared() {
         return SHARED;
+    }
+
+    /**
+     * 拷贝一份配置作为实例化客户端的初始值，基本类型字段与拦截器列表为独立副本，
+     * 保证实例之间、实例与全局默认之间的常规配置互不污染。
+     *
+     * <p>注意：{@code executor}、{@code endpointPool}、{@code sslContext}、{@code retryPolicy}
+     * 四个复杂对象仍是共享引用（实例与全局默认共用同一个执行器、端点池与 SSL 上下文）；
+     * 拦截器列表重新包装为新的并发列表，但元素仍是同一批实例（拦截器本身多实例共享安全）。
+     *
+     * @return 常规字段独立、复杂对象共享的配置副本
+     */
+    public HttpConfig copy() {
+        HttpConfig c = new HttpConfig();
+        c.connectTimeoutMs = this.connectTimeoutMs;
+        c.readTimeoutMs = this.readTimeoutMs;
+        c.http2 = this.http2;
+        c.maxBufferBytes = this.maxBufferBytes;
+        c.downloadBufferSize = this.downloadBufferSize;
+        c.proxyUsername = this.proxyUsername;
+        c.proxyPassword = this.proxyPassword;
+        c.sslContext = this.sslContext;
+        c.hostnameVerifier = this.hostnameVerifier;
+        c.retryPolicy = this.retryPolicy;
+        c.totalTimeoutMs = this.totalTimeoutMs;
+        c.maxRedirects = this.maxRedirects;
+        c.throwOnHttpError = this.throwOnHttpError;
+        c.executor = this.executor;
+        c.endpointPool = this.endpointPool;
+        c.countReadTimeoutAsEndpointFailure = this.countReadTimeoutAsEndpointFailure;
+        c.interceptors = new java.util.concurrent.CopyOnWriteArrayList<HttpInterceptor>(this.interceptors);
+        return c;
     }
 
     /**

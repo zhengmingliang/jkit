@@ -2,6 +2,7 @@ package com.alianga.jkit.common.idgenerate;
 
 import java.io.InputStream;
 import java.util.Properties;
+import java.util.UUID;
 
 /**
  * 分布式全局ID生成器的配置驱动入口。
@@ -84,6 +85,38 @@ public final class IdGenerator {
      */
     public static String hex() {
         return worker.nextHex();
+    }
+
+    /**
+     * 生成一个 ULID（26 字符，按时间有序）。
+     *
+     * <p>需要「单 JVM 内严格递增」时用 {@link ULID#nextMonotonic()}。
+     *
+     * @return ULID 字符串
+     * @since 2.0.2
+     */
+    public static String ulid() {
+        return ULID.next();
+    }
+
+    /**
+     * 生成一个 UUIDv7（毫秒时间戳在高 48 位，索引写入接近顺序追加）。
+     *
+     * @return UUIDv7 实例
+     * @since 2.0.2
+     */
+    public static UUID uuidV7() {
+        return UUIDv7.next();
+    }
+
+    /**
+     * 生成一个 UUIDv7 的字符串形式。
+     *
+     * @return UUID 字符串
+     * @since 2.0.2
+     */
+    public static String uuidV7String() {
+        return UUIDv7.nextString();
     }
 
     /**

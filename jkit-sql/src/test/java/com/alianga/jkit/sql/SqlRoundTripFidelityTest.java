@@ -69,6 +69,29 @@ public class SqlRoundTripFidelityTest {
                 {"mysql", "SELECT * FROM t1 UNION ALL SELECT * FROM t2"},
                 {"mysql", "SELECT a, ROW_NUMBER() OVER (PARTITION BY b ORDER BY c) AS rn FROM t"},
                 {"mysql", "SELECT CAST(a AS DECIMAL(10, 2)) FROM t"},
+                {"mysql", "SELECT DATE(o.order_date) FROM orders o"},
+                {"postgres", "SELECT DATE '2020-01-01' FROM t"},
+
+                // 表达式括号保真：formatter 不按运算符优先级自动补括号，
+                // 回写丢了 (a - b) / c 的外层括号就会变成 a - b / c，求值顺序被改。
+                {"mysql", "SELECT (a - b) / c FROM t"},
+                {"mysql", "SELECT (a + b) * c FROM t"},
+                {"mysql", "SELECT a - (b - c) FROM t"},
+                {"mysql", "SELECT -(a + b) FROM t"},
+                {"mysql", "SELECT (a OR b) AND c FROM t"},
+                {"mysql", "SELECT * FROM t WHERE (a - b) / c > 1"},
+                {"mysql", "SELECT ROUND((revenue - cost) / NULLIF(revenue, 0), 2) FROM t"},
+                {"mysql", "SELECT CASE WHEN (a - b) / c < 1 THEN 1 ELSE 2 END FROM t"},
+                {"postgres", "SELECT (a - b) / c FROM t"},
+                {"oracle", "SELECT (a - b) / c FROM t"},
+
+                // 引号按段保真：只有列名段带引号时，回写不能把引号扩散到表别名上。
+                // Oracle 里 c."LEVEL" 写成 "c"."LEVEL" 会因别名 C 与 "c" 不匹配而报 ORA-00904。
+                {"oracle", "SELECT c.\"LEVEL\" FROM customers c"},
+                {"oracle", "SELECT c.customer_name, c.\"LEVEL\" FROM customers c WHERE c.\"LEVEL\" > 1"},
+                {"mysql", "SELECT t.`LEVEL` FROM `my tbl` t"},
+                {"sqlserver", "SELECT t.[LEVEL] FROM tbl t"},
+                {"sqlserver", "SELECT (a - b) / c FROM t"},
 
                 {"mysql", "SELECT * FROM t1 LEFT JOIN t2 ON t1.a = t2.a"},
                 {"mysql", "SELECT * FROM t1 RIGHT JOIN t2 ON t1.a = t2.a"},

@@ -4,7 +4,7 @@
 
 当前待办从 **第 11 节** 读起。第 1–10 节是已完成历史，不要重做、不要推翻。不要把第三方库引进 `jkit-sql` / `jkit-core`。
 
-- 仓库：`/opt/workspace/zml/jkit`，父 POM `jkit-parent` **2.0.1**
+- 仓库：`/opt/workspace/zml/jkit`，父 POM `jkit-parent` **2.0.2**
 - 对比测试工程：`/opt/workspace/zml/tools-test`（可以引 Druid / JSqlParser）
 - 用户要求：每次回复用 `jkit-notify` SMTP 再发一封到 `mpro@vip.qq.com`（凭证在 `/opt/workspace/zml/z-notify-hub/z-notify.db` 的 `email-aliyun`，收件人历史测试为 `mpro@vip.qq.com`）。发信脚本曾放在 `/tmp/jkit-mail-send/`，不在 git 里。
 
@@ -15,7 +15,7 @@
 1. **零第三方依赖**：`jkit-core`、`jkit-sql`、`jkit-notify` 的运行时 `<dependencies>` 不得引入 Druid、JSqlParser、POI、Hibernate Validator 等。JUnit 仅 test。
 2. **JDK 8**：无 `var`、`List.of`、`String.isBlank`、switch 表达式。
 3. Checkstyle：`checkstyle/check-style.xml`。行宽 160 error / 120 warning；ImportOrder 组 `*,javax,java`；禁止 tab；NeedBraces；字段不要显式赋默认值（`= null` / `= 0` / `= false`）。
-4. 公开 API 中文 javadoc，`@author 郑明亮`。**`jkit-sql` 收口为 `@since 2.0.1`**（新模块随父 POM 2.0.1 交付，勿改标其它版本号）。其它模块在已发布的 2.0.1 之上若再加未发布公开 API，等真正升版时再标对应 `@since`，不要回写进历史 2.0.1。
+4. 公开 API 中文 javadoc，`@author 郑明亮`。已随 2.0.1 交付的 API 保持 `@since 2.0.1`。**本轮新增公开 API 标 `@since 2.0.2`**，不要回写进历史 2.0.1。
 5. 对比测试、JMH、引入 Druid/JSqlParser **只允许**在 `/opt/workspace/zml/tools-test`，禁止写进 `jkit-sql` 的 POM。
 6. 改 SQL 解析器后：`mvn -pl jkit-sql test` 必须绿；再 `mvn -pl jkit-sql,jkit-core install -DskipTests`，然后 `cd ../tools-test && mvn -Dtest=SqlParserCompareTest test`。
 
@@ -270,18 +270,18 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 
 | 项 | 位置 | 要点 |
 | --- | --- | --- |
-| HTTP **可实例化客户端** | `jkit-core` `HttpUtils` / `HttpConfig` | 文档已写「后续提供」。`HttpClient.builder()`，全局 `setXxx` 只影响 `shared()`。测试：两个实例配置互不污染 |
-| 流式 multipart | `HttpUtils.upload` | 现在整包进内存 |
-| JWT + 加密默认值 | `EncryptUtils.RSA` 仍 1024+ECB；DES 仍在门面 | HS256/RS256；RSA 2048+OAEP；AES-GCM；DES/1024 `@Deprecated` |
-| 空文档 | `docs/expression.md`、`docs/csv.md` | 现在是空文件，表达式/CSV 两套门面实际存在 |
+| HTTP **可实例化客户端** | `jkit-core` `HttpUtils` / `HttpConfig` | 文档已写「后续提供」。`HttpClient.builder()`，全局 `setXxx` 只影响 `shared()`。测试：两个实例配置互不污染 | **已做（HttpClient，ThreadLocal 隔离，8cdc967）** |
+| 流式 multipart | `HttpUtils.upload` | 现在整包进内存 | **已做（HttpBodies.multipart 超阈值落临时文件流式发送，SPOOL_THRESHOLD_BYTES，无单独提交，附在 HTTP 相关提交里）** |
+| JWT + 加密默认值 | `EncryptUtils.RSA` 仍 1024+ECB；DES 仍在门面 | HS256/RS256；RSA 2048+OAEP；AES-GCM；DES/1024 `@Deprecated` | 加密一半已做（8600d5d）；**JWT 已补（JwtUtils，零依赖，16 测试全过）** |
+| 空文档 | `docs/expression.md`、`docs/csv.md` | 现在是空文件，表达式/CSV 两套门面实际存在 | **已做（305ddae）** |
 | `jkit-llm` | 新模块 | 建立在 HttpClient 实例 + 已有 `sseMerge` 上，本季不要做 |
-| 轻量 HTML | 新模块或 core | 替代已移除的 Jsoup，CSS 选择器子集 |
-| 韧性抽包 | `http.lb` 的 Retry/熔断 | 给 notify / 任意 Callable 用 |
-| zstd | HTTP `Content-Encoding` | 已有 gzip/deflate/br |
-| Consul / K8s 发现 | `ServiceDiscovery` | 已有 Nacos + 静态 |
-| JSON Patch / Schema `required` 别名 | `jkit-core` json | `must` → 兼容标准 `required` |
-| ULID / UUIDv7 | `common.idgenerate` | 小 |
-| 脱敏 | 与 `IdCardUtils` 同包 | 小 |
+| 轻量 HTML | 新模块或 core | 替代已移除的 Jsoup，CSS 选择器子集 | **已做**：`com.alianga.jkit.html`（`Html` / `Element` / `Document` / `Elements` / `Selector` / `HtmlParser` / `Entities`，零依赖，32 测试全过；以 Jsoup 1.18.1 差分验证 119 组用例 112 组一致，剩余差异为 `:has()` / `:eq()` 等 Jsoup 专有扩展与收养算法，已在 `docs/html.md` §7 列明；另完成性能专项，解析与选择器已追平或快于 Jsoup、常驻内存仍高约 11%，实测数据见 `docs/html.md` §9） |
+| 韧性抽包 | `http.lb` 的 Retry/熔断 | 给 notify / 任意 Callable 用 | **已做（Retryer + CircuitBreaker，com.alianga.jkit.resilience，与 HTTP 解耦，15 测试全过）** |
+| zstd | HTTP `Content-Encoding` | 已有 gzip/deflate/br | 零依赖不可行，保持不做 |
+| Consul / K8s 发现 | `ServiceDiscovery` | 已有 Nacos + 静态 | 需基础设施，暂不验证 |
+| JSON Patch / Schema `required` 别名 | `jkit-core` json | `must` → 兼容标准 `required` | `required` 别名已做（920c014）；**JSON Patch 已补（JSONPatch，RFC 6902，32 测试全过）** |
+| ULID / UUIDv7 | `common.idgenerate` | 小 | **已做（2c1d193）** |
+| 脱敏 | 与 `IdCardUtils` 同包 | 小 | **已做（16b3271）** |
 
 ---
 
@@ -305,7 +305,7 @@ SELECT id, sum(x) OVER w FROM t WINDOW w AS (PARTITION BY a ORDER BY b)
 4. 余量（可选）：其它聚合的 WITHIN GROUP/`aggOption`。~~OUTPUT INTO~~ ✅；~~SqlBuilder rightJoin/union/with/distinct~~ ✅。
 5. 对比工程：语料成功率 ✅；~~表名集合差分~~ ✅；改解析器后记得 `install` 再跑 tools-test。
 
-**发版叙事已定（sql-only）**：`jkit-sql` 随父 POM **2.0.1** 收口（`CHANGELOG` 顶栏 `## 2.0.1 - 2026-09-09`，javadoc `@since 2.0.1`）。每完成一块：补 `@since 2.0.1`（仅 sql 模块）、更新 `docs/sql.md` 覆盖表、在 `CHANGELOG.md` 的 `2.0.1 - 2026-09-09` 追加条目。父 POM 保持 2.0.1，不要擅自升版。
+**发版叙事已定（sql-only）**：`jkit-sql` 随父 POM **2.0.1** 收口（`CHANGELOG` 顶栏 `## 2.0.1 - 2026-09-13`，javadoc `@since 2.0.1`）。每完成一块：补 `@since 2.0.1`（仅 sql 模块）、更新 `docs/sql.md` 覆盖表、在 `CHANGELOG.md` 的 `2.0.1 - 2026-09-13` 追加条目。父 POM 保持 2.0.1，不要擅自升版。
 
 ---
 
@@ -486,7 +486,7 @@ cd ../tools-test && mvn -Dtest='SqlParserCompareTest,SqlRoundTripFidelityCorpusT
    `jkit-core/.../JSONTest.java` 的 M 是历史遗留，**永远别带进提交**。
 2. **发版叙事**：父 POM `2.0.1`；jkit-sql 新公开 API 一律 `@since 2.0.1`；用户明确要求
    **docs/sql.md 按"初版特性"口径写，不写修复叙事**（f44f30e 已按此同步，后续照此办理）。
-3. **每完成一块**：`@since` + `docs/sql.md`（中英同步）+ CHANGELOG 顶部 `2.0.1 - 2026-09-09` 追加条目。
+3. **每完成一块**：`@since` + `docs/sql.md`（中英同步）+ CHANGELOG 顶部 `2.0.1 - 2026-09-13` 追加条目。
    文档站构建：`npx vitepress build docs`（预览 `npx vitepress preview docs --port 4173`）。
 4. **邮件通知**：每轮完成后用 jkit-notify SMTP 发 `mpro@vip.qq.com`。
    脚本 `/tmp/jkit-mail-send/SendNotify.java`（/tmp 易失需重建）；凭证在
@@ -573,7 +573,7 @@ cd ../tools-test && mvn -Dtest='SqlParserCompareTest,SqlRoundTripFidelityCorpusT
 
 | 项 | 说明 |
 |---|---|
-| 中英 `sql.md` | 英文转换/SPI 章节短一截（还停留在 KEY 被 strip，没写附录 INDEX / `registerFunctions`）。对外只维护这两份 + 设计文档，**不要**把 next-plan 链回去 |
+| 中英 `sql.md` | 英文转换/SPI 章节短一截（还停留在 KEY 被 strip，没写附录 INDEX / `registerFunctions`）。对外只维护这两份 + 设计文档，**不要**把 next-plan 链回去 | ✅ 已对齐（2026-09-18）：英文转换章节补到与中文全等，含 Normal Form 框架、Phase 0–1/2–3 代码、`registerFunctions`/`SqlFunctionRegistry`/`SqlDialectSpec` |
 | 设计文档 §12 | 与 `generateOracleSequence` 对齐（opt-in 已实现） |
 | `SqlDdlStatement.columnDefinitions()` | 仍是 `List<String>`。结构化列是平行通路。**不要**为了好看改公开签名 |
 | pretty 缩进 | `SqlFormatter.indent` 是死代码（第 9 节）。有真实需求再做 subquery/CTE/UNION 缩进，勿硬接 |
@@ -609,3 +609,78 @@ Spring Boot 2/3 starter：`jkit-sql-auto-spring-boot-2`（`spring.factories`）�
 表 / 列注释按方言生成（MySQL/Hive/ClickHouse 内联、H2 列内 + `COMMENT ON TABLE`、PG/Oracle/DB2/ANSI `COMMENT ON`、SQL Server `sp_addextendedproperty`、Presto 表级 `WITH`、SQLite 忽略）。Oracle ≤11g 自增用 SEQUENCE + TRIGGER；达梦列上写 IDENTITY。`CREATE TABLE`（`includeIndexes=false`）不含附录，由 `extraSql` 单独执行。
 
 `SqlDialect.DAMENG` 一等方言：`fromName("dm"/"dameng")`、`jdbc:dm:`。函数改写：`NVL`/`INSTR`/`LISTAGG`/`TO_DATE`/`FROM_UNIXTIME→NUMTODSINTERVAL`。
+
+---
+
+## 12. 复杂业务 SQL 1200 条回归（2026-09-16，可并行）
+
+语料：`jkit-sql/src/test/resources/sqls/complex-sql/`，四方言各 300 条（`-- [NNN] 技法 | 业务域 | 标题`），编号 001–300 一一对应。Oracle 语料是 **12c+**（`FETCH FIRST` / 列清单递归 CTE），解析与转换一律 `SqlDialect.ORACLE12`，不要用 `ORACLE`（11g ROWNUM）。
+
+分层漏斗（后一层依赖前一层的报告，不要抢同一批失败 SQL 去改解析器）：
+
+| 层 | 问题 | 代码落点 | 连库 |
+|---|---|---|---|
+| L0 | 库能连、核心表有数据 | `tools-test` IT | 是 |
+| L1 | `SQL.parse` 成功且为 SELECT | `jkit-sql` 单测 | 否 |
+| L2 | parse → `toSqlString` → 再 parse | `jkit-sql` 单测 | 否 |
+| L3 | `SQL.convert(src→dst)` 后再 parse + 形态检查 | `jkit-sql` 单测 | 否 |
+| L4 | 原文 / 回写 / 转换 SQL 在真库可执行 | `tools-test` IT | 是 |
+
+**硬约束**：`jkit-sql` 零 JDBC；不要改 1200 条语料迁就解析器；失败登记 KnownGaps，按 errorClass 聚类再修。
+
+### 12.1 工作包（可分给其他 agent 并行）
+
+**共享前置（先做完再拆并行）**：`ComplexSqlCorpus` 加载器 + 拆条单测必须先绿。切块规则：`^-- \[(\d+)\]`；丢掉块内前导 `--`；SQL Server 去掉独立一行 `GO`；去掉末尾 `;`。
+
+| ID | 工作包 | 目录 / 类 | 依赖 | 验收 |
+|---|---|---|---|---|
+| A | 语料加载器 | `jkit-sql/.../ComplexSqlCorpus.java` + `ComplexSqlCorpusTest` | 无 | 四文件各 300、编号对齐、001/022/211 抽得出 SQL |
+| B | L1 解析 | `ComplexSqlParseCorpusTest` | A | 1200 条 parse；报告 `target/complex-sql-reports/l1-fails.tsv`；第一轮 ≥95%，冲 100% |
+| C | L1 失败修复 | `SqlSelectParser` / `SqlExprParser` / formatter 仅在 B 的聚类之后 | B 的 fails.tsv | 按 Top errorClass 修；`mvn -pl jkit-sql test` 绿 |
+| D | L2 回写 | `ComplexSqlRoundTripTest` | A，建议等 C | L1 通过集合再 parse 100%；文本保真只出报告 |
+| E | L3 转换 | `ComplexSqlConvertCorpusTest` + `BuiltinFunctionRewriter` | A；代表题 001/022/211 可先于全量 | 主矩阵 MYSQL↔ORACLE12 / MYSQL↔SQLSERVER 转换后再 parse ≥90%；源方言特征残留下降 |
+| F | L4 真库 | `tools-test/.../ComplexSqlExecutionIT` | A；C 的原文基线 | 库不可达 `Assume` skip。先 A/D 原文 300 条，再回写，再转换执行。Oracle 指向 19c `M_PDB`，不要用本机 10g |
+| G | KnownGaps + 文档 | `ComplexSqlKnownGapsTest`；语料 README 加「jkit-sql 回归」；**禁止**链到 next-plan | B/C/E 报告 | 缺口显式登记，只减不增 |
+
+并行建议：A 完成后 **B 与 E 的代表题（001/022/211）可同时做**；C 必须等 B 报告；F 的原文基线可与 B 并行（不改解析器）；F 的转换执行必须等 E。不要两个 agent 同时改 `SqlParser` / `BuiltinFunctionRewriter`。
+
+### 12.2 转换 Morph 检查（L3）
+
+| 能力 | MySQL | PG | Oracle12 | SQL Server |
+|---|---|---|---|---|
+| 分页 | `LIMIT` | `LIMIT` | `FETCH FIRST`，禁止裸 `LIMIT` | `OFFSET/FETCH` 或 `TOP`，禁止 `LIMIT` |
+| 串聚合 | `GROUP_CONCAT` | `STRING_AGG` | `LISTAGG` | `STRING_AGG` |
+| 日期截断 | `DATE_FORMAT` / `DATE(` | `DATE_TRUNC` | `TRUNC(..., 'MM')` | `DATEFROMPARTS` |
+| 日期加减 | `DATE_ADD/SUB` | `INTERVAL 'n days'` | `d ± n` 或 `INTERVAL 'n' DAY` | `DATEADD` |
+| 当前日 | `CURRENT_DATE` | `CURRENT_DATE` | `TRUNC(SYSDATE)` | `GETDATE` |
+| 递归 CTE | `WITH RECURSIVE` | `WITH RECURSIVE` | `WITH x(cols) AS`，无 `RECURSIVE` | `WITH x AS` |
+| 空表 | 可省略 FROM | 可省略 FROM | `FROM dual` | 可省略 FROM |
+| 长度 | `LENGTH` | `LENGTH` | `LENGTH` | `LEN` |
+| 标准差 | `STDDEV_SAMP` | `STDDEV_SAMP` | `STDDEV_SAMP` | `STDEV` |
+| LEAST/GREATEST | 保留 | 保留 | 保留 | `CASE` |
+
+优先补的改写缺口：`DATE_TRUNC` 族、`PERIOD_DIFF`/`MONTHS_BETWEEN`、`GETDATE`↔`SYSDATE`↔`CURRENT_DATE`、作为**源**的 `DATEADD`、`LEAST`/`GREATEST`→SQL Server CASE、`STDDEV_SAMP`↔`STDEV`、`WITH RECURSIVE`↔Oracle 列清单、`FORMAT(d,'yyyy-MM')`、`INTERVAL` 双向、CTE+ORDER BY+LIMIT 的分页包装。
+
+### 12.3 真库（L0/L4）
+
+数据源：`/opt/workspace/zml/tools-test/src/test/resources/datasource`。MySQL `127.0.0.1:3308/test_db`；Oracle 19c `192.168.1.197:2521` 服务名 `M_PDB`（`ORACLE12`）；SQL Server `127.0.0.1:1433/jkit_ss_test`。PostgreSQL 可选。`setMaxRows(200)`、`queryTimeout(30)`、只跑 SELECT、剥掉 `GO`。空结果先对照原文基线（数据按导入时「当前日」生成，窗口类查询会随时间变空）。
+
+### 12.4 本会话进度
+
+- [x] 方案与第 12 节计划（2026-09-16）
+- [x] A 语料加载器 `ComplexSqlCorpus` + `ComplexSqlCorpusTest`（四文件各 300、编号对齐）
+- [x] B L1 全量 parse **1200/1200 = 100%**（MYSQL/POSTGRES/ORACLE12/SQLSERVER 各 300；~0.3s）
+- [x] C 按聚类修解析 — L1 零失败，本轮无需改解析器
+- [x] D L2 结构保真 1200/1200；修 `DATE(col)` 回写丢括号；文本匹配约 46%（非门禁）
+- [x] E L3 主矩阵 1500/1500 parse；残留 0（GETDATE/DATEADD/LEAST/RECURSIVE 已改写）
+- [x] F L4 代表题 001/022/211：原文 9/9、转换 6/6 真库可执行（MySQL / Oracle19c / SQL Server）
+- [x] G KnownGaps 登记已关闭项；仍开放 DATE_TRUNC 族 / PERIOD_DIFF / STDDEV↔STDEV（不影响 parse）
+- [x] H 回写保真复查（2026-09-17）：D 的「结构保真」只比 6 个维度，抓不到表达式级丢失。补深结构对比（列数 / WHERE / GROUP BY / HAVING / ORDER BY / FROM / DISTINCT / UNION / LIMIT）后仍 1200/1200，但**回写丢二元表达式括号**：`(a - b) / c` → `a - b / c`，语料 172 条受影响。根因是 `SqlBinaryExpr.parenthesized` 只有改写器会置 true、parser 从不设置，而 formatter 不按优先级自动补括号。已修 parser 保留标记 + formatter 函数参数里的标量子查询带括号；文本匹配 45.75% → 91.83%。
+- [x] I L4 回写对照（2026-09-17）：`ComplexSqlExecutionIT#rewrittenMatchesOriginal` 对原文与 `parse → toSqlString` 后的 SQL 在同一库、同一批数据上取回结果集做规范化比对（数字去尾随零、行间排序消除不稳定顺序），列数 / 行数 / 每行数据任一不符即失败。默认 001/022/211，`-Dcomplex.sql.ids=all` 跑 300×3。
+- [x] J 深结构对比落进门禁：H 的深结构对比原先只在临时探针里，`structureDrift` 仍只比语句级 6 项。已下沉到 `ComplexSqlReports.deepStructureDrift`，L2 与 8 个方言切片共用。
+- [x] K 引号按段保真（2026-09-17，I 全量跑出来的第二个 bug）：`SqlIdentifier` 只有一个整体 `quoted` 标记，`c."LEVEL"` 回写成 `"c"."LEVEL"` —— 引号扩散到表别名，Oracle 里 `"c"` 与别名 `C` 不匹配，真库 ORA-00904，全量 900 条中 15 条中招。改为 `BitSet` 逐段记录引号（parser 标记、cloner 复制、formatter 按段输出），无逐段信息时回退到整体标记。
+- [x] L 转换结果集对照（2026-09-17）：`ComplexSqlExecutionIT#convertedMatchesOriginal` 拿 MySQL 原文在 MySQL 库的结果集，与 `SQL.convert` 到目标方言后在目标库的结果集比对。代表题 9 条实测 7 条对不上，**逐条查过都不是 jkit 的问题**——Oracle / PG 递归 CTE 路径拼接列宽度由 anchor 定死、PG `round(double precision, int)` 需显式 cast、SQL Server 库数据本就不同（001 是 6 行 vs 33 行）且中文列取回是 `????`、MySQL DATE 与 Oracle TIMESTAMP 的 toString 不同。噪音盖过信号，做成报告型不做门禁，差异留档 `l4-convert-compare.txt`。要变成门禁，得先把四库数据对齐 + 统一日期/布尔/精度映射。
+- [x] M 转换产物的回写稳定性（2026-09-17）：`ComplexSqlExecutionIT#convertedRewriteStable` 对 `SQL.convert` 出的目标方言 SQL 再走一遍 `parse → toSqlString`，在同一目标库比对结果集。起点是改写器生成的树（带改写器设置的 `parenthesized` 标记），与 parser 直接解析源文的树不同路径。全量 300×3：fail=0（转换产物自身跑不通的 39/23/17 条记为 skip，由 `convertedMysqlExecutes` 兜）。
+- [ ] N 四库数据未对齐（SQL Server 001 是 6 行 vs 其他库 33 行），SQL Server 中文列经 JDBC 取回是 `????`。要推进 L 成门禁必须先解决这两项。
+
+邮件：每完成一块用 `/tmp/jkit-mail-send/SendNotify.java` 发 `mpro@vip.qq.com`（凭证 `email-aliyun`）。

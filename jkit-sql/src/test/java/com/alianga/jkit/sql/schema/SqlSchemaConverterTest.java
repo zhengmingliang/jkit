@@ -75,6 +75,59 @@ public class SqlSchemaConverterTest {
     }
 
     @Test
+    public void getDateBecomesNowOnMysql() {
+        String mysql = SQL.convert("SELECT GETDATE()", SqlDialect.SQLSERVER, SqlDialect.MYSQL);
+        assertTrue(mysql, mysql.toUpperCase().contains("NOW"));
+        assertFalse(mysql, mysql.toUpperCase().contains("GETDATE"));
+        SQL.parse(mysql, SqlDialect.MYSQL);
+    }
+
+    @Test
+    public void dateAddBecomesDateAddOnMysql() {
+        String mysql = SQL.convert("SELECT DATEADD(day, 1, dt) FROM t",
+                SqlDialect.SQLSERVER, SqlDialect.MYSQL);
+        assertTrue(mysql, mysql.toUpperCase().contains("DATE_ADD"));
+        assertFalse(mysql, mysql.toUpperCase().contains("DATEADD"));
+        SQL.parse(mysql, SqlDialect.MYSQL);
+    }
+
+    @Test
+    public void leastBecomesCaseOnSqlServer() {
+        String ss = SQL.convert("SELECT LEAST(a, b) FROM t", SqlDialect.MYSQL, SqlDialect.SQLSERVER);
+        assertTrue(ss, ss.toUpperCase().contains("CASE"));
+        assertFalse(ss, ss.toUpperCase().contains("LEAST"));
+        SQL.parse(ss, SqlDialect.SQLSERVER);
+    }
+
+    @Test
+    public void mysqlRecursiveCteDropsKeywordOnOracle12() {
+        String ora = SQL.convert(
+                "WITH RECURSIVE x AS (SELECT 1 AS n UNION ALL SELECT n + 1 FROM x WHERE n < 3) SELECT * FROM x",
+                SqlDialect.MYSQL, SqlDialect.ORACLE12);
+        assertFalse(ora, ora.toUpperCase().contains("RECURSIVE"));
+        assertTrue(ora, ora.toUpperCase().contains("WITH"));
+        assertTrue(ora, ora.toUpperCase().contains("X(N)"));
+        SQL.parse(ora, SqlDialect.ORACLE12);
+    }
+
+    @Test
+    public void currentDateBecomesCastGetDateOnSqlServer() {
+        String ss = SQL.convert("SELECT CURRENT_DATE FROM t", SqlDialect.MYSQL, SqlDialect.SQLSERVER);
+        assertTrue(ss, ss.toUpperCase().contains("GETDATE"));
+        assertFalse(ss, ss.toUpperCase().contains("CURRENT_DATE"));
+        SQL.parse(ss, SqlDialect.SQLSERVER);
+    }
+
+    @Test
+    public void mysqlDateSubToOracleUsesNumericDays() {
+        String ora = SQL.convert("SELECT DATE_SUB(CURRENT_DATE, INTERVAL 180 DAY) FROM t",
+                SqlDialect.MYSQL, SqlDialect.ORACLE12);
+        assertTrue(ora, ora.contains("180"));
+        assertFalse(ora, ora.toUpperCase().contains("INTERVAL '180' DAY"));
+        SQL.parse(ora, SqlDialect.ORACLE12);
+    }
+
+    @Test
     public void uuidAndIntervalRoundtrip() {
         assertEquals("UUID",
                 SqlDataTypeRegistry.builtins().convert("CHAR(36)", SqlDialect.MYSQL, SqlDialect.POSTGRES));

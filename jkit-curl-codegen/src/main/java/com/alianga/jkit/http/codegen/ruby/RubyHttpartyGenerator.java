@@ -70,7 +70,9 @@ public final class RubyHttpartyGenerator extends AbstractCodeGenerator {
             // Authorization header via visibleHeaders
         }
 
-        List<Header> headers = CurlGenSupport.visibleHeaders(req);
+        // basic_auth 已经负责认证，头里再带注入的 Authorization 就重复了
+        List<Header> headers = useBasicAuth
+                ? CurlGenSupport.headersWithoutAuth(req) : CurlGenSupport.visibleHeaders(req);
         boolean explicitMultipart = false;
         if (body.kind() == Body.Kind.MULTIPART) {
             for (Header h : headers) {

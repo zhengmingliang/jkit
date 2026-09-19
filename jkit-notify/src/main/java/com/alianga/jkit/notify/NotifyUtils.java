@@ -187,7 +187,9 @@ public final class NotifyUtils {
      *
      * @param markdown 原文，{@code null} 或空串返回空串
      * @return HTML 片段（不含 html 文档壳）
+     * @deprecated 请用 {@link Markdown#toHtml(String)}
      */
+    @Deprecated
     public static String markdownToHtml(String markdown) {
         return Markdown.toHtml(markdown);
     }
@@ -198,13 +200,11 @@ public final class NotifyUtils {
      * @param markdown 原文
      * @param responsive {@code true} 时带 viewport 与移动端/PC 适配样式
      * @return 完整 HTML 文档；原文为空时返回空串
+     * @deprecated 请用 {@link Markdown#toDocument(String, boolean)}
      */
+    @Deprecated
     public static String markdownToDocument(String markdown, boolean responsive) {
-        String fragment = markdownToHtml(markdown);
-        if (StringUtils.isEmpty(fragment)) {
-            return "";
-        }
-        return wrapHtmlDocument(fragment, responsive);
+        return Markdown.toDocument(markdown, responsive);
     }
 
     /**
@@ -213,41 +213,11 @@ public final class NotifyUtils {
      * @param fragment HTML 片段
      * @param responsive 是否适配手机与桌面预览
      * @return 完整 HTML 文档
+     * @deprecated 请用 {@link Markdown#wrapDocument(String, boolean)}
      */
+    @Deprecated
     public static String wrapHtmlDocument(String fragment, boolean responsive) {
-        String body = StringUtils.defaultString(fragment);
-        if (!responsive) {
-            return "<!DOCTYPE html><html><head><meta charset=\"UTF-8\"></head><body>"
-                    + body + "</body></html>";
-        }
-        return "<!DOCTYPE html><html><head><meta charset=\"UTF-8\">"
-                + "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
-                + "<style>"
-                + "html{-webkit-text-size-adjust:100%}"
-                + "body{margin:0 auto;padding:16px;max-width:720px;font-family:-apple-system,"
-                + "BlinkMacSystemFont,'Segoe UI',Roboto,'PingFang SC','Hiragino Sans GB',"
-                + "'Microsoft YaHei',sans-serif;line-height:1.65;color:#222;font-size:16px;"
-                + "word-wrap:break-word;overflow-wrap:anywhere}"
-                + "h1,h2,h3,h4{line-height:1.3;margin:1.2em 0 .5em}"
-                + "h1{font-size:1.5em}h2{font-size:1.3em}h3{font-size:1.15em}"
-                + "img,table,pre,video{max-width:100%}"
-                + "img{height:auto}"
-                + "pre{background:#f6f8fa;padding:12px;overflow:auto;border-radius:6px;"
-                + "font-size:13px;white-space:pre;box-sizing:border-box}"
-                + "code{font-family:ui-monospace,Menlo,Consolas,monospace;background:#f6f8fa;"
-                + "padding:0 .3em}"
-                + "pre code{background:none;padding:0}"
-                + "table{border-collapse:collapse;margin:12px 0;display:block;overflow-x:auto}"
-                + "th,td{border:1px solid #d0d7de;padding:6px 10px;text-align:left}"
-                + "th{background:#f6f8fa}"
-                + "blockquote{border-left:4px solid #d0d7de;margin:0;padding:0 12px;color:#57606a}"
-                + "@media (min-width:768px){body{padding:24px 32px;font-size:15px}"
-                + "pre{font-size:13px}}"
-                + "@media (max-width:480px){body{padding:12px;font-size:16px}"
-                + "table,th,td{font-size:14px}pre{font-size:12px;padding:8px}}"
-                + "</style></head><body>"
-                + body
-                + "</body></html>";
+        return Markdown.wrapDocument(fragment, responsive);
     }
 
     /**
@@ -801,13 +771,6 @@ public final class NotifyUtils {
     }
 
     /**
-     * 随机 UUID（去掉连字符），短信签名 nonce 用。
-     *
-     * @return 32 位十六进制串
-     * @since 2.0.1
-     */
-
-    /**
      * 返回第一个非空（非 {@code null} 且非空串）字符串。
      *
      * @param values 候选
@@ -861,6 +824,12 @@ public final class NotifyUtils {
         return out.toString();
     }
 
+    /**
+     * 随机 UUID（去掉连字符），短信签名 nonce 用。
+     *
+     * @return 32 位十六进制串
+     * @since 2.0.1
+     */
     public static String uuid() {
         return RandomUtils.getUUID();
     }

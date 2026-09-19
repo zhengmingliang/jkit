@@ -26,6 +26,11 @@ public final class SqlPlaceholderPattern {
         IDENT,
         /** {@code <sheet>} / {@code <-…->}：IDENT 体 + {@code .} {@code -}。 */
         SHEET,
+        /**
+         * MyBatis {@code #{id}} / {@code ${table}} / {@code #{id,jdbcType=VARCHAR}} /
+         * {@code #{item.name}}。
+         */
+        MYBATIS,
         /** 自定义包裹：非空白即可（遇后缀结束）。 */
         ANY_NON_WS
     }
@@ -69,6 +74,50 @@ public final class SqlPlaceholderPattern {
      */
     public String pattern() {
         return display;
+    }
+
+    /**
+     * 从已解析的占位 IDENT 文本取出命名键。仅包裹模式（{@code @name@} / {@code #{table}}）；
+     * printf / 精确字面量返回 null。
+     *
+     * @param token 记号原文
+     * @return 正文，不匹配时 null
+     */
+    String extractNamedKey(String token) {
+        if (kind != Kind.WRAPPED || token == null) {
+            return null;
+        }
+        int pl = prefix.length;
+        int sl = suffix.length;
+        int n = token.length();
+        if (n < pl + sl + 1) {
+            return null;
+        }
+        for (int i = 0; i < pl; i++) {
+            if (token.charAt(i) != prefix[i]) {
+                return null;
+            }
+        }
+        for (int i = 0; i < sl; i++) {
+            if (token.charAt(n - sl + i) != suffix[i]) {
+                return null;
+            }
+        }
+        String body = token.substring(pl, n - sl).trim();
+        if (isMybatisWrap()) {
+            int comma = body.indexOf(',');
+            if (comma > 0) {
+                body = body.substring(0, comma).trim();
+            }
+        }
+        return body.isEmpty() ? null : body;
+    }
+
+    private boolean isMybatisWrap() {
+        return bodyClass == BodyClass.MYBATIS
+                || (prefix.length == 2 && prefix[1] == '{'
+                && (prefix[0] == '#' || prefix[0] == '$')
+                && suffix.length == 1 && suffix[0] == '}');
     }
 
     /**
@@ -144,6 +193,13 @@ public final class SqlPlaceholderPattern {
     }
 
     private boolean allowedBody(char c) {
+        if (bodyClass == BodyClass.MYBATIS) {
+            if (c == '\n' || c == '\r' || c == '\t') {
+                return false;
+            }
+            return isIdentBody(c) || c == '.' || c == '-' || c == '[' || c == ']'
+                    || c == ',' || c == '=' || c == ' ' || c == '\'' || c == '"';
+        }
         if (c <= ' ') {
             return false;
         }

@@ -111,6 +111,18 @@ public interface SqlDialectSpec {
     }
 
     /**
+     * 布尔字面量是否写成 {@code 1}/{@code 0}。Oracle SQL 无 BOOLEAN（PL/SQL 才有），
+     * SQL Server 用 BIT，SQLite 用 INTEGER，均不能写 {@code TRUE}/{@code FALSE}。
+     * 默认 false，即 ANSI {@code TRUE}/{@code FALSE}。
+     *
+     * @return true 时 {@link com.alianga.jkit.sql.SqlBinder} 输出 1/0
+     * @since 2.0.2
+     */
+    default boolean booleanLiteralAsNumber() {
+        return false;
+    }
+
+    /**
      * 是否原生支持 {@code LIMIT … [OFFSET …]} / {@code LIMIT offset, count}。
      *
      * @return true 表示改写宜写 LIMIT（默认 true）

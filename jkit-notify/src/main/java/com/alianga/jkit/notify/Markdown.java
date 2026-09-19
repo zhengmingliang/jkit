@@ -1,8 +1,10 @@
 package com.alianga.jkit.notify;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 /**
  * 面向通知正文的 Markdown → HTML 转换（零依赖）。
@@ -10,38 +12,184 @@ import java.util.Locale;
  * <p>覆盖告警 / 周报 / 技术文档常用子集：ATX 标题、段落（单换行变 {@code <br>}）、
  * 引用、有序/无序列表（列表项内可嵌套代码块、表格、子列表）、GFM 表格、
  * {@code |...|+...+} 形式的 CLI 宽表、围栏代码块（{@code ```}/{@code ~~~}，允许缩进）、
- * 分割线、链接、图片、加粗 / 斜体 / 删除线 / 行内代码。不是完整 CommonMark。
+ * 分割线、链接、图片（含原文里的 HTML {@code <img>}）、加粗 / 斜体 / 删除线 / 行内代码。
+ * 不是完整 CommonMark。
  *
- * <p>文本节点做 HTML 转义；{@code javascript:}/{@code data:} 链接降为 {@code #}。
- * SMTP 等不原生渲染 Markdown 的渠道通过 {@link NotifyUtils#markdownToHtml(String)} 调用。
+ * <p>文本节点做 HTML 转义；原文 {@code <img>} 消毒后透传（只留 src/alt/width 等安全属性，
+ * {@code onerror} 等事件丢掉）；{@code javascript:} 链接降为 {@code #}。
+ *
+ * <p>公开入口：{@link #toHtml(String)} 只要片段；{@link #toHtml(String, MarkdownRenderOptions)}
+ * 按主题渲染（高亮 / 内联样式 / 图片内嵌）；{@link #toDocument(String, MarkdownRenderOptions)}
+ * 再套文档壳。SMTP 等不原生渲染 Markdown 的渠道走这里。
+ * {@link NotifyUtils#markdownToHtml(String)} 等 2.0.1 方法仍可用，已过期。
  *
  * @author 郑明亮
  * @since 2.0.1
  */
-final class Markdown {
+public final class Markdown {
     private Markdown() {
     }
 
     /**
-     * 把 Markdown 转成 HTML 片段（不含 {@code <html>} 文档壳）。
+     * 围栏代码块的渲染回调，用于接入语法高亮；返回的内容必须自行完成 HTML 转义。
+     */
+    interface CodeRenderer {
+        /**
+         * 渲染一段代码。
+         *
+         * @param code 未转义的原始代码
+         * @param lang 语言标识，可能为空串
+         * @return 已转义的 HTML
+         */
+        String render(String code, String lang);
+    }
+
+    /**
+     * 把 Markdown 转成 HTML 片段（不含 {@code <html>} 文档壳），代码块仅转义。
+     *
+     * <p>不套主题、不做代码高亮。要配色 / 高亮 / 内联样式请用
+     * {@link #toHtml(String, MarkdownRenderOptions)}。
      *
      * @param markdown 原文，{@code null} 或空串返回空串
      * @return HTML 片段
      */
-    static String toHtml(String markdown) {
+    public static String toHtml(String markdown) {
+        return toHtml(markdown, (CodeRenderer) null);
+    }
+
+    /**
+     * 把 Markdown 转成 HTML 片段，围栏代码交给 {@code renderer} 渲染。
+     *
+     * @param markdown 原文，{@code null} 或空串返回空串
+     * @param renderer 代码渲染器，{@code null} 时退化为纯转义
+     * @return HTML 片段
+     */
+    static String toHtml(String markdown, CodeRenderer renderer) {
         if (markdown == null || markdown.isEmpty()) {
             return "";
         }
         String normalized = markdown.replace("\r\n", "\n").replace('\r', '\n');
-        return convertBlocks(normalized);
+        return convertBlocks(normalized, renderer);
     }
 
-    private static String convertBlocks(String text) {
+    /**
+     * 按主题渲染 Markdown 片段：可切换配色、代码高亮与内联样式。
+     *
+     * <p>{@code inlineStyle=true} 时把主题样式写进每个标签的 {@code style} 属性，适合粘贴到微信、
+     * 发往 Outlook 等会剥离 {@code <style>} 标签的环境；代价是伪元素与斑马纹等选择器式样不生效。
+     *
+     * <p>设置 {@link MarkdownRenderOptions#imageBaseDir(String)} 后，Markdown 里引用本地相对路径的
+     * 图片会内嵌成 {@code data:image/...;base64,...}，正文可脱离原文件独立展示。
+     *
+     * @param markdown 原文
+     * @param options 渲染选项，{@code null} 时同 {@link #toHtml(String)}
+     * @return HTML 片段（不含 html 文档壳）
+     * @since 2.0.2
+     */
+    public static String toHtml(String markdown, MarkdownRenderOptions options) {
+        if (options == null) {
+            return toHtml(markdown);
+        }
+        MarkdownStyle style = MarkdownStyle.of(options.theme());
+        CodeRenderer renderer = options.highlight() ? new HighlightRenderer(style) : null;
+        String fragment = toHtml(markdown, renderer);
+        fragment = ImageInliner.apply(fragment, options);
+        return options.inlineStyle() ? HtmlInliner.apply(fragment, style) : fragment;
+    }
+
+    /**
+     * 把 Markdown 转成带文档壳的 HTML，便于邮件客户端预览。
+     *
+     * @param markdown 原文
+     * @param responsive {@code true} 时带 viewport 与移动端/PC 适配样式
+     * @return 完整 HTML 文档；原文为空时返回空串
+     */
+    public static String toDocument(String markdown, boolean responsive) {
+        return toDocument(markdown, MarkdownRenderOptions.create().responsive(responsive));
+    }
+
+    /**
+     * 按主题把 Markdown 转成带文档壳的 HTML。
+     *
+     * @param markdown 原文
+     * @param options 渲染选项，{@code null} 时使用默认选项
+     * @return 完整 HTML 文档；原文为空时返回空串
+     * @since 2.0.2
+     */
+    public static String toDocument(String markdown, MarkdownRenderOptions options) {
+        MarkdownRenderOptions opts = options == null ? MarkdownRenderOptions.create() : options;
+        String fragment = toHtml(markdown, opts);
+        if (fragment == null || fragment.isEmpty()) {
+            return "";
+        }
+        return wrapDocument(fragment, opts);
+    }
+
+    /**
+     * 给 HTML 片段套文档壳（charset + 可选响应式样式）。
+     *
+     * @param fragment HTML 片段
+     * @param responsive 是否适配手机与桌面预览
+     * @return 完整 HTML 文档
+     */
+    public static String wrapDocument(String fragment, boolean responsive) {
+        return wrapDocument(fragment, MarkdownRenderOptions.create().responsive(responsive));
+    }
+
+    /**
+     * 给 HTML 片段套带主题的文档壳。
+     *
+     * <p>片段本身没内联样式时才需要 {@code <style>}：若片段已由
+     * {@link #toHtml(String, MarkdownRenderOptions)} 内联过，这里再套一层样式表也无害，
+     * 两者来自同一套令牌，不会打架。
+     *
+     * @param fragment HTML 片段
+     * @param options 渲染选项，{@code null} 时使用默认选项
+     * @return 完整 HTML 文档
+     * @since 2.0.2
+     */
+    public static String wrapDocument(String fragment, MarkdownRenderOptions options) {
+        MarkdownRenderOptions opts = options == null ? MarkdownRenderOptions.create() : options;
+        String body = fragment == null ? "" : fragment;
+        StringBuilder html = new StringBuilder(body.length() + 1024);
+        html.append("<!DOCTYPE html><html><head><meta charset=\"UTF-8\">");
+        if (opts.responsive()) {
+            html.append("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
+        }
+        MarkdownStyle style = MarkdownStyle.of(opts.theme());
+        html.append("<style>").append(style.css(opts.responsive()))
+                .append("</style></head><body style=\"margin:0;padding:0;background:")
+                .append(style.background())
+                // 排版挂在这层 div 上：邮件客户端普遍会剥掉 <body>，只保留正文内容
+                .append("\"><div class=\"").append(MarkdownStyle.CONTAINER_CLASS)
+                .append("\" style=\"").append(style.containerInline()).append("\">")
+                .append(body)
+                .append("</div></body></html>");
+        return html.toString();
+    }
+
+    /**
+     * 把代码高亮接进 Markdown 解析：围栏代码块交给 {@link CodeHighlighter}。
+     */
+    private static final class HighlightRenderer implements CodeRenderer {
+        private final MarkdownStyle style;
+
+        HighlightRenderer(MarkdownStyle style) {
+            this.style = style;
+        }
+
+        @Override
+        public String render(String code, String lang) {
+            return CodeHighlighter.render(code, lang, style);
+        }
+    }
+
+    private static String convertBlocks(String text, CodeRenderer renderer) {
         String[] lines = text.split("\n", -1);
-        return convertRange(lines, 0, lines.length);
+        return convertRange(lines, 0, lines.length, renderer);
     }
 
-    private static String convertRange(String[] lines, int from, int to) {
+    private static String convertRange(String[] lines, int from, int to, CodeRenderer renderer) {
         StringBuilder html = new StringBuilder();
         int i = from;
         while (i < to) {
@@ -53,7 +201,7 @@ final class Markdown {
                 html.append('\n');
             }
             if (isFence(lines[i])) {
-                i = appendFence(html, lines, i, to);
+                i = appendFence(html, lines, i, to, renderer);
             } else if (looksLikeTable(lines, i, to)) {
                 i = appendTable(html, lines, i, to);
             } else {
@@ -67,11 +215,11 @@ final class Markdown {
                     html.append("<hr>");
                     i++;
                 } else if (isBlockquote(lines[i])) {
-                    i = appendQuote(html, lines, i, to);
+                    i = appendQuote(html, lines, i, to, renderer);
                 } else if (ulMarkerEnd(lines[i]) >= 0) {
-                    i = appendList(html, lines, i, to, false);
+                    i = appendList(html, lines, i, to, false, renderer);
                 } else if (olMarkerEnd(lines[i]) >= 0) {
-                    i = appendList(html, lines, i, to, true);
+                    i = appendList(html, lines, i, to, true, renderer);
                 } else {
                     i = appendParagraph(html, lines, i, to);
                 }
@@ -80,7 +228,8 @@ final class Markdown {
         return html.toString();
     }
 
-    private static int appendFence(StringBuilder html, String[] lines, int start, int to) {
+    private static int appendFence(StringBuilder html, String[] lines, int start, int to,
+                                  CodeRenderer renderer) {
         int fenceIndent = indent(lines[start]);
         String open = lines[start].trim();
         char tick = open.charAt(0);
@@ -107,11 +256,15 @@ final class Markdown {
         if (!lang.isEmpty()) {
             html.append(" class=\"language-").append(NotifyUtils.escapeHtml(lang)).append('"');
         }
-        html.append('>').append(NotifyUtils.escapeHtml(code.toString())).append("</code></pre>");
+        html.append('>')
+                .append(renderer == null ? NotifyUtils.escapeHtml(code.toString())
+                        : renderer.render(code.toString(), lang))
+                .append("</code></pre>");
         return i;
     }
 
-    private static int appendQuote(StringBuilder html, String[] lines, int start, int to) {
+    private static int appendQuote(StringBuilder html, String[] lines, int start, int to,
+                                  CodeRenderer renderer) {
         StringBuilder inner = new StringBuilder();
         int i = start;
         while (i < to && isBlockquote(lines[i])) {
@@ -121,7 +274,8 @@ final class Markdown {
             inner.append(stripQuote(lines[i]));
             i++;
         }
-        html.append("<blockquote>").append(convertBlocks(inner.toString())).append("</blockquote>");
+        html.append("<blockquote>").append(convertBlocks(inner.toString(), renderer))
+                .append("</blockquote>");
         return i;
     }
 
@@ -148,7 +302,8 @@ final class Markdown {
                 && !looksLikeTable(lines, i, to);
     }
 
-    private static int appendList(StringBuilder html, String[] lines, int start, int to, boolean ordered) {
+    private static int appendList(StringBuilder html, String[] lines, int start, int to,
+                                  boolean ordered, CodeRenderer renderer) {
         int baseIndent = indent(lines[start]);
         html.append(ordered ? "<ol>" : "<ul>");
         int i = start;
@@ -200,7 +355,7 @@ final class Markdown {
                     nested.append(stripIndent(lines[k], contentCol));
                 }
             }
-            String inner = convertBlocks(nested.toString());
+            String inner = convertBlocks(nested.toString(), renderer);
             if (tight) {
                 inner = unwrapTightParagraphs(inner);
             }
@@ -292,6 +447,7 @@ final class Markdown {
 
     private static String renderInline(String text) {
         List<String> codes = new ArrayList<String>();
+        List<String> images = new ArrayList<String>();
         StringBuilder stripped = new StringBuilder(text.length());
         int i = 0;
         while (i < text.length()) {
@@ -304,6 +460,21 @@ final class Markdown {
                     continue;
                 }
             }
+            int imgEnd = htmlImgEnd(text, i);
+            if (imgEnd > i) {
+                String sanitized = sanitizeImg(text.substring(i, imgEnd));
+                if (sanitized != null) {
+                    images.add(sanitized);
+                    stripped.append('\u0002').append(images.size() - 1).append('\u0002');
+                    i = imgEnd;
+                    continue;
+                }
+            }
+            int closeEnd = htmlImgCloseEnd(text, i);
+            if (closeEnd > i) {
+                i = closeEnd;
+                continue;
+            }
             stripped.append(text.charAt(i));
             i++;
         }
@@ -314,6 +485,9 @@ final class Markdown {
         html = applyDelimited(html, "__", "<strong>", "</strong>");
         html = applyDelimited(html, "~~", "<del>", "</del>");
         html = applyDelimited(html, "*", "<em>", "</em>");
+        for (int n = images.size() - 1; n >= 0; n--) {
+            html = html.replace("\u0002" + n + "\u0002", images.get(n));
+        }
         for (int n = codes.size() - 1; n >= 0; n--) {
             html = html.replace("\u0001" + n + "\u0001",
                     "<code>" + NotifyUtils.escapeHtml(codes.get(n)) + "</code>");
@@ -357,6 +531,177 @@ final class Markdown {
             i = paren + 1;
         }
         return out.toString();
+    }
+
+    /**
+     * 原文 HTML {@code <img>} 的结束位置（不含可选的 {@code </img>}），未闭合或不是 img 返回 -1。
+     */
+    private static int htmlImgEnd(String text, int from) {
+        if (!isImgOpen(text, from)) {
+            return -1;
+        }
+        boolean inQuote = false;
+        char quote = 0;
+        for (int i = from + 4; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (inQuote) {
+                if (c == quote) {
+                    inQuote = false;
+                }
+                continue;
+            }
+            if (c == '"' || c == '\'') {
+                inQuote = true;
+                quote = c;
+            } else if (c == '>') {
+                return i + 1;
+            }
+        }
+        return -1;
+    }
+
+    private static boolean isImgOpen(String text, int i) {
+        if (i + 4 >= text.length() || text.charAt(i) != '<') {
+            return false;
+        }
+        if (!text.regionMatches(true, i + 1, "img", 0, 3)) {
+            return false;
+        }
+        char next = text.charAt(i + 4);
+        return next == '>' || next == '/' || next == ' ' || next == '\t'
+                || next == '\n' || next == '\r';
+    }
+
+    /**
+     * 跳过 {@code </img>}，避免消毒后残留转义的闭合标签。
+     */
+    private static int htmlImgCloseEnd(String text, int i) {
+        if (i + 5 >= text.length() || text.charAt(i) != '<' || text.charAt(i + 1) != '/') {
+            return -1;
+        }
+        if (!text.regionMatches(true, i + 2, "img", 0, 3)) {
+            return -1;
+        }
+        int j = i + 5;
+        while (j < text.length() && isHtmlWs(text.charAt(j))) {
+            j++;
+        }
+        if (j < text.length() && text.charAt(j) == '>') {
+            return j + 1;
+        }
+        return -1;
+    }
+
+    /**
+     * 重建安全的 {@code <img>}：只留 src/alt/title/width/height/class/loading，src 走消毒。
+     *
+     * @return 可透传的标签；没有 src 时返回 {@code null}（按普通文本转义）
+     */
+    private static String sanitizeImg(String raw) {
+        Map<String, String> attrs = parseHtmlAttrs(raw);
+        String src = attrs.get("src");
+        if (src == null || src.isEmpty()) {
+            return null;
+        }
+        StringBuilder out = new StringBuilder(64);
+        out.append("<img src=\"").append(NotifyUtils.escapeHtml(safeImgSrc(src))).append('"');
+        appendImgAttr(out, attrs, "alt");
+        appendImgAttr(out, attrs, "title");
+        appendImgAttr(out, attrs, "width");
+        appendImgAttr(out, attrs, "height");
+        appendImgAttr(out, attrs, "class");
+        appendImgAttr(out, attrs, "loading");
+        out.append('>');
+        return out.toString();
+    }
+
+    private static void appendImgAttr(StringBuilder out, Map<String, String> attrs, String name) {
+        String value = attrs.get(name);
+        if (value == null || value.isEmpty()) {
+            return;
+        }
+        out.append(' ').append(name).append("=\"").append(NotifyUtils.escapeHtml(value)).append('"');
+    }
+
+    private static String safeImgSrc(String url) {
+        String trimmed = url.trim();
+        String lower = trimmed.toLowerCase(Locale.ROOT);
+        if (lower.startsWith("javascript:")) {
+            return "#";
+        }
+        if (lower.startsWith("data:") && !lower.startsWith("data:image/")) {
+            return "#";
+        }
+        return trimmed;
+    }
+
+    private static Map<String, String> parseHtmlAttrs(String tag) {
+        Map<String, String> attrs = new LinkedHashMap<String, String>();
+        int i = 0;
+        int n = tag.length();
+        if (n >= 4 && tag.charAt(0) == '<') {
+            i = 4;
+        }
+        while (i < n) {
+            char c = tag.charAt(i);
+            if (c == '>' || c == '/') {
+                i++;
+                continue;
+            }
+            if (isHtmlWs(c)) {
+                i++;
+                continue;
+            }
+            int nameStart = i;
+            while (i < n) {
+                char ch = tag.charAt(i);
+                if (ch == '=' || ch == '>' || ch == '/' || isHtmlWs(ch)) {
+                    break;
+                }
+                i++;
+            }
+            String name = tag.substring(nameStart, i).toLowerCase(Locale.ROOT);
+            while (i < n && isHtmlWs(tag.charAt(i))) {
+                i++;
+            }
+            String value = "";
+            if (i < n && tag.charAt(i) == '=') {
+                i++;
+                while (i < n && isHtmlWs(tag.charAt(i))) {
+                    i++;
+                }
+                if (i < n && (tag.charAt(i) == '"' || tag.charAt(i) == '\'')) {
+                    char quote = tag.charAt(i);
+                    i++;
+                    int valueStart = i;
+                    while (i < n && tag.charAt(i) != quote) {
+                        i++;
+                    }
+                    value = tag.substring(valueStart, i);
+                    if (i < n) {
+                        i++;
+                    }
+                } else {
+                    int valueStart = i;
+                    while (i < n) {
+                        char ch = tag.charAt(i);
+                        if (ch == '>' || ch == '/' || isHtmlWs(ch)) {
+                            break;
+                        }
+                        i++;
+                    }
+                    value = tag.substring(valueStart, i);
+                }
+            }
+            if (!name.isEmpty() && !attrs.containsKey(name)) {
+                attrs.put(name, value);
+            }
+        }
+        return attrs;
+    }
+
+    private static boolean isHtmlWs(char c) {
+        return c == ' ' || c == '\t' || c == '\n' || c == '\r';
     }
 
     private static String applyDelimited(String text, String delim, String openTag, String closeTag) {

@@ -277,8 +277,9 @@ public final class ObjectUtils {
                 if (CollectionUtils.isCollection(target)) {
                     if (key.startsWith("[") && key.endsWith("]")) {
                         CollectionUtils.setElement(target, Integer.parseInt(key.substring(1, key.length() - 1)), value);
+                    } else {
+                        throw new TypeNotMatchExecption("context property '" + key + "' is invalid ");
                     }
-                    throw new TypeNotMatchExecption("context property '" + key + "' is invalid ");
                 } else {
                     ClassStrucWrap classStrucWrap = ClassStrucWrap.get(target.getClass());
                     SetterInfo setterInfo = classStrucWrap.getSetterInfo(key);

@@ -93,8 +93,22 @@ Verify.verify(n > 0, "n must be positive");
 
 ```java
 long digest = Hash64.hash("cache-key");
-byte[] out = AESCrypt.encrypt(plain, key16);
+byte[] out = AESCrypt.encryptGcm(plain, key32);   // preferred: GCM authenticated encryption
 ```
+
+### AES-GCM: The Default for New Code
+
+`AESCrypt.encryptGcm(data, key)` / `decryptGcm(data, key)` use `AES/GCM/NoPadding` (AEAD) with a fresh random 12-byte IV prepended to the ciphertext (`IV || ciphertext`); decryption splits it off automatically, so callers never store IVs. Compared with ECB / CBC, GCM also authenticates: **flip one byte or use the wrong key and decryption throws**, whereas ECB / CBC happily return garbage that travels further down the pipeline.
+
+```java
+byte[] key = AESCrypt.generateKey(256);
+byte[] packed = AESCrypt.encryptGcm(plain, key);          // IV included; safe to store or ship
+byte[] plain2 = AESCrypt.decryptGcm(packed, key);
+```
+
+When you manage IVs yourself, or want to bind fields that must not be encrypted but must not be tampered with either, use the four-argument form `encryptGcm(data, key, iv, aad)` / `decryptGcm(data, key, iv, aad)` and pass `null` for `aad` to skip it. The AAD must match byte for byte or decryption fails. An IV must never repeat under the same key; IVs are 12 bytes and keys 16/24/32 bytes—illegal arguments throw `IllegalArgumentException`, and ciphertext shorter than 12 bytes is rejected instead of being treated as empty plaintext.
+
+The ECB helpers `encrypt(data, key)` / `decrypt(data, key)` remain but are **not recommended**: identical plaintext blocks produce identical ciphertext blocks, leaking patterns, and nothing detects tampering. They are also not interchangeable with the CBC path used by the constructor (see below).
 
 The digest methods (`md5`, `sha1`, `sha256`, `sha512`, `sha256_HMAC`) output **lowercase** hex; underneath they all go through `ByteUtils.toHexStringLower`.
 
@@ -109,6 +123,32 @@ crypt.decrypt(in, out);                    // streams for large files; both in a
 The streaming overloads **close both streams passed in** (closing the internal `CipherOutputStream` also closes `outputData`, and `inputData` is explicitly `close()`d), so don't reuse them outside try-with-resources.
 
 `AwaruaTiger`: Tiger digest (192-bit / 24 bytes). `computeHash(bytes)` processes the entire array in one shot and automatically resets the instance, so the same instance can be called repeatedly; however, instances carry internal state and are **not thread-safe**. Kept only for compatibility scenarios like TTH (tiger tree hash); use SHA-256 in new code.
+
+### RSA: 2048-bit by Default, OAEP Padding First
+
+`EncryptUtils.RSA` generates key pairs and does public-key encrypt / private-key decrypt. The two padding paths are not interchangeable—pick the wrong one and decryption simply fails:
+
+| Methods | Padding | Use for |
+| --- | --- | --- |
+| `encryptOaep` / `decryptOaep` | `RSA/ECB/OAEPWithSHA-256AndMGF1Padding` | **Default for new data**: resists chosen-ciphertext attacks, randomised salt, different ciphertext each time |
+| `encrypt` / `decrypt` | `RSA/ECB/PKCS1Padding` (PKCS#1 v1.5) | Legacy ciphertext, or peers that only speak v1.5 |
+
+```java
+KeyPair pair = EncryptUtils.RSA.buildKeyPair();          // 2048 bits
+String pub = Base64Utils.encodeToString(pair.getPublic().getEncoded());
+String pri = Base64Utils.encodeToString(pair.getPrivate().getEncoded());
+
+String cipher = EncryptUtils.RSA.encryptOaep("sensitive", pub);   // base64 ciphertext
+String text = EncryptUtils.RSA.decryptOaep(cipher, pri);
+```
+
+`buildKeyPair()` generates **2048-bit** keys since 2.0.2 (it used to be 1024, which no longer meets current baselines). Call `buildKeyPair(1024)` when the old length is genuinely required; below 512 bits throws `IllegalArgumentException`. With a 2048-bit key, OAEP encrypts at most 190 bytes per block—for larger payloads use the hybrid pattern of encrypting the body with a random AES key and wrapping that key with RSA.
+
+The string helpers return an empty string (rather than throwing) when the key is invalid, so callers must check for empty.
+
+### DES Is Deprecated
+
+`DESCrypt` and `EncryptUtils.DES` are `@Deprecated` since 2.0.2: 56 effective bits are brute-forceable and neither ECB nor CBC detects tampering. They still work for decrypting legacy data; use `AESCrypt.encryptGcm` everywhere else.
 
 ### ContextObfuscator: Context-Derived Obfuscation Wrapping
 
@@ -271,10 +311,57 @@ List<User> users = JSON.parse(json, type);
 if (JDKVersion.VERSION >= 9) { /* use the VarHandle implementation */ }
 ```
 
+## Desensitization
+
+`DesensitizeUtils` masks data for logs, exports, and UI. `null` returns `null` and an empty string returns an empty string—nothing throws, so it can sit inside a logging path.
+
+```java
+DesensitizeUtils.phone("13800138000");             // 138****8000
+DesensitizeUtils.idCard("110101199003071234");     // 110101********1234 (keep first 6, last 4)
+DesensitizeUtils.name("张三");                      // 张*
+DesensitizeUtils.email("zheng@example.com");       // z****@example.com (domain kept)
+DesensitizeUtils.bankCard("6222 0202 0001 1234");  // 6222********1234 (spaces stripped first)
+DesensitizeUtils.address("北京市海淀区中关村大街1号"); // 北京市海淀区*******
+DesensitizeUtils.carNo("京A12345");                // 京A***45
+DesensitizeUtils.ip("192.168.1.100");              // 192.168.*.*
+DesensitizeUtils.password("anything");             // ****** (fixed length, hides password length)
+```
+
+The generic entry points are `mask(value, keepHead, keepTail)` / `mask(value, keepHead, keepTail, maskChar)`, which mask everything in between; `maskAll(value)` masks the whole string at the same length. When `keepHead + keepTail` covers the entire string the value is **not** returned as-is—only the first character survives. Over-masking beats leaking plaintext just because the length looked odd. A single character cannot be masked and is returned unchanged.
+
+For configuration-driven setups (a field name maps to a type) use `desensitize(value, Type)`; the `Type` enum covers `PHONE` / `ID_CARD` / `NAME` / `EMAIL` / `BANK_CARD` / `ADDRESS` / `CAR_NO` / `IP` / `PASSWORD` / `DEFAULT`, and a `null` type falls back to `DEFAULT` (keep one character at each end).
+
+Names are handled by character count only—compound surnames are not detected, and non-Chinese names (John) fall back to `DEFAULT`. Masking is about presentation; it does **not** replace access control, since the data itself still flows in plaintext.
+
+## ID Generation
+
+- `IdGenerator`: configuration-driven entry point reading `generate.properties`, delegating to snowflake by default. `id()` returns a `long`, `hex()` a 16-character hex string.
+- `SnowFlakeIdWorker`: the snowflake algorithm; requires worker / datacenter ids, so multi-instance deployments must keep those ids distinct.
+- `ULID`: 26 Crockford Base32 characters — 10 for the millisecond timestamp, 16 for randomness. **Lexicographic order equals generation order**, which makes it a much better index key than UUIDv4 (whose random prefix splits B+Tree pages constantly).
+- `UUIDv7`: puts the millisecond timestamp in the high 48 bits while staying a well-formed UUID that fits a `uuid` column.
+
+```java
+String ulid = IdGenerator.ulid();                 // or ULID.next()
+String mono = ULID.nextMonotonic();               // increments within the same millisecond
+long ts = ULID.parse(ulid).timestamp();           // back to epoch millis
+byte[] bytes = ULID.toBytes(ulid);                // 16-byte compact form (6 timestamp + 10 random)
+
+UUID v7 = IdGenerator.uuidV7();                   // or UUIDv7.next()
+long when = UUIDv7.timestamp(v7);
+```
+
+`ULID.next()` draws a fresh 80-bit random value, so ordering within one millisecond is undefined; `nextMonotonic()` adds 1 to the previous random value inside the same millisecond — use it when strict ordering matters (across instances, the same millisecond can still interleave). `UUIDv7.nextMonotonic()` uses a 12-bit counter and advances the logical clock by 1ms when the counter is exhausted, so it never goes backwards.
+
+Parsing follows Crockford tolerances: `I` / `L` count as `1`, `O` counts as `0`, and case does not matter; a `U` or any other illegal character is rejected. Input whose timestamp exceeds the 48-bit range is rejected by `parse`, symmetric with encoding, so `parse(x).toString()` round-trips. `ULID.isUlid(s)` validates without throwing.
+
 ## CSV / ID Card
 
-- `com.alianga.jkit.csv.CSVUtils`: reads and writes string rows in UTF-8; headers, commas/newlines inside quotes; includes streaming `readStream` / `writer`. The `CSV`/`CSVTable` classes in the same package provide a table model and POJO mapping; both share the same parser. See [csv.md](https://github.com/zhengmingliang/jkit/blob/develop/docs/csv.md).
+- `com.alianga.jkit.csv.CSVUtils`: reads and writes string rows in UTF-8; headers, commas/newlines inside quotes; includes streaming `readStream` / `writer`. The `CSV`/`CSVTable` classes in the same package provide a table model and POJO mapping; both share the same parser. Full usage in the [CSV module](/en/csv).
 - `IdCardUtils` / `IdCardGenerator`: 18-digit validation, parsing, and generation; region data is in `idcard-areas.txt`.
+
+## Expression Engine
+
+- `com.alianga.jkit.expression.Expression`: a zero-dependency expression evaluator for rule checks, dynamic value resolution, and template rendering. Supports arithmetic/comparison/logic/ternary operators, Map and JavaBean contexts, positional parameters `p0/p1`, `@`-prefixed built-in functions, and `renderTemplate` string templates. Full usage in the [Expression module](/en/expression).
 
 ## Miscellaneous Utilities
 

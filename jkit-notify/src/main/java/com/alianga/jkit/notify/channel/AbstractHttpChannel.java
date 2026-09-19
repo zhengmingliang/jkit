@@ -32,6 +32,17 @@ public abstract class AbstractHttpChannel implements NotificationChannel {
 
     private final Log log = Log.get(getClass());
 
+    /**
+     * 配置预检：各渠道的必填项（webhook / token 等）在 {@link #buildUrl} 里检查，
+     * 这里直接复用——{@code buildUrl} 不读 message，传 {@code null} 安全。
+     *
+     * @param config 渠道配置
+     */
+    @Override
+    public void validate(ChannelConfig config) {
+        buildUrl(null, config);
+    }
+
     @Override
     public SendResult send(Message message, ChannelConfig config) {
         long start = System.currentTimeMillis();

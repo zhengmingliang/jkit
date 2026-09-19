@@ -1,5 +1,6 @@
 package com.alianga.jkit.notify;
 
+import com.alianga.jkit.notify.channel.WebhookChannel;
 import org.junit.Test;
 
 import java.util.LinkedHashMap;
@@ -283,6 +284,140 @@ public class NotificationManagerTest {
         } catch (IllegalArgumentException expected) {
             // 预期
         }
+    }
+
+    /**
+     * sendAll 契约：任一目标配置不完整时，编程错误在第一条发出前抛出，不会部分发送。
+     */
+    @Test
+    public void sendAllValidatesAllTargetsBeforeAnySend() {
+        final java.util.concurrent.atomic.AtomicInteger sent = new java.util.concurrent.atomic.AtomicInteger();
+        NotificationChannel recording = new NotificationChannel() {
+            @Override
+            public String id() {
+                return "rec-test";
+            }
+
+            @Override
+            public String name() {
+                return "rec";
+            }
+
+            @Override
+            public boolean supports(MessageType type) {
+                return true;
+            }
+
+            @Override
+            public SendResult send(Message message, ChannelConfig config) {
+                sent.incrementAndGet();
+                return SendResult.ok(id(), 200, "ok", 1L);
+            }
+        };
+        NotificationManager.get().register(recording);
+        try {
+            Map<String, ChannelConfig> targets = new LinkedHashMap<String, ChannelConfig>();
+            targets.put("rec-test", ChannelConfig.webhook("http://127.0.0.1:1/x"));
+            // feishu 只配 token 不配 webhook，validate 应在此刻抛出
+            targets.put("feishu", ChannelConfig.ofToken("no-webhook"));
+            NotificationManager.sendAll(Message.text("hi"), targets);
+            throw new AssertionError("expected IllegalArgumentException");
+        } catch (IllegalArgumentException expected) {
+            assertEquals("预检不通过时一条都不应发出", 0, sent.get());
+        } finally {
+            NotificationManager.get().unregister("rec-test");
+        }
+    }
+
+    /**
+     * sendFailover 契约：第二套账号配置缺失也要在第一套发出前暴露。
+     */
+    @Test
+    public void sendFailoverValidatesAllAccountsUpfront() {
+        final java.util.concurrent.atomic.AtomicInteger sent = new java.util.concurrent.atomic.AtomicInteger();
+        NotificationChannel picky = new NotificationChannel() {
+            @Override
+            public String id() {
+                return "picky-test";
+            }
+
+            @Override
+            public String name() {
+                return "picky";
+            }
+
+            @Override
+            public boolean supports(MessageType type) {
+                return true;
+            }
+
+            @Override
+            public void validate(ChannelConfig config) {
+                if (config.token() == null) {
+                    throw new IllegalArgumentException("token is required");
+                }
+            }
+
+            @Override
+            public SendResult send(Message message, ChannelConfig config) {
+                sent.incrementAndGet();
+                return SendResult.ok(id(), 200, "ok", 1L);
+            }
+        };
+        NotificationManager.get().register(picky);
+        try {
+            NotificationManager.sendFailover("picky-test", Message.text("hi"),
+                    java.util.Arrays.asList(ChannelConfig.ofToken("t1"), ChannelConfig.webhook("http://x")));
+            throw new AssertionError("expected IllegalArgumentException");
+        } catch (IllegalArgumentException expected) {
+            assertEquals("预检不通过时一条都不应发出", 0, sent.get());
+        } finally {
+            NotificationManager.get().unregister("picky-test");
+        }
+    }
+
+    /**
+     * 注册表并发读写不抛 ConcurrentModificationException / 不丢渠道。
+     */
+    @Test
+    public void registrySurvivesConcurrentAccess() throws Exception {
+        final java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1);
+        final java.util.concurrent.atomic.AtomicReference<Throwable> error =
+                new java.util.concurrent.atomic.AtomicReference<Throwable>();
+        java.util.List<Thread> pool = new java.util.ArrayList<Thread>();
+        for (int t = 0; t < 8; t++) {
+            final String id = "conc-" + t;
+            Thread thread = new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        start.await();
+                        for (int i = 0; i < 200; i++) {
+                            NotificationManager.get().list();
+                            NotificationManager.get().get("dingtalk");
+                            NotificationManager.get().register(new WebhookChannel() {
+                                @Override
+                                public String id() {
+                                    return id;
+                                }
+                            });
+                            NotificationManager.get().unregister(id);
+                        }
+                    } catch (Throwable e) {
+                        error.compareAndSet(null, e);
+                    }
+                }
+            });
+            thread.setDaemon(true);
+            thread.start();
+            pool.add(thread);
+        }
+        start.countDown();
+        for (Thread thread : pool) {
+            thread.join(15000);
+        }
+        assertNull(error.get() == null ? null : error.get().toString(), error.get());
+        assertNotNull(NotificationManager.get().get("dingtalk"));
     }
 
     /**

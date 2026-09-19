@@ -84,6 +84,11 @@ public class SqlDialectWrapper implements SqlDialectSpec {
     }
 
     @Override
+    public boolean booleanLiteralAsNumber() {
+        return base.booleanLiteralAsNumber();
+    }
+
+    @Override
     public boolean supportsLimitOffset() {
         return base.supportsLimitOffset();
     }

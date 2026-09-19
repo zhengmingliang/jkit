@@ -107,6 +107,8 @@ public final class GeneratorRegistry {
     }
 
     /**
+     * 生成代码，curl 解析阶段的告警（如未支持的选项）会合入结果的 {@link GeneratedCode#notes()} 最前面。
+     *
      * @param id 生成器 id
      * @param request 解析模型
      * @return 源码
@@ -122,7 +124,14 @@ public final class GeneratorRegistry {
         if (!g.supports(request)) {
             throw new IllegalArgumentException(id + " does not support this request");
         }
-        return g.generate(request);
+        GeneratedCode code = g.generate(request);
+        if (code == null || request.warnings().isEmpty()) {
+            return code;
+        }
+        List<String> notes = new ArrayList<String>(request.warnings().size() + code.notes().size());
+        notes.addAll(request.warnings());
+        notes.addAll(code.notes());
+        return new GeneratedCode(code.filename(), code.language(), code.source(), code.dependencies(), notes);
     }
 
     private GeneratorRegistry defaults() {

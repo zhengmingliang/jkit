@@ -1,5 +1,7 @@
 # 快速开始
 
+<DocBadges />
+
 ## 什么是 jkit
 
 jkit 是**纯 JDK、零第三方依赖**的 Java 通用工具库，由 [ZmlTools](https://github.com/wuyongshi/ZmlTools) 迁移而来。在保留原有工具能力的同时，移除了全部第三方依赖（Gson、Fastjson、OkHttp、Guava、Apache Commons CSV、Jsoup、SLF4J、Logback、Lombok 等），仅使用 JDK 标准库。
@@ -31,13 +33,15 @@ jkit 是**纯 JDK、零第三方依赖**的 Java 通用工具库，由 [ZmlTools
 
 ## 引入依赖
 
+最新发布以 [Maven Central](https://central.sonatype.com/artifact/com.alianga/jkit) 徽章为准；下文示例使用本站文档版本。
+
 核心库：
 
 ```xml
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit</artifactId>
-    <version>2.0.1</version>
+    <version>2.0.2</version>
 </dependency>
 ```
 
@@ -49,7 +53,7 @@ jkit 是**纯 JDK、零第三方依赖**的 Java 通用工具库，由 [ZmlTools
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit-sql</artifactId>
-    <version>2.0.1</version>
+    <version>2.0.2</version>
 </dependency>
 ```
 
@@ -57,7 +61,7 @@ jkit 是**纯 JDK、零第三方依赖**的 Java 通用工具库，由 [ZmlTools
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit-sql-auto</artifactId>
-    <version>2.0.1</version>
+    <version>2.0.2</version>
 </dependency>
 ```
 
@@ -65,7 +69,7 @@ jkit 是**纯 JDK、零第三方依赖**的 Java 通用工具库，由 [ZmlTools
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit-sql-auto-spring-boot-2</artifactId>
-    <version>2.0.1</version>
+    <version>2.0.2</version>
 </dependency>
 ```
 
@@ -73,7 +77,7 @@ jkit 是**纯 JDK、零第三方依赖**的 Java 通用工具库，由 [ZmlTools
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit-sql-auto-spring-boot-3</artifactId>
-    <version>2.0.1</version>
+    <version>2.0.2</version>
 </dependency>
 ```
 
@@ -81,7 +85,7 @@ jkit 是**纯 JDK、零第三方依赖**的 Java 通用工具库，由 [ZmlTools
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit-notify</artifactId>
-    <version>2.0.1</version>
+    <version>2.0.2</version>
 </dependency>
 ```
 
@@ -89,7 +93,7 @@ jkit 是**纯 JDK、零第三方依赖**的 Java 通用工具库，由 [ZmlTools
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit-notify-extra</artifactId>
-    <version>2.0.1</version>
+    <version>2.0.2</version>
 </dependency>
 ```
 
@@ -97,7 +101,7 @@ jkit 是**纯 JDK、零第三方依赖**的 Java 通用工具库，由 [ZmlTools
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit-curl-codegen</artifactId>
-    <version>2.0.1</version>
+    <version>2.0.2</version>
 </dependency>
 ```
 
@@ -179,7 +183,7 @@ public class QuickStart {
 
 Maven 坐标从 `top.wuyongshi:ZmlTools` 迁到 `com.alianga:jkit`，包名从 `top.wys.utils.*` 改为 `com.alianga.jkit.*`：
 
-1. **直接改 POM**（推荐）：把 `groupId` / `artifactId` 换成 `com.alianga:jkit:2.0.1`，并把源码中的 `top.wys.utils.*` import 改为 `com.alianga.jkit.*`。
+1. **直接改 POM**（推荐）：把 `groupId` / `artifactId` 换成 `com.alianga:jkit:2.0.2`，并把源码中的 `top.wys.utils.*` import 改为 `com.alianga.jkit.*`。
 2. **Maven relocation**：发布 `relocated/zmltools/pom.xml` 后，依赖旧坐标的构建会被 Maven 自动解析到新坐标（包名仍需手工替换）。
 
 ## 使用限制与兼容性

@@ -216,6 +216,9 @@ public final class FunctionAstRewriter {
             if (expr == null) {
                 return null;
             }
+            if (expr instanceof SqlIdentifier) {
+                return rewriteSpecialIdent((SqlIdentifier) expr);
+            }
             if (expr instanceof SqlFunctionExpr) {
                 return rewriteFunction((SqlFunctionExpr) expr);
             }
@@ -401,6 +404,36 @@ public final class FunctionAstRewriter {
                 b.setLeft(rewriteExpr(b.left()));
                 b.setRight(rewriteExpr(b.right()));
             }
+        }
+
+        /**
+         * SQL Server 没有 {@code CURRENT_DATE} 关键字，改成 {@code CAST(GETDATE() AS DATE)}。
+         */
+        private SqlExpr rewriteSpecialIdent(SqlIdentifier ident) {
+            String name = ident.simpleName();
+            if (name == null) {
+                return ident;
+            }
+            SqlDialect family = target.typeFamily();
+            if (!"CURRENT_DATE".equalsIgnoreCase(name)) {
+                return ident;
+            }
+            if (family == SqlDialect.SQLSERVER) {
+                SqlCastExpr cast = new SqlCastExpr();
+                SqlFunctionExpr getdate = new SqlFunctionExpr();
+                getdate.setName(SqlIdentifier.of("GETDATE"));
+                cast.setExpr(getdate);
+                cast.setDataType("DATE");
+                return cast;
+            }
+            if (family == SqlDialect.ORACLE || family == SqlDialect.ORACLE12
+                    || family == SqlDialect.DAMENG) {
+                SqlFunctionExpr trunc = new SqlFunctionExpr();
+                trunc.setName(SqlIdentifier.of("TRUNC"));
+                trunc.addArgument(SqlIdentifier.of("SYSDATE"));
+                return trunc;
+            }
+            return ident;
         }
 
         private static String functionName(SqlFunctionExpr fn) {

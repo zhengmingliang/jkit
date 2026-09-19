@@ -45,6 +45,12 @@ public final class SqlAutoOptions {
     private boolean gbase8a;
     private String tablePrefix;
     private boolean indexPrefixEnabled = true;
+    private boolean lock = true;
+    private boolean history;
+    private String historyTable = "jkit_schema_history";
+    private String export;
+    /** 标识符大小写折叠方向（upper / lower / null），由连接元数据探测，供引号 DDL 使用。 */
+    private String identifierCase;
 
     private SqlAutoOptions() {
     }
@@ -124,6 +130,28 @@ public final class SqlAutoOptions {
             Boolean v = resolver.getBoolean(P + "index-prefix-enabled");
             o.indexPrefixEnabled(v == null || v.booleanValue());
         }
+        if (resolver.contains(P + "foreign-keys")) {
+            Boolean v = resolver.getBoolean(P + "foreign-keys");
+            o.foreignKeys = v == null || v.booleanValue();
+        }
+        if (resolver.contains(P + "auto-increment")) {
+            Boolean v = resolver.getBoolean(P + "auto-increment");
+            o.autoIncrement = v == null || v.booleanValue();
+        }
+        String pis = first(resolver, P + "postgres-identity-style");
+        if (pis != null && pis.length() > 0) {
+            o.postgresIdentityStyle = SqlAutoSettings.parsePostgresIdentityStyle(pis);
+        }
+        if (resolver.contains(P + "lock")) {
+            Boolean v = resolver.getBoolean(P + "lock");
+            o.lock = v == null || v.booleanValue();
+        }
+        o.history = bool(resolver, P + "history", false);
+        String table = resolver.getString(P + "history-table");
+        if (table != null && table.length() > 0) {
+            o.historyTable = table;
+        }
+        o.export = resolver.getString(P + "export");
         return o;
     }
 
@@ -568,6 +596,87 @@ public final class SqlAutoOptions {
      */
     public SqlAutoOptions indexPrefixEnabled(boolean indexPrefixEnabled) {
         this.indexPrefixEnabled = indexPrefixEnabled;
+        return this;
+    }
+
+    /**
+     * @return 是否在执行前取数据库元数据锁（MySQL {@code GET_LOCK} / PG {@code pg_advisory_lock}），
+     *         缓解多实例并发冷启动的竞态；不支持的方言自动跳过
+     */
+    public boolean lock() {
+        return lock;
+    }
+
+    /**
+     * @param lock 是否取元数据锁
+     * @return this
+     */
+    public SqlAutoOptions lock(boolean lock) {
+        this.lock = lock;
+        return this;
+    }
+
+    /**
+     * @return 是否把已应用的变更写入历史表（默认关闭）
+     */
+    public boolean history() {
+        return history;
+    }
+
+    /**
+     * @param history 是否记录变更历史
+     * @return this
+     */
+    public SqlAutoOptions history(boolean history) {
+        this.history = history;
+        return this;
+    }
+
+    /**
+     * @return 变更历史表名
+     */
+    public String historyTable() {
+        return historyTable;
+    }
+
+    /**
+     * @param historyTable 变更历史表名
+     * @return this
+     */
+    public SqlAutoOptions historyTable(String historyTable) {
+        this.historyTable = historyTable;
+        return this;
+    }
+
+    /**
+     * @return 计划 SQL 导出路径，可空；配置后每次规划都会把将要执行的 DDL 写入该文件
+     */
+    public String export() {
+        return export;
+    }
+
+    /**
+     * @param export 计划 SQL 导出路径
+     * @return this
+     */
+    public SqlAutoOptions export(String export) {
+        this.export = export;
+        return this;
+    }
+
+    /**
+     * @return 标识符大小写折叠方向（upper / lower / null）
+     */
+    public String identifierCase() {
+        return identifierCase;
+    }
+
+    /**
+     * @param identifierCase upper / lower / null
+     * @return this
+     */
+    public SqlAutoOptions identifierCase(String identifierCase) {
+        this.identifierCase = identifierCase;
         return this;
     }
 

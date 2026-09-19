@@ -23,7 +23,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  * NotificationManager.sendFailover("dingtalk", msg, Arrays.asList(primary, backup), policy);
  * }</pre>
  *
- * <p>去重与限流是进程内内存实现，多实例不共享。
+ * <p>去重与限流是进程内内存实现，多实例不共享；计数在发送前原子记账，
+ * 并发下不会超额放行（窗口轮换边界可能有少量误差，属 best-effort）。
  *
  * @author 郑明亮
  * @since 2.0.1
@@ -134,6 +135,9 @@ public final class NotifyPolicy {
     /**
      * 发送前检查：静默 / 去重 / 限流。通过返回 {@code null}。
      *
+     * <p>去重占位与限流计数在本方法内原子完成（check-then-act 合一），
+     * 并发下同一条消息不会同时通过去重检查、也不会放行超额消息。
+     *
      * @param channelId 渠道
      * @param message 已渲染消息
      * @return 抑制结果；通过为 {@code null}
@@ -146,16 +150,27 @@ public final class NotifyPolicy {
         String key = dedupKey(channelId, message);
         long now = clock.now();
         if (dedupWindowMs > 0) {
-            Long until = dedupUntil.get(key);
-            if (until != null && until > now) {
-                return SendResult.fail(channelId, "suppressed: duplicate within " + dedupWindowMs + "ms",
-                        FailureType.SUPPRESSED);
+            long expiry = now + dedupWindowMs;
+            Long until = dedupUntil.putIfAbsent(key, expiry);
+            if (until != null) {
+                if (until > now) {
+                    return SendResult.fail(channelId,
+                            "suppressed: duplicate within " + dedupWindowMs + "ms",
+                            FailureType.SUPPRESSED);
+                }
+                // 过期条目原子续期；续不上说明别的线程已占位
+                if (!dedupUntil.replace(key, until, expiry)) {
+                    return SendResult.fail(channelId,
+                            "suppressed: duplicate within " + dedupWindowMs + "ms",
+                            FailureType.SUPPRESSED);
+                }
             }
         }
         if (rateLimitMax > 0 && rateLimitWindowMs > 0) {
-            WindowCounter counter = rateWindows.get(channelId);
-            if (counter != null && now - counter.windowStart < rateLimitWindowMs
-                    && counter.count.get() >= rateLimitMax) {
+            WindowCounter counter = rateWindows.compute(channelId,
+                    (id, cur) -> cur == null || now - cur.windowStart >= rateLimitWindowMs
+                            ? new WindowCounter(now) : cur);
+            if (counter.count.incrementAndGet() > rateLimitMax) {
                 return SendResult.fail(channelId, "suppressed: local rate limit " + rateLimitMax
                         + "/" + rateLimitWindowMs + "ms", FailureType.THROTTLED);
             }
@@ -164,24 +179,14 @@ public final class NotifyPolicy {
     }
 
     /**
-     * 真正发出去之后记账（成功或平台失败都占额度；本地抑制不占）。
+     * 发送后记账。去重与限流自 2.0.2 起已在 {@link #beforeSend} 原子记账，
+     * 本方法保留仅为兼容旧调用，不再重复记账。
      *
      * @param channelId 渠道
      * @param message 消息
      */
     public void afterAttempt(String channelId, Message message) {
-        long now = clock.now();
-        if (dedupWindowMs > 0) {
-            dedupUntil.put(dedupKey(channelId, message), now + dedupWindowMs);
-        }
-        if (rateLimitMax > 0 && rateLimitWindowMs > 0) {
-            WindowCounter counter = rateWindows.get(channelId);
-            if (counter == null || now - counter.windowStart >= rateLimitWindowMs) {
-                counter = new WindowCounter(now);
-                rateWindows.put(channelId, counter);
-            }
-            counter.count.incrementAndGet();
-        }
+        // 记账已前移到 beforeSend，见 beforeSend javadoc
     }
 
     /**

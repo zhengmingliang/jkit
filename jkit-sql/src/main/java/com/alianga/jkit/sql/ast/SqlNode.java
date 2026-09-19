@@ -70,12 +70,13 @@ public abstract class SqlNode {
     }
 
     /**
-     * 紧凑 SQL 文本（方言中性 ANSI 引号），便于调试；永不回落到 {@code Class@hash}。
+     * 紧凑 SQL 文本（默认 MySQL 标识符引号，与 {@code SQL.toSqlString} 一致），便于调试；
+     * 永不回落到 {@code Class@hash}。跨方言请用 {@code SQL.toSqlString(stmt, dialect)}。
      *
      * @return 格式化 SQL 片段
      */
     @Override
     public String toString() {
-        return new SqlFormatter(false, SqlDialect.ANSI).format(this);
+        return new SqlFormatter(false, SqlDialect.MYSQL).format(this);
     }
 }

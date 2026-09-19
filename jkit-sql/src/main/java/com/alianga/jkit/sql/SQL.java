@@ -14,8 +14,12 @@ import com.alianga.jkit.sql.schema.convert.SqlSchemaConverter;
 import com.alianga.jkit.sql.visitor.SqlVisitorAdapter;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * SQL 解析门面，对标 Druid {@code SQLUtils} 与 JSqlParser {@code CCJSqlParserUtil}
@@ -679,7 +683,7 @@ public final class SQL {
      * 一致，返回新语句，原 AST 不变。调用方需使用返回值。
      *
      * @param statement 语句
-     * @param predicateSql 谓词 SQL，如 {@code tenant_id = ?}
+     * @param predicateSql 谓词 SQL，如 {@code org_id = ?}
      * @return 带新 WHERE 的拷贝；谓词为空时返回原对象
      */
     public static SqlStatement andWhere(SqlStatement statement, String predicateSql) {
@@ -689,6 +693,100 @@ public final class SQL {
         SqlExpr predicate = parseExpr(predicateSql);
         SqlStatement copy = clone(statement);
         return SqlRewriter.andWhere(copy, predicate);
+    }
+
+    /**
+     * 设置全局行级注入配置（表白名单、列名、动态取值）。拦截器里直接 {@link #inject(SqlStatement)}。
+     *
+     * @param config 配置，null 清空
+     * @since 2.0.2
+     */
+    public static void injectConfig(SqlInjectConfig config) {
+        SqlInject.setDefault(config);
+    }
+
+    /**
+     * 按 {@link SqlInject#current()}（线程当前，否则全局默认）注入。先深拷贝。
+     * 未配置时抛 {@link IllegalStateException}。
+     *
+     * @param statement 语句
+     * @return 新语句
+     * @since 2.0.2
+     */
+    public static SqlStatement inject(SqlStatement statement) {
+        SqlInjectConfig cfg = SqlInject.current();
+        if (cfg == null || cfg.columns().isEmpty()) {
+            throw new IllegalStateException(
+                    "SqlInjectConfig not set; call SQL.injectConfig or SqlInject.setCurrent");
+        }
+        return inject(statement, cfg);
+    }
+
+    /**
+     * 按配置注入行级条件（先深拷贝再改）。可多列一次遍历。
+     *
+     * @param statement 语句
+     * @param config 配置
+     * @return 新语句
+     * @since 2.0.2
+     */
+    public static SqlStatement inject(SqlStatement statement, SqlInjectConfig config) {
+        if (statement == null) {
+            return statement;
+        }
+        SqlStatement copy = clone(statement);
+        return SqlInjectRewriter.inject(copy, config);
+    }
+
+    /**
+     * 注入单列等值条件（先深拷贝再改）。列名自定，不限租户。
+     *
+     * @param statement 语句
+     * @param column 列简单名，如 {@code org_id} / {@code deleted}
+     * @param value 值（字面量或绑定）
+     * @param tables 表白名单；省略则全部物理表
+     * @return 新语句
+     * @since 2.0.2
+     */
+    public static SqlStatement inject(SqlStatement statement, String column, SqlExpr value,
+            String... tables) {
+        Collection<String> list = tables == null || tables.length == 0 ? null : Arrays.asList(tables);
+        return inject(statement, column, value, list);
+    }
+
+    /**
+     * 注入单列等值条件（先深拷贝再改）。{@code value} 为 Java 值时收成字面量。
+     *
+     * @param statement 语句
+     * @param column 列简单名
+     * @param value Java 值
+     * @param tables 表白名单；省略则全部物理表
+     * @return 新语句
+     * @since 2.0.2
+     */
+    public static SqlStatement inject(SqlStatement statement, String column, Object value,
+            String... tables) {
+        Collection<String> list = tables == null || tables.length == 0 ? null : Arrays.asList(tables);
+        return inject(statement, column, SqlInjectRewriter.literalValue(value), list);
+    }
+
+    /**
+     * 注入单列等值条件（先深拷贝再改）。
+     *
+     * @param statement 语句
+     * @param column 列简单名
+     * @param value 值
+     * @param tables 表白名单；null 或空 = 全部物理表
+     * @return 新语句
+     * @since 2.0.2
+     */
+    public static SqlStatement inject(SqlStatement statement, String column, SqlExpr value,
+            Collection<String> tables) {
+        if (statement == null) {
+            return statement;
+        }
+        SqlStatement copy = clone(statement);
+        return SqlInjectRewriter.inject(copy, column, value, tables);
     }
 
     /**
@@ -768,6 +866,121 @@ public final class SQL {
     }
 
     /**
+     * 整树替换 SELECT 投影（先深拷贝再改）。匹配别名或标识符最后一段；{@code t.col} 按限定名匹配。
+     * 所有命中项都会替换。默认把输出别名设成列简单名，对外列名不变。
+     *
+     * <p>{@code SELECT *} 匹配不到具名列，请先 {@link #expandStar}。</p>
+     *
+     * @param statement 语句
+     * @param column 列简单名或 {@code t.col}
+     * @param exprSql 新表达式 SQL，如 {@code CONCAT(LEFT(phone,3),'****')}
+     * @return 新语句
+     * @since 2.0.2
+     */
+    public static SqlStatement replaceSelectItem(SqlStatement statement, String column, String exprSql) {
+        if (exprSql == null || exprSql.trim().isEmpty()) {
+            return statement;
+        }
+        return replaceSelectItem(statement, column, parseExpr(exprSql), null);
+    }
+
+    /**
+     * 整树替换 SELECT 投影（先深拷贝再改）。
+     *
+     * @param statement 语句
+     * @param column 列简单名或 {@code t.col}
+     * @param expr 新表达式
+     * @return 新语句
+     * @since 2.0.2
+     */
+    public static SqlStatement replaceSelectItem(SqlStatement statement, String column, SqlExpr expr) {
+        return replaceSelectItem(statement, column, expr, null);
+    }
+
+    /**
+     * 整树替换 SELECT 投影（先深拷贝再改）。
+     *
+     * @param statement 语句
+     * @param column 列简单名或 {@code t.col}
+     * @param expr 新表达式
+     * @param alias 新别名；{@code null} 保留/补列简单名，空串去掉别名
+     * @return 新语句
+     * @since 2.0.2
+     */
+    public static SqlStatement replaceSelectItem(SqlStatement statement, String column, SqlExpr expr,
+            String alias) {
+        if (statement == null) {
+            return statement;
+        }
+        SqlStatement copy = clone(statement);
+        return SqlSelectListRewriter.replaceSelectItem(copy, column, expr, alias);
+    }
+
+    /**
+     * 整树一次遍历替换多列投影（只 clone 一次）。值是表达式 SQL 或 {@link SqlExpr}。
+     *
+     * @param statement 语句
+     * @param replacements 列名（或 {@code t.col}）→ 新表达式
+     * @return 新语句
+     * @since 2.0.2
+     */
+    public static SqlStatement replaceSelectItems(SqlStatement statement, Map<String, ?> replacements) {
+        if (statement == null || replacements == null || replacements.isEmpty()) {
+            return statement;
+        }
+        Map<String, SqlExpr> exprs = new LinkedHashMap<String, SqlExpr>(replacements.size() * 2);
+        for (Map.Entry<String, ?> e : replacements.entrySet()) {
+            if (e.getKey() == null || e.getValue() == null) {
+                continue;
+            }
+            Object v = e.getValue();
+            if (v instanceof SqlExpr) {
+                exprs.put(e.getKey(), (SqlExpr) v);
+            } else {
+                String sql = String.valueOf(v).trim();
+                if (sql.isEmpty()) {
+                    continue;
+                }
+                exprs.put(e.getKey(), parseExpr(sql));
+            }
+        }
+        if (exprs.isEmpty()) {
+            return statement;
+        }
+        SqlStatement copy = clone(statement);
+        return SqlSelectListRewriter.replaceSelectItems(copy, exprs);
+    }
+
+    /**
+     * 整树展开 {@code *} / {@code t.*}（先深拷贝再改）。解析不到列的星号保持原样。
+     *
+     * @param statement 语句
+     * @param columnsByTable 物理表简单名 → 列简单名
+     * @return 新语句
+     * @since 2.0.2
+     */
+    public static SqlStatement expandStar(SqlStatement statement,
+            Map<String, ? extends List<String>> columnsByTable) {
+        return expandStar(statement, SqlSelectListRewriter.mapResolver(columnsByTable));
+    }
+
+    /**
+     * 整树展开 {@code *} / {@code t.*}（先深拷贝再改）。
+     *
+     * @param statement 语句
+     * @param resolver 表 → 列；某表返回 null 时该星号不展开
+     * @return 新语句
+     * @since 2.0.2
+     */
+    public static SqlStatement expandStar(SqlStatement statement, SqlColumnResolver resolver) {
+        if (statement == null) {
+            return statement;
+        }
+        SqlStatement copy = clone(statement);
+        return SqlSelectListRewriter.expandStar(copy, resolver);
+    }
+
+    /**
      * 按目标方言适配分页形态（先深拷贝再改）。无分页时返回拷贝或原语义等价结果。
      *
      * @param statement 语句
@@ -787,7 +1000,7 @@ public final class SQL {
      *
      * <pre>{@code
      * SqlStatement out = SQL.rewrite(stmt, SqlRewrites.create()
-     *         .add(new TenantRule())                            // 前 hook：自定义
+     *         .add(new RowFilterRule())                         // 前 hook：自定义
      *         .add(SqlRewrites.replaceTable("t", "t_2026"))     // 内建
      *         .add(SqlRewrites.addLimit(100, SqlDialect.MYSQL))); // 后 hook 位置随意
      * }</pre>
@@ -855,6 +1068,146 @@ public final class SQL {
             }
         });
         return list;
+    }
+
+    /**
+     * 把 {@code ?} 换成字面量或公式，按默认 MySQL 方言回写。字符串只加倍单引号，不会拆成多语句。
+     * 公式传 {@link SqlExpr}，例如 {@code SQL.parseExpr("NOW()")}；{@code String} 不会当 SQL 解析。
+     *
+     * @param sql SQL
+     * @param values 位置参数
+     * @return 填充后的紧凑 SQL
+     * @since 2.0.2
+     */
+    public static String bind(String sql, Object... values) {
+        return bind(sql, SqlDialect.MYSQL, values);
+    }
+
+    /**
+     * 把 {@code ?} 换成字面量或公式后按方言回写。公式请传 {@link SqlExpr}。
+     *
+     * @param sql SQL
+     * @param dialect 方言
+     * @param values 位置参数
+     * @return 填充后的紧凑 SQL
+     * @since 2.0.2
+     */
+    public static String bind(String sql, SqlDialectSpec dialect, Object... values) {
+        SqlDialectSpec d = dialect == null ? SqlDialect.MYSQL : dialect;
+        // parse 已是新树，字符串入口不再 clone
+        return toSqlString(SqlBinder.bind(parse(sql, d), d, values, null), d);
+    }
+
+    /**
+     * 填充位置参数（先深拷贝再改）。值可以是 Java 常量或 {@link SqlExpr} 公式。
+     *
+     * @param statement 语句
+     * @param dialect 方言
+     * @param values 位置参数
+     * @return 新语句
+     * @since 2.0.2
+     */
+    public static SqlStatement bind(SqlStatement statement, SqlDialectSpec dialect, Object... values) {
+        if (statement == null) {
+            return statement;
+        }
+        SqlStatement copy = clone(statement);
+        return SqlBinder.bind(copy, dialect, values, null);
+    }
+
+    /**
+     * 把 {@code :name} 换成字面量或公式。
+     *
+     * @param sql SQL
+     * @param values 命名参数（不含冒号）
+     * @return 填充后的紧凑 SQL
+     * @since 2.0.2
+     */
+    public static String bindNamed(String sql, Map<String, ?> values) {
+        return bindNamed(sql, SqlDialect.MYSQL, values);
+    }
+
+    /**
+     * 把 {@code :name} 换成字面量后按方言回写。
+     *
+     * @param sql SQL
+     * @param dialect 方言
+     * @param values 命名参数（不含冒号）
+     * @return 填充后的紧凑 SQL
+     * @since 2.0.2
+     */
+    public static String bindNamed(String sql, SqlDialectSpec dialect, Map<String, ?> values) {
+        return bindNamed(sql, dialect, null, values);
+    }
+
+    /**
+     * 按解析选项填充命名参数（支持 {@code @name@} / {@code #{table}} 等模板占位）。
+     *
+     * @param sql SQL
+     * @param dialect 方言
+     * @param options 解析选项，可空
+     * @param values 命名参数（键不含包裹符，如 {@code table} 对应 {@code #{table}}）
+     * @return 填充后的紧凑 SQL
+     * @since 2.0.2
+     */
+    public static String bindNamed(String sql, SqlDialectSpec dialect, SqlParseOptions options,
+            Map<String, ?> values) {
+        SqlDialectSpec d = dialect == null ? SqlDialect.MYSQL : dialect;
+        SqlStatement stmt = options == null ? parse(sql, d) : parse(sql, d, options);
+        return toSqlString(SqlBinder.bind(stmt, d, null, values,
+                options == null ? null : options.placeholders()), d);
+    }
+
+    /**
+     * 填充命名参数（先深拷贝再改）。
+     *
+     * @param statement 语句
+     * @param dialect 方言
+     * @param values 命名参数
+     * @return 新语句
+     * @since 2.0.2
+     */
+    public static SqlStatement bindNamed(SqlStatement statement, SqlDialectSpec dialect,
+            Map<String, ?> values) {
+        return bindNamed(statement, dialect, values, null);
+    }
+
+    /**
+     * 填充命名参数（先深拷贝再改）。{@code placeholders} 用于从 {@code #{table}} 一类 IDENT 抠键。
+     *
+     * @param statement 语句
+     * @param dialect 方言
+     * @param values 命名参数
+     * @param placeholders 额外包裹模式，可空（仍识别 {@code @*@} / {@code #{*}} 等内置）
+     * @return 新语句
+     * @since 2.0.2
+     */
+    public static SqlStatement bindNamed(SqlStatement statement, SqlDialectSpec dialect,
+            Map<String, ?> values, SqlPlaceholders placeholders) {
+        if (statement == null) {
+            return statement;
+        }
+        SqlStatement copy = clone(statement);
+        return SqlBinder.bind(copy, dialect, null, values, placeholders);
+    }
+
+    /**
+     * 同时填充位置参数与命名参数（先深拷贝再改）。
+     *
+     * @param statement 语句
+     * @param dialect 方言
+     * @param positional 位置参数
+     * @param named 命名参数
+     * @return 新语句
+     * @since 2.0.2
+     */
+    public static SqlStatement bind(SqlStatement statement, SqlDialectSpec dialect,
+            Object[] positional, Map<String, ?> named) {
+        if (statement == null) {
+            return statement;
+        }
+        SqlStatement copy = clone(statement);
+        return SqlBinder.bind(copy, dialect, positional, named);
     }
 
     /**

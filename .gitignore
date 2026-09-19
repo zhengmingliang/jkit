@@ -28,5 +28,9 @@ jkit-notify-extra/src/test/resources/application-local.yml
 node_modules/
 docs/.vitepress/dist/
 docs/.vitepress/cache/
+.docs-worktrees/
 
 .zcode
+
+# 公众号文章（本地草稿，不纳入版本库）
+articles/

@@ -41,6 +41,28 @@ public class CurlParserFixTest {
     }
 
     @Test
+    public void multipleCookieFlagsAreMergedWithSemicolon() {
+        ParsedCurlRequest req = CurlParser.parseModel(
+                "curl -b 'a=1' -b 'b=2' https://example.com/x");
+        assertEquals("a=1; b=2", req.header("Cookie"));
+    }
+
+    @Test
+    public void shortCertFlagIsSkippedLikeLongForm() {
+        ParsedCurlRequest req = CurlParser.parseModel(
+                "curl -E client.pem https://example.com/x");
+        assertTrue(req.unknownOptions().isEmpty());
+        boolean skipped = false;
+        for (String w : req.warnings()) {
+            if (w.contains("-E") && w.contains("已忽略")) {
+                skipped = true;
+                break;
+            }
+        }
+        assertTrue("-E 应与 --cert 一样按忽略处理: " + req.warnings(), skipped);
+    }
+
+    @Test
     public void dataUrlEncodePercentEncodesValue() {
         CurlRequest req = CurlParser.parse(
                 "curl -G 'https://example.com/q' --data-urlencode 'q=hello world'");

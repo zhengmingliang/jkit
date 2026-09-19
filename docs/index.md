@@ -18,6 +18,9 @@ hero:
       text: 更新日志
       link: /changelog
     - theme: alt
+      text: Maven Central
+      link: https://central.sonatype.com/artifact/com.alianga/jkit
+    - theme: alt
       text: GitHub
       link: https://github.com/zhengmingliang/jkit
 
@@ -40,6 +43,11 @@ features:
     details: 零依赖手写 SQL 解析器，对标 Druid 与 JSqlParser 常用入口；另有 jkit-sql-auto 启动时按实体建表 / 加列。
     link: /sql
     linkText: 查看 SQL 文档
+  - icon: 🚀
+    title: HTML 抽取，性能对标 Jsoup
+    details: 零依赖 HTML 解析与 CSS 选择器。与 Jsoup 1.18.1 对比：解析快至 1.76x、选择器快至 1344x、常驻内存低 15%，119 组差分用例 112 组逐结果一致。
+    link: /html
+    linkText: 查看 HTML 文档
   - icon: 📣
     title: 消息通知
     details: 钉钉、企微、飞书、Server酱、Bark、SMTP、Webhook 开箱即用，扩展渠道覆盖 Slack、Telegram、短信。
@@ -52,6 +60,8 @@ features:
     linkText: 查看 YAML 文档
 ---
 
+<DocBadges />
+
 ## 三分钟上手
 
 ::: code-group
@@ -60,12 +70,12 @@ features:
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit</artifactId>
-    <version>2.0.1</version>
+    <version>2.0.2</version>
 </dependency>
 ```
 
 ```groovy [Gradle]
-implementation 'com.alianga:jkit:2.0.1'
+implementation 'com.alianga:jkit:2.0.2'
 ```
 
 ```java [第一个程序]

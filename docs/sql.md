@@ -9,13 +9,15 @@
 
 不执行 SQL，不引 JDBC 驱动。
 
+<MavenBadge artifact="jkit-sql" />
+
 ## 引入
 
 ```xml
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit-sql</artifactId>
-    <version>2.0.1</version>
+    <version>2.0.2</version>
 </dependency>
 ```
 
@@ -121,6 +123,7 @@ common-model 一类**模板 SQL**会用 `@age@`、`%s`、`<sheet>`、`<-sheet->`
 SqlParseOptions opt = SqlParseOptions.defaults()
         .placeholders(SqlPlaceholders.create()
                 .atWrapped()    // @name@
+                .mybatis()      // #{id} / ${table}
                 .printf()       // %s / %d / %f …
                 .angle()        // <sheet>
                 .arrowAngle()   // <-sheet->
@@ -131,18 +134,39 @@ SqlStatement stmt = SQL.parse(
         SqlDialect.MYSQL, opt);
 ```
 
-也可用 `SqlPlaceholders.create().commonModelTemplates()` 一次打开上述四类内置预设。
+也可用 `SqlPlaceholders.create().commonModelTemplates()` 一次打开 common-model 四类预设；
+`SqlPlaceholders.create().mybatis()` 打开 MyBatis 的 `#{property}` / `${property}`（含 `#{id,jdbcType=VARCHAR}`）。
 
 规则摘要：
 
 | 模式 | 含义 | 词法结果 |
 |------|------|----------|
 | `@*@` | 前后 `@` 包裹的标识体 | `IDENT`（可作列/值原子） |
+| `#{*}` / `${*}` | MyBatis 参数 / 字面量（`mybatis()`） | `IDENT`；bind 时 `#{id,jdbcType=…}` 按 `id` 取值 |
 | printf | `%` + 一个字母 | `IDENT` |
 | `<*>` / `<-*->` | 表名占位（允许 `.` `-`） | `IDENT`（可作表名） |
 | 自定义 <code v-pre>{{*}}</code> 等 | 非空前后缀 + 正文 | `IDENT` |
 
 未配置时 `@age@` / `%s` / `<sheet>` 仍按原行为失败或拆成运算符。故意残缺的语句（如 `select * from`）即使开启占位符也会失败。
+
+常用写法（解析 + bind，键不含包裹符）：
+
+```java
+SqlParseOptions opt = SqlParseOptions.defaults()
+        .placeholders(SqlPlaceholders.create().mybatis());   // 只要 MyBatis 时不必叠 common-model
+
+Map<String, Object> vals = new LinkedHashMap<String, Object>();
+vals.put("table", "t_user");
+vals.put("id", 7);
+String sql = SQL.bindNamed(
+        "SELECT * FROM ${table} WHERE id = #{id, jdbcType=INTEGER}",
+        SqlDialect.MYSQL, opt, vals);
+// SELECT * FROM t_user WHERE id = 7
+
+vals.put("table", 10086);                                  // 非合法裸标识符 → 方言引号
+SQL.bindNamed("SELECT * FROM #{table}", SqlDialect.MYSQL, opt, vals);
+// SELECT * FROM `10086`     （Oracle 用 SQL.toSqlString(stmt, ORACLE) → "10086"）
+```
 
 ## 自定义语句解析器（SPI，可选）
 
@@ -184,7 +208,7 @@ List<SqlStatement> batch = SQL.parseAll(
 
 ## 统计与改写
 
-门面改写（`addLimit` / `setPage` / `andWhere` / `replaceTable` / `replaceColumn` / `addSelectItem` / `removeSelectItem` / `adaptPagination`）都是 **先 `SQL.clone` 再改**：返回新树，入参 AST 不变。`SQL.clone` 是 AST 深拷贝（`SqlAstCloner` / `SqlNode.copy`），与方言无关（`clone(stmt, dialect)` 的方言参数仅保留 API 兼容）。
+门面改写（`addLimit` / `setPage` / `andWhere` / `inject` / `replaceTable` / `replaceColumn` / `addSelectItem` / `removeSelectItem` / `replaceSelectItem` / `replaceSelectItems` / `expandStar` / `adaptPagination` / `bind`）都是 **先 `SQL.clone` 再改**：返回新树，入参 AST 不变。`SQL.clone` 是 AST 深拷贝（`SqlAstCloner` / `SqlNode.copy`），与方言无关（`clone(stmt, dialect)` 的方言参数仅保留 API 兼容）。
 
 ```java
 SqlSchemaStat stat = SQL.stat(sql);
@@ -209,11 +233,37 @@ SqlStatement c3 = SQL.addSelectItem(c2, "status");              // 追加 SELECT
 SqlStatement c4 = SQL.removeSelectItem(c3, "name");             // 按简单列名或别名移除（不可删光）
 SqlStatement c5 = SQL.adaptPagination(c4, SqlDialect.ORACLE);   // 按目标方言换分页形态
 SqlStatement copy = SQL.clone(stmt);                            // AST 深拷贝
+
+// 行级注入：启动时配一次表/列，拦截器里只 SQL.inject(stmt)
+SQL.injectConfig(SqlInjectConfig.create()
+        .tables("t_order", "t_item", "t_user")
+        .add("deleted", 0)
+        .add("tenant_id", new SqlInjectValue() {
+            public Object get() { return Session.orgId(); }
+        }));
+SqlStatement ten = SQL.inject(stmt);
+// 单次仍可显式：SQL.inject(stmt, "tenant_id", 100, "t_order")
+
+// 列级脱敏：先展开 *，再一次替换多列（只 clone / 遍历一次）
+Map<String, List<String>> cols = new LinkedHashMap<String, List<String>>();
+cols.put("t_customer", Arrays.asList("id", "name", "phone", "id_card"));
+Map<String, String> masks = new LinkedHashMap<String, String>();
+masks.put("phone", "CONCAT(LEFT(phone, 3), '****')");
+masks.put("id_card", "'****'");
+SqlStatement masked = SQL.replaceSelectItems(
+        SQL.expandStar(SQL.parse("SELECT * FROM t_customer"), cols), masks);
 ```
 
 - `addLimit`：已有分页（LIMIT / TOP / ROWNUM / `row_number` 包装）时不覆盖。SQL Server 写 `TOP`；经典 Oracle 写单层 ROWNUM 包装；其余写 `LIMIT`。
 - `setLimit` / `setOffset` / `setPage`：**替换**分页；`setPage(pageNo, pageSize)` 的 pageNo 从 1 起。
-- `removeSelectItem`：忽略大小写，匹配简单列名（`t.col` 的最后一段）或显式别名；删到只剩一项时再删会抛 `IllegalArgumentException`。
+- `removeSelectItem`：忽略大小写，匹配简单列名（`t.col` 的最后一段）或显式别名；删到只剩一项时再删会抛 `IllegalArgumentException`。只改**外层** SELECT。
+- `inject` / `SqlInjectConfig`：给匹配的物理表 AND `alias.col = value`（CTE 名与 `DUAL` 跳过）。列名自定，租户 / 软删 / 机构号都可以。`SQL.injectConfig` 设全局表名单和列；`SqlInject.setCurrent` 覆盖本线程（切面里取值）。未配置时 `SQL.inject(stmt)` 抛 `IllegalStateException`。
+  - **安全约束（2.0.2 修复）**：原 `WHERE` / `HAVING` / `ON` 含 `OR` / `XOR` 等低优先级运算符时，注入会整体套括号，保证注入条件不被优先级“漏”掉，即渲染成 `(a OR b) AND col = ?` 而非 `a OR b AND col = ?`。
+  - **布尔回写（2.0.2）**：`SqlInjectConfig.dialect(SqlDialect.ORACLE)`（或达梦等）时，注入的布尔值写 `1` / `0`（这些库 SQL 层无 `BOOLEAN` 字面量）；不配方言时按 ANSI 写 `TRUE` / `FALSE`。
+- `expandStar`：按表列清单把 `*` / `t.*` 展开；解析不到的星号保持原样。子查询 `*` 用内层投影。
+- `replaceSelectItem`：整树替换 SELECT 投影（UNION / 子查询），匹配别名或 `t.col`；`SELECT *` 请先 `expandStar`。入参 `alias` 为显式别名时赋给命中的投影列。
+  - **共享别名去重（2.0.2 修复）**：同一 `SELECT` 内若同一列被命中多次（如 `SELECT phone, phone ...`），显式 `alias` 只赋给**首个**命中项，其余退回各列自己的列名，避免产生重复输出别名；空串 `alias` 仍对所有命中项去掉别名；UNION 各分支是独立 `SELECT`，各自正常带上该别名。
+- `replaceSelectItems`：一次 clone、一次遍历替换多列，避免脱敏多字段时反复改写。
 - 分页形态、Oracle 包装、`format` / `toSqlString` 按需适配见下一节。
 
 ### 改写规则链（可选）
@@ -223,11 +273,12 @@ SqlStatement copy = SQL.clone(stmt);                            // AST 深拷贝
 
 ```java
 SqlStatement out = SQL.rewrite(stmt, SqlRewrites.create()
-        .add(new TenantRule())                            // 前 hook：自定义规则
+        .add(new RowFilterRule())                         // 前 hook：自定义规则
         .add(SqlRewrites.replaceTable("users", "users_2026"))
         .add(SqlRewrites.andWhere(SQL.parseExpr("tenant_id = ?")))
         .add(SqlRewrites.addSelectItem("status"))
         .add(SqlRewrites.removeSelectItem("secret"))
+        .add(SqlRewrites.inject("tenant_id", SqlInjectRewriter.literalValue(100), "t_order"))
         .add(SqlRewrites.adaptPagination(SqlDialect.ORACLE))
         .add(SqlRewrites.addLimit(100, SqlDialect.MYSQL)));
 ```
@@ -253,7 +304,7 @@ SqlStatement out = SQL.rewrite(stmt, SqlRewrites.create()
 | ORACLE12 | 双引号 | 拼接 | 否 | 裸 SELECT → `OFFSET … FETCH FIRST … ROWS ONLY`；已有 ROWNUM 包装仍识别 |
 | DB2 | 双引号 | 拼接 | 否 | 仅 `FETCH FIRST n ROWS ONLY` |
 
-已存在的 Oracle `ROWNUM` 双层 / `WHERE ROWNUM <= n` 与 SQL Server `row_number` 包装：`getLimit` 返回页大小，`setPage` / `setLimit` 只改数值边界（不叠 OFFSET/FETCH）。经典单层 ROWNUM 在 offset>0 时扩成双层。UNION 的分页挂在集合运算链末端。`SqlBuilder.limit` / `offset` / `toSql(dialect)` 走同一套改写（`toSql` 的方言覆盖 builder 方言）。
+已存在的 Oracle `ROWNUM` 双层 / `WHERE ROWNUM <= n` 与 SQL Server `row_number` 包装：`getLimit` 返回页大小，`setPage` / `setLimit` 只改数值边界（不叠 OFFSET/FETCH）。经典单层 ROWNUM 在 offset>0 时扩成双层。UNION 的分页挂在集合运算链末端（`LIMIT` / `OFFSET FETCH` 方言）；经典 Oracle 的 ROWNUM 包装见下一小节。`SqlBuilder.limit` / `offset` / `toSql(dialect)` 走同一套改写（`toSql` 的方言覆盖 builder 方言）。
 
 ### 经典 Oracle 的 ROWNUM 包装
 
@@ -261,9 +312,9 @@ SqlStatement out = SQL.rewrite(stmt, SqlRewrites.create()
 
 - **offset=0**：单层子查询  
   `SELECT * FROM ( <原查询> ) XX WHERE ROWNUM <= n`
-- **offset>0**：双层（中层别名 `XX` 选出 `ROWNUM AS RN` 并截 `ROWNUM <= offset+n`，外层别名 `XXX` 再滤 `RN > offset`）
+- **offset>0**：双层（中层别名 `XX` 选出 `ROWNUM AS RN` 并截 `ROWNUM <= offset+n`，外层别名 `XXX` 再滤 `RN > offset`）。外层只投影原查询列，不输出 `RN`；原查询是 `SELECT *` 时仍 `SELECT *`（会带出 `RN`）
 
-`WITH` 留在外层。`setPage` / `setLimit` / `adaptPagination` 转经典 Oracle 时会先清掉子查询内残留的旧 LIMIT/TOP，避免包装后内层还带着源方言分页。
+`WITH` 留在外层。集合运算（`UNION` / `INTERSECT` / `EXCEPT` / `MINUS`）若带 `ORDER BY`，会先改写成 `SELECT * FROM (set-op) ORDER BY …` 再套 ROWNUM，避免 Oracle 在子查询里对集合运算列别名排序报 `ORA-00904`。`setPage` / `setLimit` / `adaptPagination` 转经典 Oracle 时会先清掉子查询内残留的旧 LIMIT/TOP，避免包装后内层还带着源方言分页。回写请带目标方言：`SQL.toSqlString(page, SqlDialect.ORACLE)`；默认 `toSqlString(page)` 按 MySQL 会把 ROWNUM 再翻成 `LIMIT`。
 
 `format` / `toSqlString(..., ORACLE)` 对「offset=0 的 LIMIT/TOP → 单层 ROWNUM」走同一语义的快路径：临时清掉 LIMIT/TOP，按上面的子查询包装回写，再恢复入参（不永久改 AST）。有 offset 时走完整 `adaptPagination`。
 
@@ -290,6 +341,36 @@ String finger = SQL.parameterize("SELECT * FROM t WHERE name = 'a' AND age = 1")
 List<Object> litValues = SQL.exportParameterValues(sql); // "a", 1 —— 不是 ?/:name
 List<String> binds = SQL.parameters(sql);                 // "?", ":name"
 
+// 把 ? / :name 换成字面量（字符串只加倍单引号，不用反斜杠）
+String filled = SQL.bind("SELECT * FROM t WHERE name = ?", "'; DROP TABLE t; --");
+// SELECT * FROM t WHERE name = '''; DROP TABLE t; --'   —— 仍是一条语句
+SQL.bindNamed("SELECT * FROM t WHERE id = :id", Collections.singletonMap("id", 1));
+// 公式必须传 SqlExpr；String "NOW()" 会变成 'NOW()'
+SQL.bind("SELECT * FROM t WHERE ts > ?", SQL.parseExpr("NOW()"));
+// SELECT * FROM t WHERE ts > NOW()
+
+// 浮点用普通小数（不写科学计数法）；NaN / Infinity 直接拒绝
+SQL.bind("SELECT * FROM t WHERE v = ?", 0.0001);   // v = 0.0001（不是 1.0E-4）
+SQL.bind("SELECT * FROM t WHERE v = ?", 1.0e20);   // v = 100000000000000000000
+
+// Java 8 时间类型也支持（输出 SQL 字符串字面量，与 java.util.Date 一致）
+SQL.bind("SELECT * FROM t WHERE d = ?", LocalDate.of(2026, 9, 15));   // d = '2026-09-15'
+SQL.bind("SELECT * FROM t WHERE ts = ?", LocalDateTime.of(2026, 9, 15, 18, 39, 5)); // ts = '2026-09-15 18:39:05'
+SQL.bind("SELECT * FROM t WHERE ts = ?", Instant.ofEpochSecond(1_000_000_000L));      // 按 UTC：'2001-09-09 01:46:40'
+
+// 模板占位（解析时启用 SqlPlaceholders）：#{table} 当表名，@name@ / :name 当值
+Map<String, Object> vals = new LinkedHashMap<String, Object>();
+vals.put("table", "users");
+vals.put("name", "bob");
+vals.put("nameKey", SQL.parseExpr("LENGTH(name)"));
+String out = SQL.bindNamed(
+        "SELECT * FROM #{table} WHERE name = :name AND :nameKey > 2 OR nick = @name@",
+        SqlDialect.MYSQL,
+        SqlParseOptions.defaults().placeholders(
+                SqlPlaceholders.create().commonModelTemplates().mybatis()),
+        vals);
+// SELECT * FROM users WHERE name = 'bob' AND LENGTH(name) > 2 OR nick = 'bob'
+
 SqlWallResult wall = SQL.wall(sql); // 默认不拦截解析；显式调用
 wall.passed();
 wall.violations(); // multi-statement / comment-bypass / always-true-condition / sleep-function / delete-without-where / update-without-where
@@ -299,7 +380,11 @@ SqlWallConfig cfg = SqlWallConfig.defaults()
         .denyDdl(true)
         .denyDangerousFunctions(true)  // SLEEP / BENCHMARK / LOAD_FILE …
         .denyIntoOutfile(true)
-        .selectOnly(false);
+        .selectOnly(false)
+        .denyTables("mysql.user", "secret")   // deny-table
+        .allowTables("t_order", "t_item")     // 非空则只允许这些表；allow-table
+        .requireWhereColumns("tenant_id")     // 触及物理表时 WHERE/JOIN ON 必须出现；missing-where-column
+        .maxTables(8);                        // too-many-tables
 SqlWallResult w2 = SQL.wall(sql, SqlDialect.MYSQL, cfg);
 
 // 自定义规则（SqlWallRule SPI）：在全部内置检查之后、按注册顺序执行，违规码自动去重
@@ -323,8 +408,13 @@ stmt.accept(new SqlAstVisitor() {
 
 ```java
 SQL.format(stmt);                           // 换行缩进（SELECT 子句换行；CREATE TABLE 按列缩进）
-SQL.toSqlString(stmt);                      // 紧凑单行
+SQL.toSqlString(stmt);                      // 紧凑单行（默认 MySQL）
+stmt.toString();                            // 同 SQL.toSqlString(stmt)：MySQL 反引号
 SQL.format(stmt, SqlDialect.MYSQL, true);
+SQL.toSqlString(stmt, SqlDialect.ORACLE);   // 数字表名等强制引号时用双引号
+
+stmt.addComment("我是注释");                 // 正文即可；回写为 /* 我是注释 */
+stmt.addComment("-- already a comment");    // 已带分隔符的原文保留（紧凑模式下行注释改成块注释）
 
 // 强制给每个标识符段加方言引号（默认 false；不影响字面量/关键字/*/函数名）
 SqlFormatOptions opts = SqlFormatOptions.defaults().quoteIdentifiers(true);
@@ -342,7 +432,7 @@ SQL.format(stmt, SqlDialect.MYSQL, false,
 开启 `quoteIdentifiers` 后，**未引号**的表/列名也会强制加同套引号。
 `||` 按 AST 回写（`CONCAT`→`||`，MySQL 默认解析出的 `OR`→`OR`）。
 
-回写是 pretty-print，**不保证注释和空白 round-trip**。
+回写是 pretty-print，**不保证空白 round-trip**。`keepComments` 或 `addComment` 留下的注释会作为合法 SQL 注释输出：正文包成块注释；紧凑模式下 `--` / `#` 行注释也会改成块注释，避免把后续语句注释掉。跨方言引号请用 `SQL.toSqlString(stmt, dialect)`，不要依赖 `toString()` 以外的方言。
 
 ## 方言差异
 
@@ -357,6 +447,31 @@ SQL.format(stmt, SqlDialect.MYSQL, false,
 | 分页能力 | `supportsLimitOffset` + 逗号风格 | `supportsLimitOffset` | `supportsTop` + FETCH | 见上一节 |
 
 ClickHouse 与 MySQL 一样用反引号，但双引号也是标识符，且分页支持逗号 `LIMIT`。
+
+## JDBC URL
+
+`JdbcUrlUtils` 从 JDBC URL 解析主机 / 库名 / schema，并推断方言与驱动类名，不打开连接。
+
+```java
+import com.alianga.jkit.sql.jdbc.JdbcUrlUtils;
+import com.alianga.jkit.sql.jdbc.JdbcUrlInfo;
+
+JdbcUrlInfo info = JdbcUrlUtils.parse(
+        "jdbc:postgresql://primary:5432,standby:5432/orders?currentSchema=sales");
+info.getDbType();          // postgresql
+info.getDatabaseName();    // orders
+info.getSchema();          // sales
+info.getNodes().size();    // 2
+
+JdbcUrlUtils.fromUrl("jdbc:gaussdb://localhost:5433/postgres");  // POSTGRES
+JdbcUrlUtils.getDbType("jdbc:kingbase8://h/db");                 // kingbase
+JdbcUrlUtils.driverForUrl("jdbc:dm://localhost:5236");           // dm.jdbc.driver.DmDriver
+JdbcUrlUtils.schema("jdbc:postgresql://h/db");                   // public
+```
+
+- `fromUrl` 无法识别时返回 `null`（不像 `SqlDialect.fromName` 回落 MySQL）。
+- PostgreSQL / Gauss / openGauss / Kingbase 读 `currentSchema`（缺省 `public`）；SQL Server 缺省 `dbo`；达梦读 `schema` 参数。
+- `tryParse` 失败返回 null，不抛错。`jkit-sql-auto` 的 `SqlAutoDialects.fromUrl` / `driverForUrl` 委托本工具。
 
 ## 快速构建（SqlBuilder）
 
@@ -418,7 +533,7 @@ SELECT 列表项与表源的别名用 **`alias()`** 读取：
 - MERGE：INTO / USING / ON、多个 `WHEN MATCHED [AND pred]`、`WHEN NOT MATCHED [BY TARGET|SOURCE]`、`UPDATE … DELETE WHERE`、`INSERT … VALUES … WHERE`、`OUTPUT` / `OUTPUT … INTO`
 - DDL：CREATE/DROP/ALTER TABLE|VIEW|INDEX|DATABASE|PROCEDURE|FUNCTION|TRIGGER|EVENT|USER（抽对象名；`CREATE OR REPLACE`；MySQL `ALGORITHM`/`DEFINER`/`SQL SECURITY`；VIEW/CTAS 的 AS query；过程/函数参数 → `SqlRoutineParam`，`FUNCTION RETURNS` → `returnsType`，BEGIN 体 → `bodyStatements`（保留 `bodyRaw`/`tail` 往返）；CREATE TABLE 列定义原文（`columnDefinitions`）+ ENGINE/CHARSET/COLLATE/COMMENT + 表级 FOREIGN KEY 引用表；`CREATE TABLE t2 LIKE t1` 抽源表进 `tables()`；ALTER ADD/DROP INDEX（含 `ADD UNIQUE KEY|INDEX` 保留 `UNIQUE`）、`DROP INDEX idx ON t`、RENAME TO、CHANGE/MODIFY 列定义、ADD CONSTRAINT）；独立语句 `RENAME TABLE a TO b[, c TO d]`（多组完整回写）；`CREATE/DROP USER 'u'@'%'` 账号原文保留（`userSpec`）；`CREATE TYPE … AS OBJECT/VARRAY/ENUM` 原文保留；`DROP … PURGE` / `DROP TABLESPACE … ENGINE`、`TRUNCATE … PURGE SNAPSHOT LOG` 尾段原文；MySQL 8 函数索引 `ADD KEY idx ((expr))`；CTAS 尾缀 `WITH [NO] DATA`
 - `EXPLAIN`/`DESCRIBE` → `SqlExplainStatement`（ANALYZE/FORMAT/BUFFERS 等选项 + 嵌套 statement）、`SET` → `SqlSetStatement`（多赋值 / NAMES / CHARACTER SET / SESSION|GLOBAL）、USE、SHOW、CALL（实参进 AST）、TRUNCATE、GRANT / REVOKE（权限 + ON 对象名；收件人 `user@host` 紧凑回写；REVOKE 用 FROM）
-- 过程块 / 维护 / 事务：`BEGIN … END` / 顶层匿名 `DECLARE … BEGIN … END` → `SqlBlockStatement`（支持 `EXCEPTION WHEN`、标签 `lab: BEGIN…END lab`）；PostgreSQL `DO $$…$$` / `DO $tag$…$tag$`；`IF…ELSIF/ELSEIF…END IF`；会话式 `DECLARE x INT`（OTHER）；过程体内 `DECLARE`/`CURSOR FOR` → `SqlDeclareStatement`，`CONTINUE|EXIT|UNDO HANDLER` → `SqlHandlerStatement`；`IF`/`WHILE`/`LOOP`/`REPEAT`/`CASE…END CASE`/`LEAVE`/`ITERATE`/`RETURN` → `SqlControlStatement`（可带循环标签）；`TRIGGER` 抽 `triggerTiming`/`triggerEvent`/`triggerTable`/`triggerUpdateColumns`/`FOR EACH`/`FOLLOWS|PRECEDES`；`EVENT` 抽 `ON SCHEDULE AT|EVERY`、`eventStarts`/`eventEnds`/`eventEnabled`/`eventComment`/`eventOnCompletion`/`eventDisableOnSlave`；裸 `BEGIN` / `BEGIN WORK` / `START TRANSACTION` → `SqlStartTransactionStatement`（隔离级别 / READ WRITE|ONLY / WITH CONSISTENT SNAPSHOT）；`COMMIT` / `ROLLBACK [TO SAVEPOINT]` / `SAVEPOINT` / `RELEASE SAVEPOINT` → `SqlTransactionControlStatement`；`FLUSH …` → `SqlFlushStatement`（选项列表 / TABLES 表名）；`LOCK TABLES`/`UNLOCK TABLES` → `SqlLockTablesStatement`；`ANALYZE` / `VACUUM` / `OPTIMIZE|REPAIR|CHECK TABLE` → `SqlMaintenanceStatement`（tables + optionsRaw）；`SHOW CREATE TABLE|VIEW|DATABASE` / `SHOW COLUMNS|INDEX|TABLES` → `SqlShowStatement`；`COMMENT ON TABLE|COLUMN|…` → `SqlCommentOnStatement`（objectKind/name/comment）；SQL Server `GO` 批分隔；PG `COPY … FROM|TO` → `SqlCopyStatement`（表/列/STDIN·PROGRAM·文件 + WITH 原文）；MySQL `LOAD DATA [LOCAL] INFILE … INTO TABLE` → `SqlLoadDataStatement`（文件/表/列 + FIELDS·LINES·IGNORE 原文）；MySQL 表 `HANDLER t OPEN|READ|CLOSE` → `SqlTableHandlerStatement`；`PREPARE` / `EXECUTE` / `DEALLOCATE PREPARE` / `EXECUTE IMMEDIATE` → `SqlPrepareStatement`（名 / FROM·源 / USING）
+- 过程块 / 维护 / 事务：`BEGIN … END` / 顶层匿名 `DECLARE … BEGIN … END` → `SqlBlockStatement`（支持 `EXCEPTION WHEN`、标签 `lab: BEGIN…END lab`）；PostgreSQL `DO $$…$$` / `DO $tag$…$tag$`；`IF…ELSIF/ELSEIF…END IF`；会话式 `DECLARE x INT`（OTHER）；过程体内 `DECLARE`/`CURSOR FOR` → `SqlDeclareStatement`，`CONTINUE|EXIT|UNDO HANDLER` → `SqlHandlerStatement`；`IF`/`WHILE`/`LOOP`/`REPEAT`/`CASE…END CASE`/`LEAVE`/`ITERATE`/`RETURN` → `SqlControlStatement`（可带循环标签）；`TRIGGER` 抽 `triggerTiming`/`triggerEvent`/`triggerTable`/`triggerUpdateColumns`/`FOR EACH`/`FOLLOWS|PRECEDES`；`EVENT` 抽 `ON SCHEDULE AT|EVERY`、`eventStarts`/`eventEnds`/`eventEnabled`/`eventComment`/`eventOnCompletion`/`eventDisableOnSlave`；裸 `BEGIN` / `BEGIN WORK` / `START TRANSACTION` → `SqlStartTransactionStatement`（隔离级别 / READ WRITE|ONLY / WITH CONSISTENT SNAPSHOT）；`COMMIT` / `ROLLBACK [TO SAVEPOINT]` / `SAVEPOINT` / `RELEASE SAVEPOINT` → `SqlTransactionControlStatement`；`FLUSH …` → `SqlFlushStatement`（选项列表 / TABLES 表名）；`LOCK TABLES`/`UNLOCK TABLES` → `SqlLockTablesStatement`；`ANALYZE` / `VACUUM` / `OPTIMIZE|REPAIR|CHECK TABLE` → `SqlMaintenanceStatement`（tables + optionsRaw）；`SHOW CREATE TABLE|VIEW|DATABASE` / `SHOW COLUMNS|INDEX|TABLES` → `SqlShowStatement`；`COMMENT ON TABLE|COLUMN|…` → `SqlCommentOnStatement`（objectKind/name/comment）；SQL Server `GO` 批分隔；SQL Server 语句级 `IF <expr> <stmt> [ELSE <stmt>]` 控制流守卫 → `SqlGuardedStatement`（condition 原文保留，`type()` 委托 body，故 `IF…DROP` 归 DROP）；PG `COPY … FROM|TO` → `SqlCopyStatement`（表/列/STDIN·PROGRAM·文件 + WITH 原文）；MySQL `LOAD DATA [LOCAL] INFILE … INTO TABLE` → `SqlLoadDataStatement`（文件/表/列 + FIELDS·LINES·IGNORE 原文）；MySQL 表 `HANDLER t OPEN|READ|CLOSE` → `SqlTableHandlerStatement`；`PREPARE` / `EXECUTE` / `DEALLOCATE PREPARE` / `EXECUTE IMMEDIATE` → `SqlPrepareStatement`（名 / FROM·源 / USING）
 - 表达式：字面量、绑定 `?` / `:name` / `:0` / `@var`、相邻字符串隐式拼接、算术比较、AND/OR/XOR/NOT、IN（含 `IN :name` / `IN ?` 无括号绑定列表）/BETWEEN/LIKE/ILIKE/`NOT ILIKE`/REGEXP、IS NULL、`IS DISTINCT FROM` / `IS NOT DISTINCT FROM`、CASE、CAST / `TRY_CAST` / `::`、函数（含 `USING charset`）、EXISTS、子查询、函数结果字段访问 `f(x).y`、`INTERVAL '1 day'` / `INTERVAL 1 DAY` / `INTERVAL … YEAR(n) TO MONTH`、`CAST(… AS INTERVAL DAY TO SECOND)`、`X'FF'` / `0xFF`、行构造 `(a,b)`、JSON `->` `->>` `#>` `#>>`、数组下标 `arr[1]`、PG 数组构造 `ARRAY[1,2,3]`（含 `ANY(ARRAY[...])`）、`= ANY/SOME/ALL (...)`；`INTERVAL` 复合单位（`HOUR_MINUTE`/`YEAR_MONTH` 等）与表达式值（`INTERVAL 6/4 HOUR_MINUTE`）；字符集前缀字面量（`_latin1'x'` / `_utf8mb4'…'` / `_binary'…'` / `_utf32 X'…'`）；`NOT REGEXP`；PL/SQL 游标属性 `SQL%FOUND` / `c1%NOTFOUND`；`count(UNIQUE …)`（等同 DISTINCT）；JDBC/ODBC 转义解包（`{fn …}` 函数、`{d|t|ts '…'}` 类型字面量、`{oj …}` JOIN、`{call …}`、`{escape …}`）；另含 PG `@>`/`<@`/`~`/`~*`、MySQL `FORCE INDEX FOR …`/`<=>`/`INSERT DELAYED`/`BINARY`、SQL Server `TOP WITH TIES`、`TABLESAMPLE`/`SAMPLE`、Oracle `(+)` 外连接后缀 / `CONNECT_BY_ROOT`
 - 注释：`--`、`/* */`、MySQL `#`；仅注释/空白的输入解析为 `OTHER` 空语句（不抛 empty SQL）；MySQL 可执行注释 `/*!40101 … */` 展开为内部 SQL（不整段丢弃）；优化器 hint `/*+ … */` 挂到 SELECT / 表并可 format 回写；位置游离的 hint（如 WHERE 中的 `/*+TDDL:MASTER*/`、Trino `/*+joinMethod=…*/`）统一吸收并挂到 SELECT 回写
 - 标识符：MySQL 裸标识符允许数字开头（如 `32强国` / `1019使用`），整段不能只是数字；`32` / `32.5` / `32e1` / `0xFF` 仍为字面量；反引号形式原本即可；限定名中点号后的数字开头段可解析（`t.1_id` / `a.32强国`；前导小数 `.5` 仍为 NUMBER）；点号后单引号名作引用标识符（`T.'Group'`）；SELECT 列表别名支持点号限定（`AS a.b`）；函数与表名支持 Oracle DB Link 后缀（`fn@dblink` / `t@dblink`，`SqlIdentifier.dblink`）
@@ -429,7 +544,7 @@ SELECT 列表项与表源的别名用 **`alias()`** 读取：
 
 明确未做：过程体**执行引擎**（AST 结构化已覆盖 DECLARE/HANDLER/控制流/TRIGGER/EVENT 等，但不解释执行）、完整 Wall 规则集（`SqlWallConfig` 提供可配置子集，非 Druid WallFilter 全量）、`MATCH_RECOGNIZE.PATTERN` 的 DSL 树（仍为字符串）。CREATE TABLE 列类型/约束已进 `columnDefinitions` 并可 format 往返。未知函数按普通函数调用解析，不失败。
 
-## 跨方言类型转换（进行中）
+## 跨方言类型转换
 
 表结构 / SQL 跨方言转换走 **Normal Form 中转**（canonical 类型，避免 N² pairwise 映射）。设计见 [sql-schema-converter-design.md](./sql-schema-converter-design.md)。
 
@@ -480,7 +595,13 @@ Oracle ≤11g 的自增默认给出 `MANUAL_ACTION_REQUIRED`；`generateOracleSe
 - `CONCAT(a,b,c)` 在 Oracle 下改为 `||`（Oracle `CONCAT` 只接受两参数）
 - `CAST` / `CONVERT(expr, type)` 的类型走 canonical 表
 - MySQL `CONVERT(expr USING charset)` **不会**误映射成 CAST，只告警并保留原文
-- `DATE_ADD`/`DATE_SUB` → 加减 `INTERVAL`；`DATEDIFF` → 日期相减；`FROM_UNIXTIME` → `TO_TIMESTAMP`
+- `DATE_ADD`/`DATE_SUB` → 加减 `INTERVAL`；转到 Oracle 的「日」间隔写成数字加减（避免 `INTERVAL '180' DAY` 前导精度 2 触发 ORA-01873）
+- `DATEADD(unit, n, d)`（SQL Server 源）→ MySQL `DATE_ADD`/`DATE_SUB`，或 PG/Oracle 间隔运算
+- `GETDATE()` / `SYSDATE` / `NOW()` 互转；SQL Server 目标把 `CURRENT_DATE` 改成 `CAST(GETDATE() AS DATE)`
+- `LEAST`/`GREATEST` 转到 SQL Server 改写成嵌套 `CASE`
+- Oracle / SQL Server 目标去掉 `WITH RECURSIVE` 关键字；Oracle 递归 CTE 补列清单 `WITH x(c1, c2) AS (...)`
+- `DATEDIFF` → 日期相减；`FROM_UNIXTIME` → `TO_TIMESTAMP`
+- `DATE_FORMAT`：常见格式符会改写（`%Y-%m-%d %H:%i:%s` → PG/Oracle `TO_CHAR(..., 'YYYY-MM-DD HH24:MI:SS')`；SQLite `strftime` 交换参数并把 `%i` 改成 `%M`）。对不上的格式符保留并 `SEMANTIC_RISK`
 - `SUBSTRING`/`LEFT`/`RIGHT`/`MID`：Oracle/达梦 `SUBSTR`；SQL Server 两参数补 `LEN`、负起点改 `RIGHT`；SQLite/Hive 的 `LEFT`/`RIGHT` 展开成 `SUBSTR`。回写按方言：PG/MySQL 用 `FROM n FOR m`，SQL Server/SQLite 用逗号
 - `UCASE`/`LCASE`→`UPPER`/`LOWER`；`CONCAT_WS`；`LPAD`/`RPAD`；`SPACE`；`CEIL`/`CEILING`；`POW`/`POWER`；`MOD`；`YEAR`/`MONTH`/`DAY`/`HOUR`/`MINUTE`/`SECOND`；`SYSDATE`；`LAST_DAY`；`CHAR`/`CHR`
 - `DECODE`/`NVL2` → `CASE`；`FIND_IN_SET`/`SUBSTRING_INDEX` 无干净等价则告警并保留
@@ -497,6 +618,7 @@ mvn -Dtest=CrossDialectDdlExecutionTest test      # MySQL→PG 建表；需要 D
 mvn -Dtest=CrossDialectExprExecutionTest test     # DDL+表达式真库执行：PG 上 DATE_ADD→INTERVAL、DATEDIFF→CAST 减法、MySQL 上 ||→CONCAT、SQLite 上 AUTOINCREMENT、NUMERIC(10,2) 不截断；PG/MySQL 走 Docker，SQLite 走内存库
 mvn -Dtest=LocalDatasourceConvertTest test        # 读 src/test/resources/datasource，连本机 MySQL/PG/Oracle
 mvn -Dtest=LocalDatasourceFunctionRewriteTest test  # 同上，真库执行 SUBSTRING/LEFT/RIGHT/LOCATE 改写结果
+mvn -Dtest=ComplexSqlExecutionIT test               # 1200 条复杂 SQL 代表题（001/022/211）原文 + MySQL→Oracle12/SQL Server 转换后真库执行
 java -jar target/benchmarks.jar com.alianga.test.sql.jmh.SqlSchemaConvertBenchmark -f 1 -wi 1 -i 1
 ```
 
@@ -510,7 +632,7 @@ java -jar target/benchmarks.jar com.alianga.test.sql.jmh.SqlSchemaConvertBenchma
 
 对标 data-set `EntityScanner`：扫描包下带 `@SqlTable`、JPA `@Entity`、MyBatis-Plus `@TableName`/`@TableId` 的类（不依赖 Spring / JPA / MyBatis / Hibernate 编译），再按方言生成建表与增删改查。也认 `@TableField`（`exist=false` 跳过）、JPA `@Index`/`@Enumerated`/`@Embedded`、任意 `@Comment`（按简单名，不绑包名）、Hibernate `@ColumnDefault`；`List`/`Set`/`@OneToMany` 默认不建列。`createTables` 按外键把被引用表排在前面。Java 类型走 canonical 类型表。
 
-表 / 列注释：`@SqlTable(comment=…)`、`@SqlColumn(comment=…)`，以及任意简单名为 `Comment` 的注解（标在类上=表注释，标在字段上=列注释，读 `value` 或 `comment`；jkit 注解优先）。MySQL / Hive / ClickHouse 写成列内 / 表尾 `COMMENT '…'`；H2 列内 `COMMENT`，表级走 `COMMENT ON TABLE`；PostgreSQL / Oracle / DB2 / ANSI 走 `COMMENT ON TABLE|COLUMN`；SQL Server 走 `sp_addextendedproperty`；Presto 表级 `WITH (comment=…)`；SQLite 无注释语法，忽略。自动建表把这些附录拆成独立变更执行。
+表 / 列注释：`@SqlTable(comment=…)`、`@SqlColumn(comment=…)`、本模块 `com.alianga.jkit.sql.entity.Comment`，以及任意简单名为 `Comment` 的注解（标在类上=表注释，标在字段上=列注释，读 `value` 或 `comment`；jkit 注解优先）。MySQL / Hive / ClickHouse 写成列内 / 表尾 `COMMENT '…'`；H2 列内 `COMMENT`，表级走 `COMMENT ON TABLE`；PostgreSQL / Oracle / DB2 / ANSI 走 `COMMENT ON TABLE|COLUMN`；SQL Server 走 `sp_addextendedproperty`；Presto 表级 `WITH (comment=…)`；SQLite 无注释语法，忽略。自动建表把这些附录拆成独立变更执行。
 
 列默认值：Hibernate `@ColumnDefault` 的 `value` 是 **SQL 片段**（不含 `DEFAULT` 关键字），原样写入列定义，例如 `@ColumnDefault("0")` → `DEFAULT 0`，`@ColumnDefault("'guest'")` → `DEFAULT 'guest'`，`@ColumnDefault("CURRENT_TIMESTAMP")` → `DEFAULT CURRENT_TIMESTAMP`。`columnDefinition` 里已有 `DEFAULT` 时不再重复。
 
@@ -607,6 +729,8 @@ mvn -Dtest=SqlParserCompareTest test
 
 `tools-test` 文件语料 `sql-corpus.txt`（约 **379** 条）上 **jkit 379/379（100%）**；内嵌 CORPUS（约 64 条）亦全绿。竞品缺口随样例变化（Druid 常见挂 `DISTINCT ON` / WINDOW 继承 / UNNEST；JSqlParser 常见挂 `LOCK IN SHARE MODE` / `[dbo].[user]` / WINDOW 继承）。
 
+`SQL.bind` / `bindNamed` 字符串入口对 parse 得到的新树就地填值（不再二次 clone）；`SQL.bind(stmt, …)` AST 入口仍 clone-then-mutate。tools-test `SqlBindBenchTest` 墙钟对比（warmup=2000 / iter=20000）：全路径命名填值从慢于 Druid 改为快于 Druid；缓存 AST 路径因必须 clone，仍慢于只反解析的 JSqlParser。
+
 吞吐以 **JMH** 为准（`tools-test` 的 `SqlParseBenchmark`）。正式轮实测（fork=2、warmup=5、iteration=5、Cnt=10，avgt，ns/op，越小越好；2026-09-10，i9-13900HX / OpenJDK 17.0.11）：
 
 | 引擎 | SIMPLE（单表查询） | JOIN（双表连接） | WINDOW（窗口函数） |
@@ -647,7 +771,7 @@ mvn -Dtest=ExternalSqlCorpusCompareTest test
 
 ## 业务场景与实践案例
 
-`jkit-sql` 的能力可以落在下面 14 类业务场景里，每类配至少两个最佳实践案例。所有片段都取自
+`jkit-sql` 的能力可以落在下面 18 类业务场景里，每类配至少两个最佳实践案例。所有片段都取自
 `jkit-sql/src/test/java/com/alianga/jkit/sql/SqlBusinessScenarioTest.java`，可直接运行回归：
 
 ```text
@@ -658,18 +782,22 @@ mvn -pl jkit-sql test -Dtest=SqlBusinessScenarioTest
 | --- | --- | --- | --- |
 | 1 | SQL 审计与依赖分析 | `SQL.tables` / `SQL.stat` / `SqlStatement.isReadOnly` | 依赖提取、写操作标记 |
 | 2 | 读写分离路由 | `SqlStatement.isReadOnly` | 只读走从库、持锁 SELECT 走主库 |
-| 3 | SQL 注入防护 | `SQL.parameterize` / `SQL.exportParameterValues` | 字面量收编、绑定值导出 |
-| 4 | SQL 防火墙 | `SQL.wall` / `SqlWallConfig` | 危险语句拦截、按通道放行 DDL |
+| 3 | SQL 注入防护 | `SQL.parameterize` / `SQL.bind` / `SQL.bindNamed` / `SQL.exportParameterValues` | 字面量收编、安全回填、`IN` 集合、公式 |
+| 4 | SQL 防火墙 | `SQL.wall` / `SqlWallConfig` | 危险语句、无 WHERE 写、恒真 `LIKE '%'` / `XOR` |
 | 5 | 跨方言数据库迁移 | `SQL.convertBatch` / `SqlSchemaConverter.convert` | DDL 翻译闭环、批量 DML 函数改写 |
 | 6 | 多方言分页 | `SQL.setPage` / `SQL.adaptPagination` / `SQL.toSqlString` | LIMIT/TOP/FETCH/ROWNUM、offset=0 单层包装、回写按需适配 |
-| 7 | 多租户改写 | `SqlRewrites.replaceTable` / `SqlRewrites.andWhere` | 分表路由、租户条件注入 |
-| 8 | 数据脱敏与列级权限 | `SQL.removeSelectItem` / `SqlRewrites.replaceColumn` | 敏感列裁剪、物理列改名映射 |
+| 7 | 多租户改写 | `SQL.inject` / `SqlInjectConfig` / `SqlRewrites.replaceTable` | 全局表列配置、切面取值、分表路由 |
+| 8 | 数据脱敏与列级权限 | `SQL.expandStar` / `SQL.replaceSelectItems` / `SQL.removeSelectItem` | 展开 `*`、一次替换多列、裁敏感列 |
 | 9 | 动态 SQL 构建 | `SqlBuilder` | 条件查询组装、INSERT/UPDATE |
 | 10 | 实体驱动多方言建表 | `SqlEntities.createTable` | MySQL 内联注释、PG 的 COMMENT ON |
-| 11 | SQL 格式化与规范统一 | `SQL.format` / `SqlFormatOptions` | 关键字大小写归一、pretty 多行 |
-| 12 | 遗留模板占位符迁移 | `SqlPlaceholders` / `SqlParseOptions.placeholders` | `@xx@`、`%s` 两种风格 |
+| 11 | SQL 格式化与规范统一 | `SQL.format` / `toString` / `addComment` | 关键字大小写、pretty、注释、方言引号 |
+| 12 | 遗留模板占位符迁移 | `SqlPlaceholders` / `SQL.bindNamed` | `@xx@`、`%s`、MyBatis `#{}/ ${}` |
 | 13 | 表达式预计算 | `SQL.eval` | 常量折叠、列引用返回 null |
 | 14 | 安全改写不污染原语句 | `SQL.clone` / clone-then-mutate | 复用缓存原语句、分页改写不改原句 |
+| 15 | 多数据源方言自动识别 | `JdbcUrlUtils.fromUrl` / `parse` / `driverForUrl` | URL 推断方言、HA 节点 / schema / 驱动 |
+| 16 | 报表函数跨方言改写 | `SQL.convert`（`DATE_FORMAT`） | MySQL → PG/Oracle `TO_CHAR`、SQLite `strftime` |
+| 17 | 动态表名 / 分表安全绑定 | `SQL.bindNamed` + `SqlPlaceholders.mybatis()` | 表名当标识符、数字表名加引号、注入仍是一条语句 |
+| 18 | 低代码查询沙箱 | `allowTables` / `denyTables` / `requireWhereColumns` / `maxTables` | 表白名单、WHERE 必含租户列、JOIN 宽度上限 |
 
 ### 1. SQL 审计与依赖分析
 
@@ -738,6 +866,30 @@ List<Object> values = SQL.exportParameterValues(stmt);   // [alice, 18]
 String parameterized = SQL.parameterize(stmt);           // 值全部变成 ?，已存在的 ? 保持不变
 ```
 
+**案例 3：`SQL.bind` 安全回填（含 `IN` 集合）**
+
+```java
+String payload = "'; DROP TABLE t_user; --";
+String sql = SQL.bind("SELECT * FROM t_user WHERE name = ?", payload);
+// SELECT * FROM t_user WHERE name = '''; DROP TABLE t_user; --'  —— 仍是一条语句
+SQL.parseAll(sql).size();                                // 1
+
+String inList = SQL.bind("SELECT * FROM t WHERE id IN ?", Arrays.asList(1, 2, 3));
+// SELECT * FROM t WHERE id IN (1, 2, 3)
+```
+
+**案例 4：`bindNamed` 填值 + 公式**
+
+```java
+Map<String, Object> vals = new LinkedHashMap<String, Object>();
+vals.put("id", 7);
+vals.put("ts", SQL.parseExpr("NOW()"));                  // 公式必须传 SqlExpr
+String sql = SQL.bindNamed(
+        "SELECT * FROM t_user WHERE id = :id AND created_at > :ts", vals);
+// SELECT * FROM t_user WHERE id = 7 AND created_at > NOW()
+// 字符串 "NOW()" 会变成 'NOW()'，不要这么传
+```
+
 ### 4. SQL 防火墙（Wall）
 
 面向用户可编辑查询、开放接口、低代码平台等不可信入口做前置拦截。
@@ -750,6 +902,8 @@ SQL.wall("DELETE FROM t").violations();                        // [delete-withou
 SQL.wall("UPDATE t SET a = 1").violations();                   // [update-without-where]
 SQL.wall("SELECT SLEEP(5) FROM t").violations();               // [dangerous-function]
 SQL.wall("SELECT * FROM t WHERE name = 'x' --").violations();  // [comment-bypass]
+SQL.wall("SELECT * FROM t WHERE name LIKE '%'").violations();  // [always-true-condition]
+SQL.wall("SELECT * FROM t WHERE id = 1 XOR 1 = 1").violations(); // [always-true-condition]
 SQL.wall("SELECT * FROM t WHERE id = 1").passed();             // true，合法放行
 ```
 
@@ -809,6 +963,11 @@ SqlStatement page = SQL.setPage(
 // 双层 RN，不含 OFFSET/FETCH
 SQL.parse(SQL.toSqlString(page, SqlDialect.ORACLE), SqlDialect.ORACLE);
 
+// UNION + ORDER BY：先 SELECT * FROM (set-op) ORDER BY，再套 ROWNUM
+SqlStatement unionPage = SQL.setPage(SQL.parse(
+        "SELECT a FROM t1 UNION ALL SELECT a FROM t2 ORDER BY a"), 2, 5, SqlDialect.ORACLE);
+SQL.toSqlString(unionPage, SqlDialect.ORACLE);
+
 // 已有 MySQL LIMIT 的 AST，按目标方言回写或显式适配
 SqlStatement mysql = SQL.parse("SELECT * FROM emp LIMIT 10");
 SQL.toSqlString(mysql, SqlDialect.ORACLE);               // 单层 ROWNUM
@@ -838,6 +997,20 @@ SqlStatement out = SQL.rewrite(stmt, SqlRewrites.create()
 SQL.toSqlString(stmt);                                   // 原语句未被改动
 ```
 
+**案例 3：启动时配表白名单，拦截器里 `SQL.inject`**
+
+```java
+SQL.injectConfig(SqlInjectConfig.create()
+        .tables("t_order", "t_item")
+        .add("deleted", 0)
+        .add("tenant_id", new SqlInjectValue() {
+            public Object get() { return Session.orgId(); }
+        }));
+SqlStatement out = SQL.inject(SQL.parse("SELECT id FROM t_order WHERE status = 1"));
+// SELECT id FROM t_order WHERE status = 1 AND tenant_id = … AND deleted = 0
+// 请求结束：SqlInject.clear()；单次仍可 SQL.inject(stmt, "tenant_id", 100, "t_order")
+```
+
 ### 8. 数据脱敏与列级权限
 
 对外接口裁掉敏感列；库表重构后旧 SQL 不改代码即可适配。
@@ -857,6 +1030,19 @@ out = SQL.removeSelectItem(out, "id_card");
 SqlStatement out = SQL.rewrite(SQL.parse("SELECT name FROM t_user WHERE name = 'a'"),
         SqlRewrites.create().add(SqlRewrites.replaceColumn("name", "user_name")));
 // SELECT user_name FROM t_user WHERE user_name = 'a'
+```
+
+**案例 3：展开 `*` 后一次替换多列**
+
+```java
+Map<String, List<String>> cols = new LinkedHashMap<String, List<String>>();
+cols.put("t_customer", Arrays.asList("id", "name", "phone", "id_card"));
+Map<String, String> masks = new LinkedHashMap<String, String>();
+masks.put("phone", "CONCAT(LEFT(phone, 3), '****')");
+masks.put("id_card", "'****'");
+SqlStatement masked = SQL.replaceSelectItems(
+        SQL.expandStar(SQL.parse("SELECT * FROM t_customer"), cols), masks);
+// SELECT id, name, CONCAT(LEFT(phone, 3), '****') AS phone, '****' AS id_card FROM t_customer
 ```
 
 ### 9. 动态 SQL 构建
@@ -932,6 +1118,21 @@ pretty.contains("\n");                                   // true
 assertEquals(SQL.tables(SQL.parse(ugly)), SQL.tables(SQL.parse(pretty)));
 ```
 
+**案例 3：`addComment` + `toString()` 默认 MySQL 反引号**
+
+```java
+SqlParseOptions opt = SqlParseOptions.defaults()
+        .placeholders(SqlPlaceholders.create().mybatis());
+SqlStatement bound = SQL.bindNamed(
+        SQL.parse("SELECT * FROM #{table}", SqlDialect.MYSQL, opt),
+        SqlDialect.MYSQL, Collections.<String, Object>singletonMap("table", 10086));
+bound.addComment("我是注释");                             // 传正文即可
+String sql = bound.toString();
+// /* 我是注释 */ SELECT * FROM `10086`
+SQL.toSqlString(bound, SqlDialect.ORACLE);               // "10086"
+SQL.toSqlString(bound, SqlDialect.SQLSERVER);            // [10086]
+```
+
 ### 12. 遗留模板占位符迁移
 
 老系统里的 `@xx@` / `%s` 风格 SQL，不改写文本也能直接解析。
@@ -954,6 +1155,30 @@ SqlStatement stmt = SQL.parse("SELECT %s FROM (SELECT '20221111' AS %s) AS a",
         SqlDialect.MYSQL,
         SqlParseOptions.defaults().placeholders(SqlPlaceholders.create().printf()));
 SQL.tables(stmt);                                        // []，FROM 的是派生表
+```
+
+**案例 3：MyBatis `#{id}` / `${table}`**
+
+```java
+SqlParseOptions opt = SqlParseOptions.defaults()
+        .placeholders(SqlPlaceholders.create().mybatis());
+SQL.parse("SELECT * FROM ${table} WHERE id = #{id, jdbcType=INTEGER}",
+        SqlDialect.MYSQL, opt);
+```
+
+**案例 4：bind 按属性名填 MyBatis 占位**
+
+```java
+Map<String, Object> vals = new LinkedHashMap<String, Object>();
+vals.put("table", "t_user");
+vals.put("id", 7);
+vals.put("user.name", "bob");
+String sql = SQL.bindNamed(
+        "SELECT * FROM ${table} WHERE id = #{id, jdbcType=INTEGER} AND name = #{user.name}",
+        SqlDialect.MYSQL,
+        SqlParseOptions.defaults().placeholders(SqlPlaceholders.create().mybatis()),
+        vals);
+// SELECT * FROM t_user WHERE id = 7 AND name = 'bob'
 ```
 
 ### 13. 表达式预计算
@@ -993,6 +1218,122 @@ SQL.toSqlString(masked).contains("name");                       // false
 SqlStatement original = SQL.parse("SELECT id FROM users WHERE status = 1");
 SQL.setPage(original, 2, 10, SqlDialect.MYSQL);
 ((SqlSelect) original).limit();                          // null，原语句无 LIMIT
+```
+
+### 15. 多数据源方言自动识别
+
+接入很多 JDBC URL 时，不要手写 `if mysql else oracle`。`JdbcUrlUtils` 不打开连接，从 URL 推断方言、库名、schema、驱动类。
+
+**案例 1：按 URL 选方言再解析 / 回写**
+
+```java
+SqlDialect dialect = JdbcUrlUtils.fromUrl(
+        "jdbc:postgresql://primary:5432/orders?currentSchema=sales");  // POSTGRES
+SqlStatement stmt = SQL.parse("SELECT id FROM t WHERE name = 'a' || 'b'", dialect);
+SQL.toSqlString(stmt, dialect);                          // PG 下 || 是拼接
+JdbcUrlUtils.fromUrl("jdbc:dm://localhost:5236");        // DAMENG
+JdbcUrlUtils.fromUrl("jdbc:tidb://127.0.0.1:4000/test"); // MYSQL
+JdbcUrlUtils.fromUrl("jdbc:unknown:foo");                // null，不会误回落 MySQL
+```
+
+**案例 2：HA 节点、schema、驱动类**
+
+```java
+JdbcUrlInfo info = JdbcUrlUtils.parse(
+        "jdbc:postgresql://primary:5432,standby:5432/orders?currentSchema=sales");
+info.getDbType();          // postgresql
+info.getDatabaseName();    // orders
+info.getSchema();          // sales
+info.getNodes().size();    // 2
+JdbcUrlUtils.driverForUrl("jdbc:dm://localhost:5236");   // dm.jdbc.driver.DmDriver
+JdbcUrlUtils.schema("jdbc:postgresql://h/db");           // public
+```
+
+### 16. 报表函数跨方言改写
+
+存量报表 SQL 里的 MySQL `DATE_FORMAT` 迁到 PG / Oracle / SQLite 时，格式符一并改写，输出可被目标方言再解析。
+
+**案例 1：MySQL → PostgreSQL / Oracle `TO_CHAR`**
+
+```java
+String pg = SQL.convert("SELECT DATE_FORMAT(ts, '%Y-%m-%d %H:%i:%s') FROM t",
+        SqlDialect.MYSQL, SqlDialect.POSTGRES);
+// SELECT TO_CHAR(ts, 'YYYY-MM-DD HH24:MI:SS') FROM t
+SQL.parse(pg, SqlDialect.POSTGRES);
+
+String ora = SQL.convert("SELECT DATE_FORMAT(ts, '%Y-%m-%d') FROM t",
+        SqlDialect.MYSQL, SqlDialect.ORACLE);
+// SELECT TO_CHAR(ts, 'YYYY-MM-DD') FROM t
+SQL.parse(ora, SqlDialect.ORACLE);
+```
+
+**案例 2：MySQL → SQLite `strftime`（参数对调，`%i` → `%M`）**
+
+```java
+String sql = SQL.convert("SELECT DATE_FORMAT(ts, '%Y-%m-%d %H:%i:%s') FROM t",
+        SqlDialect.MYSQL, SqlDialect.SQLITE);
+// SELECT strftime('%Y-%m-%d %H:%M:%S', ts) FROM t
+SQL.parse(sql, SqlDialect.SQLITE);
+```
+
+### 17. 动态表名 / 分表安全绑定
+
+按日期、租户、sheet 名拼表名时，用模板占位 + bind：表名位置写成标识符（必要时加方言引号），不会变成 `'t_user'` 字符串，恶意表名也拆不成第二条语句。
+
+**案例 1：分表名当标识符**
+
+```java
+SqlParseOptions opt = SqlParseOptions.defaults()
+        .placeholders(SqlPlaceholders.create().mybatis());
+Map<String, Object> vals = new LinkedHashMap<String, Object>();
+vals.put("table", "t_user_2026");
+vals.put("id", 1);
+String sql = SQL.bindNamed("SELECT * FROM ${table} WHERE id = #{id}",
+        SqlDialect.MYSQL, opt, vals);
+// SELECT * FROM t_user_2026 WHERE id = 1   —— 不是 FROM 't_user_2026'
+```
+
+**案例 2：数字表名加反引号；注入 payload 仍是一个标识符**
+
+```java
+SQL.bindNamed("SELECT * FROM #{table}", SqlDialect.MYSQL, opt,
+        Collections.<String, Object>singletonMap("table", 10086));
+// SELECT * FROM `10086`
+
+SQL.bindNamed("SELECT * FROM #{table}", SqlDialect.MYSQL, opt,
+        Collections.<String, Object>singletonMap("table", "t; DROP TABLE x"));
+// SELECT * FROM `t; DROP TABLE x`   —— parseAll 仍是 1 条
+```
+
+### 18. 低代码查询沙箱
+
+开放查询 / 报表设计器只能碰业务表，必须带租户列，JOIN 不能无限变宽。`SqlWallConfig.defaults()` **默认不**开表白名单（避免误杀）；沙箱显式打开。
+
+**案例 1：只允许业务表，拦截系统表**
+
+```java
+SqlWallConfig cfg = SqlWallConfig.defaults()
+        .allowTables("t_order", "t_item")
+        .denyTables("mysql.user", "secret");
+SQL.wall("SELECT id FROM t_order o JOIN t_item i ON o.id = i.oid",
+        SqlDialect.MYSQL, cfg).passed();                 // true
+SQL.wall("SELECT id FROM t_user", SqlDialect.MYSQL, cfg).violations();
+// [allow-table]
+SQL.wall("SELECT * FROM secret", SqlDialect.MYSQL, cfg).violations();
+// [deny-table]
+```
+
+**案例 2：WHERE 必含租户列，限制物理表数量**
+
+```java
+SqlWallConfig cfg = SqlWallConfig.defaults()
+        .requireWhereColumns("tenant_id")
+        .maxTables(2);
+SQL.wall("SELECT id FROM t_order WHERE tenant_id = 1", SqlDialect.MYSQL, cfg).passed();
+SQL.wall("SELECT id FROM t_order", SqlDialect.MYSQL, cfg).violations();
+// [missing-where-column]
+SQL.wall("SELECT * FROM a JOIN b ON a.id = b.id JOIN c ON b.id = c.id",
+        SqlDialect.MYSQL, cfg).violations();             // [too-many-tables]
 ```
 
 ### 新增场景的约定

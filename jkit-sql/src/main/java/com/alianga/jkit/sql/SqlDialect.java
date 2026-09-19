@@ -346,6 +346,19 @@ public enum SqlDialect implements SqlDialectSpec {
     }
 
     /**
+     * {@inheritDoc}
+     *
+     * <p>MySQL/Hive 用 0/1；Oracle / 达梦无 SQL BOOLEAN；SQL Server 是 BIT；
+     * SQLite、DB2 登记为整数族。其余（PG/H2/ANSI/Presto/ClickHouse）写 {@code TRUE}/{@code FALSE}。</p>
+     */
+    @Override
+    public boolean booleanLiteralAsNumber() {
+        return this == MYSQL || this == HIVE
+                || this == ORACLE || this == ORACLE12 || this == DAMENG
+                || this == SQLSERVER || this == SQLITE || this == DB2;
+    }
+
+    /**
      * @return 是否识别 {@code #} 行注释
      */
     public boolean hashLineComment() {

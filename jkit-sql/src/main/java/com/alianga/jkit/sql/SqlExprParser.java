@@ -1658,6 +1658,11 @@ final class SqlExprParser {
                 first = iv;
             }
             p.expect(SqlTokenType.RPAREN);
+            // 源文里的括号要保留：formatter 不按运算符优先级自动补括号，
+            // 丢了 (a - b) / c 的外层括号就会回写成 a - b / c，求值顺序被改。
+            if (first instanceof SqlBinaryExpr) {
+                ((SqlBinaryExpr) first).setParenthesized(true);
+            }
             return first;
         }
         if (p.identLike() || p.token.type().keyword()) {

@@ -750,7 +750,8 @@ public final class ChannelConfig {
                 continue;
             }
             for (String part : item.split("[,;]")) {
-                String trimmed = part.trim();
+                // 去掉 CR/LF，防止不可信输入向 MIME 头或 SMTP 命令注入换行
+                String trimmed = part.replace("\r", "").replace("\n", "").trim();
                 if (!trimmed.isEmpty()) {
                     target.add(trimmed);
                 }

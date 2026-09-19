@@ -101,6 +101,9 @@ public final class SqlAutoDdl {
                 }
             }
         }
+        if (mode != SqlAutoMode.VALIDATE) {
+            addCommentSync(out, model, live, d);
+        }
         addIndexChanges(out, model, live, d, opt);
         return out;
     }
@@ -143,7 +146,7 @@ public final class SqlAutoDdl {
      */
 
     public static String dropTableSql(String tableName, SqlDialect dialect, SqlAutoOptions options) {
-        String name = ident(tableName, dialect, options);
+        String name = identTable(tableName, dialect, options);
         SqlDialect d = dialect == null ? SqlDialect.MYSQL : dialect;
         if (d == SqlDialect.ORACLE || d == SqlDialect.ORACLE12 || d == SqlDialect.DAMENG) {
             return "DROP TABLE " + name;
@@ -347,27 +350,13 @@ public final class SqlAutoDdl {
                                                    SqlAutoOptions options) {
         SqlSchemaConvertOptions convert = convertOptions(options);
         String sql = SqlEntities.createTable(model, dialect, false, convert);
-        if (options.quoteIdentifiers()) {
-            sql = quoteCreateTable(sql, model, dialect);
-        }
         return new SqlAutoChange(SqlAutoChange.Kind.CREATE_TABLE, model.tableName(), "", sql);
-    }
-
-    private static String quoteCreateTable(String sql, SqlEntityModel model, SqlDialect dialect) {
-        // 简单路径：重新用带引号的标识符拼 CREATE TABLE 会更稳，这里只给表名加引号。
-        String table = model.tableName();
-        String quoted = dialect.quoteIdent(table);
-        int at = sql.indexOf(table);
-        if (at < 0) {
-            return sql;
-        }
-        return sql.substring(0, at) + quoted + sql.substring(at + table.length());
     }
 
     private static String addColumnSql(String table, SqlEntityColumn col, SqlDialect dialect,
                                        SqlAutoOptions options) {
         String def = SqlEntities.columnSql(col, dialect, false, convertOptions(options));
-        return "ALTER TABLE " + ident(table, dialect, options) + " ADD " + addColumnKeyword(dialect) + def;
+        return "ALTER TABLE " + identTable(table, dialect, options) + " ADD " + addColumnKeyword(dialect) + def;
     }
 
     private static String addColumnKeyword(SqlDialect dialect) {
@@ -381,13 +370,15 @@ public final class SqlAutoDdl {
     private static String alterColumnSql(String table, SqlEntityColumn col, SqlDialect dialect,
                                          SqlAutoOptions options) {
         String type = SqlEntities.columnTypeSql(col, dialect);
-        String t = ident(table, dialect, options);
+        String t = identTable(table, dialect, options);
         String c = ident(col.columnName(), dialect, options);
         if (dialect == SqlDialect.MYSQL || dialect == SqlDialect.H2) {
-            return "ALTER TABLE " + t + " MODIFY " + SqlEntities.columnSql(col, dialect, false);
+            return "ALTER TABLE " + t + " MODIFY " + SqlEntities.columnSql(col, dialect, false,
+                    convertOptions(options));
         }
         if (dialect == SqlDialect.SQLSERVER) {
-            return "ALTER TABLE " + t + " ALTER COLUMN " + SqlEntities.columnSql(col, dialect, false);
+            return "ALTER TABLE " + t + " ALTER COLUMN " + SqlEntities.columnSql(col, dialect, false,
+                    convertOptions(options));
         }
         if (dialect == SqlDialect.ORACLE || dialect == SqlDialect.ORACLE12
                 || dialect == SqlDialect.DAMENG) {
@@ -398,8 +389,53 @@ public final class SqlAutoDdl {
 
     private static String dropColumnSql(String table, String column, SqlDialect dialect,
                                         SqlAutoOptions options) {
-        return "ALTER TABLE " + ident(table, dialect, options)
+        return "ALTER TABLE " + identTable(table, dialect, options)
                 + " DROP COLUMN " + ident(column, dialect, options);
+    }
+
+    /**
+     * 已有表：实体注释非空且与活表 REMARKS 不同时补 COMMENT / ALTER COMMENT。
+     * 实体未写注释时不覆盖库里已有注释。
+     */
+    private static void addCommentSync(List<SqlAutoChange> out, SqlEntityModel model,
+                                       SqlAutoLiveTable live, SqlDialect dialect) {
+        if (model == null || live == null) {
+            return;
+        }
+        String table = model.tableName();
+        if (!sameComment(model.comment(), live.comment())) {
+            String sql = SqlEntities.tableCommentSql(table, model.comment(), dialect);
+            if (sql != null) {
+                out.add(new SqlAutoChange(SqlAutoChange.Kind.COMMENT, table, "", sql));
+            }
+        }
+        List<SqlEntityColumn> cols = model.columns();
+        for (int i = 0; i < cols.size(); i++) {
+            SqlEntityColumn col = cols.get(i);
+            if (col.comment() == null || col.comment().isEmpty()) {
+                continue;
+            }
+            SqlAutoLiveColumn existing = live.column(col.columnName());
+            if (existing == null) {
+                continue;
+            }
+            if (sameComment(col.comment(), existing.comment())) {
+                continue;
+            }
+            String sql = SqlEntities.columnCommentSql(table, col, dialect);
+            if (sql != null) {
+                out.add(new SqlAutoChange(SqlAutoChange.Kind.COMMENT, table, col.columnName(), sql));
+            }
+        }
+    }
+
+    private static boolean sameComment(String wanted, String live) {
+        String a = wanted == null ? "" : wanted.trim();
+        if (a.isEmpty()) {
+            return true;
+        }
+        String b = live == null ? "" : live.trim();
+        return a.equals(b);
     }
 
     private static void addExtraChanges(List<SqlAutoChange> out, SqlEntityModel model,
@@ -592,6 +628,7 @@ public final class SqlAutoDdl {
         }
         convert.includeForeignKeys(options.foreignKeys());
         convert.includeAutoIncrement(options.autoIncrement());
+        convert.quoteIdentifiers(options.quoteIdentifiers());
         return convert;
     }
 
@@ -600,5 +637,25 @@ public final class SqlAutoDdl {
             return dialect.quoteIdent(name);
         }
         return name;
+    }
+
+    /**
+     * 表名标识符：先按连接元数据折叠大小写再加方言引号。
+     * 表在建表时是不带引号的（会按库的大小写规则折叠），DROP / ALTER 必须与之一致。
+     *
+     * @param name 表名
+     * @param dialect 方言
+     * @param options 选项
+     * @return 标识符文本
+     */
+    private static String identTable(String name, SqlDialect dialect, SqlAutoOptions options) {
+        String n = name;
+        String fold = options == null ? null : options.identifierCase();
+        if ("upper".equals(fold)) {
+            n = n.toUpperCase(Locale.ROOT);
+        } else if ("lower".equals(fold)) {
+            n = n.toLowerCase(Locale.ROOT);
+        }
+        return ident(n, dialect, options);
     }
 }

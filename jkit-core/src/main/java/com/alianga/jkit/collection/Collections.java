@@ -222,7 +222,7 @@ public class Collections {
 
         // Full iteration necessary...
         Iterator<T> it = collection.iterator();
-        T last = null;
+        T last = defaultValue;
         while (it.hasNext()) {
             last = it.next();
         }
@@ -413,9 +413,9 @@ public class Collections {
      * <li>Enumeration - the number of elements remaining in the enumeration
      * </ul>
      *
-     * @param object the object to get the size of
+     * @param object the object to get the size of, {@code null} 时返回 {@code 0}
      * @return the size of the specified collection
-     * @throws IllegalArgumentException thrown if object is not recognised or null
+     * @throws IllegalArgumentException thrown if object is not recognised
      * @since Commons Collections 3.1
      */
     public static int size(Object object) {

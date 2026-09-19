@@ -14,6 +14,10 @@ Pick one path:
 
 All three artifacts pull in `jkit` and `jkit-sql`. The host still supplies the JDBC driver.
 
+<MavenBadge artifact="jkit-sql-auto" />
+<MavenBadge artifact="jkit-sql-auto-spring-boot-2" />
+<MavenBadge artifact="jkit-sql-auto-spring-boot-3" />
+
 ---
 
 ## 1. Write an entity
@@ -74,7 +78,7 @@ Add the matching starter, set `jkit.sql.auto.packages` (or `entities`), and **do
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit-sql-auto-spring-boot-2</artifactId>
-    <version>2.0.1</version>
+    <version>2.0.2</version>
 </dependency>
 ```
 
@@ -84,7 +88,7 @@ Add the matching starter, set `jkit.sql.auto.packages` (or `entities`), and **do
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit-sql-auto-spring-boot-3</artifactId>
-    <version>2.0.1</version>
+    <version>2.0.2</version>
 </dependency>
 ```
 
@@ -126,7 +130,7 @@ Core artifact only:
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit-sql-auto</artifactId>
-    <version>2.0.1</version>
+    <version>2.0.2</version>
 </dependency>
 ```
 
@@ -234,7 +238,7 @@ Prefix is always `jkit.sql.auto.`. The Spring Boot starters bind the same set; n
 | `quote-identifiers` | `false` | quote identifiers in the dialect |
 | `show-sql` | `true` | log SQL |
 | `dry-run` | `false` | plan only |
-| `catalog` / `schema` | JDBC default | `DatabaseMetaData` lookup scope |
+| `catalog` / `schema` | JDBC default | `DatabaseMetaData` lookup scope. If `catalog` is unset, uses `Connection.getCatalog()`; if `schema` is unset, uses `getSchema()`, then the JDBC URL (`currentSchema` on PostgreSQL-family URLs, default `public`; SQL Server `dbo`). Dry-run (no connection) also reads the URL |
 
 The fluent API matches these keys (`.mode(SqlAutoMode.UPDATE)`, `.packages("a","b")`, `.alterColumn(true)`). Code-only switches: `postgresIdentityStyle(SERIAL)`, `foreignKeys(false)`, `autoIncrement(false)`.
 
@@ -283,6 +287,7 @@ When `dialect` is unset:
 - Table exists, column missing → `ALTER TABLE … ADD`
 - Missing index → `CREATE INDEX`
 - Table/column comments as extra statements (MySQL inline `COMMENT`, PG/Oracle `COMMENT ON`, SQL Server `sp_addextendedproperty`)
+- When the table already exists: if the entity comment is non-empty and differs from `DatabaseMetaData.REMARKS`, emit `COMMENT ON` / `ALTER TABLE … COMMENT` / MySQL `MODIFY … COMMENT`. An entity with no comment does not overwrite comments already in the database (2.0.2: comment sync compares against the live table; it is not an unconditional overwrite)
 
 **Default does not**
 

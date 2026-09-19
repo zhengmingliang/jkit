@@ -118,7 +118,10 @@ public class AliyunSmsChannel extends AbstractSmsChannel {
         params.put("Action", "SendSms");
         params.put("Format", "JSON");
         params.put("PhoneNumbers", currentReceiver(message));
-        params.put("RegionId", "cn-hangzhou");
+        // RegionId 跟随 CFG_REGION（可配地域）；配完整 endpoint 主机时退回默认
+        String region = smsRegion(config);
+        params.put("RegionId", region != null && !region.isEmpty() && !region.contains(".")
+                ? region : "cn-hangzhou");
         params.put("SignName", config.name());
         params.put("SignatureMethod", SIGN_METHOD);
         params.put("SignatureNonce", NotifyUtils.uuid());

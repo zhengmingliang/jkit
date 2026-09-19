@@ -320,11 +320,29 @@
   background-color: var(--vp-c-bg-soft);
 }
 
+/* 首页 / 文档里的 shields 徽章：去掉链接下划线 */
+.vp-doc .doc-badges a,
+.vp-doc .maven-badge,
+.vp-doc p > a:has(img[alt*='Maven']),
+.vp-doc p > a:has(img[src*='img.shields.io']) {
+  text-decoration: none;
+  border: 0;
+}
+
+.vp-doc a:has(img[src*='img.shields.io']):hover {
+  text-decoration: none;
+}
+
 /* ---------- 首页「三分钟上手」区块 ---------- */
 .VPHome .vp-doc {
   max-width: 960px;
   margin: 24px auto 64px;
   padding: 0 24px;
+}
+
+.VPHome .vp-doc .doc-badges {
+  justify-content: center;
+  margin: 0 0 8px;
 }
 
 .VPHome .vp-doc h2 {

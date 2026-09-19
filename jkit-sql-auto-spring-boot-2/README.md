@@ -1,12 +1,14 @@
 # jkit-sql-auto-spring-boot-2
 
+[![Maven Central](https://img.shields.io/maven-central/v/com.alianga/jkit-sql-auto-spring-boot-2?style=flat-square)](https://central.sonatype.com/artifact/com.alianga/jkit-sql-auto-spring-boot-2)
+
 Spring Boot **2.x**（JDK 8+）适配包：应用就绪后自动按实体建表 / 加列，使用容器里的 `DataSource`。**不必**在 `main` 里调 `SqlAuto.run`。
 
 ```xml
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit-sql-auto-spring-boot-2</artifactId>
-    <version>2.0.1</version>
+    <version>2.0.2</version>
 </dependency>
 ```
 

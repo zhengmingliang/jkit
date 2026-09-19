@@ -40,7 +40,11 @@ public final class SwiftUrlSessionGenerator extends AbstractCodeGenerator {
     public GeneratedCode generate(ParsedCurlRequest req) {
         List<String> notes = new ArrayList<String>();
         StringBuilder src = new StringBuilder();
-        src.append("import Foundation\n\n");
+        // Linux 上 URLSession/URLRequest 在 FoundationNetworking 里，不补这个 import 编译不过
+        src.append("import Foundation\n")
+                .append("#if canImport(FoundationNetworking)\n")
+                .append("import FoundationNetworking\n")
+                .append("#endif\n\n");
 
         Body body = req.body();
         List<Header> headers = CurlGenSupport.visibleHeaders(req);
@@ -148,9 +152,10 @@ public final class SwiftUrlSessionGenerator extends AbstractCodeGenerator {
                     String fn = p.filename() == null ? "file" : p.filename();
                     sb.append("body.append(\"--\\(boundary)\\r\\n\".data(using: .utf8)!)\n");
                     sb.append("body.append(\"Content-Disposition: form-data; name=")
-                            .append("\\\"").append(p.name()).append("\\\"; filename=\\\"").append(fn)
+                            .append("\\\"").append(CodeQuote.swiftEscape(p.name()))
+                            .append("\\\"; filename=\\\"").append(CodeQuote.swiftEscape(fn))
                             .append("\\\"\\r\\n\".data(using: .utf8)!)\n");
-                    sb.append("body.append(\"Content-Type: ").append(mime)
+                    sb.append("body.append(\"Content-Type: ").append(CodeQuote.swiftEscape(mime))
                             .append("\\r\\n\\r\\n\".data(using: .utf8)!)\n");
                     sb.append("body.append(try! Data(contentsOf: URL(fileURLWithPath: ")
                             .append(CodeQuote.swift(p.filePath())).append(")))\n");
@@ -158,7 +163,8 @@ public final class SwiftUrlSessionGenerator extends AbstractCodeGenerator {
                 } else {
                     sb.append("body.append(\"--\\(boundary)\\r\\n\".data(using: .utf8)!)\n");
                     sb.append("body.append(\"Content-Disposition: form-data; name=\\\"")
-                            .append(p.name()).append("\\\"\\r\\n\\r\\n\".data(using: .utf8)!)\n");
+                            .append(CodeQuote.swiftEscape(p.name()))
+                            .append("\\\"\\r\\n\\r\\n\".data(using: .utf8)!)\n");
                     sb.append("body.append(").append(CodeQuote.swift(p.value() == null ? "" : p.value()))
                             .append(".data(using: .utf8)!)\n");
                     sb.append("body.append(\"\\r\\n\".data(using: .utf8)!)\n");

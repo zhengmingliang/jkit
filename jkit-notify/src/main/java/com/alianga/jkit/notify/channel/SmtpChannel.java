@@ -4,6 +4,9 @@ import com.alianga.jkit.log.Log;
 import com.alianga.jkit.notify.Attachment;
 import com.alianga.jkit.notify.ChannelConfig;
 import com.alianga.jkit.notify.FailureType;
+import com.alianga.jkit.notify.Markdown;
+import com.alianga.jkit.notify.MarkdownRenderOptions;
+import com.alianga.jkit.notify.MarkdownTheme;
 import com.alianga.jkit.notify.Message;
 import com.alianga.jkit.notify.MessageType;
 import com.alianga.jkit.notify.NotificationChannel;
@@ -64,7 +67,7 @@ import java.util.UUID;
  * <li>{@link ChannelConfig#autoSplit(boolean)}：超大附件按块拆成多封发送。</li>
  * </ul>
  *
- * <p>消息：TEXT 按纯文本发送；HTML 直发；MARKDOWN 经 {@link NotifyUtils#markdownToHtml(String)}
+ * <p>消息：TEXT 按纯文本发送；HTML 直发；MARKDOWN 经 {@link Markdown#toDocument(String, MarkdownRenderOptions)}
  * 转成 HTML 后按 {@code text/html} 发送。标题作为邮件主题。附件走 {@link Message#attachment}。
  * MIME 含 {@code Date} 与 {@code Message-ID}；DATA 阶段做 RFC 5321 dot-stuffing。
  *
@@ -91,9 +94,73 @@ public class SmtpChannel implements NotificationChannel {
             "trustAllCerts", "timeoutMs", "autoSplit", "maxAttachmentSize", "splitChunkSize"
     };
 
+    private MarkdownTheme markdownTheme = MarkdownTheme.DEFAULT;
+    private boolean inlineMarkdownStyle;
+    private String markdownImageBaseDir;
+
     @Override
     public String id() {
         return ID;
+    }
+
+    /**
+     * MARKDOWN 正文转 HTML 时使用的主题（默认 {@link MarkdownTheme#DEFAULT}）。
+     *
+     * @return 当前主题
+     * @since 2.0.2
+     */
+    public MarkdownTheme markdownTheme() {
+        return markdownTheme;
+    }
+
+    /**
+     * 设置 MARKDOWN 正文的渲染主题。
+     *
+     * @param markdownTheme 主题，{@code null} 视为 {@link MarkdownTheme#DEFAULT}
+     * @return 当前实例，便于链式调用
+     * @since 2.0.2
+     */
+    public SmtpChannel markdownTheme(MarkdownTheme markdownTheme) {
+        this.markdownTheme = markdownTheme == null ? MarkdownTheme.DEFAULT : markdownTheme;
+        return this;
+    }
+
+    /**
+     * 是否把主题样式内联到每个标签（兼容 Outlook 等剥离 {@code <style>} 的邮件客户端）。
+     *
+     * @param inlineMarkdownStyle 内联返回 {@code true}
+     * @return 当前实例，便于链式调用
+     * @since 2.0.2
+     */
+    public SmtpChannel inlineMarkdownStyle(boolean inlineMarkdownStyle) {
+        this.inlineMarkdownStyle = inlineMarkdownStyle;
+        return this;
+    }
+
+    /**
+     * MARKDOWN 正文里本地图片的基准目录。
+     *
+     * <p>设置了之后，正文里 {@code ![](./assets/a.png)} 这类相对路径图片会内嵌成 Base64 data URI
+     * 随邮件一起发出去，收件方不依赖原文件与图床也能看到图。不设置则保留原 {@code src}。
+     *
+     * @return 基准目录；未设置时为 {@code null}
+     * @since 2.0.2
+     */
+    public String markdownImageBaseDir() {
+        return markdownImageBaseDir;
+    }
+
+    /**
+     * 设置 MARKDOWN 正文里本地图片的基准目录，开启图片内嵌。
+     *
+     * @param markdownImageBaseDir 基准目录，{@code null} / 空串表示关闭内嵌
+     * @return 当前实例，便于链式调用
+     * @since 2.0.2
+     */
+    public SmtpChannel markdownImageBaseDir(String markdownImageBaseDir) {
+        this.markdownImageBaseDir = markdownImageBaseDir == null
+                || markdownImageBaseDir.trim().isEmpty() ? null : markdownImageBaseDir.trim();
+        return this;
     }
 
     @Override
@@ -107,12 +174,17 @@ public class SmtpChannel implements NotificationChannel {
     }
 
     @Override
-    public SendResult send(Message message, ChannelConfig config) {
+    public void validate(ChannelConfig config) {
         required(config.username(), "smtp username is required");
         required(config.password(), "smtp password is required");
         if (config.to() == null || config.to().isEmpty()) {
             throw new IllegalArgumentException("smtp to is required (ChannelConfig.to)");
         }
+    }
+
+    @Override
+    public SendResult send(Message message, ChannelConfig config) {
+        validate(config);
         config.logUnused(LOG, id(), USED_KEYS);
 
         if (config.autoSplit() && message.attachments() != null && !message.attachments().isEmpty()) {
@@ -195,8 +267,11 @@ public class SmtpChannel implements NotificationChannel {
     protected SendResult sendOnce(Message message, ChannelConfig config, List<Attachment> attachments) {
         String username = required(config.username(), "smtp username is required");
         String password = required(config.password(), "smtp password is required");
-        String from = config.from() != null ? config.from() : username;
+        String from = requireSafeMailbox(config.from() != null ? config.from() : username);
         List<String> recipients = allRecipients(config);
+        for (String rcpt : recipients) {
+            requireSafeMailbox(rcpt);
+        }
 
         long start = System.currentTimeMillis();
         Socket socket = null;
@@ -209,7 +284,7 @@ public class SmtpChannel implements NotificationChannel {
             readReply(in);
             String ehloHost = ehloHost();
             write(out, "EHLO " + ehloHost);
-            readReply(in);
+            List<String> ehlo = readReplyLines(in);
             if (config.starttls() && !implicitSsl(config)) {
                 write(out, "STARTTLS");
                 readReply(in);
@@ -218,25 +293,45 @@ public class SmtpChannel implements NotificationChannel {
                 out = new BufferedWriter(
                         new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8));
                 write(out, "EHLO " + ehloHost);
+                ehlo = readReplyLines(in);
+            }
+            if (supportsAuth(ehlo, "PLAIN")) {
+                write(out, "AUTH PLAIN " + Base64.getEncoder().encodeToString(
+                        ("\0" + username + "\0" + password).getBytes(StandardCharsets.UTF_8)));
+                readReply(in);
+            } else {
+                write(out, "AUTH LOGIN");
+                readReply(in);
+                write(out, Base64.getEncoder().encodeToString(username.getBytes(StandardCharsets.UTF_8)));
+                readReply(in);
+                write(out, Base64.getEncoder().encodeToString(password.getBytes(StandardCharsets.UTF_8)));
                 readReply(in);
             }
-            write(out, "AUTH LOGIN");
-            readReply(in);
-            write(out, Base64.getEncoder().encodeToString(username.getBytes(StandardCharsets.UTF_8)));
-            readReply(in);
-            write(out, Base64.getEncoder().encodeToString(password.getBytes(StandardCharsets.UTF_8)));
-            readReply(in);
 
             write(out, "MAIL FROM:<" + from + ">");
             readReply(in);
+            // 单个 RCPT 被拒不中断整封邮件：记录后跳过，只要有收件人被接受就继续
+            List<String> rejected = new ArrayList<String>();
             for (String rcpt : recipients) {
                 write(out, "RCPT TO:<" + rcpt + ">");
-                readReply(in);
+                try {
+                    readReply(in);
+                } catch (SmtpReplyException e) {
+                    rejected.add(rcpt);
+                    LOG.warn("[{}] rcpt rejected: {} ({})", id(), rcpt, e.reply());
+                }
+            }
+            if (rejected.size() == recipients.size()) {
+                String reply = "550 all recipients rejected";
+                throw new SmtpReplyException(reply, 550, classifyReply(reply));
             }
             write(out, "DATA");
             readReply(in);
-            writeMime(out, message, from, config, attachments == null
+            // DATA 阶段经 DotStuffingWriter 写出，行首的 '.' 按 RFC 5321 双写
+            BufferedWriter dataOut = new DotStuffingWriter(out);
+            writeMime(dataOut, message, from, config, attachments == null
                     ? Collections.<Attachment>emptyList() : attachments);
+            dataOut.flush();
             write(out, ".");
             String finalReply = readReply(in);
             write(out, "QUIT");
@@ -244,6 +339,10 @@ public class SmtpChannel implements NotificationChannel {
 
             long elapsed = System.currentTimeMillis() - start;
             if (finalReply.startsWith("250")) {
+                if (!rejected.isEmpty()) {
+                    return SendResult.ok(id(), 250,
+                            finalReply + "; rejected recipients: " + rejected, elapsed);
+                }
                 return SendResult.ok(id(), 250, finalReply, elapsed);
             }
             return SendResult.fail(id(), replyCode(finalReply), finalReply,
@@ -514,7 +613,7 @@ public class SmtpChannel implements NotificationChannel {
             headers.append("Cc: ").append(mailboxList(config.cc())).append("\r\n");
         }
         if (config.replyTo() != null && !config.replyTo().trim().isEmpty()) {
-            headers.append("Reply-To: <").append(config.replyTo().trim()).append(">\r\n");
+            headers.append("Reply-To: <").append(requireSafeMailbox(config.replyTo().trim())).append(">\r\n");
         }
         headers.append("Subject: ").append(encodedWord(subject)).append("\r\n");
         headers.append("Date: ").append(date).append("\r\n");
@@ -581,9 +680,9 @@ public class SmtpChannel implements NotificationChannel {
 
     private static String mailbox(String address, String displayName) {
         if (displayName == null || displayName.trim().isEmpty()) {
-            return "<" + address + ">";
+            return "<" + requireSafeMailbox(address) + ">";
         }
-        return encodedWord(displayName.trim()) + " <" + address + ">";
+        return encodedWord(displayName.trim()) + " <" + requireSafeMailbox(address) + ">";
     }
 
     private static String mailboxList(List<String> addresses) {
@@ -592,7 +691,7 @@ public class SmtpChannel implements NotificationChannel {
             if (i > 0) {
                 out.append(", ");
             }
-            out.append('<').append(addresses.get(i)).append('>');
+            out.append('<').append(requireSafeMailbox(addresses.get(i))).append('>');
         }
         return out.toString();
     }
@@ -645,11 +744,15 @@ public class SmtpChannel implements NotificationChannel {
         return "localhost";
     }
 
-    private static String bodyOf(Message message) {
+    private String bodyOf(Message message) {
         if (message.type() != MessageType.MARKDOWN) {
             return message.content();
         }
-        return NotifyUtils.markdownToDocument(message.content(), true);
+        MarkdownRenderOptions options = MarkdownRenderOptions.create()
+                .theme(markdownTheme)
+                .inlineStyle(inlineMarkdownStyle)
+                .imageBaseDir(markdownImageBaseDir);
+        return Markdown.toDocument(message.content(), options);
     }
 
     /**
@@ -684,6 +787,122 @@ public class SmtpChannel implements NotificationChannel {
             throw new SmtpReplyException(line, replyCode(line), classifyReply(line));
         }
         return line;
+    }
+
+    /**
+     * 读取一条多行回复并保留全部行（EHLO 需要看能力行）。
+     *
+     * @param in 输入流
+     * @return 全部响应行
+     * @throws IOException 连接关闭
+     */
+    protected java.util.List<String> readReplyLines(BufferedReader in) throws IOException {
+        java.util.List<String> lines = new ArrayList<String>();
+        String line = decodeSmtpLine(in.readLine());
+        if (line == null) {
+            throw new IOException("smtp connection closed");
+        }
+        lines.add(line);
+        while (line.length() >= 4 && line.charAt(3) == '-') {
+            line = decodeSmtpLine(in.readLine());
+            if (line == null) {
+                throw new IOException("smtp connection closed");
+            }
+            lines.add(line);
+        }
+        String last = lines.get(lines.size() - 1);
+        if (last.startsWith("4") || last.startsWith("5")) {
+            throw new SmtpReplyException(last, replyCode(last), classifyReply(last));
+        }
+        return lines;
+    }
+
+    /**
+     * EHLO 能力行里是否声明了指定认证方式。
+     *
+     * @param ehloLines EHLO 全部响应行
+     * @param mechanism 认证方式（如 {@code PLAIN}）
+     * @return 支持时为 {@code true}
+     */
+    protected static boolean supportsAuth(java.util.List<String> ehloLines, String mechanism) {
+        for (String line : ehloLines) {
+            String upper = line.toUpperCase(java.util.Locale.ROOT);
+            if (upper.contains("AUTH") && upper.contains(mechanism)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 邮箱地址不允许带 CR/LF，防止向 MIME 头或 SMTP 命令注入。
+     *
+     * @param addr 地址
+     * @return 原地址
+     */
+    protected static String requireSafeMailbox(String addr) {
+        if (addr == null) {
+            throw new IllegalArgumentException("email address is required");
+        }
+        if (addr.indexOf('\r') >= 0 || addr.indexOf('\n') >= 0) {
+            throw new IllegalArgumentException("email address must not contain CR/LF");
+        }
+        return addr;
+    }
+
+    /**
+     * DATA 阶段写出器：以 {@code .} 开头的行按 RFC 5321 双写（dot-stuffing），
+     * 避免正文里恰好出现的 {@code .} 行被服务器当成 DATA 结束。
+     */
+    protected static final class DotStuffingWriter extends BufferedWriter {
+        private boolean lineStart = true;
+
+        /**
+         * @param out 底层写出器
+         */
+        public DotStuffingWriter(java.io.Writer out) {
+            super(out);
+        }
+
+        @Override
+        public void write(int c) throws IOException {
+            if (lineStart && c == '.') {
+                super.write('.');
+            }
+            super.write(c);
+            lineStart = c == '\n';
+        }
+
+        @Override
+        public void write(char[] cbuf, int off, int len) throws IOException {
+            int i = off;
+            int end = off + len;
+            while (i < end) {
+                if (lineStart && cbuf[i] == '.') {
+                    super.write('.');
+                }
+                int nl = -1;
+                for (int j = i; j < end; j++) {
+                    if (cbuf[j] == '\n') {
+                        nl = j;
+                        break;
+                    }
+                }
+                if (nl < 0) {
+                    super.write(cbuf, i, end - i);
+                    lineStart = false;
+                    break;
+                }
+                super.write(cbuf, i, nl - i + 1);
+                lineStart = true;
+                i = nl + 1;
+            }
+        }
+
+        @Override
+        public void write(String s, int off, int len) throws IOException {
+            write(s.toCharArray(), off, len);
+        }
     }
 
     private static BufferedReader newReader(Socket socket) throws IOException {

@@ -7,12 +7,17 @@ import com.alianga.jkit.sql.entity.SqlEntities;
 import com.alianga.jkit.sql.entity.SqlGenerated;
 import com.alianga.jkit.sql.entity.SqlId;
 import com.alianga.jkit.sql.entity.SqlTable;
+import com.alianga.jkit.sql.jdbc.JdbcUrlInfo;
+import com.alianga.jkit.sql.jdbc.JdbcUrlUtils;
 import com.alianga.jkit.sql.schema.convert.ConversionResult;
 
 import org.junit.Test;
 
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -27,7 +32,7 @@ import static org.junit.Assert.assertTrue;
  * <ol>
  *   <li>SQL 审计与依赖分析</li>
  *   <li>读写分离路由</li>
- *   <li>SQL 注入防护（参数化）</li>
+ *   <li>SQL 注入防护（参数化 / bind）</li>
  *   <li>SQL 防火墙（Wall）</li>
  *   <li>跨方言数据库迁移</li>
  *   <li>多方言分页适配</li>
@@ -36,8 +41,13 @@ import static org.junit.Assert.assertTrue;
  *   <li>动态 SQL 构建（零字符串拼接）</li>
  *   <li>实体驱动多方言建表</li>
  *   <li>SQL 格式化与规范统一</li>
- *   <li>遗留模板占位符迁移</li>
+ *   <li>遗留模板占位符迁移（含 MyBatis）</li>
  *   <li>表达式预计算（规则引擎 / 预览）</li>
+ *   <li>安全改写不污染原语句</li>
+ *   <li>多数据源方言自动识别（JdbcUrlUtils）</li>
+ *   <li>报表函数跨方言改写（DATE_FORMAT）</li>
+ *   <li>动态表名 / 分表安全绑定</li>
+ *   <li>低代码查询沙箱（Wall 表策略）</li>
  * </ol>
  *
  * @author 郑明亮
@@ -124,6 +134,32 @@ public class SqlBusinessScenarioTest {
         assertFalse(parameterized, parameterized.contains("'alice'"));
     }
 
+    @Test
+    public void bindFillsPlaceholdersWithoutSqlInjection() {
+        String payload = "'; DROP TABLE t_user; --";
+        String sql = SQL.bind("SELECT * FROM t_user WHERE name = ?", payload);
+        assertTrue(sql, sql.contains("'''; DROP TABLE t_user; --'"));
+        assertEquals(1, SQL.parseAll(sql).size());
+        SQL.parse(sql, SqlDialect.MYSQL);
+
+        String inList = SQL.bind("SELECT * FROM t WHERE id IN ?", Arrays.asList(1, 2, 3));
+        assertTrue(inList, inList.contains("IN (1, 2, 3)") || inList.contains("IN(1, 2, 3)"));
+        SQL.parse(inList, SqlDialect.MYSQL);
+    }
+
+    @Test
+    public void bindNamedFillsValuesAndFormulas() {
+        Map<String, Object> vals = new LinkedHashMap<String, Object>();
+        vals.put("id", Integer.valueOf(7));
+        vals.put("ts", SQL.parseExpr("NOW()"));
+        String sql = SQL.bindNamed(
+                "SELECT * FROM t_user WHERE id = :id AND created_at > :ts", vals);
+        assertTrue(sql, sql.contains("id = 7"));
+        assertTrue(sql, sql.contains("NOW()"));
+        assertFalse(sql, sql.contains("'NOW()'"));
+        SQL.parse(sql, SqlDialect.MYSQL);
+    }
+
     // ------------------------------------------------------------------
     // 场景 4：SQL 防火墙——对用户可编辑查询 / 开放接口做危险语句拦截
     // ------------------------------------------------------------------
@@ -135,6 +171,10 @@ public class SqlBusinessScenarioTest {
         assertTrue(SQL.wall("UPDATE t SET a = 1").violations().contains("update-without-where"));
         assertTrue(SQL.wall("SELECT SLEEP(5) FROM t").violations().contains("dangerous-function"));
         assertTrue(SQL.wall("SELECT * FROM t WHERE name = 'x' --").violations().contains("comment-bypass"));
+        assertTrue(SQL.wall("SELECT * FROM t WHERE name LIKE '%'").violations()
+                .contains("always-true-condition"));
+        assertTrue(SQL.wall("SELECT * FROM t WHERE id = 1 XOR 1 = 1").violations()
+                .contains("always-true-condition"));
         assertTrue("合法查询应放行", SQL.wall("SELECT * FROM t WHERE id = 1").passed());
     }
 
@@ -207,7 +247,7 @@ public class SqlBusinessScenarioTest {
     // ------------------------------------------------------------------
 
     @Test
-    public void tenantRoutingRewritesTableSuffix() {
+    public void shardRoutingRewritesTableSuffix() {
         SqlStatement stmt = SQL.parse("SELECT id, name FROM t_user WHERE status = 1");
         SqlStatement out = SQL.rewrite(stmt, SqlRewrites.create()
                 .add(SqlRewrites.replaceTable("t_user", "t_user_2026")));
@@ -217,8 +257,8 @@ public class SqlBusinessScenarioTest {
     }
 
     @Test
-    public void tenantIsolationInjectsTenantPredicate() {
-        // 防漏租户过滤：统一在网关层给所有查询追加 tenant_id 条件
+    public void injectAddsRowPredicate() {
+        // 网关层给匹配表白名单的查询追加行级条件（列名自定）
         SqlStatement stmt = SQL.parse("SELECT id FROM t_order WHERE status = 1");
         SqlStatement out = SQL.rewrite(stmt, SqlRewrites.create()
                 .add(SqlRewrites.andWhere(SQL.parseExpr("tenant_id = 100"))));
@@ -227,6 +267,25 @@ public class SqlBusinessScenarioTest {
         assertTrue(sql, sql.contains("status = 1"));
         // 改写发生在 clone 上，原语句不被动过
         assertFalse(norm(SQL.toSqlString(stmt)), norm(SQL.toSqlString(stmt)).contains("tenant_id"));
+    }
+
+    @Test
+    public void injectConfigAddsRowFiltersOnWhitelistedTables() {
+        SQL.injectConfig(SqlInjectConfig.create()
+                .tables("t_order")
+                .add("tenant_id", 100)
+                .add("deleted", 0));
+        try {
+            SqlStatement out = SQL.inject(SQL.parse("SELECT id FROM t_order WHERE status = 1"));
+            String sql = norm(SQL.toSqlString(out));
+            assertTrue(sql, sql.contains("tenant_id = 100"));
+            assertTrue(sql, sql.contains("deleted = 0"));
+            assertTrue(sql, sql.contains("status = 1"));
+            SQL.parse(sql, SqlDialect.MYSQL);
+        } finally {
+            SqlInject.clear();
+            SqlInject.setDefault(null);
+        }
     }
 
     // ------------------------------------------------------------------
@@ -253,6 +312,22 @@ public class SqlBusinessScenarioTest {
         String sql = norm(SQL.toSqlString(out));
         assertTrue(sql, sql.contains("user_name"));
         assertFalse(sql, sql.contains(" name"));
+    }
+
+    @Test
+    public void expandStarThenReplaceSelectItemsMasksManyColumns() {
+        Map<String, List<String>> cols = new LinkedHashMap<String, List<String>>();
+        cols.put("t_customer", Arrays.asList("id", "name", "phone", "id_card"));
+        Map<String, String> masks = new LinkedHashMap<String, String>();
+        masks.put("phone", "CONCAT(LEFT(phone, 3), '****')");
+        masks.put("id_card", "'****'");
+        SqlStatement masked = SQL.replaceSelectItems(
+                SQL.expandStar(SQL.parse("SELECT * FROM t_customer"), cols), masks);
+        String sql = SQL.toSqlString(masked);
+        assertFalse(sql, sql.contains("SELECT *"));
+        assertTrue(sql, sql.contains("CONCAT"));
+        assertTrue(sql, sql.contains("'****'"));
+        SQL.parse(sql, SqlDialect.MYSQL);
     }
 
     // ------------------------------------------------------------------
@@ -393,6 +468,25 @@ public class SqlBusinessScenarioTest {
         assertEquals(SQL.tables(SQL.parse(sql)), SQL.tables(roundTrip));
     }
 
+    @Test
+    public void addCommentAndToStringUseMysqlQuotes() {
+        SqlParseOptions opt = SqlParseOptions.defaults()
+                .placeholders(SqlPlaceholders.create().mybatis());
+        Map<String, Object> vals = Collections.<String, Object>singletonMap("table", Integer.valueOf(10086));
+        SqlStatement bound = SQL.bindNamed(
+                SQL.parse("SELECT * FROM #{table}", SqlDialect.MYSQL, opt),
+                SqlDialect.MYSQL, vals);
+        bound.addComment("我是注释");
+        String sql = bound.toString();
+        assertTrue(sql, sql.contains("`10086`"));
+        assertFalse(sql, sql.contains("\"10086\""));
+        assertTrue(sql, sql.contains("/*") && sql.contains("我是注释"));
+        assertFalse(sql, sql.startsWith("我是注释"));
+        SQL.parse(sql, SqlDialect.MYSQL);
+        assertTrue(SQL.toSqlString(bound, SqlDialect.ORACLE).contains("\"10086\""));
+        assertTrue(SQL.toSqlString(bound, SqlDialect.SQLSERVER).contains("[10086]"));
+    }
+
     // ------------------------------------------------------------------
     // 场景 12：遗留模板占位符迁移——@xx@ / %s 风格 SQL 收编解析
     // ------------------------------------------------------------------
@@ -412,6 +506,30 @@ public class SqlBusinessScenarioTest {
         assertEquals(com.alianga.jkit.sql.ast.SqlStatementType.SELECT, stmt.type());
         // FROM 的是子查询派生表，无物理表依赖
         assertTrue(SQL.tables(stmt).toString(), SQL.tables(stmt).isEmpty());
+    }
+
+    @Test
+    public void mybatisPlaceholdersParseAndBindByPropertyName() {
+        SqlParseOptions opt = SqlParseOptions.defaults()
+                .placeholders(SqlPlaceholders.create().mybatis());
+        SqlStatement parsed = SQL.parse(
+                "SELECT * FROM ${table} WHERE id = #{id, jdbcType=INTEGER} AND name = #{user.name}",
+                SqlDialect.MYSQL, opt);
+        assertEquals("${table}", SQL.tables(parsed).get(0));
+
+        Map<String, Object> vals = new LinkedHashMap<String, Object>();
+        vals.put("table", "t_user");
+        vals.put("id", Integer.valueOf(7));
+        vals.put("user.name", "bob");
+        String sql = SQL.bindNamed(
+                "SELECT * FROM ${table} WHERE id = #{id, jdbcType=INTEGER} AND name = #{user.name}",
+                SqlDialect.MYSQL, opt, vals);
+        assertTrue(sql, sql.contains("FROM t_user") || sql.contains("FROM `t_user`"));
+        assertTrue(sql, sql.contains("id = 7"));
+        assertTrue(sql, sql.contains("'bob'"));
+        assertFalse(sql, sql.contains("#{id"));
+        assertFalse(sql, sql.contains("${table}"));
+        SQL.parse(sql, SqlDialect.MYSQL);
     }
 
     // ------------------------------------------------------------------
@@ -452,5 +570,127 @@ public class SqlBusinessScenarioTest {
         SQL.setPage(original, 2, 10, SqlDialect.MYSQL);
         assertNull("clone-then-mutate：分页改写不应改动原语句",
                 ((SqlSelect) original).limit());
+    }
+
+    // ------------------------------------------------------------------
+    // 场景 15：多数据源方言自动识别——URL 推断方言 / schema / 驱动，不硬编码
+    // ------------------------------------------------------------------
+
+    @Test
+    public void jdbcUrlPicksDialectForParseAndFormat() {
+        SqlDialect dialect = JdbcUrlUtils.fromUrl(
+                "jdbc:postgresql://primary:5432/orders?currentSchema=sales");
+        assertEquals(SqlDialect.POSTGRES, dialect);
+        SqlStatement stmt = SQL.parse("SELECT id FROM t WHERE name = 'a' || 'b'", dialect);
+        String sql = SQL.toSqlString(stmt, dialect);
+        assertTrue(sql, sql.contains("||"));
+        SQL.parse(sql, dialect);
+        assertEquals(SqlDialect.DAMENG, JdbcUrlUtils.fromUrl("jdbc:dm://localhost:5236"));
+        assertEquals(SqlDialect.MYSQL, JdbcUrlUtils.fromUrl("jdbc:tidb://127.0.0.1:4000/test"));
+        assertNull(JdbcUrlUtils.fromUrl("jdbc:unknown:foo"));
+    }
+
+    @Test
+    public void jdbcUrlExposesSchemaDriverAndHaNodes() {
+        JdbcUrlInfo info = JdbcUrlUtils.parse(
+                "jdbc:postgresql://primary:5432,standby:5432/orders?currentSchema=sales");
+        assertEquals("postgresql", info.getDbType());
+        assertEquals("orders", info.getDatabaseName());
+        assertEquals("sales", info.getSchema());
+        assertEquals(2, info.getNodes().size());
+        assertEquals("dm.jdbc.driver.DmDriver", JdbcUrlUtils.driverForUrl("jdbc:dm://localhost:5236"));
+        assertEquals("public", JdbcUrlUtils.schema("jdbc:postgresql://h/db"));
+    }
+
+    // ------------------------------------------------------------------
+    // 场景 16：报表 SQL 跨方言函数改写——DATE_FORMAT 跟目标库走
+    // ------------------------------------------------------------------
+
+    @Test
+    public void reportDateFormatConvertsToPgAndOracle() {
+        String pg = SQL.convert("SELECT DATE_FORMAT(ts, '%Y-%m-%d %H:%i:%s') FROM t",
+                SqlDialect.MYSQL, SqlDialect.POSTGRES);
+        assertTrue(pg, pg.toUpperCase().contains("TO_CHAR"));
+        assertTrue(pg, pg.contains("YYYY-MM-DD HH24:MI:SS"));
+        SQL.parse(pg, SqlDialect.POSTGRES);
+
+        String ora = SQL.convert("SELECT DATE_FORMAT(ts, '%Y-%m-%d') FROM t",
+                SqlDialect.MYSQL, SqlDialect.ORACLE);
+        assertTrue(ora, ora.contains("TO_CHAR"));
+        assertTrue(ora, ora.contains("YYYY-MM-DD"));
+        SQL.parse(ora, SqlDialect.ORACLE);
+    }
+
+    @Test
+    public void reportDateFormatConvertsToSqliteStrftime() {
+        String sql = SQL.convert("SELECT DATE_FORMAT(ts, '%Y-%m-%d %H:%i:%s') FROM t",
+                SqlDialect.MYSQL, SqlDialect.SQLITE);
+        assertTrue(sql, sql.contains("strftime"));
+        assertTrue(sql, sql.contains("%Y-%m-%d %H:%M:%S"));
+        SQL.parse(sql, SqlDialect.SQLITE);
+    }
+
+    // ------------------------------------------------------------------
+    // 场景 17：动态表名 / 分表安全绑定——表名当标识符，不进字符串字面量
+    // ------------------------------------------------------------------
+
+    @Test
+    public void dynamicTableNameBindsAsIdentifier() {
+        SqlParseOptions opt = SqlParseOptions.defaults()
+                .placeholders(SqlPlaceholders.create().mybatis());
+        Map<String, Object> vals = new LinkedHashMap<String, Object>();
+        vals.put("table", "t_user_2026");
+        vals.put("id", Integer.valueOf(1));
+        String sql = SQL.bindNamed("SELECT * FROM ${table} WHERE id = #{id}",
+                SqlDialect.MYSQL, opt, vals);
+        assertTrue(sql, sql.contains("FROM t_user_2026") || sql.contains("FROM `t_user_2026`"));
+        assertFalse("table must not become a string literal", sql.contains("FROM 't_user_2026'"));
+        SQL.parse(sql, SqlDialect.MYSQL);
+    }
+
+    @Test
+    public void numericAndHostileTableNamesStayQuotedIdentifiers() {
+        SqlParseOptions opt = SqlParseOptions.defaults()
+                .placeholders(SqlPlaceholders.create().mybatis());
+        String numeric = SQL.bindNamed("SELECT * FROM #{table}", SqlDialect.MYSQL, opt,
+                Collections.<String, Object>singletonMap("table", Integer.valueOf(10086)));
+        assertTrue(numeric, numeric.contains("`10086`"));
+        SQL.parse(numeric, SqlDialect.MYSQL);
+
+        String hostile = SQL.bindNamed("SELECT * FROM #{table}", SqlDialect.MYSQL, opt,
+                Collections.<String, Object>singletonMap("table", "t; DROP TABLE x"));
+        assertEquals(1, SQL.parseAll(hostile).size());
+        assertTrue(hostile, hostile.contains("`"));
+        SQL.parse(hostile, SqlDialect.MYSQL);
+    }
+
+    // ------------------------------------------------------------------
+    // 场景 18：低代码查询沙箱——表白名单、WHERE 必含列、表数量上限
+    // ------------------------------------------------------------------
+
+    @Test
+    public void sandboxAllowAndDenyTables() {
+        SqlWallConfig cfg = SqlWallConfig.defaults()
+                .allowTables("t_order", "t_item")
+                .denyTables("mysql.user", "secret");
+        assertTrue(SQL.wall("SELECT id FROM t_order o JOIN t_item i ON o.id = i.oid",
+                SqlDialect.MYSQL, cfg).passed());
+        assertTrue(SQL.wall("SELECT id FROM t_user", SqlDialect.MYSQL, cfg).violations()
+                .contains("allow-table"));
+        assertTrue(SQL.wall("SELECT * FROM secret", SqlDialect.MYSQL, cfg).violations()
+                .contains("deny-table"));
+    }
+
+    @Test
+    public void sandboxRequiresWhereColumnAndCapsJoinWidth() {
+        SqlWallConfig cfg = SqlWallConfig.defaults()
+                .requireWhereColumns("tenant_id")
+                .maxTables(2);
+        assertTrue(SQL.wall("SELECT id FROM t_order WHERE tenant_id = 1",
+                SqlDialect.MYSQL, cfg).passed());
+        assertTrue(SQL.wall("SELECT id FROM t_order", SqlDialect.MYSQL, cfg).violations()
+                .contains("missing-where-column"));
+        assertTrue(SQL.wall("SELECT * FROM a JOIN b ON a.id = b.id JOIN c ON b.id = c.id",
+                SqlDialect.MYSQL, cfg).violations().contains("too-many-tables"));
     }
 }

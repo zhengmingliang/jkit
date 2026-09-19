@@ -11,20 +11,158 @@
       "name": "jkit.sql.auto.enabled",
       "type": "java.lang.Boolean",
       "defaultValue": true,
-      "description": "Whether to sync schema on startup."
+      "description": "Whether to sync schema from entities on startup."
     },
     {
       "name": "jkit.sql.auto.mode",
       "type": "java.lang.String",
-      "defaultValue": "update"
+      "defaultValue": "update",
+      "description": "Sync mode: none / validate / update / create / create-drop."
     },
     {
       "name": "jkit.sql.auto.packages",
-      "type": "java.util.List<java.lang.String>"
+      "type": "java.util.List<java.lang.String>",
+      "description": "Packages to scan for @SqlTable / JPA / MyBatis-Plus entities."
     },
     {
       "name": "jkit.sql.auto.entities",
-      "type": "java.util.List<java.lang.String>"
+      "type": "java.util.List<java.lang.String>",
+      "description": "Explicit entity class names, in addition to scanned packages."
+    },
+    {
+      "name": "jkit.sql.auto.dialect",
+      "type": "java.lang.String",
+      "description": "Target dialect name; inferred from the JDBC URL when absent."
+    },
+    {
+      "name": "jkit.sql.auto.url",
+      "type": "java.lang.String",
+      "description": "JDBC URL used when no DataSource bean is available; falls back to spring.datasource.url."
+    },
+    {
+      "name": "jkit.sql.auto.username",
+      "type": "java.lang.String",
+      "description": "JDBC username for the DriverManager path."
+    },
+    {
+      "name": "jkit.sql.auto.password",
+      "type": "java.lang.String",
+      "description": "JDBC password for the DriverManager path."
+    },
+    {
+      "name": "jkit.sql.auto.driver",
+      "type": "java.lang.String",
+      "description": "JDBC driver class name; inferred from the URL when absent."
+    },
+    {
+      "name": "jkit.sql.auto.fail-fast",
+      "type": "java.lang.Boolean",
+      "defaultValue": true,
+      "description": "Abort startup when a DDL statement fails; false skips failed statements."
+    },
+    {
+      "name": "jkit.sql.auto.alter-column",
+      "type": "java.lang.Boolean",
+      "defaultValue": false,
+      "description": "ALTER columns whose type differs from the entity."
+    },
+    {
+      "name": "jkit.sql.auto.drop-extra-columns",
+      "type": "java.lang.Boolean",
+      "defaultValue": false,
+      "description": "Drop database columns that no longer exist on the entity. Dangerous; keep off in shared schemas."
+    },
+    {
+      "name": "jkit.sql.auto.create-index",
+      "type": "java.lang.Boolean",
+      "defaultValue": true,
+      "description": "Create missing secondary indexes."
+    },
+    {
+      "name": "jkit.sql.auto.quote-identifiers",
+      "type": "java.lang.Boolean",
+      "defaultValue": false,
+      "description": "Quote identifiers with dialect-specific quotes in generated DDL."
+    },
+    {
+      "name": "jkit.sql.auto.show-sql",
+      "type": "java.lang.Boolean",
+      "defaultValue": true,
+      "description": "Log every executed DDL statement."
+    },
+    {
+      "name": "jkit.sql.auto.dry-run",
+      "type": "java.lang.Boolean",
+      "defaultValue": false,
+      "description": "Plan only; never executes DDL and never opens the DataSource."
+    },
+    {
+      "name": "jkit.sql.auto.catalog",
+      "type": "java.lang.String",
+      "description": "JDBC catalog for metadata lookups; defaults to the connection catalog."
+    },
+    {
+      "name": "jkit.sql.auto.schema",
+      "type": "java.lang.String",
+      "description": "JDBC schema for metadata lookups; defaults to the connection schema."
+    },
+    {
+      "name": "jkit.sql.auto.table-prefix",
+      "type": "java.lang.String",
+      "description": "Prefix applied to managed table names and FK reference targets."
+    },
+    {
+      "name": "jkit.sql.auto.index-prefix-enabled",
+      "type": "java.lang.Boolean",
+      "defaultValue": true,
+      "description": "Whether auto-derived index names include the table prefix."
+    },
+    {
+      "name": "jkit.sql.auto.foreign-keys",
+      "type": "java.lang.Boolean",
+      "defaultValue": true,
+      "description": "Emit FOREIGN KEY constraints; disable for engines like GBase 8a."
+    },
+    {
+      "name": "jkit.sql.auto.auto-increment",
+      "type": "java.lang.Boolean",
+      "defaultValue": true,
+      "description": "Emit auto-increment clauses; disable for engines like DuckDB."
+    },
+    {
+      "name": "jkit.sql.auto.postgres-identity-style",
+      "type": "java.lang.String",
+      "defaultValue": "IDENTITY",
+      "description": "PostgreSQL identity style: IDENTITY or SERIAL (for old OpenGauss)."
+    },
+    {
+      "name": "jkit.sql.auto.phase",
+      "type": "java.lang.String",
+      "defaultValue": "eager",
+      "description": "When to run: eager = during context refresh before traffic; ready = after the ApplicationReadyEvent (2.0.1 behaviour)."
+    },
+    {
+      "name": "jkit.sql.auto.lock",
+      "type": "java.lang.Boolean",
+      "defaultValue": true,
+      "description": "Take a dialect metadata lock (MySQL GET_LOCK / PG pg_advisory_lock) before executing, so concurrent instances start serially."
+    },
+    {
+      "name": "jkit.sql.auto.history",
+      "type": "java.lang.Boolean",
+      "defaultValue": false,
+      "description": "Record applied changes into the history table."
+    },
+    {
+      "name": "jkit.sql.auto.history-table",
+      "type": "java.lang.String",
+      "defaultValue": "jkit_schema_history",
+      "description": "History table name."
+    },
+    {
+      "name": "jkit.sql.auto.export",
+      "type": "java.lang.String",
+      "description": "Write the planned DDL to this file (UTF-8, one statement per line) on every run."
     }
   ]
 }

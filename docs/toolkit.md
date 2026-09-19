@@ -93,8 +93,22 @@ Verify.verify(n > 0, "n must be positive");
 
 ```java
 long digest = Hash64.hash("cache-key");
-byte[] out = AESCrypt.encrypt(plain, key16);
+byte[] out = AESCrypt.encryptGcm(plain, key32);   // 推荐：GCM 认证加密
 ```
+
+### AES-GCM：新代码默认选它
+
+`AESCrypt.encryptGcm(data, key)` / `decryptGcm(data, key)` 走 `AES/GCM/NoPadding`（AEAD），每次随机 12 字节 IV 并拼在密文前面（`IV || ciphertext`），解密时自动拆分，调用方不用自己保管 IV。相比 ECB / CBC，GCM 额外提供完整性校验：**密文被改一个字节、或拿错密钥，解密直接抛异常**，而 ECB / CBC 会解出一堆乱码让错误继续往后传。
+
+```java
+byte[] key = AESCrypt.generateKey(256);
+byte[] packed = AESCrypt.encryptGcm(plain, key);          // 自带 IV，可直接存库 / 传输
+byte[] plain2 = AESCrypt.decryptGcm(packed, key);
+```
+
+需要自己管 IV、或要把「不加密但要防篡改」的字段绑进密文时，用四参版本：`encryptGcm(data, key, iv, aad)` / `decryptGcm(data, key, iv, aad)`，`aad` 传 `null` 即不启用。AAD 必须与加密时逐字节一致，否则解密失败。IV 在同一密钥下**不可重复**；IV 长度必须 12 字节、密钥必须 16/24/32 字节，非法参数抛 `IllegalArgumentException`，密文短于 12 字节时解密直接拒绝而不是当成空明文。
+
+ECB 的静态 `encrypt(data, key)` / `decrypt(data, key)` 保留但**不推荐**：相同明文块产生相同密文块，会泄漏数据模式，也不防篡改。它和构造器走的 CBC 路径互不相通（见下文）。
 
 摘要类方法（`md5`、`sha1`、`sha256`、`sha512`、`sha256_HMAC`）输出**小写** 16 进制，底层统一走 `ByteUtils.toHexStringLower`。
 
@@ -109,6 +123,32 @@ crypt.decrypt(in, out);                    // 大文件走流；in 和 out 都�
 流式重载**会关掉传入的两条流**（内部关闭 `CipherOutputStream` 时连带关闭 `outputData`，并显式 `close()` 了 `inputData`），别在 try-with-resources 外面复用它们。
 
 `AwaruaTiger`：Tiger 摘要（192 位 / 24 字节），`computeHash(bytes)` 一次算完整个数组并自动重置实例，因此同一实例可以重复调用；但实例带内部状态，**不是线程安全的**。只为 TTH（tiger tree hash）这类兼容场景保留，新代码用 SHA-256。
+
+### RSA：密钥默认 2048 位，填充优先 OAEP
+
+`EncryptUtils.RSA` 提供密钥对生成与公钥加密 / 私钥解密。两条填充路径互不相通，选错就是解密失败：
+
+| 方法 | 填充 | 适用 |
+| --- | --- | --- |
+| `encryptOaep` / `decryptOaep` | `RSA/ECB/OAEPWithSHA-256AndMGF1Padding` | **新数据默认选这个**，抗选择密文攻击，带随机盐，同明文每次密文不同 |
+| `encrypt` / `decrypt` | `RSA/ECB/PKCS1Padding`（PKCS#1 v1.5） | 解密历史密文、对接只认 v1.5 的老系统 |
+
+```java
+KeyPair pair = EncryptUtils.RSA.buildKeyPair();          // 2048 位
+String pub = Base64Utils.encodeToString(pair.getPublic().getEncoded());
+String pri = Base64Utils.encodeToString(pair.getPrivate().getEncoded());
+
+String cipher = EncryptUtils.RSA.encryptOaep("敏感字段", pub);   // base64 密文
+String text = EncryptUtils.RSA.decryptOaep(cipher, pri);
+```
+
+`buildKeyPair()` 自 2.0.2 起默认生成 **2048 位**（此前是 1024 位，已不满足当前安全基线）。确需沿用旧长度用 `buildKeyPair(1024)` 显式指定；小于 512 位抛 `IllegalArgumentException`。2048 位密钥下 OAEP 单块最多加密 190 字节，超长数据请走「随机 AES 密钥加密正文 + RSA 加密该密钥」的混合方案。
+
+字符串便捷方法在密钥非法时返回空字符串（不抛异常），调用方要判空。
+
+### DES 已废弃
+
+`DESCrypt` 与 `EncryptUtils.DES` 自 2.0.2 起标 `@Deprecated`：56 位有效密钥可被暴力破解，ECB / CBC 又不防篡改。仍可用于解密历史数据，新代码一律用 `AESCrypt.encryptGcm`。
 
 ### ContextObfuscator：上下文派生的混淆包装
 
@@ -271,10 +311,57 @@ List<User> users = JSON.parse(json, type);
 if (JDKVersion.VERSION >= 9) { /* 走 VarHandle 实现 */ }
 ```
 
+## 脱敏
+
+`DesensitizeUtils`：日志、导出、前端展示用的打码工具。`null` 返回 `null`、空串返回空串，不抛异常，可以直接埋进日志链路。
+
+```java
+DesensitizeUtils.phone("13800138000");        // 138****8000
+DesensitizeUtils.idCard("110101199003071234");  // 110101********1234（保留前 6 后 4）
+DesensitizeUtils.name("张三");                 // 张*
+DesensitizeUtils.email("zheng@example.com");  // z****@example.com（域名保留）
+DesensitizeUtils.bankCard("6222 0202 0001 1234"); // 6222********1234（先去空格）
+DesensitizeUtils.address("北京市海淀区中关村大街1号"); // 北京市海淀区*******
+DesensitizeUtils.carNo("京A12345");           // 京A***45
+DesensitizeUtils.ip("192.168.1.100");         // 192.168.*.*
+DesensitizeUtils.password("anything");        // ******（固定 6 位，不泄漏长度）
+```
+
+通用入口是 `mask(value, keepHead, keepTail)` / `mask(value, keepHead, keepTail, maskChar)`，中间全部打码；`maskAll(value)` 等长全打码。`keepHead + keepTail` 覆盖整个字符串时**不会原样返回**，只保留首字符——宁可多打码，也不因为「长度异常」把明文放出去。单字符无从打码时原样返回。
+
+配置驱动场景（按字段名指定类型）用 `desensitize(value, Type)`，`Type` 枚举含 `PHONE` / `ID_CARD` / `NAME` / `EMAIL` / `BANK_CARD` / `ADDRESS` / `CAR_NO` / `IP` / `PASSWORD` / `DEFAULT`，`type` 为 `null` 时按 `DEFAULT`（保留首尾各一位）处理。
+
+姓名只按字符数处理，不识别复姓；非纯中文（英文名）走 `DEFAULT` 兜底。脱敏只管展示，**不能替代访问控制**——数据本身仍是明文流转的。
+
+## ID 生成
+
+- `IdGenerator`：配置驱动入口，读 `generate.properties`，默认委托雪花算法。`id()` 出 `long`、`hex()` 出 16 字符十六进制。
+- `SnowFlakeIdWorker`：雪花算法，需配置 worker / datacenter 实例号，跨实例部署要靠实例号区分。
+- `ULID`：26 字符 Crockford Base32，前 10 位毫秒时间戳、后 16 位随机数，**按字符串排序即按时间排序**，适合做索引主键（UUIDv4 的随机前缀会让 B+Tree 频繁页分裂）。
+- `UUIDv7`：把毫秒时间戳放进 UUID 高 48 位，形态仍是标准 UUID，可直接存 `uuid` 列。
+
+```java
+String ulid = IdGenerator.ulid();                 // 或 ULID.next()
+String mono = ULID.nextMonotonic();               // 同一毫秒内递增，单 JVM 严格有序
+long ts = ULID.parse(ulid).timestamp();           // 解析回毫秒时间戳
+byte[] bytes = ULID.toBytes(ulid);                // 16 字节紧凑存储（6 时间戳 + 10 随机）
+
+UUID v7 = IdGenerator.uuidV7();                   // 或 UUIDv7.next()
+long when = UUIDv7.timestamp(v7);
+```
+
+ULID 的 `next()` 每次取 80 位随机数，同一毫秒内顺序不确定；`nextMonotonic()` 在同一毫秒内在上一个随机值上 `+1`，需要严格有序时用后者（多实例部署时同毫秒仍可能交错）。UUIDv7 的 `nextMonotonic()` 用 12 位计数器，一毫秒内用满会把逻辑时钟推进 1ms，保证不回退。
+
+解析时 `I` / `L` 视作 `1`、`O` 视作 `0`、大小写不敏感（Crockford 容错），含 `U` 或其它非法字符一律拒绝；时间戳超出 48 位范围的输入 `parse` 直接拒绝，与编码侧对称，`parse(x).toString()` 可往返；`ULID.isUlid(s)` 只做校验不抛异常。
+
 ## CSV / 身份证
 
-- `com.alianga.jkit.csv.CSVUtils`：UTF-8 读写字符串行，表头、引号内逗号/换行，含流式 `readStream` / `writer`。同包的 `CSV`/`CSVTable` 提供表格模型与 POJO 映射，两者共用同一个解析器。见 [csv.md](https://github.com/zhengmingliang/jkit/blob/develop/docs/csv.md)。
+- `com.alianga.jkit.csv.CSVUtils`：UTF-8 读写字符串行，表头、引号内逗号/换行，含流式 `readStream` / `writer`。同包的 `CSV`/`CSVTable` 提供表格模型与 POJO 映射，两者共用同一个解析器。完整用法见 [CSV 模块](/csv)。
 - `IdCardUtils` / `IdCardGenerator`：18 位校验、解析、生成；区划数据在 `idcard-areas.txt`。
+
+## 表达式引擎
+
+- `com.alianga.jkit.expression.Expression`：零依赖表达式求值，用于规则判断、动态取值、模板渲染。支持算术/比较/逻辑/三元运算、Map 与 JavaBean 上下文、位置参数 `p0/p1`、以 `@` 开头的内置函数，以及 `renderTemplate` 字符串模板。完整用法见 [表达式引擎](/expression)。
 
 ## 杂项工具
 

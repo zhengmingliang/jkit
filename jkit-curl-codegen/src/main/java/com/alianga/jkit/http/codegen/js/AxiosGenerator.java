@@ -6,6 +6,7 @@ import com.alianga.jkit.http.codegen.CurlGenSupport;
 import com.alianga.jkit.http.codegen.GeneratedCode;
 import com.alianga.jkit.http.curl.ParsedCurlRequest;
 import com.alianga.jkit.http.curl.ParsedCurlRequest.Body;
+import com.alianga.jkit.http.curl.ParsedCurlRequest.FormPart;
 import com.alianga.jkit.http.curl.ParsedCurlRequest.Header;
 
 import java.util.ArrayList;
@@ -52,9 +53,39 @@ public final class AxiosGenerator extends AbstractCodeGenerator {
         }
         src.append("  },\n");
         src.append("  maxRedirects: ").append(req.followRedirects() ? 5 : 0).append(",\n");
+        if (req.proxy() != null) {
+            src.append("  proxy: {\n");
+            src.append("    protocol: ").append(CodeQuote.js(req.proxy().scheme())).append(",\n");
+            src.append("    host: ").append(CodeQuote.js(req.proxy().host())).append(",\n");
+            src.append("    port: ").append(req.proxy().port()).append(",\n");
+            if (req.proxy().user() != null) {
+                src.append("    auth: { username: ").append(CodeQuote.js(req.proxy().user()))
+                        .append(", password: ")
+                        .append(CodeQuote.js(req.proxy().password() == null ? "" : req.proxy().password()))
+                        .append(" },\n");
+            }
+            src.append("  },\n");
+        }
         Body body = req.body();
         if (body.kind() == Body.Kind.MULTIPART) {
-            notes.add("multipart 请改用 FormData 作为 data。");
+            src.append("  data: (() => {\n");
+            src.append("    const form = new FormData();\n");
+            for (FormPart p : body.parts()) {
+                if (p.file()) {
+                    src.append("    form.append(").append(CodeQuote.js(p.name()))
+                            .append(", /* file: ").append(p.filePath()).append(" */);\n");
+                    notes.add("FormData 文件请换成 File/Blob 对象（Node 可用 fs.createReadStream + form-data 包）。");
+                } else {
+                    src.append("    form.append(").append(CodeQuote.js(p.name())).append(", ")
+                            .append(CodeQuote.js(p.value() == null ? "" : p.value())).append(");\n");
+                }
+            }
+            src.append("    return form;\n");
+            src.append("  })(),\n");
+        } else if (body.kind() == Body.Kind.FILE) {
+            src.append("  // Node 读取文件作为请求体：data: await fs.promises.readFile(")
+                    .append(CodeQuote.js(body.filePath())).append("),\n");
+            notes.add("axios 读取本地文件需在 Node 中用 fs，或在浏览器中用 input[type=file]。");
         } else if (body.isPresent()) {
             src.append("  data: ").append(CodeQuote.js(body.text())).append(",\n");
         }

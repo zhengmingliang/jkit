@@ -6,6 +6,9 @@ on:
     # 只有 docs 内容或本工作流文件变更时才构建部署，避免每次提交都跑 Pages 构建
     paths:
       - 'docs/**'
+      - 'scripts/docs-build-versions.mjs'
+      - 'package.json'
+      - 'package-lock.json'
       - '.github/workflows/deploy.yml'
   workflow_dispatch:      # 允许在 Actions 页面手动触发
 
@@ -27,6 +30,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          fetch-tags: true
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -37,8 +41,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build VitePress site
-        run: npm run docs:build   # 产物在 docs/.vitepress/dist
+      - name: Build VitePress site (current + archived tags)
+        run: npm run docs:build:all   # 产物在 docs/.vitepress/dist，历史版在 dist/vX.Y.Z/
 
       - name: Configure Pages
         uses: actions/configure-pages@v4

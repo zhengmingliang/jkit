@@ -14,7 +14,6 @@ import java.util.logging.*;
  * @since 2.0.1
  */
 public class LocaleFormatter extends Formatter {
-
     private final Locale locale;
 
     public LocaleFormatter(Locale locale) {

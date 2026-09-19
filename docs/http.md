@@ -14,6 +14,34 @@
 
 详细类型位于 `com.alianga.jkit.http`：`HttpResponse`、`HttpResponseBody`、`HttpRequest`、`HttpCookieJar`、`UploadInfo`、`HttpCallBack` 等。原 OkHttp 的 `Response` / `ResponseBody` / `CookieJar` / `Call` 已替换为上述 JDK 类型。
 
+## 0. 可实例化客户端 HttpClient
+
+`HttpUtils` 的静态方法是进程级全局门面：所有 `setXxx` 都是改全局默认，多线程下互相覆盖、互相污染。`HttpClient` 是等价的**可实例化**版本，每个实例持有独立配置，多个实例之间、与全局默认之间都不串味，且不同线程并发执行各自隔离，无需全局加锁。
+
+典型用法：
+
+```java
+// 实例 A：短超时 + 专属代理
+HttpClient a = HttpClient.builder()
+        .connectTimeout(2000).readTimeout(5000)
+        .httpProxy("proxy-a", 8080)
+        .build();
+
+// 实例 B：完全不同的超时，不依赖代理
+HttpClient b = HttpClient.builder()
+        .connectTimeout(1000)
+        .build();
+
+HttpResponse r = a.get("https://api.example.com/x");   // A 的配置
+HttpResponse s = b.get("https://api.example.com/y");   // B 的配置，互不影响
+```
+
+- 构建器 `HttpClient.builder()` 初始值取自当前全局默认，只需覆盖关心的项；所有 setter 返回 `this`，可链式编排。
+- 可配置项：连接/读取超时（`connectTimeout` / `readTimeout`）、代理（`proxy` / `httpProxy` / `proxyAuth`）、SSL（`ignoreSsl` / `sslContext` + `hostnameVerifier`）、`cookieJar`、`engine`（注入传输引擎，常用于测试）、`fakeIp`、`defaultMediaType`、重试（`retryPolicy` / `maxRedirects`）、`http2`、`throwOnHttpError`、`endpointPool`、拦截器（`addInterceptor` / `interceptors`）。
+- `HttpClient.shared()` 取全局默认单例，与 `HttpUtils` 的静态方法共享同一份进程级配置，二者行为完全等价。
+- 实例方法覆盖常用场景：`execute(HttpRequest)`、`get(...)`、`post(...)`、`postJson(...)`、`put(...)`、`delete(...)`；请求作用域在 `execute` 内部设置、结束后恢复进入前的旧值（顶层调用恢复为空），因此连静态 `HttpUtils` 调用也不会被某个实例的配置污染。
+- 隔离实现：实例配置通过线程局部（ThreadLocal）下发到发送链路（超时、代理、SSL、CookieJar、引擎、拦截器均读取"当前活跃客户端"），保证多实例与多线程互不污染；拦截器里嵌套调用其它实例（如 token 刷新）后，外层剩余链路读到的仍是外层自己的配置。
+
 ## 1. GET
 
 ```java

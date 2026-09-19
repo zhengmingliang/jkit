@@ -115,6 +115,51 @@ public class SqlPaginationTest {
         SQL.parse(SQL.toSqlString(page, SqlDialect.ORACLE), SqlDialect.ORACLE);
     }
 
+    /**
+     * Oracle 子查询里对 UNION 列别名 ORDER BY 会 ORA-00904；分页须先包一层再 ORDER BY。
+     */
+    @Test
+    public void setPageOracleUnionOrderByLiftsOutOfSetOp() {
+        String src = "SELECT 'revenue' AS metric_group, 'gmv_30d' AS metric_name FROM dual "
+                + "UNION ALL SELECT 'revenue', 'orders_30d' FROM dual "
+                + "UNION ALL SELECT 'cost', 'discount_30d' FROM dual "
+                + "UNION ALL SELECT 'finance', 'deposit_total' FROM dual "
+                + "UNION ALL SELECT 'risk', 'npl_pct' FROM dual "
+                + "UNION ALL SELECT 'hr', 'headcount' FROM dual "
+                + "UNION ALL SELECT 'hr', 'left_1y' FROM dual "
+                + "UNION ALL SELECT 'hr', 'avg_perf' FROM dual "
+                + "UNION ALL SELECT 'efficiency', 'gmv_per_head' FROM dual "
+                + "ORDER BY metric_group, metric_name";
+        SqlStatement page = SQL.setPage(SQL.parse(src, SqlDialect.ORACLE), 2, 5, SqlDialect.ORACLE);
+        String sql = SQL.toSqlString(page, SqlDialect.ORACLE);
+        String compact = sql.toUpperCase().replaceAll("\\s+", "");
+        assertFalse(sql, compact.contains("LIMIT"));
+        assertTrue(sql, compact.contains("ROWNUM<=10"));
+        assertTrue(sql, compact.contains("RN>5"));
+        assertTrue("ORDER BY must sit on SELECT * FROM (union), not a UNION branch",
+                compact.contains(")ORDERBYMETRIC_GROUP"));
+        assertTrue("outer select must project original columns, not RN",
+                compact.startsWith("SELECTMETRIC_GROUP"));
+        assertFalse("outer select must not be SELECT * (would leak RN)",
+                compact.startsWith("SELECT*FROM"));
+        assertEquals(Long.valueOf(5L), SQL.getLimit(page));
+        assertEquals(Long.valueOf(5L), SQL.getOffset(page));
+        SQL.parse(sql, SqlDialect.ORACLE);
+    }
+
+    @Test
+    public void setPageOracleNestedDoesNotProjectRn() {
+        SqlStatement page = SQL.setPage(
+                SQL.parse("SELECT id, name FROM emp", SqlDialect.ORACLE), 2, 8, SqlDialect.ORACLE);
+        String sql = SQL.toSqlString(page, SqlDialect.ORACLE);
+        String compact = sql.toUpperCase().replaceAll("\\s+", "");
+        assertTrue(sql, compact.startsWith("SELECTID,NAMEFROM("));
+        assertTrue(sql, compact.contains("ROWNUMASRN") || compact.contains("ASRN"));
+        SqlSelect select = (SqlSelect) page;
+        assertEquals(2, select.selectItems().size());
+        SQL.parse(sql, SqlDialect.ORACLE);
+    }
+
     @Test
     public void setLimitReplacesExisting() {
         SqlStatement stmt = SQL.parse("SELECT * FROM t LIMIT 5");

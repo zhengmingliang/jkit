@@ -104,9 +104,8 @@ public final class LuaSocketHttpGenerator extends AbstractCodeGenerator {
             }
 
             boolean needContentLength = payloadText != null;
-            boolean needHeaders = !headers.isEmpty()
-                    || needContentLength
-                    || (auth != null && "basic".equals(auth.type()) && !req.hasHeader("Authorization"));
+            // -u 的 basic 认证已由 visibleHeaders 注入成 Authorization 头，这里不要再写一遍
+            boolean needHeaders = !headers.isEmpty() || needContentLength;
             if (needHeaders) {
                 code.append("\theaders = {\n");
                 for (Header h : headers) {
@@ -117,13 +116,6 @@ public final class LuaSocketHttpGenerator extends AbstractCodeGenerator {
                     int len = payloadText.getBytes(StandardCharsets.UTF_8).length;
                     code.append("\t\t[\"Content-Length\"] = ").append(CodeQuote.lua(Integer.toString(len)))
                             .append(",\n");
-                }
-                if (auth != null && "basic".equals(auth.type()) && !req.hasHeader("Authorization")) {
-                    imports.add("mime");
-                    String raw = (auth.user() == null ? "" : auth.user()) + ":"
-                            + (auth.password() == null ? "" : auth.password());
-                    code.append("\t\tauthentication = \"Basic \" .. (mime.b64(")
-                            .append(CodeQuote.lua(raw)).append(")),\n");
                 }
                 code.append("\t},\n");
             }

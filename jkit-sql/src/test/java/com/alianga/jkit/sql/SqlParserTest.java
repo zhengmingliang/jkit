@@ -59,6 +59,38 @@ import java.util.Set;
  */
 public class SqlParserTest {
 
+    @Test
+    public void parseSqlServerSql() {
+        String sqls = "-- ============================================================================\n" +
+                "-- SQL Server 2017+ 初始化脚本\n" +
+                "-- 配套 complex-sql 300 条复杂业务 SQL 的初始化脚本（建表 + 测试数据）\n" +
+                "-- ============================================================================\n" +
+                "--\n" +
+                "-- 说明：\n" +
+                "--   1. 共 51 张表，94332 行测试数据。\n" +
+                "--   2. 所有日期/时间列均以『当前时间』为基准动态生成相对偏移，\n" +
+                "--      因此无论何时执行，近 30 天 / 180 天 / 1 年 / 3 年的分析窗口都有数据。\n" +
+                "--   3. 数据刻意包含：帕累托分布的高价值客户、快进快出与拆分交易等可疑模式、\n" +
+                "--      逾期贷款、考勤异常、少量 NULL 与重复姓名、少量孤儿外键记录，\n" +
+                "--      用于让风控/数据质量/异常检测类 SQL 能跑出非空结果。\n" +
+                "--   4. 表结构与字段说明见 README.md。\n" +
+                "--   5. 建议执行前先创建数据库：CREATE DATABASE complex_sql; GO  USE complex_sql; GO\n" +
+                "--\n" +
+                "-- ============================================================================\n" +
+                "\n" +
+                "SET NOCOUNT ON;\n" +
+                "\n" +
+                "-- ---------- 1. 删除已存在的表 ----------\n" +
+                "IF OBJECT_ID('payroll', 'U') IS NOT NULL DROP TABLE payroll;\n" +
+                "IF OBJECT_ID('project_assignments', 'U') IS NOT NULL DROP TABLE project_assignments;";
+        List<SqlStatement> sqlStatements = SQL.parseAll(sqls);
+        assertEquals(3, sqlStatements.size());
+        // 顺序：SET NOCOUNT ON(0) / IF...DROP payroll(1) / IF...DROP project_assignments(2)
+        assertEquals(SqlStatementType.SET, sqlStatements.get(0).type());
+        assertEquals(SqlStatementType.DROP, sqlStatements.get(1).type());
+        assertEquals(SqlStatementType.DROP, sqlStatements.get(2).type());
+    }
+
     /**
      * 基本 SELECT 与表列抽取。
      */
@@ -138,6 +170,133 @@ public class SqlParserTest {
         System.out.println(SQL.toSqlString(SqlRewriter.addLimit(statement, 100, SqlDialect.ORACLE)));
         System.out.println(select.limit());
         System.out.println(SQL.toSqlString(statement));
+    }
+    @Test
+    public void parseSimpleSql() {
+        SqlStatement statement = SQL.parse("select * from ACCOUNTS", SqlDialect.ORACLE);
+        SqlSchemaStat stat = SQL.stat(statement);
+        Set<String> columns = stat.getColumns();
+        System.out.println("columns = " + columns);
+        List<String> conditions = stat.getConditions();
+        List<String> groupByColumns = stat.getGroupByColumns();
+        List<String> orderByColumns = stat.getOrderByColumns();
+        System.out.println("conditions = " + conditions);
+        System.out.println("groupByColumns = " + groupByColumns);
+        System.out.println("orderByColumns = " + orderByColumns);
+        SqlStatement paged = SQL.setPage(statement, 2, 100, SqlDialect.ORACLE);
+        String oraclePage = SQL.toSqlString(paged, SqlDialect.ORACLE);
+        System.out.println(oraclePage);
+        String compact = oraclePage.toUpperCase().replaceAll("\\s+", "");
+        assertFalse("must not emit MySQL LIMIT for Oracle page", compact.contains("LIMIT"));
+        assertTrue(oraclePage, compact.contains("ROWNUM<=200"));
+        assertTrue(oraclePage, compact.contains("RN>100"));
+        assertTrue("SELECT * keeps star wrap", compact.contains("SELECT*FROM(SELECTXX.*"));
+        assertEquals(Long.valueOf(100L), SQL.getLimit(paged));
+        assertEquals(Long.valueOf(100L), SQL.getOffset(paged));
+        SQL.parse(oraclePage, SqlDialect.ORACLE);
+    }
+    @Test
+    public void parseComplicateSql2() {
+        String
+        sql = "WITH ec AS (\n" +
+                "    SELECT ROUND(SUM(o.pay_amount), 2)                                   AS gmv_30d,\n" +
+                "           COUNT(*)                                                      AS orders_30d,\n" +
+                "           COUNT(DISTINCT o.customer_id)                                 AS cust_30d,\n" +
+                "           ROUND(SUM(o.discount_amount), 2)                              AS discount_30d\n" +
+                "    FROM orders o\n" +
+                "    WHERE o.status = 'completed' AND o.order_date >= TRUNC(SYSDATE) - 30\n" +
+                "),\n" +
+                "fn AS (\n" +
+                "    SELECT ROUND(SUM(a.balance), 2)                                      AS deposit_total,\n" +
+                "           COUNT(DISTINCT a.cust_id)                                     AS fin_cust,\n" +
+                "           ROUND(SUM(CASE WHEN l.status = 'overdue' THEN l.loan_amount ELSE 0 END) * 100.0\n" +
+                "                 / NULLIF(SUM(l.loan_amount), 0), 2)                     AS npl_pct\n" +
+                "    FROM accounts a\n" +
+                "    LEFT JOIN loans l ON a.cust_id = l.cust_id\n" +
+                "),\n" +
+                "hr AS (\n" +
+                "    SELECT SUM(CASE WHEN e.status = 'active' THEN 1 ELSE 0 END)          AS headcount,\n" +
+                "           ROUND(AVG(CASE WHEN e.status = 'active' THEN e.salary END), 2) AS avg_salary,\n" +
+                "           SUM(CASE WHEN e.leave_date >= TRUNC(SYSDATE) - 365 THEN 1 ELSE 0 END) AS left_1y\n" +
+                "    FROM employees e\n" +
+                "),\n" +
+                "pf AS (\n" +
+                "    SELECT ROUND(AVG(score), 2) AS avg_perf FROM performance\n" +
+                ")\n" +
+                "SELECT 'revenue'                                                         AS metric_group,\n" +
+                "       'gmv_30d'                                                         AS metric_name,\n" +
+                "       e.gmv_30d                                                         AS metric_value,\n" +
+                "       ROUND(e.gmv_30d / NULLIF(e.orders_30d, 0), 2)                     AS derived_aov\n" +
+                "FROM ec e\n" +
+                "UNION ALL\n" +
+                "SELECT 'revenue', 'orders_30d', e.orders_30d,\n" +
+                "       ROUND(e.orders_30d * 1.0 / NULLIF(e.cust_30d, 0), 3)\n" +
+                "FROM ec e\n" +
+                "UNION ALL\n" +
+                "SELECT 'cost', 'discount_30d', e.discount_30d,\n" +
+                "       ROUND(e.discount_30d * 100.0 / NULLIF(e.gmv_30d, 0), 2)\n" +
+                "FROM ec e\n" +
+                "UNION ALL\n" +
+                "SELECT 'finance', 'deposit_total', f.deposit_total,\n" +
+                "       ROUND(f.deposit_total / NULLIF(f.fin_cust, 0), 2)\n" +
+                "FROM fn f\n" +
+                "UNION ALL\n" +
+                "SELECT 'risk', 'npl_pct', f.npl_pct, NULL FROM fn f\n" +
+                "UNION ALL\n" +
+                "SELECT 'hr', 'headcount', h.headcount, h.avg_salary FROM hr h\n" +
+                "UNION ALL\n" +
+                "SELECT 'hr', 'left_1y', h.left_1y,\n" +
+                "       ROUND(h.left_1y * 100.0 / NULLIF(h.headcount, 0), 2)\n" +
+                "FROM hr h\n" +
+                "UNION ALL\n" +
+                "SELECT 'hr', 'avg_perf', p.avg_perf, NULL FROM pf p\n" +
+                "UNION ALL\n" +
+                "SELECT 'efficiency', 'gmv_per_head',\n" +
+                "       ROUND(e.gmv_30d / NULLIF(h.headcount, 0), 2),\n" +
+                "       ROUND(e.gmv_30d / NULLIF(h.headcount, 0) * 12.0, 2)\n" +
+                "FROM ec e\n" +
+                "CROSS JOIN hr h\n" +
+                "ORDER BY 1, 2;";
+        SqlStatement statement = SQL.parse(sql, SqlDialect.ORACLE);
+
+        SqlSchemaStat stat = SQL.stat(statement);
+        Set<String> columns = stat.getColumns();
+        System.out.println("columns = " + columns);
+        List<String> conditions = stat.getConditions();
+        List<String> groupByColumns = stat.getGroupByColumns();
+        List<String> orderByColumns = stat.getOrderByColumns();
+        System.out.println("conditions = " + conditions);
+        System.out.println("groupByColumns = " + groupByColumns);
+        System.out.println("orderByColumns = " + orderByColumns);
+        assertTrue(orderByColumns.toString(), orderByColumns.contains("1") && orderByColumns.contains("2"));
+        assertTrue(conditions.toString(), conditions.toString().contains("TRUNC(SYSDATE) - 30"));
+        SqlStatement paged = SQL.setPage(statement, 2, 5, SqlDialect.ORACLE);
+        String oraclePage = SQL.toSqlString(paged, SqlDialect.ORACLE);
+        System.out.println(oraclePage);
+        String compact = oraclePage.toUpperCase().replaceAll("\\s+", "");
+        assertTrue(oraclePage, compact.contains("ROWNUM<=10"));
+        assertTrue(oraclePage, compact.contains("RN>5"));
+        assertFalse("must not emit MySQL LIMIT for Oracle page", compact.contains("LIMIT"));
+        assertFalse("INTERVAL literal removed from source SQL", compact.contains("INTERVAL"));
+        assertTrue(oraclePage, compact.contains("TRUNC(SYSDATE)-30"));
+        assertTrue(oraclePage, compact.contains("TRUNC(SYSDATE)-365"));
+        // UNION 的 ORDER BY 1,2 必须提到 SELECT * FROM (set-op) 外包
+        assertTrue("ORDER BY must follow the UNION subquery close, not a UNION branch",
+                compact.contains(")ORDERBY1ASC,2ASC") || compact.contains(")ORDERBY1,2"));
+        SqlSelect pagedSelect = (SqlSelect) paged;
+        assertEquals(4, pagedSelect.selectItems().size());
+        for (SqlSelectItem item : pagedSelect.selectItems()) {
+            String name = item.alias() != null ? item.alias()
+                    : (item.expr() instanceof SqlIdentifier
+                    ? ((SqlIdentifier) item.expr()).simpleName() : "");
+            assertFalse("outer select must not project RN", "RN".equalsIgnoreCase(name));
+            assertFalse(item.expr() instanceof com.alianga.jkit.sql.ast.SqlAllColumns);
+        }
+        assertTrue(oraclePage, compact.contains("SELECTMETRIC_GROUP"));
+        assertEquals(Long.valueOf(5L), SQL.getLimit(paged));
+        assertEquals(Long.valueOf(5L), SQL.getOffset(paged));
+        assertFalse("setPage must clone", ((SqlSelect) statement).from() instanceof SqlSubqueryTable);
+        SQL.parse(oraclePage, SqlDialect.ORACLE);
     }
 
     /**
@@ -1588,6 +1747,11 @@ public class SqlParserTest {
         assertTrue("block comment kept", foundBlock);
         String fmt = SQL.toSqlString(kept);
         assertTrue(fmt, fmt.contains("keep me") || fmt.contains("--"));
+        // 紧凑回写不能把 -- 行注释和 SELECT 放在同一行，否则整句被注释掉
+        assertTrue(fmt.toUpperCase(), fmt.toUpperCase().contains("SELECT"));
+        SQL.parse(fmt, SqlDialect.MYSQL);
+        String pretty = SQL.format(kept, SqlDialect.MYSQL);
+        SQL.parse(pretty, SqlDialect.MYSQL);
     }
 
     /**

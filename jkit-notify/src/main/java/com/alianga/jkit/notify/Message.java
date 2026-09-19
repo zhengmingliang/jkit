@@ -303,6 +303,24 @@ public final class Message {
     }
 
     /**
+     * 复制一份独立消息：类型 / 标题 / 正文相同，extras / 附件 / 变量均为新容器，
+     * 之后对副本的修改不会写回调用方的消息。渠道需要临时改写消息
+     * （如短信渠道注入当前收件人）时应基于副本操作，避免污染调用方。
+     *
+     * @return 独立副本
+     * @since 2.0.2
+     */
+    public Message copy() {
+        Message clone = new Message(type, title, content);
+        clone.extras.putAll(this.extras);
+        clone.attachments.addAll(this.attachments);
+        if (this.vars != null) {
+            clone.vars = new LinkedHashMap<String, Object>(this.vars);
+        }
+        return clone;
+    }
+
+    /**
      * @return 消息类型
      */
     public MessageType type() {

@@ -4,6 +4,7 @@ import com.alianga.jkit.sql.ast.SqlCopyStatement;
 import com.alianga.jkit.sql.ast.SqlExplainStatement;
 import com.alianga.jkit.sql.ast.SqlExpr;
 import com.alianga.jkit.sql.ast.SqlFlushStatement;
+import com.alianga.jkit.sql.ast.SqlGuardedStatement;
 import com.alianga.jkit.sql.ast.SqlIdentifier;
 import com.alianga.jkit.sql.ast.SqlLoadDataStatement;
 import com.alianga.jkit.sql.ast.SqlLockTablesStatement;
@@ -264,6 +265,12 @@ public final class SqlParser {
         if (isIdent("DELIMITER")) {
             return parseDelimiter();
         }
+        // T-SQL 控制流守卫 IF <expr> <stmt> [ELSE <stmt>]（如 SQL Server init 的幂等删表前置
+        // IF OBJECT_ID('t','U') IS NOT NULL DROP TABLE t;）。MySQL 里 IF 是函数，但在语句
+        // 起始位置出现时一律按控制流守卫解析，避免被当作未知标识符抛 unsupported。
+        if (isIdent("IF") || is(SqlTokenType.IF)) {
+            return parseIfGuard();
+        }
         SqlTokenType t = token.type();
         switch (t) {
             case SELECT:
@@ -407,6 +414,81 @@ public final class SqlParser {
             return null;
         }
         return statementParsers.find(keyword);
+    }
+
+    /**
+     * T-SQL 控制流守卫 {@code IF <expr> <stmt> [ELSE <stmt>]}（如 SQL Server init 的幂等删表前置
+     * {@code IF OBJECT_ID('t','U') IS NOT NULL DROP TABLE t;}）。
+     * 解析出 condition 原文与内层 body 语句，包成 {@link SqlGuardedStatement}；其 {@link SqlStatement#type()}
+     * 委托给 body，因此 DROP 守卫对外仍是 DROP，下游格式化/转换可正确识别。
+     */
+    private SqlStatement parseIfGuard() {
+        int fullStart = token.start();
+        next(); // 消费 IF
+        int condStart = token.start();
+        int depth = 0;
+        boolean foundBody = false;
+        while (!atStmtBreak() && !is(SqlTokenType.EOF)) {
+            if (depth == 0 && isStmtStartKeyword()) {
+                foundBody = true;
+                break;
+            }
+            if (token.type() == SqlTokenType.LPAREN) {
+                depth++;
+            } else if (token.type() == SqlTokenType.RPAREN) {
+                depth = Math.max(0, depth - 1);
+            }
+            next();
+        }
+        if (!foundBody) {
+            // 退化：无内层语句，整条作为 OTHER 原文占位
+            SqlSimpleStatement stmt = new SqlSimpleStatement();
+            stmt.setStatementType(SqlStatementType.OTHER);
+            stmt.setText(lexer.rawSlice(fullStart, token.start()).trim());
+            return stmt;
+        }
+        String condition = lexer.rawSlice(condStart, token.start()).trim();
+        SqlStatement body = parseStatement();
+        SqlGuardedStatement g = new SqlGuardedStatement();
+        g.setCondition(condition);
+        g.setBody(body);
+        return g;
+    }
+
+    /**
+     * 判断当前 token 是否为一条语句的起始关键字（用于在 IF 守卫里界定 condition 与 body 的边界）。
+     */
+    private boolean isStmtStartKeyword() {
+        switch (token.type()) {
+            case SELECT:
+            case VALUES:
+            case INSERT:
+            case REPLACE:
+            case UPDATE:
+            case DELETE:
+            case MERGE:
+            case CREATE:
+            case DROP:
+            case ALTER:
+            case RENAME:
+            case TRUNCATE:
+            case EXPLAIN:
+            case DESCRIBE:
+            case DESC:
+            case SET:
+            case USE:
+            case SHOW:
+            case CALL:
+            case BEGIN:
+            case DECLARE:
+            case DO:
+            case GRANT:
+            case REVOKE:
+            case WITH:
+                return true;
+            default:
+                return false;
+        }
     }
 
     private SqlStatement parseWith() {
@@ -2149,6 +2231,7 @@ public final class SqlParser {
         String raw = consumeIdentPartRaw();
         if (isQuoted(raw)) {
             id.setQuoted(true);
+            id.markQuotedPart(0);
         }
         id.addName(unquote(raw));
         while (true) {
@@ -2165,6 +2248,7 @@ public final class SqlParser {
                 String part = consumeIdentPartRaw();
                 if (isQuoted(part)) {
                     id.setQuoted(true);
+                    id.markQuotedPart(id.names().size());
                 }
                 id.addName(unquote(part));
             } else if (is(SqlTokenType.NAMED_BIND) && lexer.lookahead(0) != null
@@ -2184,6 +2268,7 @@ public final class SqlParser {
                 String part = consumeIdentPartRaw();
                 if (isQuoted(part)) {
                     id.setQuoted(true);
+                    id.markQuotedPart(id.names().size());
                 }
                 id.addName(unquote(part));
             } else {

@@ -4,8 +4,11 @@ import com.alianga.jkit.sql.ast.SqlExpr;
 import com.alianga.jkit.sql.ast.SqlStatement;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 改写规则链：按 {@link #add} 顺序依次执行 {@link SqlRewriteHook}。
@@ -14,7 +17,7 @@ import java.util.List;
  *
  * <pre>{@code
  * SqlStatement out = SQL.rewrite(stmt, SqlRewrites.create()
- *         .add(new TenantRule())                        // 前 hook：自定义规则
+ *         .add(new RowFilterRule())                     // 前 hook：自定义规则
  *         .add(SqlRewrites.replaceTable("t", "t_2026")) // 内建：换表
  *         .add(SqlRewrites.addLimit(100, SqlDialect.MYSQL)) // 内建：补 LIMIT
  *         .add(SqlRewrites.andWhere(SQL.parseExpr("id > ?")))); // 内建：AND WHERE
@@ -148,7 +151,7 @@ public final class SqlRewrites {
     /**
      * 内建适配器：把谓词 AND 到顶层 WHERE，等价 {@link SqlRewriter#andWhere}。
      *
-     * @param predicate 谓词（如 {@code SQL.parseExpr("tenant_id = ?")}）
+     * @param predicate 谓词（如 {@code SQL.parseExpr("org_id = ?")}）
      * @return 规则
      */
     public static SqlRewriteHook andWhere(final SqlExpr predicate) {
@@ -159,6 +162,49 @@ public final class SqlRewrites {
             @Override
             public SqlStatement apply(SqlStatement statement) {
                 return SqlRewriter.andWhere(statement, predicate);
+            }
+        };
+    }
+
+    /**
+     * 内建适配器：按配置注入行级条件，等价 {@link SqlInjectRewriter#inject(SqlStatement, SqlInjectConfig)}。
+     *
+     * @param config 配置
+     * @return 规则
+     * @since 2.0.2
+     */
+    public static SqlRewriteHook inject(final SqlInjectConfig config) {
+        return new SqlRewriteHook() {
+            /**
+             * {@inheritDoc}
+             */
+            @Override
+            public SqlStatement apply(SqlStatement statement) {
+                return SqlInjectRewriter.inject(statement, config);
+            }
+        };
+    }
+
+    /**
+     * 内建适配器：注入单列等值条件。
+     *
+     * @param column 列简单名
+     * @param value 值
+     * @param tables 表白名单；省略则全部物理表
+     * @return 规则
+     * @since 2.0.2
+     */
+    public static SqlRewriteHook inject(final String column, final SqlExpr value,
+            final String... tables) {
+        final Collection<String> list = tables == null || tables.length == 0
+                ? null : Arrays.asList(tables);
+        return new SqlRewriteHook() {
+            /**
+             * {@inheritDoc}
+             */
+            @Override
+            public SqlStatement apply(SqlStatement statement) {
+                return SqlInjectRewriter.inject(statement, column, value, list);
             }
         };
     }
@@ -255,6 +301,65 @@ public final class SqlRewrites {
             @Override
             public SqlStatement apply(SqlStatement statement) {
                 return SqlRewriter.removeSelectItem(statement, columnSimpleName);
+            }
+        };
+    }
+
+    /**
+     * 内建适配器：整树替换 SELECT 投影，等价 {@link SqlSelectListRewriter#replaceSelectItem}。
+     *
+     * @param column 列简单名或 {@code t.col}
+     * @param expr 新表达式
+     * @return 规则
+     * @since 2.0.2
+     */
+    public static SqlRewriteHook replaceSelectItem(final String column, final SqlExpr expr) {
+        return new SqlRewriteHook() {
+            /**
+             * {@inheritDoc}
+             */
+            @Override
+            public SqlStatement apply(SqlStatement statement) {
+                return SqlSelectListRewriter.replaceSelectItem(statement, column, expr, null);
+            }
+        };
+    }
+
+    /**
+     * 内建适配器：一次遍历替换多列投影。
+     *
+     * @param replacements 列名 → 新表达式
+     * @return 规则
+     * @since 2.0.2
+     */
+    public static SqlRewriteHook replaceSelectItems(final Map<String, ? extends SqlExpr> replacements) {
+        return new SqlRewriteHook() {
+            /**
+             * {@inheritDoc}
+             */
+            @Override
+            public SqlStatement apply(SqlStatement statement) {
+                return SqlSelectListRewriter.replaceSelectItems(statement, replacements);
+            }
+        };
+    }
+
+    /**
+     * 内建适配器：整树展开 {@code *} / {@code t.*}。
+     *
+     * @param columnsByTable 物理表简单名 → 列
+     * @return 规则
+     * @since 2.0.2
+     */
+    public static SqlRewriteHook expandStar(final Map<String, ? extends List<String>> columnsByTable) {
+        final SqlColumnResolver resolver = SqlSelectListRewriter.mapResolver(columnsByTable);
+        return new SqlRewriteHook() {
+            /**
+             * {@inheritDoc}
+             */
+            @Override
+            public SqlStatement apply(SqlStatement statement) {
+                return SqlSelectListRewriter.expandStar(statement, resolver);
             }
         };
     }

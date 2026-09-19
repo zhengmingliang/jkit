@@ -340,7 +340,8 @@ Supported constraint keywords:
 | Keyword | Description |
 | --- | --- |
 | `type` | type: `object` / `array` / `string` / `number` / `integer` / `boolean` / `null`; an array of multiple types is supported |
-| `must` | required (this implementation uses `must`, equivalent to the standard `required`) |
+| `required` | the standard form: an array of strings declared on the parent, `"required": ["name", "age"]`. Presence is enough — `null` counts as present |
+| `must` | this library's own form: a boolean declared inside the field schema, `"name": {"must": true}`. The field must exist **and its value must not be `null`** |
 | `minimum` / `maximum` | numeric bounds |
 | `exclusiveMinimum` / `exclusiveMaximum` | open intervals |
 | `minLength` / `maxLength` | string length |
@@ -353,7 +354,67 @@ Supported constraint keywords:
 | `anyOf` / `allOf` / `oneOf` | combined validation |
 | `disableExtra` | forbid undefined fields |
 
-## 9. Other Capabilities
+### Required: `required` or `must`?
+
+Both are honoured, with different semantics; when both appear, both must hold:
+
+```java
+// Standard form: declared on the parent, presence is enough
+JSONSchema.of("{\"type\":\"object\",\"required\":[\"name\"],\"properties\":{\"name\":{\"type\":\"string\"}}}")
+        .validateSuccess("{}");            // false: field 'name' is required but not found
+
+// This library's form: declared inside the field, also rejects null
+JSONSchema.of("{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\",\"must\":true}}}")
+        .validateSuccess("{\"name\":null}"); // false
+```
+
+Prefer `required` for API payload validation (it interoperates with standard schema tooling); use `must` when a null value must be rejected too. If a `required` field also declares `type`, then `{"v":null}` fails on `type`, not on `required`.
+
+## 9. JSON Patch (RFC 6902)
+
+Apply a list of operations (a "patch") to a JSON document and get the modified document back. The patch
+itself is a JSON array where each element is an operation object carrying `op` and `path`. Useful for
+"update only a small slice of a large document" or "merge a server-pushed delta into a local cache"
+without sending the whole document.
+
+Supported operations:
+
+| op | fields | meaning |
+| --- | --- | --- |
+| `add` | `path` + `value` | set the value at `path`; on an object it adds/overwrites a key, on an array it inserts at the index (`-` or an index equal to the length appends at the end) |
+| `remove` | `path` | delete the member at `path`; on an array it removes by index and shifts the rest |
+| `replace` | `path` + `value` | replace an existing member (errors if `path` does not exist) |
+| `move` | `from` + `path` | `remove` `from`, then `add` to `path` |
+| `copy` | `from` + `path` | deep-copy the value at `from`, then `add` to `path` |
+| `test` | `path` + `value` | assert the value at `path` equals `value`; throws `JSONPatchException` otherwise |
+
+`path` is a JSON Pointer (RFC 6901): reference tokens separated by `/`, an empty string means the root
+document; array indexes are decimal non-negative integers (no leading zeros except `0` itself, no `+`),
+`-` means the array end (`add` only); inside a token `~1` decodes
+to `/` and `~0` decodes to `~` (so a key that literally contains `/` or `~` can be addressed). `test`
+compares numbers by exact value (`BigDecimal` semantics), so `1` and `1.0` are considered equal while
+`9007199254740993` and `9007199254740992` are not — large integers are never truncated into false
+equality by `double`.
+
+```java
+// String entry point: parses and serializes for you
+String patched = JSONPatch.apply(
+        "{\"title\":\"old title\",\"tags\":[\"a\"]}",
+        "[{\"op\":\"replace\",\"path\":\"/title\",\"value\":\"new title\"},"
+      + " {\"op\":\"add\",\"path\":\"/tags/-\",\"value\":\"b\"}]");
+// -> {"title":"new title","tags":["a","b"]}
+
+// Object entry point: mutates the parsed Map/List in place and returns the same tree reference
+Object doc = JSON.parse("{\"a\":1}");
+JSONPatch.apply(doc, JSON.parse("[{\"op\":\"add\",\"path\":\"/b\",\"value\":2}]"));
+```
+
+> Note: `JSONPatch.apply(Object, ...)` mutates the passed document tree **in place**; use the returned
+> value. `copy` deep-copies the source value so the two sides do not share a reference. A malformed
+> `path`, out-of-range index, missing operation field, `remove`/`replace` on a non-existent member, or
+> a failed `test` throws `JSONPatchException` (a subclass of `JSONException`).
+
+## 10. Other Capabilities
 
 ```java
 // NDJSON (JSON Lines)

@@ -15,10 +15,13 @@ import java.net.URL;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * HTTP 模块内部 IO 与头解析辅助。
@@ -240,6 +243,62 @@ public final class HttpIo {
         }
         return params.keySet().toString();
     }
+
+    /**
+     * 需要完整打印 URL 的日志/异常场景使用的脱敏版：保留 scheme/host/path 结构与全部参数名，
+     * 只把敏感查询参数值（{@code access_token} / {@code token} / {@code sign} / {@code signature}
+     * / {@code secret} / {@code key} 等）与常见路径令牌（Telegram {@code /bot<token>/}、
+     * Server酱 {@code /<SendKey>.send}）打码。
+     *
+     * @param url 原始 URL，可为 {@code null}
+     * @return 脱敏后的 URL；入参为 {@code null} 时返回 {@code null}
+     * @since 2.0.2
+     */
+    public static String maskUrl(String url) {
+        if (url == null) {
+            return null;
+        }
+        String out = url;
+        int q = out.indexOf('?');
+        if (q >= 0) {
+            int hash = out.indexOf('#', q);
+            String query = hash < 0 ? out.substring(q + 1) : out.substring(q + 1, hash);
+            StringBuilder masked = new StringBuilder(out.length());
+            boolean changed = false;
+            for (String pair : query.split("&")) {
+                int eq = pair.indexOf('=');
+                String name = eq < 0 ? pair : pair.substring(0, eq);
+                if (eq >= 0 && SENSITIVE_QUERY_KEYS.contains(name.toLowerCase(Locale.ROOT))) {
+                    masked.append(name).append('=').append(maskValue(pair.substring(eq + 1)));
+                    changed = true;
+                } else {
+                    masked.append(pair);
+                }
+                masked.append('&');
+            }
+            if (changed) {
+                masked.setLength(masked.length() - 1);
+                out = out.substring(0, q + 1) + masked + (hash < 0 ? "" : out.substring(hash));
+            }
+        }
+        // Telegram Bot API：/bot<token>/<method>
+        out = out.replaceAll("(/bot)[^/]+(/)", "$1***$2");
+        // Server酱 Turbo：路径段 <SendKey>.send
+        out = out.replaceAll("(://[^/]+/)[^/]*(\\.send)", "$1***$2");
+        return out;
+    }
+
+    private static String maskValue(String value) {
+        if (value.length() <= 4) {
+            return "***";
+        }
+        return value.substring(0, 2) + "***";
+    }
+
+    private static final Set<String> SENSITIVE_QUERY_KEYS = new HashSet<String>(Arrays.asList(
+            "access_token", "token", "sign", "signature", "secret", "appsecret", "secretkey",
+            "secret_key", "apikey", "api_key", "accesskey", "access_key", "accesskeyid",
+            "access_key_id", "password", "passwd", "pwd", "key", "sendkey", "device_key"));
 
     /**
      * 把 {@code Location} 解析为绝对 URL，支持绝对地址、协议相对（{@code //host/path}）

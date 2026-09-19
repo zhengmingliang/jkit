@@ -14,6 +14,34 @@ The underlying implementation is chosen automatically based on the runtime JDK:
 
 The detailed types live in `com.alianga.jkit.http`: `HttpResponse`, `HttpResponseBody`, `HttpRequest`, `HttpCookieJar`, `UploadInfo`, `HttpCallBack`, etc. The original OkHttp `Response` / `ResponseBody` / `CookieJar` / `Call` have been replaced by the JDK types above.
 
+## 0. Instantiable Client `HttpClient`
+
+`HttpUtils`' static methods are a process-wide global facade: every `setXxx` mutates the global default, and under multiple threads they overwrite and pollute each other. `HttpClient` is the equivalent **instantiable** version—each instance holds its own configuration, and instances never leak into each other or into the global default; different threads are isolated too, without any global lock.
+
+Typical usage:
+
+```java
+// Instance A: short timeouts + its own proxy
+HttpClient a = HttpClient.builder()
+        .connectTimeout(2000).readTimeout(5000)
+        .httpProxy("proxy-a", 8080)
+        .build();
+
+// Instance B: totally different timeouts, no proxy
+HttpClient b = HttpClient.builder()
+        .connectTimeout(1000)
+        .build();
+
+HttpResponse r = a.get("https://api.example.com/x");   // A's config
+HttpResponse s = b.get("https://api.example.com/y");   // B's config, unaffected
+```
+
+- The `HttpClient.builder()` starts from the current global defaults; override only what you care about. Every setter returns `this` for chaining.
+- Configurable: connect/read timeouts (`connectTimeout` / `readTimeout`), proxy (`proxy` / `httpProxy` / `proxyAuth`), SSL (`ignoreSsl` / `sslContext` + `hostnameVerifier`), `cookieJar`, `engine` (inject a transport engine, handy for tests), `fakeIp`, `defaultMediaType`, retries (`retryPolicy` / `maxRedirects`), `http2`, `throwOnHttpError`, `endpointPool`, and interceptors (`addInterceptor` / `interceptors`).
+- `HttpClient.shared()` returns the global default singleton, sharing the same process-wide config with `HttpUtils` static methods—fully equivalent.
+- Instance methods cover common cases: `execute(HttpRequest)`, `get(...)`, `post(...)`, `postJson(...)`, `put(...)`, `delete(...)`. The request scope is set inside `execute` and cleared afterward, so even static `HttpUtils` calls are never polluted by an instance's config.
+- Isolation is done via a thread-local that propagates the instance config down the send chain (timeouts, proxy, SSL, CookieJar, engine, interceptors all read the "currently active client"), guaranteeing no cross-instance or cross-thread leakage. When an interceptor executes a request on another instance (e.g. token refresh), the outer pipeline still reads the outer instance's own config afterwards — the previous scope is saved and restored.
+
 ## 1. GET
 
 ```java

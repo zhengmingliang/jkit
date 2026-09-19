@@ -4,6 +4,7 @@ import com.alianga.jkit.sql.auto.boot3.fixture.BootUser;
 
 import org.junit.Test;
 import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
 import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.ConfigurableApplicationContext;
@@ -63,5 +64,31 @@ public class SqlAutoBoot3Test {
      */
     @SpringBootApplication
     public static class App {
+    }
+
+    @Test
+    public void skipsGracefullyWithoutDataSourceAndUrl() {
+        // 没有 DataSource bean、也没配 jkit.sql.auto.url：上下文应正常启动并跳过同步。
+        // 用 @ImportAutoConfiguration 精确装配，避免全量自动配置对 DataSource 的依赖。
+        Map<String, Object> props = new HashMap<String, Object>();
+        props.put("jkit.sql.auto.entities", BootUser.class.getName());
+        props.put("jkit.sql.auto.show-sql", "false");
+        props.put("jkit.sql.auto.phase", "ready");
+        SpringApplication app = new SpringApplication(NoDataSourceApp.class);
+        app.setWebApplicationType(WebApplicationType.NONE);
+        app.setDefaultProperties(props);
+        ConfigurableApplicationContext ctx = app.run();
+        try {
+            SqlAutoAutoConfiguration.SqlAutoStartupListener listener =
+                    ctx.getBean(SqlAutoAutoConfiguration.SqlAutoStartupListener.class);
+            assertTrue(listener.runNow().isEmpty());
+        } finally {
+            ctx.close();
+        }
+    }
+
+    @org.springframework.context.annotation.Configuration
+    @org.springframework.boot.autoconfigure.ImportAutoConfiguration(SqlAutoAutoConfiguration.class)
+    static class NoDataSourceApp {
     }
 }

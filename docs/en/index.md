@@ -18,6 +18,9 @@ hero:
       text: Changelog
       link: /en/changelog
     - theme: alt
+      text: Maven Central
+      link: https://central.sonatype.com/artifact/com.alianga/jkit
+    - theme: alt
       text: GitHub
       link: https://github.com/zhengmingliang/jkit
 
@@ -40,6 +43,11 @@ features:
     details: A hand-written, zero-dependency SQL parser matching the common entry points of Druid and JSqlParser. jkit-sql-auto can create or update tables from entities at startup.
     link: /en/sql
     linkText: SQL docs
+  - icon: 🚀
+    title: HTML Extraction, Benchmarked Against Jsoup
+    details: Zero-dependency HTML parsing with CSS selectors. Against Jsoup 1.18.1: parsing up to 1.76x faster, selectors up to 1344x, retained heap 15% lower, and 112 of 119 differential cases match result-for-result.
+    link: /en/html
+    linkText: HTML docs
   - icon: 📣
     title: Notifications
     details: DingTalk, WeCom, Feishu, ServerChan, Bark, SMTP and Webhook out of the box; optional channels cover Slack, Telegram and SMS.
@@ -52,6 +60,8 @@ features:
     linkText: YAML docs
 ---
 
+<DocBadges />
+
 ## Up and running in 3 minutes
 
 ::: code-group
@@ -60,12 +70,12 @@ features:
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit</artifactId>
-    <version>2.0.1</version>
+    <version>2.0.2</version>
 </dependency>
 ```
 
 ```groovy [Gradle]
-implementation 'com.alianga:jkit:2.0.1'
+implementation 'com.alianga:jkit:2.0.2'
 ```
 
 ```java [First program]

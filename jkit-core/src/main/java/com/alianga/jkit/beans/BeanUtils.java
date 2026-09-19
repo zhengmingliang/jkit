@@ -63,7 +63,7 @@ public final class BeanUtils {
                         if (CollectionUtils.indexOf(excludeFields, key) > -1) {
                             continue;
                         }
-                        sourceMap.put(key, entry.getValue());
+                        targetMap.put(key, entry.getValue());
                     }
                 }
             } else {

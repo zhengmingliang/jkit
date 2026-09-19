@@ -13,6 +13,7 @@ public final class SqlAutoLiveColumn {
     private final int size;
     private final int decimalDigits;
     private final int nullable;
+    private final String comment;
 
     /**
      * @param name 列名
@@ -24,12 +25,28 @@ public final class SqlAutoLiveColumn {
      */
     public SqlAutoLiveColumn(String name, String typeName, int dataType, int size,
                              int decimalDigits, int nullable) {
+        this(name, typeName, dataType, size, decimalDigits, nullable, null);
+    }
+
+    /**
+     * @param name 列名
+     * @param typeName 方言类型名
+     * @param dataType {@link java.sql.Types}
+     * @param size 长度
+     * @param decimalDigits 小数位
+     * @param nullable 可空码
+     * @param comment 列注释（{@code REMARKS}），可空
+     * @since 2.0.2
+     */
+    public SqlAutoLiveColumn(String name, String typeName, int dataType, int size,
+                             int decimalDigits, int nullable, String comment) {
         this.name = name == null ? "" : name;
         this.typeName = typeName == null ? "" : typeName;
         this.dataType = dataType;
         this.size = size;
         this.decimalDigits = decimalDigits;
         this.nullable = nullable;
+        this.comment = comment;
     }
 
     /**
@@ -72,6 +89,14 @@ public final class SqlAutoLiveColumn {
      */
     public int nullable() {
         return nullable;
+    }
+
+    /**
+     * @return 列注释，可空
+     * @since 2.0.2
+     */
+    public String comment() {
+        return comment;
     }
 
     /**

@@ -41,6 +41,21 @@ public interface NotificationChannel {
     boolean supports(MessageType type);
 
     /**
+     * 发送前校验配置完整性（webhook / token / 收件人等必填项）。配置缺失抛
+     * {@link IllegalArgumentException}（编程错误）；默认不校验。
+     *
+     * <p>{@link NotificationManager} 在任何网络发送前调用本方法：
+     * {@code sendAll} / {@code sendFailover} 会先校验完全部目标再发出第一条，
+     * 保证"编程错误不会部分发送后才抛"的契约。实现本方法时请只做纯配置检查，
+     * 不要发网络请求。
+     *
+     * @param config 渠道配置
+     * @since 2.0.2
+     */
+    default void validate(ChannelConfig config) {
+    }
+
+    /**
      * 发送一条消息。
      *
      * @param message 消息

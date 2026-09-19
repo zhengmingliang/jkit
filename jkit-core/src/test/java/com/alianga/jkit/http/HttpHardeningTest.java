@@ -60,4 +60,27 @@ public class HttpHardeningTest {
         }
         throw new AssertionError("expected IOException");
     }
+
+    @Test
+    public void maskUrlKeepsStructureButHidesSensitiveQueryValues() {
+        String masked = HttpIo.maskUrl("https://oapi.dingtalk.com/robot/send"
+                + "?access_token=abcdef123456&timestamp=1700000000000&sign=sig%2Bvalue");
+        assertTrue(masked, masked.startsWith("https://oapi.dingtalk.com/robot/send?"));
+        assertTrue(masked, masked.contains("timestamp=1700000000000"));
+        assertFalse(masked, masked.contains("abcdef123456"));
+        assertFalse(masked, masked.contains("sig%2Bvalue"));
+        assertTrue(masked, masked.contains("access_token=ab***"));
+        assertTrue(masked, masked.contains("sign=si***"));
+        // 普通参数原样保留
+        assertEquals("https://example.com/api?page=1&name=x",
+                HttpIo.maskUrl("https://example.com/api?page=1&name=x"));
+    }
+
+    @Test
+    public void maskUrlHidesTelegramAndServerChanPathTokens() {
+        assertEquals("https://api.telegram.org/bot***/sendMessage",
+                HttpIo.maskUrl("https://api.telegram.org/bot123456:ABC-def/sendMessage"));
+        assertEquals("https://sctapi.ftqq.com/***.send?title=x",
+                HttpIo.maskUrl("https://sctapi.ftqq.com/SCT123456abcdef.send?title=x"));
+    }
 }

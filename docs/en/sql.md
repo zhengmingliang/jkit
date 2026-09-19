@@ -9,13 +9,15 @@ Design references:
 
 It does not execute SQL and does not pull in any JDBC driver.
 
+<MavenBadge artifact="jkit-sql" />
+
 ## Getting Started
 
 ```xml
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit-sql</artifactId>
-    <version>2.0.1</version>
+    <version>2.0.2</version>
 </dependency>
 ```
 
@@ -121,6 +123,7 @@ Invalid SQL throws `SqlParseException` with line number, column number, and near
 SqlParseOptions opt = SqlParseOptions.defaults()
         .placeholders(SqlPlaceholders.create()
                 .atWrapped()    // @name@
+                .mybatis()      // #{id} / ${table}
                 .printf()       // %s / %d / %f …
                 .angle()        // <sheet>
                 .arrowAngle()   // <-sheet->
@@ -131,18 +134,39 @@ SqlStatement stmt = SQL.parse(
         SqlDialect.MYSQL, opt);
 ```
 
-You can also use `SqlPlaceholders.create().commonModelTemplates()` to enable all four built-in presets above at once.
+You can also use `SqlPlaceholders.create().commonModelTemplates()` to enable the four common-model presets at once;
+`SqlPlaceholders.create().mybatis()` enables MyBatis `#{property}` / `${property}` (including `#{id,jdbcType=VARCHAR}`).
 
 Rule summary:
 
 | Pattern | Meaning | Lexer result |
 |------|------|----------|
 | `@*@` | identifier body wrapped in `@` on both sides | `IDENT` (usable as a column/value atom) |
+| `#{*}` / `${*}` | MyBatis parameter / literal (`mybatis()`) | `IDENT`; bind uses `id` for `#{id,jdbcType=…}` |
 | printf | `%` + one letter | `IDENT` |
 | `<*>` / `<-*->` | table-name placeholder (allows `.` and `-`) | `IDENT` (usable as a table name) |
 | custom <code v-pre>{{*}}</code> etc. | non-empty prefix/suffix + body | `IDENT` |
 
 When not configured, `@age@` / `%s` / `<sheet>` still fail as before or get split into operators. Deliberately incomplete statements (e.g. `select * from`) fail even with placeholders enabled.
+
+Common parse + bind (keys omit the wrappers):
+
+```java
+SqlParseOptions opt = SqlParseOptions.defaults()
+        .placeholders(SqlPlaceholders.create().mybatis());   // MyBatis only; no need to stack common-model
+
+Map<String, Object> vals = new LinkedHashMap<String, Object>();
+vals.put("table", "t_user");
+vals.put("id", 7);
+String sql = SQL.bindNamed(
+        "SELECT * FROM ${table} WHERE id = #{id, jdbcType=INTEGER}",
+        SqlDialect.MYSQL, opt, vals);
+// SELECT * FROM t_user WHERE id = 7
+
+vals.put("table", 10086);                                  // not a bare identifier → dialect quotes
+SQL.bindNamed("SELECT * FROM #{table}", SqlDialect.MYSQL, opt, vals);
+// SELECT * FROM `10086`     (Oracle: SQL.toSqlString(stmt, ORACLE) → "10086")
+```
 
 ## Custom statement parsers (SPI, optional)
 
@@ -184,7 +208,7 @@ List<SqlStatement> batch = SQL.parseAll(
 
 ## Statistics and Rewriting
 
-Facade rewrites (`addLimit` / `setPage` / `andWhere` / `replaceTable` / `replaceColumn` / `addSelectItem` / `removeSelectItem` / `adaptPagination`) always **clone first**: they return a new tree and leave the input AST untouched. `SQL.clone` is an AST deep copy (`SqlAstCloner` / `SqlNode.copy`); the dialect argument of `clone(stmt, dialect)` is kept only for API compatibility and is ignored.
+Facade rewrites (`addLimit` / `setPage` / `andWhere` / `inject` / `replaceTable` / `replaceColumn` / `addSelectItem` / `removeSelectItem` / `replaceSelectItem` / `replaceSelectItems` / `expandStar` / `adaptPagination` / `bind`) always **clone first**: they return a new tree and leave the input AST untouched. `SQL.clone` is an AST deep copy (`SqlAstCloner` / `SqlNode.copy`); the dialect argument of `clone(stmt, dialect)` is kept only for API compatibility and is ignored.
 
 ```java
 SqlSchemaStat stat = SQL.stat(sql);
@@ -209,11 +233,34 @@ SqlStatement c3 = SQL.addSelectItem(c2, "status");              // append a sele
 SqlStatement c4 = SQL.removeSelectItem(c3, "name");             // remove by simple name or alias (cannot empty the list)
 SqlStatement c5 = SQL.adaptPagination(c4, SqlDialect.ORACLE);   // reshape pagination for the target dialect
 SqlStatement copy = SQL.clone(stmt);                            // AST deep copy
+
+// Row-level inject: configure tables/columns once, interceptors only call SQL.inject(stmt)
+SQL.injectConfig(SqlInjectConfig.create()
+        .tables("t_order", "t_item", "t_user")
+        .add("deleted", 0)
+        .add("tenant_id", new SqlInjectValue() {
+            public Object get() { return Session.orgId(); }
+        }));
+SqlStatement ten = SQL.inject(stmt);
+// one-off: SQL.inject(stmt, "tenant_id", 100, "t_order")
+
+// Column masking: expand *, then replace several columns in one clone/walk
+Map<String, List<String>> cols = new LinkedHashMap<String, List<String>>();
+cols.put("t_customer", Arrays.asList("id", "name", "phone", "id_card"));
+Map<String, String> masks = new LinkedHashMap<String, String>();
+masks.put("phone", "CONCAT(LEFT(phone, 3), '****')");
+masks.put("id_card", "'****'");
+SqlStatement masked = SQL.replaceSelectItems(
+        SQL.expandStar(SQL.parse("SELECT * FROM t_customer"), cols), masks);
 ```
 
 - `addLimit`: does not overwrite an existing pagination (LIMIT / TOP / ROWNUM / `row_number`). Writes `TOP` for SQL Server, a single-level ROWNUM wrap for classic Oracle, and `LIMIT` otherwise.
 - `setLimit` / `setOffset` / `setPage`: **replace** pagination; in `setPage(pageNo, pageSize)`, pageNo starts at 1.
-- `removeSelectItem`: case-insensitive match on the simple column name (last segment of `t.col`) or an explicit alias; removing the last remaining item throws `IllegalArgumentException`.
+- `removeSelectItem`: case-insensitive match on the simple column name (last segment of `t.col`) or an explicit alias; removing the last remaining item throws `IllegalArgumentException`. Outer SELECT only.
+- `inject` / `SqlInjectConfig`: AND `alias.col = value` onto matching physical tables (CTE names and `DUAL` skipped). Column names are yours — tenant, soft-delete, org id, etc. `SQL.injectConfig` sets the global table list and columns; `SqlInject.setCurrent` overrides the thread (aspect/request values). `SQL.inject(stmt)` throws `IllegalStateException` if nothing is configured.
+- `expandStar`: expand `*` / `t.*` from a table→columns map; unresolved stars stay as-is. A subquery `*` uses the inner projection.
+- `replaceSelectItem`: replace SELECT items across the tree (UNION / subqueries). Match alias or `t.col`. For `SELECT *`, call `expandStar` first.
+- `replaceSelectItems`: one clone and one walk for several columns, so masking many fields does not rewrite repeatedly.
 - Pagination shapes, Oracle wrapping, and on-demand `format` / `toSqlString` adaptation are in the next section.
 
 ### Rewrite chains (optional)
@@ -222,7 +269,7 @@ When several rewrites (custom + built-in) must run in order, compose them with `
 
 ```java
 SqlStatement out = SQL.rewrite(stmt, SqlRewrites.create()
-        .add(new TenantRule())                                   // pre hook: custom rule
+        .add(new RowFilterRule())                                // pre hook: custom rule
         .add(SqlRewrites.replaceTable("users", "users_2026"))
         .add(SqlRewrites.andWhere(SQL.parseExpr("tenant_id = ?")))
         .add(SqlRewrites.addSelectItem("status"))
@@ -250,7 +297,7 @@ Rewriting and write-back take `SqlDialect` capability methods as the single sour
 | ORACLE12 | double quotes | concat | no | bare SELECT → `OFFSET … FETCH FIRST … ROWS ONLY`; existing ROWNUM wraps still recognised |
 | DB2 | double quotes | concat | no | `FETCH FIRST n ROWS ONLY` only |
 
-Pre-existing Oracle `ROWNUM` double-nesting / `WHERE ROWNUM <= n` and SQL Server `row_number` wrappers: `getLimit` returns the page size, and `setPage` / `setLimit` only adjust the numeric bounds (without stacking OFFSET/FETCH). A classic single-level ROWNUM wrap expands to a double wrap when offset>0. A UNION's pagination hangs at the end of the set-operation chain. `SqlBuilder.limit` / `offset` / `toSql(dialect)` share the same rewrite path (`toSql`'s dialect overrides the builder dialect).
+Pre-existing Oracle `ROWNUM` double-nesting / `WHERE ROWNUM <= n` and SQL Server `row_number` wrappers: `getLimit` returns the page size, and `setPage` / `setLimit` only adjust the numeric bounds (without stacking OFFSET/FETCH). A classic single-level ROWNUM wrap expands to a double wrap when offset>0. A UNION's pagination hangs at the end of the set-operation chain for `LIMIT` / `OFFSET FETCH` dialects; classic Oracle ROWNUM wrapping is in the next subsection. `SqlBuilder.limit` / `offset` / `toSql(dialect)` share the same rewrite path (`toSql`'s dialect overrides the builder dialect).
 
 ### Classic Oracle ROWNUM wrapping
 
@@ -258,9 +305,9 @@ For a bare SELECT, `SqlDialect.ORACLE` (`supportsRownum && !supportsFetchFirst`)
 
 - **offset=0**: single-level subquery  
   `SELECT * FROM ( <original> ) XX WHERE ROWNUM <= n`
-- **offset>0**: double wrap (middle alias `XX` projects `ROWNUM AS RN` and cuts `ROWNUM <= offset+n`; outer alias `XXX` filters `RN > offset`)
+- **offset>0**: double wrap (middle alias `XX` projects `ROWNUM AS RN` and cuts `ROWNUM <= offset+n`; outer alias `XXX` filters `RN > offset`). The outer select lists the original columns only, not `RN`; a source `SELECT *` still becomes `SELECT *` (and `RN` is included)
 
-`WITH` stays on the outer node. `setPage` / `setLimit` / `adaptPagination` targeting classic Oracle first clear leftover LIMIT/TOP inside the select body so the wrap does not carry the source dialect's pagination.
+`WITH` stays on the outer node. If a set operation (`UNION` / `INTERSECT` / `EXCEPT` / `MINUS`) has an `ORDER BY`, it is first rewritten as `SELECT * FROM (set-op) ORDER BY …` and then wrapped with ROWNUM, so Oracle does not raise `ORA-00904` when ordering a set-op by column aliases inside a subquery. `setPage` / `setLimit` / `adaptPagination` targeting classic Oracle first clear leftover LIMIT/TOP inside the select body so the wrap does not carry the source dialect's pagination. Write-back must name the target dialect: `SQL.toSqlString(page, SqlDialect.ORACLE)`. The no-dialect `toSqlString(page)` defaults to MySQL and will turn ROWNUM back into `LIMIT`.
 
 `format` / `toSqlString(..., ORACLE)` use the same single-level wrap as a fast path when offset=0: they temporarily clear LIMIT/TOP, write the subquery wrap, then restore the input (the AST is not permanently mutated). A non-zero offset goes through full `adaptPagination`.
 
@@ -287,6 +334,26 @@ String finger = SQL.parameterize("SELECT * FROM t WHERE name = 'a' AND age = 1")
 List<Object> litValues = SQL.exportParameterValues(sql); // "a", 1 — not ?/:name
 List<String> binds = SQL.parameters(sql);                 // "?", ":name"
 
+// Fill ? / :name with literals (strings double single quotes; no backslash)
+String filled = SQL.bind("SELECT * FROM t WHERE name = ?", "'; DROP TABLE t; --");
+// SELECT * FROM t WHERE name = '''; DROP TABLE t; --'   — still one statement
+SQL.bindNamed("SELECT * FROM t WHERE id = :id", Collections.singletonMap("id", 1));
+// Formulas must be SqlExpr; the string "NOW()" becomes 'NOW()'
+SQL.bind("SELECT * FROM t WHERE ts > ?", SQL.parseExpr("NOW()"));
+// SELECT * FROM t WHERE ts > NOW()
+
+// Template placeholders (enable SqlPlaceholders at parse): #{table} as a table name, @name@ / :name as values
+Map<String, Object> vals = new LinkedHashMap<String, Object>();
+vals.put("table", "users");
+vals.put("name", "bob");
+vals.put("nameKey", SQL.parseExpr("LENGTH(name)"));
+String out = SQL.bindNamed(
+        "SELECT * FROM #{table} WHERE name = :name AND :nameKey > 2 OR nick = @name@",
+        SqlDialect.MYSQL,
+        SqlParseOptions.defaults().placeholders(
+                SqlPlaceholders.create().commonModelTemplates().mybatis()),
+        vals);
+
 SqlWallResult wall = SQL.wall(sql); // parsing is not intercepted by default; call explicitly
 wall.passed();
 wall.violations(); // multi-statement / comment-bypass / always-true-condition / sleep-function / delete-without-where / update-without-where
@@ -297,7 +364,11 @@ SqlWallConfig cfg = SqlWallConfig.defaults()
         .denyDdl(true)
         .denyDangerousFunctions(true)  // SLEEP / BENCHMARK / LOAD_FILE …
         .denyIntoOutfile(true)
-        .selectOnly(false);
+        .selectOnly(false)
+        .denyTables("mysql.user", "secret")   // deny-table
+        .allowTables("t_order", "t_item")     // non-empty = only these tables; allow-table
+        .requireWhereColumns("tenant_id")     // physical tables need this column in WHERE/JOIN ON
+        .maxTables(8);                        // too-many-tables
 SqlWallResult w2 = SQL.wall(sql, SqlDialect.MYSQL, cfg);
 
 Object v = SQL.eval(expr); // literal arithmetic and comparison only; null when a column is read
@@ -313,8 +384,13 @@ stmt.accept(new SqlAstVisitor() {
 
 ```java
 SQL.format(stmt);                           // newlines and indentation (SELECT clauses; CREATE TABLE columns)
-SQL.toSqlString(stmt);                      // compact single line
+SQL.toSqlString(stmt);                      // compact single line (MySQL by default)
+stmt.toString();                            // same as SQL.toSqlString(stmt): MySQL backticks
 SQL.format(stmt, SqlDialect.MYSQL, true);
+SQL.toSqlString(stmt, SqlDialect.ORACLE);   // numeric table names use double quotes
+
+stmt.addComment("a note");                  // body text; written back as /* a note */
+stmt.addComment("-- already a comment");    // delimiters kept (line comments become block comments in compact mode)
 
 // Force dialect quotes on every identifier segment (default false; literals/keywords/*/function names untouched)
 SqlFormatOptions opts = SqlFormatOptions.defaults().quoteIdentifiers(true);
@@ -332,7 +408,7 @@ Identifiers that were already quoted in the input are written back per dialect: 
 With `quoteIdentifiers` on, **unquoted** table/column names are force-quoted the same way.
 `||` is written back from the AST (`CONCAT`→`||`; `OR` parsed by MySQL by default →`OR`).
 
-The write-back is pretty-printing; **comment and whitespace round-trip is not guaranteed**.
+The write-back is pretty-printing; **whitespace round-trip is not guaranteed**. Comments left by `keepComments` or `addComment` are emitted as valid SQL comments: bare text becomes a block comment; compact mode also turns `--` / `#` line comments into block comments so they cannot swallow the rest of the statement. For another dialect's quotes, use `SQL.toSqlString(stmt, dialect)` rather than `toString()`.
 
 ## Dialect Differences
 
@@ -347,6 +423,31 @@ Full pagination shapes are in "Cross-dialect pagination". This table only lists 
 | Pagination | `supportsLimitOffset` + comma style | `supportsLimitOffset` | `supportsTop` + FETCH | see previous section |
 
 ClickHouse uses backticks like MySQL, but double quotes are identifiers too, and pagination accepts comma `LIMIT`.
+
+## JDBC URL
+
+`JdbcUrlUtils` parses host / database / schema from a JDBC URL and infers the dialect and driver class, without opening a connection.
+
+```java
+import com.alianga.jkit.sql.jdbc.JdbcUrlUtils;
+import com.alianga.jkit.sql.jdbc.JdbcUrlInfo;
+
+JdbcUrlInfo info = JdbcUrlUtils.parse(
+        "jdbc:postgresql://primary:5432,standby:5432/orders?currentSchema=sales");
+info.getDbType();          // postgresql
+info.getDatabaseName();    // orders
+info.getSchema();          // sales
+info.getNodes().size();    // 2
+
+JdbcUrlUtils.fromUrl("jdbc:gaussdb://localhost:5433/postgres");  // POSTGRES
+JdbcUrlUtils.getDbType("jdbc:kingbase8://h/db");                 // kingbase
+JdbcUrlUtils.driverForUrl("jdbc:dm://localhost:5236");           // dm.jdbc.driver.DmDriver
+JdbcUrlUtils.schema("jdbc:postgresql://h/db");                   // public
+```
+
+- `fromUrl` returns `null` when the URL is unknown (unlike `SqlDialect.fromName`, which falls back to MySQL).
+- PostgreSQL / Gauss / openGauss / Kingbase read `currentSchema` (default `public`); SQL Server defaults to `dbo`; Dameng reads the `schema` parameter.
+- `tryParse` returns null on failure instead of throwing. `jkit-sql-auto`'s `SqlAutoDialects.fromUrl` / `driverForUrl` delegate here.
 
 ## Quick Building (SqlBuilder)
 
@@ -408,7 +509,7 @@ Do not treat indexes of `SqlIdentifier.names()` as "the N-th alias"; `names()` i
 - MERGE: INTO / USING / ON, multiple `WHEN MATCHED [AND pred]`, `WHEN NOT MATCHED [BY TARGET|SOURCE]`, `UPDATE … DELETE WHERE`, `INSERT … VALUES … WHERE`, `OUTPUT` / `OUTPUT … INTO`
 - DDL: CREATE/DROP/ALTER TABLE|VIEW|INDEX|DATABASE|PROCEDURE|FUNCTION|TRIGGER|EVENT (object name extracted; `CREATE OR REPLACE`; AS query for VIEW/CTAS; routine parameters → `SqlRoutineParam`, `FUNCTION RETURNS` → `returnsType`, BEGIN body → `bodyStatements` (`bodyRaw`/`tail` kept for round-trip); CREATE TABLE column definitions verbatim (`columnDefinitions`) + ENGINE/CHARSET/COLLATE/COMMENT + table-level FOREIGN KEY referenced tables; ALTER ADD/DROP INDEX, RENAME TO, CHANGE/MODIFY column definitions, ADD CONSTRAINT); `CREATE TYPE … AS OBJECT/VARRAY/ENUM` kept verbatim; `DROP … PURGE` / `DROP TABLESPACE … ENGINE`, `TRUNCATE … PURGE SNAPSHOT LOG` tail clauses; MySQL 8 functional index `ADD KEY idx ((expr))`; CTAS suffix `WITH [NO] DATA`
 - `EXPLAIN`/`DESCRIBE` → `SqlExplainStatement` (options such as ANALYZE/FORMAT/BUFFERS + nested statement), `SET` → `SqlSetStatement` (multiple assignments / NAMES / CHARACTER SET / SESSION|GLOBAL), USE, SHOW, CALL (arguments into AST), TRUNCATE, GRANT / REVOKE (privileges + ON object name; recipient `user@host` written back compactly; REVOKE uses FROM)
-- Procedural blocks / maintenance / transactions: `BEGIN … END` / top-level anonymous `DECLARE … BEGIN … END` → `SqlBlockStatement`; session-style `DECLARE x INT` (OTHER); in-procedure `DECLARE`/`CURSOR FOR` → `SqlDeclareStatement`, `CONTINUE|EXIT|UNDO HANDLER` → `SqlHandlerStatement`; `IF`/`WHILE`/`LOOP`/`REPEAT`/`CASE…END CASE`/`LEAVE`/`ITERATE`/`RETURN` → `SqlControlStatement` (optional loop labels); `TRIGGER` extracts `triggerTiming`/`triggerEvent`/`triggerTable`/`triggerUpdateColumns`/`FOR EACH`/`FOLLOWS|PRECEDES`; `EVENT` extracts `ON SCHEDULE AT|EVERY`, `eventStarts`/`eventEnds`/`eventEnabled`/`eventComment`/`eventOnCompletion`/`eventDisableOnSlave`;  bare `BEGIN` / `BEGIN WORK` / `START TRANSACTION` → `SqlStartTransactionStatement` (isolation level / READ WRITE|ONLY / WITH CONSISTENT SNAPSHOT); `COMMIT` / `ROLLBACK [TO SAVEPOINT]` / `SAVEPOINT` / `RELEASE SAVEPOINT` → `SqlTransactionControlStatement`; `FLUSH …` → `SqlFlushStatement` (option list / TABLES table names); `LOCK TABLES`/`UNLOCK TABLES` → `SqlLockTablesStatement`; `ANALYZE` / `VACUUM` / `OPTIMIZE|REPAIR|CHECK TABLE` → `SqlMaintenanceStatement` (tables + optionsRaw); `SHOW CREATE TABLE|VIEW|DATABASE` / `SHOW COLUMNS|INDEX|TABLES` → `SqlShowStatement`; `COMMENT ON TABLE|COLUMN|…` → `SqlCommentOnStatement` (objectKind/name/comment); SQL Server `GO` batch separator; PG `COPY … FROM|TO` → `SqlCopyStatement` (table/columns/STDIN·PROGRAM·file + WITH verbatim); MySQL `LOAD DATA [LOCAL] INFILE … INTO TABLE` → `SqlLoadDataStatement` (file/table/columns + FIELDS·LINES·IGNORE verbatim); MySQL table `HANDLER t OPEN|READ|CLOSE` → `SqlTableHandlerStatement`; `PREPARE` / `EXECUTE` / `DEALLOCATE PREPARE` / `EXECUTE IMMEDIATE` → `SqlPrepareStatement` (name / FROM·source / USING)
+- Procedural blocks / maintenance / transactions: `BEGIN … END` / top-level anonymous `DECLARE … BEGIN … END` → `SqlBlockStatement`; session-style `DECLARE x INT` (OTHER); in-procedure `DECLARE`/`CURSOR FOR` → `SqlDeclareStatement`, `CONTINUE|EXIT|UNDO HANDLER` → `SqlHandlerStatement`; `IF`/`WHILE`/`LOOP`/`REPEAT`/`CASE…END CASE`/`LEAVE`/`ITERATE`/`RETURN` → `SqlControlStatement` (optional loop labels); `TRIGGER` extracts `triggerTiming`/`triggerEvent`/`triggerTable`/`triggerUpdateColumns`/`FOR EACH`/`FOLLOWS|PRECEDES`; `EVENT` extracts `ON SCHEDULE AT|EVERY`, `eventStarts`/`eventEnds`/`eventEnabled`/`eventComment`/`eventOnCompletion`/`eventDisableOnSlave`;  bare `BEGIN` / `BEGIN WORK` / `START TRANSACTION` → `SqlStartTransactionStatement` (isolation level / READ WRITE|ONLY / WITH CONSISTENT SNAPSHOT); `COMMIT` / `ROLLBACK [TO SAVEPOINT]` / `SAVEPOINT` / `RELEASE SAVEPOINT` → `SqlTransactionControlStatement`; `FLUSH …` → `SqlFlushStatement` (option list / TABLES table names); `LOCK TABLES`/`UNLOCK TABLES` → `SqlLockTablesStatement`; `ANALYZE` / `VACUUM` / `OPTIMIZE|REPAIR|CHECK TABLE` → `SqlMaintenanceStatement` (tables + optionsRaw); `SHOW CREATE TABLE|VIEW|DATABASE` / `SHOW COLUMNS|INDEX|TABLES` → `SqlShowStatement`; `COMMENT ON TABLE|COLUMN|…` → `SqlCommentOnStatement` (objectKind/name/comment); SQL Server `GO` batch separator; PG `COPY … FROM|TO` → `SqlCopyStatement` (table/columns/STDIN·PROGRAM·file + WITH verbatim); MySQL `LOAD DATA [LOCAL] INFILE … INTO TABLE` → `SqlLoadDataStatement` (file/table/columns + FIELDS·LINES·IGNORE verbatim); MySQL table `HANDLER t OPEN|READ|CLOSE` → `SqlTableHandlerStatement`; `PREPARE` / `EXECUTE` / `DEALLOCATE PREPARE` / `EXECUTE IMMEDIATE` → `SqlPrepareStatement` (name / FROM·source / USING); SQL Server statement-level `IF <expr> <stmt>` control-flow guard → `SqlGuardedStatement` (type() delegates to body, so `IF … DROP` is reported as DROP)
 - Expressions: literals, binds `?` / `:name` / `:0` / `@var`, adjacent string literal concatenation, arithmetic and comparison, AND/OR/XOR/NOT, IN (including parenthesis-free bind lists `IN :name` / `IN ?`)/BETWEEN/LIKE/ILIKE/`NOT ILIKE`/REGEXP, IS NULL, `IS DISTINCT FROM` / `IS NOT DISTINCT FROM`, CASE, CAST / `TRY_CAST` / `::`, functions (including `USING charset`), EXISTS, subqueries, function result field access `f(x).y`, `INTERVAL '1 day'` / `INTERVAL 1 DAY` / `INTERVAL … YEAR(n) TO MONTH`, `CAST(… AS INTERVAL DAY TO SECOND)`, `X'FF'` / `0xFF`, row constructors `(a,b)`, JSON `->` `->>` `#>` `#>>`, array subscript `arr[1]`, `= ANY/SOME/ALL (...)`; `INTERVAL` compound units (`HOUR_MINUTE`/`YEAR_MONTH` etc.) and expression values (`INTERVAL 6/4 HOUR_MINUTE`); charset-prefixed literals (`_latin1'x'` / `_utf8mb4'…'` / `_binary'…'` / `_utf32 X'…'`); `NOT REGEXP`; PL/SQL cursor attributes `SQL%FOUND` / `c1%NOTFOUND`; `count(UNIQUE …)` (equivalent to DISTINCT); JDBC/ODBC escape unwrapping (`{fn …}` functions, `{d|t|ts '…'}` typed literals, `{oj …}` joins, `{call …}`, `{escape …}`); plus PG `@>`/`<@`/`~`/`~*`, MySQL `FORCE INDEX FOR …`/`<=>`/`INSERT DELAYED`/`BINARY`, SQL Server `TOP WITH TIES`, `TABLESAMPLE`/`SAMPLE`, Oracle `(+)` outer-join suffix / `CONNECT_BY_ROOT`
 - Comments: `--`, `/* */`, MySQL `#`; input containing only comments/whitespace parses as an `OTHER` empty statement (no empty SQL error); MySQL executable comments `/*!40101 … */` are expanded into inner SQL (not discarded wholesale); optimizer hints `/*+ … */` attach to the SELECT / table and can be written back by format; floating hints in arbitrary positions (e.g. `/*+TDDL:MASTER*/` inside WHERE, Trino `/*+joinMethod=…*/`) are absorbed and written back on the SELECT
 - Identifiers: bare MySQL identifiers may start with digits (e.g. `32强国` / `1019使用`), as long as the whole token is not purely numeric; `32` / `32.5` / `32e1` / `0xFF` remain literals; the backquoted form worked all along; digit-leading segments after a dot in qualified names parse (`t.1_id` / `a.32强国`; leading decimals like `.5` stay NUMBER); single-quoted names after a dot act as quoted identifiers (`T.'Group'`); SELECT-list aliases may be dotted (`AS a.b`); function and table names support the Oracle DB Link suffix (`fn@dblink` / `t@dblink`, `SqlIdentifier.dblink`)
@@ -417,30 +518,95 @@ Do not treat indexes of `SqlIdentifier.names()` as "the N-th alias"; `names()` i
 
 Explicitly not done: a procedure-body **execution engine** (structured AST already covers DECLARE/HANDLER/control flow/TRIGGER/EVENT etc., but nothing is interpreted), a complete Wall rule set (`SqlWallConfig` is a configurable subset, not the full Druid WallFilter), or a DSL tree for `MATCH_RECOGNIZE.PATTERN` (still a string). CREATE TABLE column types/constraints are captured in `columnDefinitions` and can round-trip through format. Unknown functions parse as ordinary function calls and do not fail.
 
-## Cross-dialect type conversion (in progress)
+## Cross-dialect type conversion
 
-Schema / SQL conversion uses a **Normal Form** (canonical types) so adding a dialect is O(K), not O(N²). Design: [sql-schema-converter-design.md](../sql-schema-converter-design.md).
+Schema / SQL conversion across dialects goes through a **Normal Form** (canonical types), avoiding pairwise N² mappings. Design: [sql-schema-converter-design.md](../sql-schema-converter-design.md).
 
-Phase 0–1 are in tree (JDK 8; `SqlDdlStatement.columnDefinitions()` stays `List<String>`):
+Phase 0–1 are now in tree (JDK 8; `SqlDdlStatement.columnDefinitions()` stays `List<String>`):
 
 ```java
+import com.alianga.jkit.sql.schema.model.CanonicalType;
+import com.alianga.jkit.sql.schema.model.ColumnDefinition;
+import com.alianga.jkit.sql.schema.parse.SqlColumnDefinitionParser;
+import com.alianga.jkit.sql.schema.registry.SqlDataTypeRegistry;
+
+SqlDdlStatement ddl = (SqlDdlStatement) SQL.parse(
+        "CREATE TABLE t (id INT NOT NULL AUTO_INCREMENT, name VARCHAR(32))",
+        SqlDialect.MYSQL);
 List<ColumnDefinition> cols = SqlColumnDefinitionParser.fromDdl(ddl, SqlDialect.MYSQL);
+// cols.get(0): name=id, type=INT, NOT NULL + AUTO_INCREMENT
+
 SqlDataTypeRegistry types = SqlDataTypeRegistry.builtins();
 types.convert("VARCHAR(100)", SqlDialect.MYSQL, SqlDialect.ORACLE); // VARCHAR2(100)
+types.convert("DATETIME", SqlDialect.MYSQL, SqlDialect.POSTGRES);   // TIMESTAMP
 types.fromDialect("TINYINT(1)", SqlDialect.MYSQL);                  // BOOLEAN
+types.fromDialect("NUMBER(10,2)", SqlDialect.ORACLE);               // DECIMAL
 ```
 
-Undeclared reverse collisions fail `RegistryValidator` at builtin-table build time.
+Undeclared type collisions are blocked by `RegistryValidator` at builtin-table build time; `RegistryValidationTest` runs in CI.
 
-Phase 2–8 add `SQL.convert` / `SQL.convertBatch` for CREATE TABLE and `ALTER TABLE ADD/MODIFY/CHANGE` column types, plus query functions (`IF`→`CASE`, `GROUP_CONCAT`↔`STRING_AGG`/`LISTAGG`, `IFNULL`/`NVL`, `CAST`, `LOCATE`/`INSTR`, `SUBSTRING`/`LEFT`/`RIGHT`). `SUBSTRING` is written as `FROM n FOR m` on PG/MySQL/H2 and as comma-form on SQL Server/SQLite; SQLite/Hive `LEFT`/`RIGHT` expand to `SUBSTR`. MySQL table-level `KEY`/`INDEX` is stripped (with a warning) so the DDL can parse on the target. Real execution lives in `tools-test`: `CrossDialectDdlExecutionTest` (MySQL→PG CREATE TABLE, Docker), `CrossDialectExprExecutionTest` (DDL + expression execution across PostgreSQL / MySQL containers and an in-memory SQLite — covers DATE_ADD→INTERVAL, DATEDIFF→CAST subtraction, `||`→CONCAT on MySQL, SQLite AUTOINCREMENT placement, NUMERIC(10,2) not truncated; Docker-less environments skip gracefully), and `LocalDatasourceFunctionRewriteTest` (SUBSTRING/LEFT/RIGHT/LOCATE on the local datasource file). JMH: `SqlSchemaConvertBenchmark`.
+Phase 2–3 expose a whole-statement entry (CREATE TABLE column types / auto-increment / UNSIGNED / defaults / table options; other statements are formatted for the target dialect, reusing the existing pagination adaptation):
 
-Supported first-class dialects (13, including Dameng and Oracle 12c: MySQL, PostgreSQL, Oracle 11g/12c, SQL Server, H2, ANSI, DB2, SQLite, Hive, ClickHouse, Presto, Dameng) and `fromName` product aliases: [design doc §4](../sql-schema-converter-design.md). How to extend types/functions: [§9](../sql-schema-converter-design.md).
+```java
+String pg = SQL.convert(
+        "CREATE TABLE t (id INT AUTO_INCREMENT PRIMARY KEY, flag TINYINT(1) DEFAULT 0)",
+        SqlDialect.MYSQL, SqlDialect.POSTGRES);
+// id INTEGER NOT NULL GENERATED ALWAYS AS IDENTITY PRIMARY KEY, flag BOOLEAN DEFAULT false
+
+ConversionResult r = SQL.convert(sql, SqlDialect.MYSQL, SqlDialect.ORACLE,
+        SqlSchemaConvertOptions.defaults()
+                .failOnSeverity(ConversionWarning.Severity.MANUAL_ACTION_REQUIRED));
+```
+
+Oracle ≤11g auto-increment yields `MANUAL_ACTION_REQUIRED` by default; `generateOracleSequence(true)` appends a SEQUENCE + TRIGGER.
+
+Query functions are rewritten:
+
+- `IF(a,b,c)` → `CASE WHEN` (non-MySQL); `JOIN ON` / `DEFAULT NOW()` also go through the function table
+- `NOW()` / `CURDATE()` / `CURTIME()`
+- `GROUP_CONCAT` ↔ `STRING_AGG` / `LISTAGG`
+- `IFNULL` / `NVL` / `ISNULL` (binary) renamed per target dialect; `COALESCE` for PG/ANSI
+- `CONCAT(a,b,c)` becomes `||` under Oracle (Oracle `CONCAT` only takes two args)
+- `CAST` / `CONVERT(expr, type)` types go through the canonical table
+- MySQL `CONVERT(expr USING charset)` is **not** mis-mapped to CAST — it warns and keeps the original
+- `DATE_ADD`/`DATE_SUB` → `INTERVAL` add/subtract; day intervals written to Oracle are numeric add/subtract (avoids ORA-01873 from `INTERVAL '180' DAY` leading precision 2)
+- `DATEADD(unit, n, d)` (SQL Server source) → MySQL `DATE_ADD`/`DATE_SUB`, or PG/Oracle interval arithmetic
+- `GETDATE()` / `SYSDATE` / `NOW()` interconvert; SQL Server target rewrites `CURRENT_DATE` to `CAST(GETDATE() AS DATE)`
+- `LEAST`/`GREATEST` → nested `CASE` on SQL Server
+- Oracle / SQL Server targets drop `WITH RECURSIVE`; Oracle recursive CTEs add a column list `WITH x(c1, c2) AS (...)`
+- `DATEDIFF` → date subtraction; `FROM_UNIXTIME` → `TO_TIMESTAMP`
+- `DATE_FORMAT`: common specifiers are rewritten (`%Y-%m-%d %H:%i:%s` → PG/Oracle `TO_CHAR(..., 'YYYY-MM-DD HH24:MI:SS')`; SQLite `strftime` swaps arguments and maps `%i` to `%M`). Unmapped specifiers stay and raise `SEMANTIC_RISK`
+- `SUBSTRING`/`LEFT`/`RIGHT`/`MID`: Oracle/Dameng `SUBSTR`; SQL Server two-arg form adds `LEN`, negative start becomes `RIGHT`; SQLite/Hive `LEFT`/`RIGHT` expand to `SUBSTR`. Formatting per dialect: PG/MySQL use `FROM n FOR m`, SQL Server/SQLite use the comma form
+- `UCASE`/`LCASE`→`UPPER`/`LOWER`; `CONCAT_WS`; `LPAD`/`RPAD`; `SPACE`; `CEIL`/`CEILING`; `POW`/`POWER`; `MOD`; `YEAR`/`MONTH`/`DAY`/`HOUR`/`MINUTE`/`SECOND`; `SYSDATE`; `LAST_DAY`; `CHAR`/`CHR`
+- `DECODE`/`NVL2` → `CASE`; `FIND_IN_SET`/`SUBSTRING_INDEX` with no clean equivalent warn and stay
+
+MySQL table-level `KEY`/`INDEX` unsupported by the target dialect becomes appendix `CREATE INDEX`; `FULLTEXT`/`SPATIAL` are dropped with `MANUAL_ACTION_REQUIRED`. `UNIQUE KEY` becomes portable `UNIQUE (...)`. Independent `CREATE INDEX … USING BTREE` drops `USING` on non-MySQL targets.
+
+`SQL.convertBatch` converts in bulk. `ALTER TABLE ADD/MODIFY/CHANGE` converts column types; to PG/H2 it becomes `ALTER COLUMN … TYPE`, with NOT NULL/DEFAULT emitted as extra statements.
+
+Conversion results are re-parsed for the target dialect as corpus regression. Real table creation and expression execution are verified in the parent `tools-test` (jkit's own parser is more lenient than real databases; issues a re-parse cannot catch are caught by real execution):
+
+```text
+cd ../tools-test
+mvn -Dtest=CrossDialectDdlExecutionTest test         # MySQL→PG CREATE TABLE; needs Docker+local postgres, skipped otherwise
+mvn -Dtest=CrossDialectExprExecutionTest test        # DDL+expression execution: DATE_ADD→INTERVAL on PG, DATEDIFF→CAST subtraction, ||→CONCAT on MySQL, AUTOINCREMENT on SQLite, NUMERIC(10,2) no truncation; PG/MySQL via Docker, SQLite in-memory
+mvn -Dtest=LocalDatasourceConvertTest test           # reads src/test/resources/datasource, connects to local MySQL/PG/Oracle
+mvn -Dtest=LocalDatasourceFunctionRewriteTest test   # same datasource, executes SUBSTRING/LEFT/RIGHT/LOCATE rewrite results
+mvn -Dtest=ComplexSqlExecutionIT test                # 1200 complex SQL representative cases (001/022/211) original + MySQL→Oracle12/SQL Server rewritten, executed on real databases
+java -jar target/benchmarks.jar com.alianga.test.sql.jmh.SqlSchemaConvertBenchmark -f 1 -wi 1 -i 1
+```
+
+13 first-class dialects (including `DAMENG` / `ORACLE12`), see [design doc §4](../sql-schema-converter-design.md). **New products do not need to change the `SqlDialect` enum**: implement `SqlDialectSpec` (or `SqlDialectWrapper`), reuse the built-in type table via `typeFamily()`, and override individual spellings with `dialectId()` + SPI. `SQL.convert` / `SQL.parse` both accept `SqlDialectSpec`.
+
+`ConversionResult.sqlWithExtras()` includes the appendix `CREATE INDEX` / Oracle SEQUENCE. The built-in `DATE_FORMAT` → `TO_CHAR` goes through `SqlFunctionRegistry`; third parties append or override via `SqlSchemaConverterProvider.registerFunctions` (returning `null` falls back to built-in), **without** changing `FunctionAstRewriter`. `VARCHAR` over-length is promoted to TEXT/CLOB by default.
+
+How to add type aliases, override a dialect's spelling, add a canonical type, add a database, or add a function rewrite: [§9](../sql-schema-converter-design.md).
 
 ## Entity scan → DDL / DML
 
 Like data-set `EntityScanner`, without Spring: scan classes annotated with `@SqlTable`, JPA `@Entity`, or MyBatis-Plus `@TableName`/`@TableId` (resolved by FQCN via reflection — no compile dependency on Spring / JPA / MyBatis / Hibernate), then generate DDL and CRUD per dialect. Also honours `@TableField` (`exist=false` skips the column), JPA `@Index`/`@Enumerated`/`@Embedded`, any annotation whose simple name is `Comment`, and Hibernate `@ColumnDefault`; `List`/`Set`/`@OneToMany` fields are skipped unless annotated. `createTables` orders referenced tables first. Java types go through the canonical type registry.
 
-Table / column comments (`@SqlTable(comment=…)`, `@SqlColumn(comment=…)`, and any `@Comment` by simple name on the type or field, reading `value` or `comment`; jkit annotations win): MySQL / Hive / ClickHouse inline `COMMENT '…'`; H2 inlines column comments and uses `COMMENT ON TABLE` for the table; PostgreSQL / Oracle / DB2 / ANSI emit `COMMENT ON TABLE|COLUMN`; SQL Server uses `sp_addextendedproperty`; Presto table-level `WITH (comment=…)`; SQLite has no comment syntax, so comments are skipped. Auto-DDL runs these as extra statements after `CREATE TABLE`.
+Table / column comments (`@SqlTable(comment=…)`, `@SqlColumn(comment=…)`, this module's `com.alianga.jkit.sql.entity.Comment`, and any `@Comment` by simple name on the type or field, reading `value` or `comment`; jkit annotations win): MySQL / Hive / ClickHouse inline `COMMENT '…'`; H2 inlines column comments and uses `COMMENT ON TABLE` for the table; PostgreSQL / Oracle / DB2 / ANSI emit `COMMENT ON TABLE|COLUMN`; SQL Server uses `sp_addextendedproperty`; Presto table-level `WITH (comment=…)`; SQLite has no comment syntax, so comments are skipped. Auto-DDL runs these as extra statements after `CREATE TABLE`.
 
 Column defaults: Hibernate `@ColumnDefault` `value` is a **SQL fragment** (no `DEFAULT` keyword) written as-is, e.g. `@ColumnDefault("0")` → `DEFAULT 0`, `@ColumnDefault("'guest'")` → `DEFAULT 'guest'`. If `columnDefinition` already contains `DEFAULT`, it is not repeated.
 
@@ -543,6 +709,8 @@ mvn -Dtest=SqlParserCompareTest test
 
 On the `tools-test` file corpus `sql-corpus.txt` (about **379** statements), **jkit scores 379/379 (100%)**; the embedded CORPUS (about 64 statements) is also fully green. Competitor gaps vary with the samples (Druid commonly fails on `DISTINCT ON` / WINDOW inheritance / UNNEST; JSqlParser commonly fails on `LOCK IN SHARE MODE` / `[dbo].[user]` / WINDOW inheritance).
 
+The `SQL.bind` / `bindNamed` string entry points fill the tree produced by parse in place (no second clone). `SQL.bind(stmt, …)` still clone-then-mutates. Wall-clock `SqlBindBenchTest` in tools-test (warmup=2000 / iter=20000): full-path named bind went from slower than Druid to faster; the cached-AST path remains slower than JSqlParser because jkit must clone.
+
 Throughput is measured with **JMH** (`SqlParseBenchmark` in `tools-test`). Formal run (fork=2, warmup=5, iterations=5, Cnt=10, avgt, ns/op — lower is better; measured 2026-09-10 on i9-13900HX / OpenJDK 17.0.11):
 
 | Engine | SIMPLE (single table) | JOIN (two tables) | WINDOW (window function) |
@@ -583,7 +751,7 @@ mvn -Dtest=ExternalSqlCorpusCompareTest test
 
 ## Business Scenarios and Best Practices
 
-The capabilities of `jkit-sql` map onto the 14 business scenarios below, each with at least two best-practice
+The capabilities of `jkit-sql` map onto the 18 business scenarios below, each with at least two best-practice
 examples. Every snippet is taken from
 `jkit-sql/src/test/java/com/alianga/jkit/sql/SqlBusinessScenarioTest.java` and can be re-run directly:
 
@@ -595,18 +763,22 @@ mvn -pl jkit-sql test -Dtest=SqlBusinessScenarioTest
 | --- | --- | --- | --- |
 | 1 | SQL auditing and dependency analysis | `SQL.tables` / `SQL.stat` / `SqlStatement.isReadOnly` | dependency extraction, write-op flagging |
 | 2 | Read/write splitting routing | `SqlStatement.isReadOnly` | read-only to replica, locking SELECT to primary |
-| 3 | SQL injection protection | `SQL.parameterize` / `SQL.exportParameterValues` | literal harvesting, bind-value export |
-| 4 | SQL firewall | `SQL.wall` / `SqlWallConfig` | dangerous-statement blocking, per-channel DDL allowance |
+| 3 | SQL injection protection | `SQL.parameterize` / `SQL.bind` / `SQL.bindNamed` / `SQL.exportParameterValues` | literal harvesting, safe fill-in, `IN` lists, formulas |
+| 4 | SQL firewall | `SQL.wall` / `SqlWallConfig` | dangerous statements, writes without WHERE, tautology `LIKE '%'` / `XOR` |
 | 5 | Cross-dialect database migration | `SQL.convertBatch` / `SqlSchemaConverter.convert` | DDL translation loop, batch DML function rewriting |
 | 6 | Multi-dialect pagination | `SQL.setPage` / `SQL.adaptPagination` / `SQL.toSqlString` | LIMIT/TOP/FETCH/ROWNUM, offset=0 single wrap, on-demand write-back |
-| 7 | Multi-tenant rewriting | `SqlRewrites.replaceTable` / `SqlRewrites.andWhere` | shard routing, tenant predicate injection |
-| 8 | Data masking and column-level access | `SQL.removeSelectItem` / `SqlRewrites.replaceColumn` | sensitive-column trimming, physical rename mapping |
+| 7 | Multi-tenant rewriting | `SQL.inject` / `SqlInjectConfig` / `SqlRewrites.replaceTable` | global table/column config, aspect values, shard routing |
+| 8 | Data masking and column-level access | `SQL.expandStar` / `SQL.replaceSelectItems` / `SQL.removeSelectItem` | expand `*`, batch mask, drop sensitive columns |
 | 9 | Dynamic SQL building | `SqlBuilder` | conditional query assembly, INSERT/UPDATE |
 | 10 | Entity-driven multi-dialect DDL | `SqlEntities.createTable` | MySQL inline COMMENT, PG COMMENT ON |
-| 11 | SQL formatting and conventions | `SQL.format` / `SqlFormatOptions` | keyword case normalization, pretty multi-line |
-| 12 | Legacy template placeholder migration | `SqlPlaceholders` / `SqlParseOptions.placeholders` | `@xx@` and `%s` styles |
+| 11 | SQL formatting and conventions | `SQL.format` / `toString` / `addComment` | keyword case, pretty, comments, dialect quotes |
+| 12 | Legacy template placeholder migration | `SqlPlaceholders` / `SQL.bindNamed` | `@xx@`, `%s`, MyBatis `#{}/ ${}` |
 | 13 | Expression pre-evaluation | `SQL.eval` | constant folding, column refs yield null |
 | 14 | Safe rewriting without polluting the original | `SQL.clone` / clone-then-mutate | reuse cached statements, page without mutating |
+| 15 | Auto-detect dialect from datasources | `JdbcUrlUtils.fromUrl` / `parse` / `driverForUrl` | dialect from URL, HA nodes / schema / driver |
+| 16 | Report-function rewrite across dialects | `SQL.convert` (`DATE_FORMAT`) | MySQL → PG/Oracle `TO_CHAR`, SQLite `strftime` |
+| 17 | Dynamic table names / safe shard bind | `SQL.bindNamed` + `SqlPlaceholders.mybatis()` | table as identifier, quoted numeric names, injection stays one statement |
+| 18 | Low-code query sandbox | `allowTables` / `denyTables` / `requireWhereColumns` / `maxTables` | table allow-list, required tenant column, JOIN-width cap |
 
 ### 1. SQL auditing and dependency analysis
 
@@ -676,6 +848,30 @@ List<Object> values = SQL.exportParameterValues(stmt);   // [alice, 18]
 String parameterized = SQL.parameterize(stmt);           // literals become ?; existing ? untouched
 ```
 
+**Example 3: `SQL.bind` fills placeholders without SQL injection (including `IN` lists)**
+
+```java
+String payload = "'; DROP TABLE t_user; --";
+String sql = SQL.bind("SELECT * FROM t_user WHERE name = ?", payload);
+// SELECT * FROM t_user WHERE name = '''; DROP TABLE t_user; --'  — still one statement
+SQL.parseAll(sql).size();                                // 1
+
+String inList = SQL.bind("SELECT * FROM t WHERE id IN ?", Arrays.asList(1, 2, 3));
+// SELECT * FROM t WHERE id IN (1, 2, 3)
+```
+
+**Example 4: `bindNamed` with a value and a formula**
+
+```java
+Map<String, Object> vals = new LinkedHashMap<String, Object>();
+vals.put("id", 7);
+vals.put("ts", SQL.parseExpr("NOW()"));                  // formulas must be SqlExpr
+String sql = SQL.bindNamed(
+        "SELECT * FROM t_user WHERE id = :id AND created_at > :ts", vals);
+// SELECT * FROM t_user WHERE id = 7 AND created_at > NOW()
+// the string "NOW()" would become 'NOW()' — don't pass it that way
+```
+
 ### 4. SQL firewall (Wall)
 
 Pre-flight blocking for untrusted entry points: user-editable queries, open APIs, low-code platforms.
@@ -688,6 +884,8 @@ SQL.wall("DELETE FROM t").violations();                        // [delete-withou
 SQL.wall("UPDATE t SET a = 1").violations();                   // [update-without-where]
 SQL.wall("SELECT SLEEP(5) FROM t").violations();               // [dangerous-function]
 SQL.wall("SELECT * FROM t WHERE name = 'x' --").violations();  // [comment-bypass]
+SQL.wall("SELECT * FROM t WHERE name LIKE '%'").violations();  // [always-true-condition]
+SQL.wall("SELECT * FROM t WHERE id = 1 XOR 1 = 1").violations(); // [always-true-condition]
 SQL.wall("SELECT * FROM t WHERE id = 1").passed();             // true, legitimate query allowed
 ```
 
@@ -747,6 +945,11 @@ SqlStatement page = SQL.setPage(
 // double-level RN, no OFFSET/FETCH
 SQL.parse(SQL.toSqlString(page, SqlDialect.ORACLE), SqlDialect.ORACLE);
 
+// UNION + ORDER BY: wrap as SELECT * FROM (set-op) ORDER BY, then ROWNUM
+SqlStatement unionPage = SQL.setPage(SQL.parse(
+        "SELECT a FROM t1 UNION ALL SELECT a FROM t2 ORDER BY a"), 2, 5, SqlDialect.ORACLE);
+SQL.toSqlString(unionPage, SqlDialect.ORACLE);
+
 // An AST that already has MySQL LIMIT, written back or adapted for another dialect
 SqlStatement mysql = SQL.parse("SELECT * FROM emp LIMIT 10");
 SQL.toSqlString(mysql, SqlDialect.ORACLE);               // single-level ROWNUM
@@ -776,6 +979,20 @@ SqlStatement out = SQL.rewrite(stmt, SqlRewrites.create()
 SQL.toSqlString(stmt);                                   // the original statement is untouched
 ```
 
+**Example 3: configure tables/columns at startup, then `SQL.inject` in the interceptor**
+
+```java
+SQL.injectConfig(SqlInjectConfig.create()
+        .tables("t_order", "t_item")
+        .add("deleted", 0)
+        .add("tenant_id", new SqlInjectValue() {
+            public Object get() { return Session.orgId(); }
+        }));
+SqlStatement out = SQL.inject(SQL.parse("SELECT id FROM t_order WHERE status = 1"));
+// SELECT id FROM t_order WHERE status = 1 AND tenant_id = … AND deleted = 0
+// after the request: SqlInject.clear(); one-off: SQL.inject(stmt, "tenant_id", 100, "t_order")
+```
+
 ### 8. Data masking and column-level access
 
 Trim sensitive columns for external APIs; adapt old SQL to a physical rename without touching application code.
@@ -795,6 +1012,19 @@ out = SQL.removeSelectItem(out, "id_card");
 SqlStatement out = SQL.rewrite(SQL.parse("SELECT name FROM t_user WHERE name = 'a'"),
         SqlRewrites.create().add(SqlRewrites.replaceColumn("name", "user_name")));
 // SELECT user_name FROM t_user WHERE user_name = 'a'
+```
+
+**Example 3: expand `*` then mask several columns in one pass**
+
+```java
+Map<String, List<String>> cols = new LinkedHashMap<String, List<String>>();
+cols.put("t_customer", Arrays.asList("id", "name", "phone", "id_card"));
+Map<String, String> masks = new LinkedHashMap<String, String>();
+masks.put("phone", "CONCAT(LEFT(phone, 3), '****')");
+masks.put("id_card", "'****'");
+SqlStatement masked = SQL.replaceSelectItems(
+        SQL.expandStar(SQL.parse("SELECT * FROM t_customer"), cols), masks);
+// SELECT id, name, CONCAT(LEFT(phone, 3), '****') AS phone, '****' AS id_card FROM t_customer
 ```
 
 ### 9. Dynamic SQL building
@@ -870,6 +1100,21 @@ pretty.contains("\n");                                   // true
 assertEquals(SQL.tables(SQL.parse(ugly)), SQL.tables(SQL.parse(pretty)));
 ```
 
+**Example 3: `addComment` + `toString()` defaults to MySQL backticks**
+
+```java
+SqlParseOptions opt = SqlParseOptions.defaults()
+        .placeholders(SqlPlaceholders.create().mybatis());
+SqlStatement bound = SQL.bindNamed(
+        SQL.parse("SELECT * FROM #{table}", SqlDialect.MYSQL, opt),
+        SqlDialect.MYSQL, Collections.<String, Object>singletonMap("table", 10086));
+bound.addComment("a note");                              // body text is enough
+String sql = bound.toString();
+// /* a note */ SELECT * FROM `10086`
+SQL.toSqlString(bound, SqlDialect.ORACLE);               // "10086"
+SQL.toSqlString(bound, SqlDialect.SQLSERVER);            // [10086]
+```
+
 ### 12. Legacy template placeholder migration
 
 Old `@xx@` / `%s` style SQL parses as-is, without rewriting the text.
@@ -892,6 +1137,30 @@ SqlStatement stmt = SQL.parse("SELECT %s FROM (SELECT '20221111' AS %s) AS a",
         SqlDialect.MYSQL,
         SqlParseOptions.defaults().placeholders(SqlPlaceholders.create().printf()));
 SQL.tables(stmt);                                        // [], FROM is a derived table
+```
+
+**Example 3: MyBatis `#{id}` / `${table}`**
+
+```java
+SqlParseOptions opt = SqlParseOptions.defaults()
+        .placeholders(SqlPlaceholders.create().mybatis());
+SQL.parse("SELECT * FROM ${table} WHERE id = #{id, jdbcType=INTEGER}",
+        SqlDialect.MYSQL, opt);
+```
+
+**Example 4: bind fills MyBatis placeholders by property name**
+
+```java
+Map<String, Object> vals = new LinkedHashMap<String, Object>();
+vals.put("table", "t_user");
+vals.put("id", 7);
+vals.put("user.name", "bob");
+String sql = SQL.bindNamed(
+        "SELECT * FROM ${table} WHERE id = #{id, jdbcType=INTEGER} AND name = #{user.name}",
+        SqlDialect.MYSQL,
+        SqlParseOptions.defaults().placeholders(SqlPlaceholders.create().mybatis()),
+        vals);
+// SELECT * FROM t_user WHERE id = 7 AND name = 'bob'
 ```
 
 ### 13. Expression pre-evaluation
@@ -931,6 +1200,122 @@ SQL.toSqlString(masked).contains("name");                       // false
 SqlStatement original = SQL.parse("SELECT id FROM users WHERE status = 1");
 SQL.setPage(original, 2, 10, SqlDialect.MYSQL);
 ((SqlSelect) original).limit();                          // null, the original has no LIMIT
+```
+
+### 15. Auto-detect dialect from datasources
+
+When you ingest many JDBC URLs, don't write `if mysql else oracle`. `JdbcUrlUtils` never opens a connection; it infers dialect, database, schema and driver class from the URL.
+
+**Example 1: pick a dialect from the URL, then parse / write back**
+
+```java
+SqlDialect dialect = JdbcUrlUtils.fromUrl(
+        "jdbc:postgresql://primary:5432/orders?currentSchema=sales");  // POSTGRES
+SqlStatement stmt = SQL.parse("SELECT id FROM t WHERE name = 'a' || 'b'", dialect);
+SQL.toSqlString(stmt, dialect);                          // || is concatenation on PG
+JdbcUrlUtils.fromUrl("jdbc:dm://localhost:5236");        // DAMENG
+JdbcUrlUtils.fromUrl("jdbc:tidb://127.0.0.1:4000/test"); // MYSQL
+JdbcUrlUtils.fromUrl("jdbc:unknown:foo");                // null — does not fall back to MySQL
+```
+
+**Example 2: HA nodes, schema, driver class**
+
+```java
+JdbcUrlInfo info = JdbcUrlUtils.parse(
+        "jdbc:postgresql://primary:5432,standby:5432/orders?currentSchema=sales");
+info.getDbType();          // postgresql
+info.getDatabaseName();    // orders
+info.getSchema();          // sales
+info.getNodes().size();    // 2
+JdbcUrlUtils.driverForUrl("jdbc:dm://localhost:5236");   // dm.jdbc.driver.DmDriver
+JdbcUrlUtils.schema("jdbc:postgresql://h/db");           // public
+```
+
+### 16. Report-function rewrite across dialects
+
+Existing report SQL that uses MySQL `DATE_FORMAT` can move to PG / Oracle / SQLite with specifiers rewritten; the output re-parses on the target dialect.
+
+**Example 1: MySQL → PostgreSQL / Oracle `TO_CHAR`**
+
+```java
+String pg = SQL.convert("SELECT DATE_FORMAT(ts, '%Y-%m-%d %H:%i:%s') FROM t",
+        SqlDialect.MYSQL, SqlDialect.POSTGRES);
+// SELECT TO_CHAR(ts, 'YYYY-MM-DD HH24:MI:SS') FROM t
+SQL.parse(pg, SqlDialect.POSTGRES);
+
+String ora = SQL.convert("SELECT DATE_FORMAT(ts, '%Y-%m-%d') FROM t",
+        SqlDialect.MYSQL, SqlDialect.ORACLE);
+// SELECT TO_CHAR(ts, 'YYYY-MM-DD') FROM t
+SQL.parse(ora, SqlDialect.ORACLE);
+```
+
+**Example 2: MySQL → SQLite `strftime` (arguments swapped, `%i` → `%M`)**
+
+```java
+String sql = SQL.convert("SELECT DATE_FORMAT(ts, '%Y-%m-%d %H:%i:%s') FROM t",
+        SqlDialect.MYSQL, SqlDialect.SQLITE);
+// SELECT strftime('%Y-%m-%d %H:%M:%S', ts) FROM t
+SQL.parse(sql, SqlDialect.SQLITE);
+```
+
+### 17. Dynamic table names / safe shard bind
+
+When the table name is a date, tenant or sheet, use a template placeholder + bind: the table slot becomes an identifier (dialect-quoted if needed), never a `'t_user'` string, and a hostile name cannot split into a second statement.
+
+**Example 1: shard table name as an identifier**
+
+```java
+SqlParseOptions opt = SqlParseOptions.defaults()
+        .placeholders(SqlPlaceholders.create().mybatis());
+Map<String, Object> vals = new LinkedHashMap<String, Object>();
+vals.put("table", "t_user_2026");
+vals.put("id", 1);
+String sql = SQL.bindNamed("SELECT * FROM ${table} WHERE id = #{id}",
+        SqlDialect.MYSQL, opt, vals);
+// SELECT * FROM t_user_2026 WHERE id = 1   — not FROM 't_user_2026'
+```
+
+**Example 2: numeric table names get backticks; injection stays one identifier**
+
+```java
+SQL.bindNamed("SELECT * FROM #{table}", SqlDialect.MYSQL, opt,
+        Collections.<String, Object>singletonMap("table", 10086));
+// SELECT * FROM `10086`
+
+SQL.bindNamed("SELECT * FROM #{table}", SqlDialect.MYSQL, opt,
+        Collections.<String, Object>singletonMap("table", "t; DROP TABLE x"));
+// SELECT * FROM `t; DROP TABLE x`   — parseAll is still 1 statement
+```
+
+### 18. Low-code query sandbox
+
+Open queries / report designers may only touch business tables, must carry a tenant column, and cannot JOIN without bound. `SqlWallConfig.defaults()` does **not** turn on table allow-lists (to avoid false positives); the sandbox enables them explicitly.
+
+**Example 1: allow business tables, deny system tables**
+
+```java
+SqlWallConfig cfg = SqlWallConfig.defaults()
+        .allowTables("t_order", "t_item")
+        .denyTables("mysql.user", "secret");
+SQL.wall("SELECT id FROM t_order o JOIN t_item i ON o.id = i.oid",
+        SqlDialect.MYSQL, cfg).passed();                 // true
+SQL.wall("SELECT id FROM t_user", SqlDialect.MYSQL, cfg).violations();
+// [allow-table]
+SQL.wall("SELECT * FROM secret", SqlDialect.MYSQL, cfg).violations();
+// [deny-table]
+```
+
+**Example 2: require a tenant column in WHERE, cap physical tables**
+
+```java
+SqlWallConfig cfg = SqlWallConfig.defaults()
+        .requireWhereColumns("tenant_id")
+        .maxTables(2);
+SQL.wall("SELECT id FROM t_order WHERE tenant_id = 1", SqlDialect.MYSQL, cfg).passed();
+SQL.wall("SELECT id FROM t_order", SqlDialect.MYSQL, cfg).violations();
+// [missing-where-column]
+SQL.wall("SELECT * FROM a JOIN b ON a.id = b.id JOIN c ON b.id = c.id",
+        SqlDialect.MYSQL, cfg).violations();             // [too-many-tables]
 ```
 
 ### Convention for adding scenarios

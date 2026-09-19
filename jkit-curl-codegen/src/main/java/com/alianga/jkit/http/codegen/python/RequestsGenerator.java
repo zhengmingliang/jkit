@@ -54,19 +54,31 @@ public final class RequestsGenerator extends AbstractCodeGenerator {
         String extra = "";
         if (body.kind() == Body.Kind.MULTIPART) {
             src.append("files = {\n");
+            for (FormPart p : body.parts()) {
+                if (!p.file()) {
+                    continue;
+                }
+                src.append("    ").append(CodeQuote.py(p.name())).append(": ");
+                StringBuilder file = new StringBuilder("open(")
+                        .append(CodeQuote.py(p.filePath())).append(", 'rb')");
+                if (p.filename() != null || p.contentType() != null) {
+                    file.insert(0, "(" + (p.filename() == null ? "None" : CodeQuote.py(p.filename())) + ", ")
+                            .append(p.contentType() == null ? "" : ", " + CodeQuote.py(p.contentType()))
+                            .append(')');
+                }
+                src.append(file).append(",\n");
+            }
             src.append("}\n");
             src.append("data = {\n");
             for (FormPart p : body.parts()) {
                 if (p.file()) {
-                    src.append("# files[").append(CodeQuote.py(p.name())).append("] = open(")
-                            .append(CodeQuote.py(p.filePath())).append(", 'rb')\n");
-                } else {
-                    src.append("    ").append(CodeQuote.py(p.name())).append(": ")
-                            .append(CodeQuote.py(p.value() == null ? "" : p.value())).append(",\n");
+                    continue;
                 }
+                src.append("    ").append(CodeQuote.py(p.name())).append(": ")
+                        .append(CodeQuote.py(p.value() == null ? "" : p.value())).append(",\n");
             }
             src.append("}\n");
-            extra = ", data=data";
+            extra = ", data=data, files=files";
         } else if (body.kind() == Body.Kind.FILE) {
             src.append("data = open(").append(CodeQuote.py(body.filePath())).append(", 'rb')\n");
             extra = ", data=data";
@@ -82,8 +94,9 @@ public final class RequestsGenerator extends AbstractCodeGenerator {
             src.append(", verify=False");
         }
         if (req.proxy() != null) {
-            src.append(", proxies={'http': ").append(CodeQuote.py("http://" + req.proxy().hostPort()))
-                    .append(", 'https': ").append(CodeQuote.py("http://" + req.proxy().hostPort())).append("}");
+            String proxyUrl = CurlGenSupport.proxyUrl(req.proxy());
+            src.append(", proxies={'http': ").append(CodeQuote.py(proxyUrl))
+                    .append(", 'https': ").append(CodeQuote.py(proxyUrl)).append("}");
         }
         src.append(")\n");
         src.append("print(resp.status_code)\nprint(resp.text)\n");

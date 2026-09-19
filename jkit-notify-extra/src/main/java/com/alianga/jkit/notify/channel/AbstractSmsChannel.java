@@ -78,6 +78,23 @@ public abstract class AbstractSmsChannel extends AbstractHttpChannel {
         return type == MessageType.TEXT;
     }
 
+    /**
+     * 短信渠道的 buildUrl/buildPayload 依赖"当前收件人"（在消息 extras 里），
+     * 不能像普通渠道那样用 {@code null} 消息预检；改用带占位收件人的探针消息
+     * 走一遍 URL 与请求体构造，复用子类的凭证 / 模板等必填项检查（不发请求）。
+     *
+     * @param config 渠道配置
+     */
+    @Override
+    public void validate(ChannelConfig config) {
+        if (NotifyUtils.parseReceivers(config.to()).isEmpty()) {
+            throw new IllegalArgumentException(id() + " receiver is required (ChannelConfig.to)");
+        }
+        Message probe = Message.text("validate").extra(EXTRA_CURRENT_RECEIVER, "10000000000");
+        buildUrl(probe, config);
+        buildPayload(probe, config);
+    }
+
     @Override
     public SendResult send(Message message, ChannelConfig config) {
         List<String> receivers = NotifyUtils.parseReceivers(config.to());
@@ -103,7 +120,9 @@ public abstract class AbstractSmsChannel extends AbstractHttpChannel {
     }
 
     private static Message withReceiver(Message message, String receiver) {
-        return message.extra(EXTRA_CURRENT_RECEIVER, receiver);
+        // 基于独立副本注入当前收件人：调用方的消息不被写回污染，
+        // 同一消息并发发到多个短信渠道也不会互相覆盖收件人
+        return message.copy().extra(EXTRA_CURRENT_RECEIVER, receiver);
     }
 
     /**
