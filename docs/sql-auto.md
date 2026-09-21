@@ -210,7 +210,7 @@ java com.alianga.jkit.sql.auto.SqlAuto
 
 ## 4. 只看 SQL、不改库
 
-`dryRun(true)` 的 `SqlAuto.run(options)` **不打开 JDBC**。URL 只用来推断方言，按空库规划全量 `CREATE TABLE`，库没启动也能打印：
+`dryRun(true)` 的 `SqlAuto.run(options)` 默认**不打开 JDBC**。URL 只用来推断方言，按空库规划全量 `CREATE TABLE`，库没启动也能打印：
 
 ```java
 SqlAutoPlan plan = SqlAuto.run(SqlAutoOptions.defaults()
@@ -221,7 +221,21 @@ SqlAutoPlan plan = SqlAuto.run(SqlAutoOptions.defaults()
 List<String> sqls = plan.sql();
 ```
 
-要对照**现有表**看 `ALTER`，把已打开的 `Connection` 传给 `run(connection, options)`，同样可以 `dryRun(true)`（只规划不执行）。
+要对照**现有表**看实际增量变更，两种方式：
+
+1. 把已打开的 `Connection` 传给 `run(connection, options)`，同样可以 `dryRun(true)`（只规划不执行）；
+2. 只配了 `url`/数据源、不想自己开连接时，加 `.connectOnDryRun(true)`（配置 `jkit.sql.auto.connect-on-dry-run: true`）。此时 dry-run 仍会打开配置的连接读取元数据，与现有表比对，`plan.sql()` / `plan.changes()` 拿到的就是真实的增量 DDL（缺表为 `CREATE TABLE`，缺列为 `ALTER … ADD` 等），但不执行、不取锁、不写历史表；未配置连接信息时回落为离线全量规划。
+
+```java
+SqlAutoPlan plan = SqlAuto.run(SqlAutoOptions.fromConfig()
+        .packages("com.example.entity")
+        .mode(SqlAutoMode.UPDATE)
+        .dryRun(true)
+        .connectOnDryRun(true));
+for (SqlAutoChange change : plan.changes()) {
+    System.out.println(change.sql());   // 与活表比对后的实际变更，未落库
+}
+```
 
 配置项：`jkit.sql.auto.dry-run: true`。
 
@@ -258,7 +272,8 @@ List<String> sqls = plan.sql();
 | `export` | （空） | 每次规划后把将执行的 DDL 写入该文件（UTF-8，每条一行分号结尾），配合 `dry-run` 可当 schema 生成器用 |
 | `phase` | `eager` | Spring Starter 专用：`eager` 在上下文刷新期执行（端口开放前完成）；`ready` 恢复 2.0.1 的应用就绪事件后执行 |
 | `show-sql` | `true` | 打日志 |
-| `dry-run` | `false` | 只规划不执行 |
+| `dry-run` | `false` | 只规划不执行；默认不连库、按空库出全量 CREATE |
+| `connect-on-dry-run` | `false` | 与 `dry-run` 搭配：开启后仍打开配置的数据源与活表比对，产出实际增量变更（不执行、不取锁、不写历史）；未配连接时回落离线规划 |
 | `catalog` / `schema` | JDBC 默认 | `DatabaseMetaData` 查找范围。未配 `catalog` 时用连接 `getCatalog()`；未配 `schema` 时用 `getSchema()`，再不行从 JDBC URL 解析（PG 系 `currentSchema` 缺省 `public`，SQL Server `dbo`）。dry-run 无连接时同样从 URL 取 |
 
 链式 API 与配置一一对应，例如 `.mode(SqlAutoMode.UPDATE)`、`.packages("a","b")`、`.alterColumn(true)`、`.lock(false)`、`.history(true)`、`.export("target/schema.sql")`。

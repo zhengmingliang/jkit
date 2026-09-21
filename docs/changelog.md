@@ -11,10 +11,13 @@
 **jkit-sql**
 
 - 达梦裸过程调用：disql 脚本中无 `CALL` 关键字的系统过程调用（如 `SP_SET_PARA_VALUE(1, 'HJ_BUF_GLOBAL_SIZE', 4000);`）此前在语句起始遇到 `IDENT (` 直接抛 unsupported statement，现在解析为 CALL（实参进 AST，支持 `schema.proc(...)` 限定名），回写保留裸形态，`parse → format → parse` 可往返。新增方言能力 `SqlDialectSpec.supportsImplicitProcedureCall()`，仅 `DAMENG` 开启（Oracle 系裸过程调用只能出现在 PL/SQL 块内），其余方言行为不变；`SqlSimpleStatement.implicitCall()` 可区分裸调用与显式 `CALL`。
+- 实体扫描识别只标 JPA `@Table`（无 `@Entity`）的类（javax / jakarta 均认）；此前这类类不会被扫描到，尽管表名 / 列 / 索引映射本就支持 `@Table`。
+- `@SqlColumn` 新增 `defaultValue`：直接声明列默认值 SQL 片段（不含 `DEFAULT` 关键字），字符串自带引号（如 `@SqlColumn(defaultValue = "'N'")`），函数 / 表达式直接写（`"0"`、`"CURRENT_TIMESTAMP"`）；优先级高于 Hibernate `@ColumnDefault`，DDL 生成与自动建表全链路生效。
 - `SqlReservedWords`：各方言保留字注册表（SQL 标准核心 + MySQL / PostgreSQL / Oracle / SQL Server / H2 / DB2 / 达梦 / Hive / ClickHouse 扩展），`isKeyword(dialect, name)` 按方言探测。`SqlSchemaConvertOptions` 新增 `keywordQuote` 与 `keywordQuotedListener`：开启后标识符默认仍不加引号（大小写交给库折叠），撞目标库保留字时自动加方言引号，并通过回调告警（同一标识符全局只回调一次）；jkit-sql 自身不打日志，告警方式由宿主决定。
 
 **jkit-sql-auto**
 
+- dry-run 连库比对：新增 `connectOnDryRun(true)` / 配置 `jkit.sql.auto.connect-on-dry-run`。开启后 `dryRun(true)` 仍打开配置的数据源读取元数据、与现有表比对，`plan.sql()` / `plan.changes()` 产出的是实际增量变更（缺表 CREATE、缺列 ADD COLUMN 等）而非空库全量 CREATE，但不执行、不取锁、不写历史表；未配连接信息时回落原离线规划。
 - 保留字自动引号：表名 / 列名 / 索引名默认不加引号，检测到是目标库保留字（如 `order`、`desc`、`value`）时自动加引号兜底并打 WARN（每个标识符只告警一次）。CREATE / ADD / ALTER / DROP / CREATE INDEX / COMMENT 全链路同形态，二次启动不会因名字形态不一致重复改表；无需配置，默认开启。
 
 ### 修复

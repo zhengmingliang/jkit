@@ -197,7 +197,7 @@ java com.alianga.jkit.sql.auto.SqlAuto
 
 ## 4. Plan only, do not change the database
 
-`SqlAuto.run(options)` with `dryRun(true)` **does not open JDBC**. The URL is only used to infer the dialect. It plans a full `CREATE TABLE` as if the schema were empty, so the database does not need to be running:
+`SqlAuto.run(options)` with `dryRun(true)` **does not open JDBC by default**. The URL is only used to infer the dialect. It plans a full `CREATE TABLE` as if the schema were empty, so the database does not need to be running:
 
 ```java
 SqlAutoPlan plan = SqlAuto.run(SqlAutoOptions.defaults()
@@ -208,7 +208,21 @@ SqlAutoPlan plan = SqlAuto.run(SqlAutoOptions.defaults()
 List<String> sqls = plan.sql();
 ```
 
-To preview `ALTER` against **live** tables, pass an open `Connection` to `run(connection, options)` (still with `dryRun(true)` if you only want the plan).
+To preview the actual incremental changes against **live** tables, either:
+
+1. pass an open `Connection` to `run(connection, options)` (still with `dryRun(true)` if you only want the plan); or
+2. when you only configured the URL/DataSource and don't want to open the connection yourself, add `.connectOnDryRun(true)` (config `jkit.sql.auto.connect-on-dry-run: true`). Dry-run then still opens the configured connection, reads metadata, and diffs against the live tables — `plan.sql()` / `plan.changes()` return the real incremental DDL (`CREATE TABLE` for missing tables, `ALTER … ADD` for missing columns, …), but nothing is executed, locked, or recorded. With no connection configured it falls back to offline full-CREATE planning.
+
+```java
+SqlAutoPlan plan = SqlAuto.run(SqlAutoOptions.fromConfig()
+        .packages("com.example.entity")
+        .mode(SqlAutoMode.UPDATE)
+        .dryRun(true)
+        .connectOnDryRun(true));
+for (SqlAutoChange change : plan.changes()) {
+    System.out.println(change.sql());   // actual diff against live tables, not executed
+}
+```
 
 Config key: `jkit.sql.auto.dry-run: true`.
 
@@ -237,7 +251,8 @@ Prefix is always `jkit.sql.auto.`. The Spring Boot starters bind the same set; n
 | `index-prefix-enabled` | `true` | whether auto-derived index names also carry `table-prefix` (so `t_user`'s index is `t_user_idx` vs `user_idx`); an explicit `@Index(name=…)` is always kept verbatim and ignores this switch |
 | `quote-identifiers` | `false` | quote identifiers unconditionally in the dialect; when off, reserved-word identifiers are still auto-quoted (see section 8 "Reserved-word auto-quoting"), so this is rarely needed |
 | `show-sql` | `true` | log SQL |
-| `dry-run` | `false` | plan only |
+| `dry-run` | `false` | plan only; by default no connection is opened and a full CREATE is planned |
+| `connect-on-dry-run` | `false` | with `dry-run`, still open the configured DataSource/URL to diff against live tables and produce the real incremental plan (nothing is executed, locked, or recorded); falls back to offline planning when no connection is configured |
 | `catalog` / `schema` | JDBC default | `DatabaseMetaData` lookup scope. If `catalog` is unset, uses `Connection.getCatalog()`; if `schema` is unset, uses `getSchema()`, then the JDBC URL (`currentSchema` on PostgreSQL-family URLs, default `public`; SQL Server `dbo`). Dry-run (no connection) also reads the URL |
 
 The fluent API matches these keys (`.mode(SqlAutoMode.UPDATE)`, `.packages("a","b")`, `.alterColumn(true)`). Code-only switches: `postgresIdentityStyle(SERIAL)`, `foreignKeys(false)`, `autoIncrement(false)`.
