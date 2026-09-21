@@ -63,7 +63,8 @@ public final class SqlEntityMapper {
 
     /**
      * @param type 类
-     * @return 是否带 {@link SqlTable}、JPA {@code @Entity}、MyBatis-Plus {@code @TableName}/{@code @TableId}
+     * @return 是否带 {@link SqlTable}、JPA {@code @Entity}/{@code @Table}（javax/jakarta）、
+     *         MyBatis-Plus {@code @TableName}/{@code @TableId}
      */
     public static boolean isEntity(Class<?> type) {
         if (type == null || type.isInterface() || type.isAnnotation() || type.isEnum()
@@ -75,7 +76,9 @@ public final class SqlEntityMapper {
         }
         if (namedAnnotation(type, "javax.persistence.Entity") != null
                 || namedAnnotation(type, "jakarta.persistence.Entity") != null
-                || namedAnnotation(type, "com.baomidou.mybatisplus.annotation.TableName") != null) {
+                || namedAnnotation(type, "com.baomidou.mybatisplus.annotation.TableName") != null
+                || namedAnnotation(type, "jakarta.persistence.Table") != null
+                || namedAnnotation(type, "javax.persistence.Table") != null) {
             return true;
         }
         Field[] fs = type.getDeclaredFields();
@@ -232,8 +235,13 @@ public final class SqlEntityMapper {
         } else {
             comment = annotationText(namedBySimpleName(field, "Comment"));
         }
-        String defaultValue = annotationText(
-                namedAnnotation(field, "org.hibernate.annotations.ColumnDefault"));
+        String defaultValue;
+        if (col != null && col.defaultValue().length() > 0) {
+            defaultValue = col.defaultValue();
+        } else {
+            defaultValue = annotationText(
+                    namedAnnotation(field, "org.hibernate.annotations.ColumnDefault"));
+        }
         return new SqlEntityColumn(name, canonical, prec, sc, nullable, id, generated, unique,
                 rawType, refTable, refCol, comment, defaultValue, field);
     }

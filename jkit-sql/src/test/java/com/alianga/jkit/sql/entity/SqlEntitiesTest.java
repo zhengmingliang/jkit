@@ -142,6 +142,57 @@ public class SqlEntitiesTest {
     }
 
     @Test
+    public void sqlColumnDefaultValue() {
+        @SqlTable(name = "dv")
+        class Dv {
+            @SqlId
+            @SqlGenerated
+            long id;
+            @SqlColumn(defaultValue = "'N'")
+            String state;
+            @SqlColumn(defaultValue = "0")
+            Integer version;
+            @SqlColumn(defaultValue = "CURRENT_TIMESTAMP")
+            java.util.Date createdAt;
+            // @SqlColumn.defaultValue 优先于 Hibernate @ColumnDefault
+            @SqlColumn(defaultValue = "9")
+            @ColumnDefault("0")
+            Integer win;
+        }
+        SqlEntityModel model = SqlEntities.inspect(Dv.class);
+        assertEquals("'N'", model.columns().get(1).defaultValue());
+        assertEquals("0", model.columns().get(2).defaultValue());
+        assertEquals("CURRENT_TIMESTAMP", model.columns().get(3).defaultValue());
+        assertEquals("9", model.columns().get(4).defaultValue());
+
+        String mysql = SqlEntities.createTable(Dv.class, SqlDialect.MYSQL);
+        assertTrue(mysql, mysql.contains("DEFAULT 'N'"));
+        assertTrue(mysql, mysql.contains("DEFAULT 0"));
+        assertTrue(mysql, mysql.contains("DEFAULT CURRENT_TIMESTAMP"));
+        assertTrue(mysql, mysql.contains("DEFAULT 9"));
+
+        String pg = SqlEntities.createTable(Dv.class, SqlDialect.POSTGRES);
+        assertTrue(pg, pg.contains("DEFAULT 'N'"));
+        assertTrue(pg, pg.contains("DEFAULT CURRENT_TIMESTAMP"));
+    }
+
+    @Test
+    public void jpaTableWithoutEntityIsRecognized() {
+        @javax.persistence.Table(name = "table_only")
+        class TableOnly {
+            @javax.persistence.Id
+            Long id;
+            @javax.persistence.Column(name = "user_name", length = 32, nullable = false)
+            String userName;
+        }
+        assertTrue(SqlEntityMapper.isEntity(TableOnly.class));
+        SqlEntityModel model = SqlEntities.inspect(TableOnly.class);
+        assertEquals("table_only", model.tableName());
+        assertNotNull(model.idColumn());
+        assertEquals("user_name", model.columns().get(1).columnName());
+    }
+
+    @Test
     public void anyPackageCommentAnnotation() {
         SqlEntityModel model = SqlEntities.inspect(AnyCommentUser.class);
         assertEquals("自定义表注释", model.comment());

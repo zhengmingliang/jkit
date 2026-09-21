@@ -53,4 +53,13 @@ public @interface SqlColumn {
      * @return 列注释；空则不生成 COMMENT
      */
     String comment() default "";
+
+    /**
+     * 列默认值，原样写进 DDL 的 {@code DEFAULT} 后（不含关键字本身），因此字符串要自带引号
+     * （如 {@code "'N'"}），函数 / 表达式直接写（如 {@code "0"}、{@code "CURRENT_TIMESTAMP"}）。
+     * 空则不生成 DEFAULT；优先级高于 Hibernate {@code @ColumnDefault}。
+     *
+     * @return 默认值 SQL 片段；空表示不设置
+     */
+    String defaultValue() default "";
 }
