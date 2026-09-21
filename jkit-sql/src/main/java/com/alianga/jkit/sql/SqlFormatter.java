@@ -1726,6 +1726,18 @@ public final class SqlFormatter {
             }
             return;
         }
+        // 达梦裸过程调用 SP_*(...)：无 CALL 关键字，回写保留裸形态
+        if (stmt.type() == SqlStatementType.CALL && stmt.implicitCall()) {
+            if (stmt.name() != null) {
+                writeExpr(stmt.name());
+            }
+            if (stmt.withArguments()) {
+                out.append('(');
+                commaExprs(stmt.arguments());
+                out.append(')');
+            }
+            return;
+        }
         kw(stmt.type().name());
         // SHOW：text 已含完整子句（含表名），name 仅供抽表
         if (stmt.type() == SqlStatementType.SHOW) {

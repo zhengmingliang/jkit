@@ -89,6 +89,11 @@ public class SqlDialectWrapper implements SqlDialectSpec {
     }
 
     @Override
+    public boolean supportsImplicitProcedureCall() {
+        return base.supportsImplicitProcedureCall();
+    }
+
+    @Override
     public boolean supportsLimitOffset() {
         return base.supportsLimitOffset();
     }

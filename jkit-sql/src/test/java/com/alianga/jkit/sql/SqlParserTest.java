@@ -92,6 +92,61 @@ public class SqlParserTest {
     }
 
     /**
+     * 达梦 disql 裸过程调用 {@code SP_SET_PARA_VALUE(...)}（无 CALL 关键字）解析为 CALL，
+     * 回写保留裸形态；其他方言不接受裸调用，显式 CALL 不受影响。
+     */
+    @Test
+    public void parseDMSql() {
+        String sql = "SP_SET_PARA_VALUE(1, 'HJ_BUF_GLOBAL_SIZE', 4000);";
+        SqlSimpleStatement statement =
+                (SqlSimpleStatement) SQL.parse(sql, SqlDialect.DAMENG);
+        assertEquals(SqlStatementType.CALL, statement.type());
+        assertTrue(statement.implicitCall());
+        assertEquals("SP_SET_PARA_VALUE", statement.name().simpleName());
+        assertTrue(statement.withArguments());
+        assertEquals(3, statement.arguments().size());
+
+        // 回写不补 CALL 关键字，且可往返解析
+        String formatted = SQL.toSqlString(statement, SqlDialect.DAMENG);
+        String compact = formatted.toUpperCase().replaceAll("\\s+", "");
+        assertTrue(formatted, compact.startsWith("SP_SET_PARA_VALUE("));
+        assertFalse(formatted, compact.contains("CALL"));
+        SqlSimpleStatement again =
+                (SqlSimpleStatement) SQL.parse(formatted, SqlDialect.DAMENG);
+        assertEquals(SqlStatementType.CALL, again.type());
+        assertTrue(again.implicitCall());
+        assertEquals(3, again.arguments().size());
+
+        // 限定名裸调用 schema.proc(...)
+        SqlSimpleStatement qualified = (SqlSimpleStatement) SQL.parse(
+                "SYS.SP_SET_PARA_VALUE(1, 'A', 1)", SqlDialect.DAMENG);
+        assertEquals("SYS.SP_SET_PARA_VALUE", qualified.name().qualifiedName());
+
+        // 多条裸调用按分号切分
+        List<SqlStatement> batch = SQL.parseAll(
+                "SP_SET_PARA_VALUE(1, 'A', 1); SP_SET_PARA_VALUE(2, 'B', 2);",
+                SqlDialect.DAMENG);
+        assertEquals(2, batch.size());
+        assertEquals(SqlStatementType.CALL, batch.get(0).type());
+        assertEquals(SqlStatementType.CALL, batch.get(1).type());
+
+        // 显式 CALL 仍是普通 CALL 语句，回写带 CALL
+        SqlSimpleStatement explicit = (SqlSimpleStatement) SQL.parse(
+                "CALL SP_SET_PARA_VALUE(1, 'X', 1)", SqlDialect.DAMENG);
+        assertEquals(SqlStatementType.CALL, explicit.type());
+        assertFalse(explicit.implicitCall());
+        assertTrue(SQL.toSqlString(explicit, SqlDialect.DAMENG).toUpperCase().contains("CALL"));
+
+        // 非达梦方言不允许裸过程调用
+        try {
+            SQL.parse(sql, SqlDialect.MYSQL);
+            fail("bare procedure call must be rejected in MySQL dialect");
+        } catch (SqlParseException expected) {
+            // ok
+        }
+    }
+
+    /**
      * 基本 SELECT 与表列抽取。
      */
     @Test

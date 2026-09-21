@@ -12,6 +12,7 @@ Unreleased changes are appended to the **current version** section (currently 2.
 
 **jkit-sql**
 
+- Dameng bare procedure calls: system-procedure invocations without the `CALL` keyword in disql scripts (e.g. `SP_SET_PARA_VALUE(1, 'HJ_BUF_GLOBAL_SIZE', 4000);`) previously threw "unsupported statement" at an `IDENT (` at statement start. They now parse as CALL (arguments into the AST, `schema.proc(...)` qualified names supported), write back in the bare form, and survive the `parse → format → parse` round-trip. New dialect capability `SqlDialectSpec.supportsImplicitProcedureCall()`, enabled only for `DAMENG` (Oracle-family bare calls are only valid inside PL/SQL blocks); other dialects are unchanged. `SqlSimpleStatement.implicitCall()` distinguishes bare calls from explicit `CALL`.
 - `SqlReservedWords`: per-dialect reserved-word registry (SQL-standard core plus MySQL / PostgreSQL / Oracle / SQL Server / H2 / DB2 / DM / Hive / ClickHouse extensions) with `isKeyword(dialect, name)`. `SqlSchemaConvertOptions` gains `keywordQuote` and `keywordQuotedListener`: identifiers stay unquoted by default (case folding is left to the database), but reserved-word collisions are quoted automatically and reported through the callback once per identifier; jkit-sql itself does no logging, the host decides how to warn.
 
 **jkit-sql-auto**

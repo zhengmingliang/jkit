@@ -366,6 +366,16 @@ public enum SqlDialect implements SqlDialectSpec {
     }
 
     /**
+     * 达梦 disql 允许省略 {@code CALL}：{@code SP_SET_PARA_VALUE(1, 'X', 4000);}。
+     *
+     * @return 仅 {@link #DAMENG} 返回 true
+     */
+    @Override
+    public boolean supportsImplicitProcedureCall() {
+        return this == DAMENG;
+    }
+
+    /**
      * 是否原生支持 {@code LIMIT … [OFFSET …]} / {@code LIMIT offset, count}。
      *
      * @return true 表示改写宜写 LIMIT

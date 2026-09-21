@@ -937,6 +937,7 @@ public final class SqlAstCloner {
         dest.setText(src.text());
         copyExprs(src.arguments(), dest.arguments());
         dest.setWithArguments(src.withArguments());
+        dest.setImplicitCall(src.implicitCall());
         dest.setParseError(src.parseError());
         dest.setPrivileges(src.privileges());
         return dest;

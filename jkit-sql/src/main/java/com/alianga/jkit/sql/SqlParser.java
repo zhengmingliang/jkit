@@ -318,7 +318,7 @@ public final class SqlParser {
             case SHOW:
                 return parseShow();
             case CALL:
-                return parseCall();
+                return parseCall(false);
             case LBRACE:
                 // JDBC/ODBC 转义：{call sp(...)} 解包为 CALL 语句（内联解析，兼容 CALL 关键字/ident 两种词法）
                 if (lexer.peek().type() == SqlTokenType.CALL
@@ -395,6 +395,9 @@ public final class SqlParser {
                         throw error("custom statement parser left unconsumed input at: " + token.text());
                     }
                     return stmt;
+                }
+                if (lookingAtImplicitProcedureCall()) {
+                    return parseCall(true);
                 }
                 throw error("unsupported statement starting with " + t);
         }
@@ -842,10 +845,17 @@ public final class SqlParser {
         return stmt;
     }
 
-    private SqlStatement parseCall() {
-        expect(SqlTokenType.CALL);
+    /**
+     * 解析过程调用。{@code implicit=true} 时无 CALL 关键字（达梦 disql 的
+     * {@code SP_SET_PARA_VALUE(1, ...)} 裸调用），回写保留裸形态。
+     */
+    private SqlStatement parseCall(boolean implicit) {
+        if (!implicit) {
+            expect(SqlTokenType.CALL);
+        }
         SqlSimpleStatement stmt = new SqlSimpleStatement();
         stmt.setStatementType(SqlStatementType.CALL);
+        stmt.setImplicitCall(implicit);
         stmt.setName(parseName());
         if (match(SqlTokenType.LPAREN)) {
             stmt.setWithArguments(true);
@@ -857,6 +867,31 @@ public final class SqlParser {
             expect(SqlTokenType.RPAREN);
         }
         return stmt;
+    }
+
+    /**
+     * 语句起始是否为裸过程调用：{@code ident [( . ident )]* (}，且方言允许省略 CALL。
+     */
+    private boolean lookingAtImplicitProcedureCall() {
+        if (token.type() != SqlTokenType.IDENT || !dialect.supportsImplicitProcedureCall()) {
+            return false;
+        }
+        int la = 0;
+        while (true) {
+            SqlToken ahead = lexer.lookahead(la);
+            if (ahead.type() == SqlTokenType.LPAREN) {
+                return true;
+            }
+            if (ahead.type() != SqlTokenType.DOT
+                    || lexer.lookahead(la + 1).type() != SqlTokenType.IDENT) {
+                return false;
+            }
+            la += 2;
+            if (la > 4) {
+                // 至多 schema.pkg.proc 三段，超出不判为过程调用
+                return false;
+            }
+        }
     }
 
     private SqlStatement parseBeginBlock() {

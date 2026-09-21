@@ -20,6 +20,8 @@ public final class SqlSimpleStatement extends SqlStatement {
     private String text;
     private final List<SqlExpr> arguments = new ArrayList<SqlExpr>(2);
     private boolean withArguments;
+    /** 裸过程调用（无 CALL 关键字，达梦 SP_*(...) 写法），回写时不补 CALL。 */
+    private boolean implicitCall;
     private String parseError;
     private String privileges;
 
@@ -126,6 +128,20 @@ public final class SqlSimpleStatement extends SqlStatement {
      */
     public void setWithArguments(boolean withArguments) {
         this.withArguments = withArguments;
+    }
+
+    /**
+     * @return 是否为省略 CALL 关键字的裸过程调用（达梦 {@code SP_*(...)} 写法）
+     */
+    public boolean implicitCall() {
+        return implicitCall;
+    }
+
+    /**
+     * @param implicitCall 是否裸过程调用；true 时回写不补 CALL 关键字
+     */
+    public void setImplicitCall(boolean implicitCall) {
+        this.implicitCall = implicitCall;
     }
 
     /**

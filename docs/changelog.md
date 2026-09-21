@@ -10,6 +10,7 @@
 
 **jkit-sql**
 
+- 达梦裸过程调用：disql 脚本中无 `CALL` 关键字的系统过程调用（如 `SP_SET_PARA_VALUE(1, 'HJ_BUF_GLOBAL_SIZE', 4000);`）此前在语句起始遇到 `IDENT (` 直接抛 unsupported statement，现在解析为 CALL（实参进 AST，支持 `schema.proc(...)` 限定名），回写保留裸形态，`parse → format → parse` 可往返。新增方言能力 `SqlDialectSpec.supportsImplicitProcedureCall()`，仅 `DAMENG` 开启（Oracle 系裸过程调用只能出现在 PL/SQL 块内），其余方言行为不变；`SqlSimpleStatement.implicitCall()` 可区分裸调用与显式 `CALL`。
 - `SqlReservedWords`：各方言保留字注册表（SQL 标准核心 + MySQL / PostgreSQL / Oracle / SQL Server / H2 / DB2 / 达梦 / Hive / ClickHouse 扩展），`isKeyword(dialect, name)` 按方言探测。`SqlSchemaConvertOptions` 新增 `keywordQuote` 与 `keywordQuotedListener`：开启后标识符默认仍不加引号（大小写交给库折叠），撞目标库保留字时自动加方言引号，并通过回调告警（同一标识符全局只回调一次）；jkit-sql 自身不打日志，告警方式由宿主决定。
 
 **jkit-sql-auto**

@@ -123,6 +123,18 @@ public interface SqlDialectSpec {
     }
 
     /**
+     * 语句起始的裸标识符后接实参括号（{@code name(...)}）是否按隐式过程调用解析，
+     * 即允许省略 {@code CALL} 关键字。达梦 disql 脚本中的系统过程调用常写成
+     * {@code SP_SET_PARA_VALUE(1, 'HJ_BUF_GLOBAL_SIZE', 4000);} 这种裸形态；
+     * Oracle 系的裸过程调用只能出现在 PL/SQL 块内，故默认关闭。
+     *
+     * @return true 时语句起始的 {@code ident(args)} 解析为 CALL（默认 false）
+     */
+    default boolean supportsImplicitProcedureCall() {
+        return false;
+    }
+
+    /**
      * 是否原生支持 {@code LIMIT … [OFFSET …]} / {@code LIMIT offset, count}。
      *
      * @return true 表示改写宜写 LIMIT（默认 true）
