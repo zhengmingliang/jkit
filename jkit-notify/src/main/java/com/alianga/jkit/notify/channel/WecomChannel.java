@@ -16,7 +16,8 @@ import java.util.Map;
  * <p>配置：{@link ChannelConfig#webhook(String)} 填群机器人 webhook 地址
  * （{@code https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx}），无需加签。
  *
- * <p>消息：TEXT / MARKDOWN / MARKDOWN_V2 / IMAGE（base64+md5）/ NEWS（图文）。
+     * <p>消息：TEXT / MARKDOWN / MARKDOWN_V2 / IMAGE（base64+md5，或 {@link Message#EXTRA_PIC_URL}
+     * 公网图先下载再编码，上限 {@value #MAX_IMAGE_BYTES} 字节）/ NEWS（图文）。
  * 正文按 UTF-8 字节上限自动截断——TEXT 为
  * {@value #MAX_TEXT_BYTES} 字节，MARKDOWN / MARKDOWN_V2 为 {@value #MAX_MARKDOWN_BYTES} 字节。
  *
@@ -47,6 +48,11 @@ public class WecomChannel extends AbstractHttpChannel {
      * MARKDOWN / MARKDOWN_V2 正文 UTF-8 字节上限。
      */
     public static final int MAX_MARKDOWN_BYTES = 4096;
+
+    /**
+     * 图片消息字节上限（企微群机器人约 2MB）。
+     */
+    public static final int MAX_IMAGE_BYTES = 2 * 1024 * 1024;
 
     @Override
     public String id() {
@@ -94,7 +100,14 @@ public class WecomChannel extends AbstractHttpChannel {
             String base64 = message.extraString(Message.EXTRA_BASE64);
             String md5 = message.extraString(Message.EXTRA_MD5);
             if (base64 == null || base64.isEmpty() || md5 == null || md5.isEmpty()) {
-                throw new IllegalArgumentException("wecom image requires base64 and md5 (Message.image)");
+                String picUrl = message.extraString(Message.EXTRA_PIC_URL);
+                if (picUrl == null || picUrl.trim().isEmpty()) {
+                    throw new IllegalArgumentException(
+                            "wecom image requires base64 and md5, or a public picUrl (Message.image / imageUrl)");
+                }
+                byte[] bytes = NotifyUtils.downloadBytes(picUrl, MAX_IMAGE_BYTES);
+                base64 = NotifyUtils.base64(bytes);
+                md5 = NotifyUtils.md5Hex(bytes);
             }
             Map<String, Object> image = NotifyUtils.map();
             image.put("base64", base64);

@@ -6,18 +6,19 @@ import com.alianga.jkit.notify.Message;
 import com.alianga.jkit.notify.MessageType;
 import com.alianga.jkit.notify.NotifyUtils;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
 /**
  * 钉钉自定义机器人渠道。
  *
- * <p>配置：{@link ChannelConfig#webhook(String)} 填机器人 webhook 地址（含 access_token），
- * 安全设置选"加签"时再 {@link ChannelConfig#secret(String)} 填 SEC 开头的密钥。
- *
- * <p>消息：TEXT / MARKDOWN / ACTION_CARD / NEWS（feedCard）/ IMAGE（图片需公网 picUrl，
- * 降级为 markdown 图）。正文按 UTF-8 {@value #MAX_CONTENT_BYTES} 字节上限自动截断。
+     * <p>配置：{@link ChannelConfig#webhook(String)} 填机器人 webhook 地址（含 access_token），
+     * 安全设置选"加签"时再 {@link ChannelConfig#secret(String)} 填 SEC 开头的密钥。
+     *
+     * <p>消息：TEXT / MARKDOWN / ACTION_CARD / NEWS（单条 {@code link}，含标题、摘要、封面、跳转）
+     * / IMAGE（需公网 picUrl，降级为 markdown 插图）。自定义群机器人的 link/feedCard 是小缩略图卡片，
+     * 长文会被裁切、点击整卡跳转；要「大图 + 全文」请用 MARKDOWN 写 {@code ![](url)}。
+     * 正文按 UTF-8 {@value #MAX_CONTENT_BYTES} 字节上限自动截断。
  *
  * <p><b>@人的关键规则</b>：钉钉光有 {@code at.atMobiles} 数组**不会**高亮提醒，被 @ 的手机号
  * 必须以字面文本出现在正文里，否则静默失效。本渠道会自动把缺失的 {@code @手机号} 追加到正文末尾
@@ -112,17 +113,14 @@ public class DingTalkChannel extends AbstractHttpChannel {
             }
             Map<String, Object> link = NotifyUtils.map();
             link.put("title", message.title("通知"));
-            link.put("messageURL", jump);
+            link.put("text", content == null ? "" : content);
+            link.put("messageUrl", jump);
             String pic = message.extraString(Message.EXTRA_PIC_URL);
             if (pic != null && !pic.isEmpty()) {
-                link.put("picURL", pic);
+                link.put("picUrl", pic);
             }
-            List<Map<String, Object>> links = new ArrayList<Map<String, Object>>();
-            links.add(link);
-            Map<String, Object> feed = NotifyUtils.map();
-            feed.put("links", links);
-            root.put("msgtype", "feedCard");
-            root.put("feedCard", feed);
+            root.put("msgtype", "link");
+            root.put("link", link);
         } else if (message.type() == MessageType.IMAGE) {
             String pic = message.extraString(Message.EXTRA_PIC_URL);
             if (pic == null || pic.isEmpty()) {

@@ -833,4 +833,48 @@ public final class NotifyUtils {
     public static String uuid() {
         return RandomUtils.getUUID();
     }
+
+    /**
+     * GET 下载公网资源为字节。渠道在发送前把图片 URL 转成本地内容时使用。
+     *
+     * @param url http(s) 地址
+     * @param maxBytes 字节上限，非正数表示不限制
+     * @return 响应体
+     * @throws IllegalArgumentException URL 非法、HTTP 失败、空内容或超限
+     * @since 2.0.2
+     */
+    public static byte[] downloadBytes(String url, int maxBytes) {
+        if (url == null || url.trim().isEmpty()) {
+            throw new IllegalArgumentException("download url is required");
+        }
+        String trimmed = url.trim();
+        String lower = trimmed.toLowerCase(Locale.ROOT);
+        if (!lower.startsWith("http://") && !lower.startsWith("https://")) {
+            throw new IllegalArgumentException("download url must be http(s): " + trimmed);
+        }
+        com.alianga.jkit.http.HttpResponse response = null;
+        try {
+            response = HttpUtils.getResponse(trimmed);
+            if (response == null || !response.isSuccessful()) {
+                int code = response == null ? 0 : response.code();
+                throw new IllegalArgumentException("download failed, http " + code + ": " + trimmed);
+            }
+            byte[] bytes = response.body() == null ? null : response.body().bytes();
+            if (bytes == null || bytes.length == 0) {
+                throw new IllegalArgumentException("download returned empty body: " + trimmed);
+            }
+            if (maxBytes > 0 && bytes.length > maxBytes) {
+                throw new IllegalArgumentException("download exceeds " + maxBytes + " bytes: " + trimmed);
+            }
+            return bytes;
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalArgumentException("download failed: " + e.getMessage(), e);
+        } finally {
+            if (response != null) {
+                response.close();
+            }
+        }
+    }
 }

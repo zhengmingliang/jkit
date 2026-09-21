@@ -179,7 +179,8 @@ public final class Message {
     }
 
     /**
-     * 构造企微图片消息（base64 + md5）。钉钉图片需走媒体上传拿 media_id，群机器人本身不支持直接发图文件。
+     * 构造企微图片消息（base64 + md5）。钉钉群机器人不能直接上传文件，请用
+     * {@link #imageUrl(String, String)} 或 {@link #EXTRA_PIC_URL} 填公网图。
      *
      * @param title 标题（部分渠道忽略）
      * @param imageBytes 图片字节
@@ -193,7 +194,24 @@ public final class Message {
     }
 
     /**
-     * 构造图文卡片（企微 news / 钉钉 feedCard 单条）。
+     * 构造图片消息，只带公网地址。企微发送前会下载并转 base64+md5；
+     * 钉钉按 markdown 内嵌该图。
+     *
+     * @param title 标题（部分渠道忽略）
+     * @param picUrl 公网图片地址
+     * @return 消息
+     * @since 2.0.2
+     */
+    public static Message imageUrl(String title, String picUrl) {
+        return new Message(MessageType.IMAGE, title, "image")
+                .extra(EXTRA_PIC_URL, picUrl);
+    }
+
+    /**
+     * 构造图文卡片（企微 news / 钉钉自定义机器人单条 link）。
+     *
+     * <p>钉钉自定义群机器人单条走 {@code msgtype=link}（含摘要 {@code text}）；
+     * 多条才是 feedCard。企微仍走 news。
      *
      * @param title 标题
      * @param description 摘要

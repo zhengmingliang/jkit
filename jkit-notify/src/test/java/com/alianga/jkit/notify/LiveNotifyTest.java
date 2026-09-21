@@ -272,7 +272,7 @@ public class LiveNotifyTest {
     }
 
     /**
-     * 钉钉真实卡片（actionCard + feedCard）与图片（公网 picUrl 内嵌 markdown）。
+     * 钉钉真实卡片（actionCard + link 图文）与图片（公网 picUrl 内嵌 markdown）。
      */
     @Test
     public void liveDingTalkCardAndImage() {
@@ -288,11 +288,11 @@ public class LiveNotifyTest {
         assertTrue(card.toString(), card.isSuccess());
 
         SendResult news = NotificationManager.send(DingTalkChannel.ID,
-                Message.news("jkit-notify 图文卡片", "钉钉 FeedCard 实发",
+                Message.news("jkit-notify 图文卡片", "钉钉 link 实发",
                         "https://github.com/alianga/jkit",
                         "https://www.dingtalk.com/favicon.ico"),
                 hook);
-        System.out.println("dingtalk feedCard: " + news);
+        System.out.println("dingtalk link: " + news);
         assertTrue(news.toString(), news.isSuccess());
 
         SendResult image = NotificationManager.send(DingTalkChannel.ID,

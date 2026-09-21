@@ -118,6 +118,26 @@ public class WecomChannelTest extends AbstractHttpChannelTest {
     }
 
     /**
+     * 图片只给公网 URL 时先下载再转 base64+md5。
+     */
+    @Test
+    public void imageUrlDownloadsThenEncodes() {
+        String fakeImage = "FAKEPNG";
+        byte[] png = fakeImage.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        respond(200, fakeImage);
+        respond(200, "{\"errcode\":0}");
+        NotificationManager.send(WecomChannel.ID,
+                Message.imageUrl("图", baseUrl() + "/cover.png"),
+                ChannelConfig.webhook(baseUrl() + "/webhook"));
+        take();
+        java.util.Map<?, ?> root = com.alianga.jkit.json.JSON.parseObject(take().body());
+        assertEquals("image", root.get("msgtype"));
+        java.util.Map<?, ?> image = (java.util.Map<?, ?>) root.get("image");
+        assertEquals(NotifyUtils.base64(png), image.get("base64"));
+        assertEquals(NotifyUtils.md5Hex(png), image.get("md5"));
+    }
+
+    /**
      * errcode 非 0 判失败。
      */
     @Test

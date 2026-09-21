@@ -171,7 +171,7 @@ public class DingTalkChannelTest extends AbstractHttpChannelTest {
     }
 
     /**
-     * 图文卡片走 feedCard；图片走 markdown 内嵌公网 picUrl。
+     * 单条图文走 link（含摘要 text）；图片走 markdown 内嵌公网 picUrl。
      */
     @Test
     public void newsAndImagePayload() {
@@ -179,8 +179,8 @@ public class DingTalkChannelTest extends AbstractHttpChannelTest {
         NotificationManager.send(DingTalkChannel.ID,
                 Message.news("发布", "v1.2.3", "https://ci.example.com/42", "https://example.com/cover.png"),
                 ChannelConfig.webhook(baseUrl()));
-        assertJsonEquals("{\"msgtype\":\"feedCard\",\"feedCard\":{\"links\":[{\"title\":\"发布\","
-                + "\"messageURL\":\"https://ci.example.com/42\",\"picURL\":\"https://example.com/cover.png\"}]}}",
+        assertJsonEquals("{\"msgtype\":\"link\",\"link\":{\"title\":\"发布\",\"text\":\"v1.2.3\","
+                + "\"messageUrl\":\"https://ci.example.com/42\",\"picUrl\":\"https://example.com/cover.png\"}}",
                 take().body());
 
         respond(200, "{\"errcode\":0}");
