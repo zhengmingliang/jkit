@@ -30,6 +30,7 @@ public class SqlAutoSettings {
     private boolean quoteIdentifiers;
     private boolean showSql = true;
     private boolean dryRun;
+    private boolean connectOnDryRun;
     private String catalog;
     private String schema;
     private String tablePrefix;
@@ -255,7 +256,8 @@ public class SqlAutoSettings {
     }
 
     /**
-     * @return 只规划不执行；{@link SqlAuto#run(SqlAutoOptions)} 时不打开 JDBC
+     * @return 只规划不执行；默认 {@link SqlAuto#run(SqlAutoOptions)} 不打开 JDBC，
+     *         {@link #isConnectOnDryRun()} 开启时改为连库比对、只出增量变更
      */
     public boolean isDryRun() {
         return dryRun;
@@ -266,6 +268,20 @@ public class SqlAutoSettings {
      */
     public void setDryRun(boolean dryRun) {
         this.dryRun = dryRun;
+    }
+
+    /**
+     * @return dry-run 时是否仍连库与活表比对
+     */
+    public boolean isConnectOnDryRun() {
+        return connectOnDryRun;
+    }
+
+    /**
+     * @param connectOnDryRun dry-run 时连库比对，只出增量变更不执行
+     */
+    public void setConnectOnDryRun(boolean connectOnDryRun) {
+        this.connectOnDryRun = connectOnDryRun;
     }
 
     /**
@@ -451,6 +467,7 @@ public class SqlAutoSettings {
                 .quoteIdentifiers(quoteIdentifiers)
                 .showSql(showSql)
                 .dryRun(dryRun)
+                .connectOnDryRun(connectOnDryRun)
                 .url(url)
                 .username(username)
                 .password(password)

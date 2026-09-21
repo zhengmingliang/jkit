@@ -40,6 +40,7 @@ public class SqlAutoOptionsTest {
             w.write("jkit.sql.auto.alter-column=true\n");
             w.write("jkit.sql.auto.create-index=false\n");
             w.write("jkit.sql.auto.dry-run=true\n");
+            w.write("jkit.sql.auto.connect-on-dry-run=true\n");
             w.write("jkit.sql.auto.foreign-keys=false\n");
             w.write("jkit.sql.auto.auto-increment=false\n");
             w.write("jkit.sql.auto.postgres-identity-style=serial\n");
@@ -61,6 +62,7 @@ public class SqlAutoOptionsTest {
         assertTrue(o.alterColumn());
         assertFalse(o.createIndex());
         assertTrue(o.dryRun());
+        assertTrue(o.connectOnDryRun());
         assertTrue(o.packages().toString(), o.packages().contains("com.example.a"));
         assertTrue(o.packages().toString(), o.packages().contains("com.example.b"));
         assertFalse(o.foreignKeys());
@@ -94,6 +96,7 @@ public class SqlAutoOptionsTest {
         settings.setHistory(true);
         settings.setHistoryTable("audit_history");
         settings.setExport("out/ddl.sql");
+        settings.setConnectOnDryRun(true);
         SqlAutoOptions o = settings.toOptions();
         assertFalse(o.foreignKeys());
         assertFalse(o.autoIncrement());
@@ -102,6 +105,7 @@ public class SqlAutoOptionsTest {
         assertTrue(o.history());
         assertEquals("audit_history", o.historyTable());
         assertEquals("out/ddl.sql", o.export());
+        assertTrue(o.connectOnDryRun());
     }
 
     @Test

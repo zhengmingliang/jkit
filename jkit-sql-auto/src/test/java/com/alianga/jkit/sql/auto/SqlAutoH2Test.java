@@ -206,6 +206,71 @@ public class SqlAutoH2Test {
     }
 
     @Test
+    public void connectedDryRunPlansIncrementalChangesWithoutExecuting() throws Exception {
+        // 先正常建一张缺列的表
+        exec("CREATE TABLE AUTO_USER (ID BIGINT PRIMARY KEY, USER_NAME VARCHAR(32) NOT NULL)");
+
+        // dryRun + connectOnDryRun：连活库比对，计划只含实际增量（ADD COLUMN），不是全量 CREATE
+        SqlAutoPlan plan = SqlAuto.run(options()
+                .entities(AutoUser.class)
+                .dryRun(true)
+                .connectOnDryRun(true));
+        assertTrue(plan.ofKind(SqlAutoChange.Kind.CREATE_TABLE).isEmpty());
+        assertFalse(plan.ofKind(SqlAutoChange.Kind.ADD_COLUMN).isEmpty());
+        // 关键：只规划不执行，缺列仍缺
+        assertFalse(columnExists("AUTO_USER", "EMAIL"));
+        assertFalse(columnExists("AUTO_USER", "AGE"));
+
+        // 再次正常执行后列才落库
+        SqlAuto.run(connection, options().entities(AutoUser.class));
+        assertTrue(columnExists("AUTO_USER", "EMAIL"));
+    }
+
+    @Test
+    public void connectedDryRunOnEmptySchemaPlansCreateWithoutExecuting() {
+        SqlAutoPlan plan = SqlAuto.run(options()
+                .entities(AutoUser.class)
+                .dryRun(true)
+                .connectOnDryRun(true));
+        assertFalse(plan.ofKind(SqlAutoChange.Kind.CREATE_TABLE).isEmpty());
+        assertFalse(tableExists("AUTO_USER"));
+    }
+
+    @Test
+    public void connectedDryRunIsNoOpWhenSchemaMatches() {
+        SqlAuto.run(connection, options().entities(AutoUser.class));
+        SqlAutoPlan plan = SqlAuto.run(options()
+                .entities(AutoUser.class)
+                .dryRun(true)
+                .connectOnDryRun(true));
+        assertTrue(plan.toString(), plan.isEmpty());
+    }
+
+    @Test
+    public void connectedDryRunFlagWithoutConnectionFallsBackToOffline() {
+        // 开了 connectOnDryRun 但没配 url/dataSource：回落离线 dry-run，不抛异常
+        SqlAutoPlan plan = SqlAuto.run(SqlAutoOptions.defaults()
+                .entities(AutoUser.class)
+                .dialect(SqlDialect.H2)
+                .dryRun(true)
+                .connectOnDryRun(true)
+                .showSql(false));
+        assertFalse(plan.ofKind(SqlAutoChange.Kind.CREATE_TABLE).isEmpty());
+    }
+
+    @Test
+    public void planApiConnectedDryRunDiffsLiveTables() throws Exception {
+        exec("CREATE TABLE AUTO_USER (ID BIGINT PRIMARY KEY, USER_NAME VARCHAR(32) NOT NULL)");
+        SqlAutoPlan plan = SqlAuto.plan(options()
+                .entities(AutoUser.class)
+                .dryRun(true)
+                .connectOnDryRun(true));
+        assertTrue(plan.ofKind(SqlAutoChange.Kind.CREATE_TABLE).isEmpty());
+        assertFalse(plan.ofKind(SqlAutoChange.Kind.ADD_COLUMN).isEmpty());
+        assertFalse(columnExists("AUTO_USER", "EMAIL"));
+    }
+
+    @Test
     public void fromUrlRun() {
         SqlAutoPlan plan = SqlAuto.run(options().entities(AutoUser.class).url(url).username("sa").password(""));
         assertTrue(tableExists("AUTO_USER"));

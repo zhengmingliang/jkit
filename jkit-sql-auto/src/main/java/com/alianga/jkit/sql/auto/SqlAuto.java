@@ -84,6 +84,9 @@ public final class SqlAuto {
             return SqlAutoPlan.empty();
         }
         if (opt.dryRun()) {
+            if (opt.connectOnDryRun() && hasConnectionInfo(opt)) {
+                return connectedDryRun(types, opt);
+            }
             return dryRun(types, opt);
         }
         ConnectionHolder holder = open(opt);
@@ -142,6 +145,16 @@ public final class SqlAuto {
         SqlAutoOptions opt = options == null ? SqlAutoOptions.defaults() : options;
         List<Class<?>> types = collectEntities(opt);
         if (opt.dryRun()) {
+            if (opt.connectOnDryRun() && hasConnectionInfo(opt)) {
+                ConnectionHolder dryHolder = open(opt);
+                try {
+                    SqlDialect dryDialect = SqlAutoDialects.resolve(opt, dryHolder.connection);
+                    detectIdentifierCase(dryHolder.connection, opt);
+                    return plan(types, dryHolder.connection, dryDialect, opt);
+                } finally {
+                    dryHolder.close();
+                }
+            }
             return plan(types, null, SqlAutoDialects.resolve(opt, null), opt);
         }
         ConnectionHolder holder = open(opt);
@@ -351,6 +364,47 @@ public final class SqlAuto {
         } catch (SQLException | AbstractMethodError ignored) {
             // 老驱动不支持则保持 null（不折叠）
         }
+    }
+
+    /**
+     * dry-run 但仍连库：读取元数据与现有表比对，产出实际增量变更；不执行、不取锁、不写历史。
+     *
+     * @param types 实体
+     * @param opt 选项（dryRun=true，connectOnDryRun=true）
+     * @return 与活表比对后的计划
+     */
+    private static SqlAutoPlan connectedDryRun(List<Class<?>> types, SqlAutoOptions opt) {
+        ConnectionHolder holder = open(opt);
+        try {
+            Connection conn = holder.connection;
+            SqlDialect dialect = SqlAutoDialects.resolve(opt, conn);
+            detectIdentifierCase(conn, opt);
+            if (SqlAutoDialects.isGbase8a(opt) || SqlAutoDialects.isGbase8a(conn)) {
+                opt.gbase8a(true);
+            }
+            SqlAutoPlan plan = plan(types, conn, dialect, opt);
+            writeExport(plan, opt);
+            if (opt.mode() == SqlAutoMode.VALIDATE) {
+                List<SqlAutoChange> bad = plan.ofKind(SqlAutoChange.Kind.VALIDATE);
+                if (!bad.isEmpty()) {
+                    throw new SqlAutoException("schema validate failed: " + bad);
+                }
+                return plan;
+            }
+            // dry-run：executor 只打 [dry-run] 日志，不执行
+            SqlAutoExecutor.execute(conn, plan, opt);
+            return plan;
+        } finally {
+            holder.close();
+        }
+    }
+
+    /**
+     * @param opt 选项
+     * @return 是否配置了可连接的数据源（DataSource 或非空 URL）
+     */
+    private static boolean hasConnectionInfo(SqlAutoOptions opt) {
+        return opt.dataSource() != null || (opt.url() != null && opt.url().length() > 0);
     }
 
     /**

@@ -37,6 +37,7 @@ public final class SqlAutoOptions {
     private boolean quoteIdentifiers;
     private boolean showSql = true;
     private boolean dryRun;
+    private boolean connectOnDryRun;
     private String catalog;
     private String schema;
     private SqlSchemaConvertOptions.PostgresIdentityStyle postgresIdentityStyle;
@@ -120,6 +121,7 @@ public final class SqlAutoOptions {
             o.showSql = v == null || v.booleanValue();
         }
         o.dryRun = bool(resolver, P + "dry-run", false);
+        o.connectOnDryRun = bool(resolver, P + "connect-on-dry-run", false);
         o.catalog = resolver.getString(P + "catalog");
         o.schema = resolver.getString(P + "schema");
         String prefix = resolver.getString(P + "table-prefix");
@@ -460,6 +462,28 @@ public final class SqlAutoOptions {
      */
     public SqlAutoOptions dryRun(boolean dryRun) {
         this.dryRun = dryRun;
+        return this;
+    }
+
+    /**
+     * @return dry-run 时是否仍打开 JDBC / DataSource 对照活表规划（只比对、不执行）
+     */
+    public boolean connectOnDryRun() {
+        return connectOnDryRun;
+    }
+
+    /**
+     * 与 {@link #dryRun(boolean)} 搭配：默认 dry-run 不连库、按空库出全量 CREATE。
+     * 开启后 dry-run 仍会打开配置的 {@code url} / {@code dataSource}，读取元数据与现有表
+     * 比对，{@code plan.sql()} / {@code plan.changes()} 拿到的就是实际增量变更
+     *（ADD COLUMN / CREATE INDEX 等 ALTER），但不执行、不取锁、不写历史表。
+     * 未配置连接信息时回落为离线 dry-run。
+     *
+     * @param connectOnDryRun dry-run 时是否连库比对
+     * @return this
+     */
+    public SqlAutoOptions connectOnDryRun(boolean connectOnDryRun) {
+        this.connectOnDryRun = connectOnDryRun;
         return this;
     }
 

@@ -94,7 +94,13 @@
       "name": "jkit.sql.auto.dry-run",
       "type": "java.lang.Boolean",
       "defaultValue": false,
-      "description": "Plan only; never executes DDL and never opens the DataSource."
+      "description": "Plan only; never executes DDL. By default the DataSource is not opened either and a full CREATE is planned; set connect-on-dry-run to diff against live tables."
+    },
+    {
+      "name": "jkit.sql.auto.connect-on-dry-run",
+      "type": "java.lang.Boolean",
+      "defaultValue": false,
+      "description": "With dry-run on, still open the configured DataSource/URL to inspect live tables and produce the actual incremental ALTER plan; nothing is executed, locked, or recorded."
     },
     {
       "name": "jkit.sql.auto.catalog",
