@@ -8,6 +8,7 @@ import java.util.Calendar;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
@@ -44,6 +45,9 @@ public class MockRandom {
     private static final Map<String, String> POOLS = new HashMap<String, String>();
     private static final List<String> PLACEHOLDERS = new ArrayList<String>();
 
+    /** 占位符推荐写法（带典型参数），用于速查面板一键插入。 */
+    private static final Map<String, String> SAMPLES = new HashMap<String, String>();
+
     static {
         POOLS.put("lower", LOWER);
         POOLS.put("upper", UPPER);
@@ -65,6 +69,32 @@ public class MockRandom {
                 "phone", "gender", "company", "department", "position", "salary",
                 "bankCard", "creditCard", "currency", "mac", "userAgent", "password",
                 "token", "timestamp", "fileName", "mime"));
+        SAMPLES.put("integer", "@integer(1,100)");
+        SAMPLES.put("natural", "@natural(0,99)");
+        SAMPLES.put("float", "@float(1,100,2,4)");
+        SAMPLES.put("character", "@character('lower')");
+        SAMPLES.put("string", "@string('lower',8)");
+        SAMPLES.put("range", "@range(1,10,2)");
+        SAMPLES.put("boolean", "@boolean");
+        SAMPLES.put("date", "@date('yyyy-MM-dd')");
+        SAMPLES.put("time", "@time('HH:mm:ss')");
+        SAMPLES.put("datetime", "@datetime('yyyy-MM-dd HH:mm:ss')");
+        SAMPLES.put("now", "@now('year')");
+        SAMPLES.put("image", "@image('200x100')");
+        SAMPLES.put("dataImage", "@dataImage('200x100')");
+        SAMPLES.put("pick", "@pick(['a','b','c'])");
+        SAMPLES.put("shuffle", "@shuffle([1,2,3])");
+        SAMPLES.put("city", "@city(true)");
+        SAMPLES.put("county", "@county(true)");
+        SAMPLES.put("increment", "@increment");
+        SAMPLES.put("phone", "@phone");
+        SAMPLES.put("salary", "@salary(5000,30000)");
+        SAMPLES.put("password", "@password(8)");
+        SAMPLES.put("timestamp", "@timestamp");
+        SAMPLES.put("cparagraph", "@cparagraph(3)");
+        SAMPLES.put("csentence", "@csentence");
+        SAMPLES.put("cword", "@cword(2,5)");
+        SAMPLES.put("ctitle", "@ctitle(3,8)");
     }
 
     /**
@@ -120,6 +150,48 @@ public class MockRandom {
      */
     public static List<String> placeholders() {
         return Collections.unmodifiableList(PLACEHOLDERS);
+    }
+
+    /**
+     * 占位符分类目录，供速查面板按类分组展示。
+     *
+     * <p>key 是分类标识（{@code basic} / {@code date} / {@code business} …，便于界面做国际化），
+     * value 是该分类下的主占位符名（不含 {@code bool} / {@code int} 这类别名）。</p>
+     *
+     * @return 有序的分类目录
+     */
+    public static Map<String, List<String>> placeholderGroups() {
+        Map<String, List<String>> groups = new LinkedHashMap<String, List<String>>();
+        groups.put("basic", Arrays.asList("boolean", "natural", "integer", "float",
+                "character", "string", "range"));
+        groups.put("date", Arrays.asList("date", "time", "datetime", "now"));
+        groups.put("image", Arrays.asList("image", "dataImage"));
+        groups.put("color", Arrays.asList("color", "hex", "rgb", "rgba", "hsl"));
+        groups.put("text", Arrays.asList("paragraph", "sentence", "word", "title"));
+        groups.put("name", Arrays.asList("first", "last", "name"));
+        groups.put("web", Arrays.asList("url", "domain", "protocol", "tld", "email", "ip"));
+        groups.put("address", Arrays.asList("region", "province", "city", "county", "zip"));
+        groups.put("helper", Arrays.asList("capitalize", "upper", "lower", "pick", "shuffle"));
+        groups.put("misc", Arrays.asList("guid", "uuid", "id", "increment"));
+        groups.put("business", Arrays.asList("phone", "gender", "company", "department",
+                "position", "salary", "bankCard", "creditCard", "currency", "mac",
+                "userAgent", "password", "token", "timestamp", "fileName", "mime"));
+        groups.put("cn", Arrays.asList("cparagraph", "csentence", "cword", "ctitle",
+                "cfirst", "clast", "cname"));
+        return groups;
+    }
+
+    /**
+     * 占位符的推荐写法：带上典型参数，可直接插进模板。
+     *
+     * <p>{@code sample("integer")} 返回 {@code "@integer(1,100)"}；未收录的返回 {@code "@" + name}。</p>
+     *
+     * @param name 占位符名
+     * @return 推荐写法
+     */
+    public static String sample(String name) {
+        String hit = SAMPLES.get(name == null ? "" : name.toLowerCase());
+        return hit == null ? "@" + name : hit;
     }
 
     /**
