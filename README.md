@@ -120,13 +120,14 @@ YamlDocument doc = YamlDocument.parse(yamlText);
 | `com.alianga.jkit.csv` | **CSV 读写**：表格模型、POJO 映射、流式读写，[文档](docs/csv.md) |
 | `jkit-notify`（独立模块） | **消息通知**：钉钉/企微/飞书/Server酱/Bark/SMTP/Webhook，可选 Slack/Telegram/短信，[文档](docs/notify.md) |
 | `jkit-curl-codegen`（独立模块） | **curl 转源码**：一键生成 OkHttp / requests / fetch / Go 等 10+ 语言调用代码，[README](jkit-curl-codegen/README.md) |
+| `jkit-mock`（独立模块） | **Mock 数据生成**：字段模式（30 种字段类型、5 个快速模板、自定义字段）+ 模板模式（完整 Mock.js 规范：DTD 规则、58 个占位符、正则反向生成、Schema 推导），一键导出 JSON / CSV / SQL INSERT / XML，[README](jkit-mock/README.md) |
 | `com.alianga.jkit.crypto` 等 | AES-GCM/DES/RSA-OAEP/摘要、图片验证码、线程池、反射、校验等，[文档](docs/toolkit.md) |
 
 完整 API 文档（中文 12,000+ 行，另有英文版）：**[jkit.alianga.com](https://jkit.alianga.com)** · [English docs](https://jkit.alianga.com/en/)
 
 ## ✅ 质量保障
 
-- **2,906 个单元测试全部通过**（`mvn test`，8 个模块：jkit-core 977 / jkit-sql 1609 / notify 170 / curl-codegen 44 / …）
+- **2,975 个单元测试全部通过**（`mvn test`，9 个模块：jkit-core 977 / jkit-sql 1609 / notify 170 / curl-codegen 44 / mock 69 / …）
 - **HTML 差分验证**：119 组「HTML + 选择器」用例与 Jsoup 逐结果比对，112 组完全一致，7 组差异全部为文档化的刻意取舍
 - **SQL 语料回归**：1200 条复杂业务 SQL 在 MySQL / Oracle / PostgreSQL / SQL Server 四方言下 parse→format→parse 结构保真 100%，部分语料在真库原生执行验证
 - **并发与边界**：熔断/重试并发测试、16000 并发 ID 唯一性、ULID/UUIDv7 往返校验、JDK 8/11/17/21/25 多版本运行
@@ -141,6 +142,7 @@ YamlDocument doc = YamlDocument.parse(yamlText);
 | 消息通知 | `com.alianga:jkit-notify:2.0.2` | 钉钉/企微/飞书/Server酱/Bark/SMTP/Webhook |
 | 通知扩展渠道 | `com.alianga:jkit-notify-extra:2.0.2` | Slack/Telegram/ntfy/阿里云等短信 |
 | SQL 解析与改写 | `com.alianga:jkit-sql:2.0.2` | 多方言解析、分页改写、注入与脱敏 |
+| Mock 数据生成 | `com.alianga:jkit-mock:2.0.3-SNAPSHOT` | 字段模式 30 种字段类型 + 模板模式完整 Mock.js 规范，JSON / CSV / SQL / XML 输出 |
 | 自动建表 | `com.alianga:jkit-sql-auto:2.0.2` | 按实体对照库表执行 CREATE/ALTER |
 | 自动建表 Starter | `com.alianga:jkit-sql-auto-spring-boot-2` / `-3` | Spring Boot 2 / 3 自动配置 |
 
