@@ -105,7 +105,10 @@ public class MockJs {
      * @param text 模板文本
      * @return 规范化后的文本
      */
-    static String normalizeQuotes(String text) {
+    public static String normalizeQuotes(String text) {
+        if (text == null) {
+            return "";
+        }
         StringBuilder out = new StringBuilder(text.length());
         boolean inString = false;
         char quote = 0;
@@ -134,6 +137,29 @@ public class MockJs {
             }
         }
         return out.toString();
+    }
+
+    /**
+     * 格式化模板：把单引号统一成双引号，并对合法 JSON 做缩进美化。
+     *
+     * <p>如果模板不是合法 JSON（例如模板本身就是纯占位符字符串，或包含正则值），
+     * 则原样返回文本。</p>
+     *
+     * @param text 模板文本
+     * @return 格式化后的文本
+     */
+    public static String prettyTemplate(String text) {
+        String trimmed = text == null ? "" : text.trim();
+        if (trimmed.isEmpty()) {
+            return "";
+        }
+        String normalized = normalizeQuotes(trimmed);
+        try {
+            Object parsed = JSON.parse(normalized);
+            return MockDataFormatter.prettyJson(parsed);
+        } catch (Exception e) {
+            return trimmed;
+        }
     }
 
     /**

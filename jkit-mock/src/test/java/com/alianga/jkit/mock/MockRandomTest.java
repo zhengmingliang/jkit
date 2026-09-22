@@ -269,10 +269,12 @@ public class MockRandomTest {
 
     @Test
     public void testBusinessPlaceholders() {
-        Assert.assertTrue("手机号：" + random.invoke("phone"),
-                String.valueOf(random.invoke("phone")).matches("1[3-9]\\d{9}"));
-        Assert.assertTrue("性别：" + random.invoke("gender"),
-                "男".equals(random.invoke("gender")) || "女".equals(random.invoke("gender")));
+        Object phone = random.invoke("phone");
+        Assert.assertTrue("手机号：" + phone,
+                String.valueOf(phone).matches("1[3-9]\\d{9}"));
+        Object gender = random.invoke("gender");
+        Assert.assertTrue("性别：" + gender,
+                "男".equals(gender) || "女".equals(gender));
         Assert.assertTrue(String.valueOf(random.invoke("company")).length() > 0);
         Assert.assertTrue(String.valueOf(random.invoke("department")).length() > 0);
         Assert.assertTrue(String.valueOf(random.invoke("position")).length() > 0);

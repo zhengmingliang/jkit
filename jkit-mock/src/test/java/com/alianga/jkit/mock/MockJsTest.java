@@ -258,6 +258,21 @@ public class MockJsTest {
         Assert.assertEquals("B", list.get(1).get("lv"));
     }
 
+    @Test
+    public void testPrettyTemplate() {
+        String compact = "{'list|2':[{'id|+1':1,'name':'@cname'}]}";
+        String pretty = MockJs.prettyTemplate(compact);
+        Assert.assertTrue("应包含 list 键", pretty.contains("\"list|2\""));
+        Assert.assertTrue("应包含 id 键", pretty.contains("\"id|+1\""));
+        Assert.assertTrue("应做缩进", pretty.contains("  "));
+    }
+
+    @Test
+    public void testPrettyTemplateInvalidKeepsOriginal() {
+        String text = "not a json template";
+        Assert.assertEquals("非法模板保持原样", text, MockJs.prettyTemplate(text));
+    }
+
     @SuppressWarnings("unchecked")
     private static Map<String, Object> asMap(Object value) {
         Assert.assertTrue("应为对象：" + value, value instanceof Map);
