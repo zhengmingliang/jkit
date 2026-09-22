@@ -39,15 +39,15 @@ public class MockDataFormatter {
                 return toXml(records);
             case JSON:
             default:
-                return toJson(records);
+                return prettyJson(records);
         }
     }
 
     /**
      * 将任意结构的数据（模板模式的产出可能是对象、标量或数组）按指定格式输出。
      *
-     * <p>JSON 直接序列化原结构；CSV / SQL / XML 需要二维表，会尽量把数据摊平成
-     * 记录列表——对象取一条，对象数组逐条，标量包成 {@code value} 列。</p>
+     * <p>JSON 走 {@link #prettyJson(Object)} 缩进输出；CSV / SQL / XML 需要二维表，会尽量把数据
+     * 摊平成记录列表——对象取一条，对象数组逐条，标量包成 {@code value} 列。</p>
      *
      * @param data   任意数据
      * @param format 输出格式
@@ -58,9 +58,139 @@ public class MockDataFormatter {
             return "";
         }
         if (format == null || format == MockOutputFormat.JSON) {
-            return JSON.toJsonString(data);
+            return prettyJson(data);
         }
         return format(toRows(data), format);
+    }
+
+    /**
+     * 把任意结构（对象 / 数组 / 标量）序列化为缩进两空格的 JSON。
+     *
+     * <p>字段模式与模板模式共用，保证同一工具两种模式的 JSON 输出风格一致：
+     * 对象与数组都逐层换行，字符串按 JSON 规范转义。</p>
+     *
+     * @param data 任意数据
+     * @return 缩进后的 JSON 字符串
+     */
+    public static String prettyJson(Object data) {
+        StringBuilder sb = new StringBuilder();
+        writeJson(data, sb, 0);
+        return sb.toString();
+    }
+
+    private static void writeJson(Object value, StringBuilder sb, int depth) {
+        if (value == null) {
+            sb.append("null");
+            return;
+        }
+        if (value instanceof Map) {
+            writeMap((Map<?, ?>) value, sb, depth);
+            return;
+        }
+        if (value instanceof List) {
+            writeList((List<?>) value, sb, depth);
+            return;
+        }
+        if (value instanceof String) {
+            writeString((String) value, sb);
+            return;
+        }
+        if (value instanceof Boolean || value instanceof Number) {
+            sb.append(value);
+            return;
+        }
+        if (value instanceof Object[]) {
+            Object[] arr = (Object[]) value;
+            sb.append('[');
+            for (int i = 0; i < arr.length; i++) {
+                if (i > 0) {
+                    sb.append(", ");
+                }
+                writeJson(arr[i], sb, depth);
+            }
+            sb.append(']');
+            return;
+        }
+        writeString(String.valueOf(value), sb);
+    }
+
+    private static void writeMap(Map<?, ?> map, StringBuilder sb, int depth) {
+        if (map.isEmpty()) {
+            sb.append("{}");
+            return;
+        }
+        sb.append('{');
+        int i = 0;
+        for (Map.Entry<?, ?> entry : map.entrySet()) {
+            sb.append(i == 0 ? "\n" : ",\n");
+            indent(sb, depth + 1);
+            writeString(String.valueOf(entry.getKey()), sb);
+            sb.append(": ");
+            writeJson(entry.getValue(), sb, depth + 1);
+            i++;
+        }
+        sb.append('\n');
+        indent(sb, depth);
+        sb.append('}');
+    }
+
+    private static void writeList(List<?> list, StringBuilder sb, int depth) {
+        if (list.isEmpty()) {
+            sb.append("[]");
+            return;
+        }
+        sb.append('[');
+        for (int i = 0; i < list.size(); i++) {
+            sb.append(i == 0 ? "\n" : ",\n");
+            indent(sb, depth + 1);
+            writeJson(list.get(i), sb, depth + 1);
+        }
+        sb.append('\n');
+        indent(sb, depth);
+        sb.append(']');
+    }
+
+    private static void indent(StringBuilder sb, int depth) {
+        for (int i = 0; i < depth; i++) {
+            sb.append("  ");
+        }
+    }
+
+    private static void writeString(String text, StringBuilder sb) {
+        sb.append('"');
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            switch (c) {
+                case '"':
+                    sb.append("\\\"");
+                    break;
+                case '\\':
+                    sb.append("\\\\");
+                    break;
+                case '\n':
+                    sb.append("\\n");
+                    break;
+                case '\r':
+                    sb.append("\\r");
+                    break;
+                case '\t':
+                    sb.append("\\t");
+                    break;
+                case '\b':
+                    sb.append("\\b");
+                    break;
+                case '\f':
+                    sb.append("\\f");
+                    break;
+                default:
+                    if (c < 0x20) {
+                        sb.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        sb.append(c);
+                    }
+            }
+        }
+        sb.append('"');
     }
 
     /**

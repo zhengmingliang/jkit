@@ -4,6 +4,7 @@ import org.junit.Assert;
 import org.junit.Test;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * MockRandom 占位符库单元测试，覆盖 Mock.js 的数据占位符定义（DPD）规范。
@@ -220,5 +221,85 @@ public class MockRandomTest {
         Assert.assertTrue(random.invoke("int") instanceof Long);
         Assert.assertTrue(random.invoke("img") instanceof String);
         Assert.assertTrue(random.invoke("inc") instanceof Long);
+    }
+
+    @Test
+    public void testExtend() {
+        MockRandom r = new MockRandom();
+        r.extend("employeeNo", (random1, args) -> "E" + random1.invoke("integer", 1000, 9999));
+        String value = String.valueOf(r.invoke("employeeNo"));
+        Assert.assertTrue("工号：" + value, value.matches("E\\d{4}"));
+        Assert.assertTrue(r.allPlaceholders().contains("employeeno"));
+    }
+
+    @Test
+    public void testExtendOverridesBuiltin() {
+        MockRandom r = new MockRandom();
+        r.extend("cname", (random1, args) -> "固定姓名");
+        Assert.assertEquals("固定姓名", r.invoke("cname"));
+    }
+
+    @Test
+    public void testExtendInvalid() {
+        MockRandom r = new MockRandom();
+        try {
+            r.extend("  ", (random1, args) -> "x");
+            Assert.fail("空名应抛异常");
+        } catch (IllegalArgumentException expected) {
+            Assert.assertTrue(expected.getMessage().contains("占位符名"));
+        }
+        try {
+            r.extend("x", null);
+            Assert.fail("空实现应抛异常");
+        } catch (IllegalArgumentException expected) {
+            Assert.assertTrue(expected.getMessage().contains("生成逻辑"));
+        }
+    }
+
+    @Test
+    public void testExtendedPlaceholderInTemplate() {
+        MockRandom r = new MockRandom();
+        r.extend("employeeNo", (random1, args) -> "E" + random1.invoke("integer", 1000, 9999));
+        MockJs js = new MockJs(r);
+        Object data = js.mock((Object) "{'no':'@employeeNo'}");
+        Map<?, ?> map = (Map<?, ?>) data;
+        Assert.assertTrue("模板里应用扩展占位符：" + map.get("no"),
+                String.valueOf(map.get("no")).matches("E\\d{4}"));
+    }
+
+    @Test
+    public void testBusinessPlaceholders() {
+        Assert.assertTrue("手机号：" + random.invoke("phone"),
+                String.valueOf(random.invoke("phone")).matches("1[3-9]\\d{9}"));
+        Assert.assertTrue("性别：" + random.invoke("gender"),
+                "男".equals(random.invoke("gender")) || "女".equals(random.invoke("gender")));
+        Assert.assertTrue(String.valueOf(random.invoke("company")).length() > 0);
+        Assert.assertTrue(String.valueOf(random.invoke("department")).length() > 0);
+        Assert.assertTrue(String.valueOf(random.invoke("position")).length() > 0);
+        for (int i = 0; i < 30; i++) {
+            long salary = ((Number) random.invoke("salary")).longValue();
+            Assert.assertTrue("薪资：" + salary, salary >= 5000 && salary <= 50000);
+        }
+        Assert.assertTrue(String.valueOf(random.invoke("bankCard")).matches("\\d{16,}"));
+        Assert.assertTrue(String.valueOf(random.invoke("creditCard")).matches("\\d{16,}"));
+        Assert.assertTrue(String.valueOf(random.invoke("currency")).matches("[A-Z]{3}"));
+        Assert.assertTrue("MAC：" + random.invoke("mac"),
+                String.valueOf(random.invoke("mac")).matches("[0-9A-F]{2}(:[0-9A-F]{2}){5}"));
+        Assert.assertTrue(String.valueOf(random.invoke("userAgent")).contains("Mozilla"));
+        Assert.assertEquals(12, String.valueOf(random.invoke("password")).length());
+        Assert.assertEquals(32, String.valueOf(random.invoke("token")).length());
+        Assert.assertTrue(((Number) random.invoke("timestamp")).longValue() > 0);
+        Assert.assertTrue(String.valueOf(random.invoke("fileName")).contains("."));
+        Assert.assertTrue(String.valueOf(random.invoke("mime")).contains("/"));
+    }
+
+    @Test
+    public void testBusinessPlaceholdersRegistered() {
+        List<String> names = MockRandom.placeholders();
+        for (String name : new String[]{"phone", "gender", "company", "department", "position",
+                "salary", "bankCard", "creditCard", "currency", "mac", "userAgent", "password",
+                "token", "timestamp", "fileName", "mime"}) {
+            Assert.assertTrue("应注册 " + name, names.contains(name));
+        }
     }
 }

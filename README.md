@@ -127,7 +127,7 @@ YamlDocument doc = YamlDocument.parse(yamlText);
 
 ## ✅ 质量保障
 
-- **2,975 个单元测试全部通过**（`mvn test`，9 个模块：jkit-core 977 / jkit-sql 1609 / notify 170 / curl-codegen 44 / mock 69 / …）
+- **2,989 个单元测试全部通过**（`mvn test`，9 个模块：jkit-core 977 / jkit-sql 1609 / notify 170 / curl-codegen 44 / mock 83 / …）
 - **HTML 差分验证**：119 组「HTML + 选择器」用例与 Jsoup 逐结果比对，112 组完全一致，7 组差异全部为文档化的刻意取舍
 - **SQL 语料回归**：1200 条复杂业务 SQL 在 MySQL / Oracle / PostgreSQL / SQL Server 四方言下 parse→format→parse 结构保真 100%，部分语料在真库原生执行验证
 - **并发与边界**：熔断/重试并发测试、16000 并发 ID 唯一性、ULID/UUIDv7 往返校验、JDK 8/11/17/21/25 多版本运行

@@ -22,44 +22,6 @@ public class MockDataGenerator {
     private static final String NUMERIC = "0123456789";
     private static final String CHINESE_NUMBERS = "一二三四五六七八九十";
 
-    private static final String[] SURNAMES = {
-            "王", "李", "张", "刘", "陈", "杨", "赵", "黄", "周", "吴",
-            "徐", "孙", "胡", "朱", "高", "林", "何", "郭", "马", "罗",
-            "梁", "宋", "郑", "谢", "韩", "唐", "冯", "于", "董", "萧"
-    };
-
-    private static final String[] GIVEN_NAMES = {
-            "伟", "芳", "娜", "秀英", "敏", "静", "丽", "强", "磊", "军",
-            "洋", "勇", "艳", "杰", "娟", "涛", "明", "超", "秀兰", "霞",
-            "平", "刚", "桂英", "永", "健", "鑫", "帅", "莉", "凯", "浩",
-            "宇", "琳", "雅", "欣", "晨", "阳", "雪", "晴", "萌", "悦"
-    };
-
-    private static final String[] COMPANY_SUFFIXES = {
-            "有限公司", "股份有限公司", "科技有限公司", "贸易有限公司", "实业有限公司",
-            "投资有限公司", "集团有限公司", "控股有限公司", "发展有限公司", "建设有限公司",
-            "咨询有限公司", "服务有限公司"
-    };
-
-    private static final String[] COMPANY_PREFIXES = {
-            "阿里巴巴", "腾讯", "百度", "京东", "美团", "字节跳动", "滴滴", "小米", "华为", "网易",
-            "新浪", "搜狐", "爱奇艺", "快手", "拼多多", "携程", "途牛", "去哪儿", "58同城", "赶集网",
-            "优酷", "土豆", "乐视", "暴风", "金山", "猎豹", "360", "蚂蚁金服", "陆金所",
-            "恒生电子", "同花顺", "东方财富"
-    };
-
-    private static final String[] DEPARTMENTS = {
-            "技术部", "产品部", "运营部", "市场部", "销售部", "人事部", "财务部", "行政部", "法务部",
-            "客服部", "设计部", "测试部", "运维部", "数据部", "商务部", "品牌部", "公关部", "投资部"
-    };
-
-    private static final String[] POSITIONS = {
-            "前端工程师", "后端工程师", "全栈工程师", "移动端工程师", "DevOps工程师",
-            "产品经理", "项目经理", "技术经理", "运营专员", "市场专员",
-            "UI设计师", "UX设计师", "测试工程师", "数据分析师", "算法工程师",
-            "架构师", "CTO", "CEO", "COO", "CFO", "总监", "主管", "专员"
-    };
-
     private static final String[] PROVINCES = {
             "北京市", "上海市", "天津市", "重庆市", "河北省", "山西省", "辽宁省", "吉林省", "黑龙江省",
             "江苏省", "浙江省", "安徽省", "福建省", "江西省", "山东省", "河南省", "湖北省", "湖南省",
@@ -77,80 +39,6 @@ public class MockDataGenerator {
 
     private static final String[] DISTRICTS = {
             "朝阳区", "海淀区", "西城区", "东城区", "丰台区", "石景山区"
-    };
-
-    private static final String[] PHONE_PREFIXES = {
-            "130", "131", "132", "133", "134", "135", "136", "137", "138", "139",
-            "150", "151", "152", "153", "155", "156", "157", "158", "159",
-            "180", "181", "182", "183", "184", "185", "186", "187", "188", "189"
-    };
-
-    private static final String[] EMAIL_DOMAINS = {
-            "gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "163.com", "126.com", "qq.com",
-            "sina.com", "sohu.com", "foxmail.com", "aliyun.com", "yeah.net", "vip.sina.com", "vip.163.com"
-    };
-
-    private static final String[] CURRENCIES = {
-            "CNY", "USD", "EUR", "JPY", "GBP", "AUD", "CAD", "CHF", "HKD", "SGD"
-    };
-
-    private static final String[] USER_AGENTS = {
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
-                    + "Chrome/91.0.4472.124 Safari/537.36",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) "
-                    + "Chrome/91.0.4472.124 Safari/537.36",
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
-                    + "Chrome/91.0.4472.124 Safari/537.36",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0",
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
-                    + "(KHTML, like Gecko) Version/14.1.1 Safari/605.1.15"
-    };
-
-    private static final String[] MIME_TYPES = {
-            "image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml",
-            "text/html", "text/css", "text/javascript", "text/plain", "text/csv",
-            "application/json", "application/xml", "application/pdf", "application/zip",
-            "video/mp4", "video/webm", "audio/mp3", "audio/wav", "audio/ogg"
-    };
-
-    private static final String[] FILE_EXTENSIONS = {
-            "jpg", "png", "gif", "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
-            "txt", "csv", "json", "xml", "zip", "rar", "mp4", "avi", "mov", "mp3",
-            "wav", "html", "css", "js"
-    };
-
-    private static final String[] DOMAIN_SUFFIXES = {
-            "com", "cn", "net", "org", "edu", "gov", "mil", "int",
-            "com.cn", "net.cn", "org.cn", "edu.cn", "gov.cn"
-    };
-
-    private static final String[] URL_DOMAINS = {
-            "example.com", "test.com", "demo.com", "sample.org", "mock.net"
-    };
-
-    private static final String[] URL_PATHS = {
-            "/", "/home", "/about", "/contact", "/products", "/services", "/blog"
-    };
-
-    private static final String[] URL_SCHEMES = {
-            "http", "https"
-    };
-
-    private static final String[] BANK_CARD_PREFIXES = {
-            "6225", "6222", "6228", "6229", "6227", "6223", "6226"
-    };
-
-    private static final String[] CREDIT_CARD_PREFIXES = {
-            "4", "5", "6"
-    };
-
-    private static final String[] ID_CARD_AREAS = {
-            "110000", "120000", "130000", "140000", "150000",
-            "210000", "220000", "230000"
-    };
-
-    private static final String[] ID_CARD_CHECK = {
-            "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "X"
     };
 
     private static final Random RANDOM = new SecureRandom();
@@ -268,11 +156,11 @@ public class MockDataGenerator {
      * @return 中文姓名
      */
     public String generateName() {
-        String surname = randomChoice(SURNAMES);
+        String surname = randomChoice(MockDict.SURNAMES);
         int count = RANDOM.nextDouble() > 0.7 ? 2 : 1;
         StringBuilder given = new StringBuilder();
         for (int i = 0; i < count; i++) {
-            given.append(randomChoice(GIVEN_NAMES));
+            given.append(randomChoice(MockDict.GIVEN_NAMES));
         }
         return surname + given.toString();
     }
@@ -284,7 +172,7 @@ public class MockDataGenerator {
      */
     public String generateEmail() {
         String local = randomString(randomInt(6, 12));
-        String domain = randomChoice(EMAIL_DOMAINS);
+        String domain = randomChoice(MockDict.EMAIL_DOMAINS);
         return local + "@" + domain;
     }
 
@@ -294,7 +182,7 @@ public class MockDataGenerator {
      * @return 11 位手机号
      */
     public String generatePhone() {
-        return randomChoice(PHONE_PREFIXES) + randomString(8, NUMERIC);
+        return randomChoice(MockDict.PHONE_PREFIXES) + randomString(8, NUMERIC);
     }
 
     /**
@@ -303,7 +191,7 @@ public class MockDataGenerator {
      * @return 18 位身份证号
      */
     public String generateIdCard() {
-        String area = randomChoice(ID_CARD_AREAS);
+        String area = randomChoice(MockDict.ID_CARD_AREAS);
         int year = randomInt(1970, 2000);
         int month = randomInt(1, 12);
         int day = randomInt(1, 28);
@@ -311,7 +199,7 @@ public class MockDataGenerator {
                 + padLeft(month, 2)
                 + padLeft(day, 2);
         String seq = String.valueOf(randomInt(100, 999));
-        String check = randomChoice(ID_CARD_CHECK);
+        String check = randomChoice(MockDict.ID_CARD_CHECK);
         return area.substring(0, 6) + birth + seq + check;
     }
 
@@ -365,7 +253,7 @@ public class MockDataGenerator {
      * @return 公司名称
      */
     public String generateCompany() {
-        return randomChoice(COMPANY_PREFIXES) + randomChoice(COMPANY_SUFFIXES);
+        return randomChoice(MockDict.COMPANY_PREFIXES) + randomChoice(MockDict.COMPANY_SUFFIXES);
     }
 
     /**
@@ -374,7 +262,7 @@ public class MockDataGenerator {
      * @return 部门名称
      */
     public String generateDepartment() {
-        return randomChoice(DEPARTMENTS);
+        return randomChoice(MockDict.DEPARTMENTS);
     }
 
     /**
@@ -383,7 +271,7 @@ public class MockDataGenerator {
      * @return 职位名称
      */
     public String generatePosition() {
-        return randomChoice(POSITIONS);
+        return randomChoice(MockDict.POSITIONS);
     }
 
     /**
@@ -401,7 +289,7 @@ public class MockDataGenerator {
      * @return 16 位银行卡号
      */
     public String generateBankCard() {
-        return randomChoice(BANK_CARD_PREFIXES) + randomString(12, NUMERIC);
+        return randomChoice(MockDict.BANK_CARD_PREFIXES) + randomString(12, NUMERIC);
     }
 
     /**
@@ -410,7 +298,7 @@ public class MockDataGenerator {
      * @return 16 位信用卡号
      */
     public String generateCreditCard() {
-        return randomChoice(CREDIT_CARD_PREFIXES) + randomString(15, NUMERIC);
+        return randomChoice(MockDict.CREDIT_CARD_PREFIXES) + randomString(15, NUMERIC);
     }
 
     /**
@@ -428,7 +316,7 @@ public class MockDataGenerator {
      * @return 货币代码
      */
     public String generateCurrency() {
-        return randomChoice(CURRENCIES);
+        return randomChoice(MockDict.CURRENCIES);
     }
 
     /**
@@ -486,7 +374,7 @@ public class MockDataGenerator {
      * @return User Agent 字符串
      */
     public String generateUserAgent() {
-        return randomChoice(USER_AGENTS);
+        return randomChoice(MockDict.USER_AGENTS);
     }
 
     /**
@@ -495,9 +383,9 @@ public class MockDataGenerator {
      * @return URL
      */
     public String generateUrl() {
-        String scheme = randomChoice(URL_SCHEMES);
-        String domain = randomChoice(URL_DOMAINS);
-        String path = randomChoice(URL_PATHS);
+        String scheme = randomChoice(MockDict.URL_SCHEMES);
+        String domain = randomChoice(MockDict.URL_DOMAINS);
+        String path = randomChoice(MockDict.URL_PATHS);
         return scheme + "://" + domain + path;
     }
 
@@ -508,7 +396,7 @@ public class MockDataGenerator {
      */
     public String generateDomain() {
         String name = randomString(randomInt(5, 15));
-        String suffix = randomChoice(DOMAIN_SUFFIXES);
+        String suffix = randomChoice(MockDict.DOMAIN_SUFFIXES);
         return name + "." + suffix;
     }
 
@@ -556,7 +444,7 @@ public class MockDataGenerator {
      */
     public String generateFilename() {
         String name = randomString(randomInt(5, 15));
-        String ext = randomChoice(FILE_EXTENSIONS);
+        String ext = randomChoice(MockDict.FILE_EXTENSIONS);
         return name + "." + ext;
     }
 
@@ -566,7 +454,7 @@ public class MockDataGenerator {
      * @return MIME 类型
      */
     public String generateMimeType() {
-        return randomChoice(MIME_TYPES);
+        return randomChoice(MockDict.MIME_TYPES);
     }
 
     /**

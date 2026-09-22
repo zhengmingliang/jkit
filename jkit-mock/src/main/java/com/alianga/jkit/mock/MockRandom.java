@@ -61,11 +61,31 @@ public class MockRandom {
                 "url", "domain", "protocol", "tld", "email", "ip",
                 "region", "province", "city", "county", "zip",
                 "capitalize", "upper", "lower", "pick", "shuffle",
-                "guid", "uuid", "id", "increment", "inc"));
+                "guid", "uuid", "id", "increment", "inc",
+                "phone", "gender", "company", "department", "position", "salary",
+                "bankCard", "creditCard", "currency", "mac", "userAgent", "password",
+                "token", "timestamp", "fileName", "mime"));
+    }
+
+    /**
+     * 自定义占位符生成器，对应 Mock.js 的 {@code Random.extend()} 扩展机制。
+     *
+     * @author 郑明亮
+     */
+    public interface MockPlaceholder {
+        /**
+         * 生成占位符的值。
+         *
+         * @param random 随机源，实现内应复用它以保证种子复现
+         * @param args   模板里传入的参数，元素可为字符串 / 数字 / 布尔 / 数组
+         * @return 生成结果
+         */
+        Object apply(MockRandom random, Object... args);
     }
 
     private final Random random;
     private final AtomicLong incrementKey = new AtomicLong();
+    private final Map<String, MockPlaceholder> extensions = new HashMap<String, MockPlaceholder>();
     private double hue = -1;
 
     /**
@@ -103,6 +123,46 @@ public class MockRandom {
     }
 
     /**
+     * 注册自定义占位符，覆盖 Mock.js 的 {@code Random.extend()}。重名时后来者优先。
+     *
+     * <pre>{@code
+     * MockRandom r = new MockRandom();
+     * r.extend("employeeNo", (random, args) -> "E" + random.integer(1000, 9999));
+     * r.invoke("employeeNo");          // => "E3821"
+     * }</pre>
+     *
+     * @param name 占位符名，大小写不敏感
+     * @param fn   生成逻辑
+     * @return 当前实例，便于链式注册
+     */
+    public MockRandom extend(String name, MockPlaceholder fn) {
+        String key = name == null ? "" : name.trim().toLowerCase();
+        if (key.isEmpty()) {
+            throw new IllegalArgumentException("占位符名不能为空");
+        }
+        if (fn == null) {
+            throw new IllegalArgumentException("占位符生成逻辑不能为空");
+        }
+        extensions.put(key, fn);
+        return this;
+    }
+
+    /**
+     * 内置占位符加上本实例已注册的自定义占位符。
+     *
+     * @return 全部可用占位符名
+     */
+    public List<String> allPlaceholders() {
+        List<String> all = new ArrayList<String>(PLACEHOLDERS);
+        for (String key : extensions.keySet()) {
+            if (!all.contains(key)) {
+                all.add(key);
+            }
+        }
+        return all;
+    }
+
+    /**
      * 按名字调用占位符，名字大小写不敏感。
      *
      * @param name 占位符名，如 {@code cname}
@@ -112,6 +172,10 @@ public class MockRandom {
     public Object invoke(String name, Object... args) {
         String key = name == null ? "" : name.toLowerCase();
         Object[] a = args == null ? new Object[0] : args;
+        MockPlaceholder custom = extensions.get(key);
+        if (custom != null) {
+            return custom.apply(this, a);
+        }
         if ("boolean".equals(key) || "bool".equals(key)) {
             return bool(a);
         }
@@ -267,6 +331,54 @@ public class MockRandom {
         }
         if ("increment".equals(key) || "inc".equals(key)) {
             return increment(a);
+        }
+        if ("phone".equals(key)) {
+            return phone(a);
+        }
+        if ("gender".equals(key)) {
+            return gender(a);
+        }
+        if ("company".equals(key)) {
+            return company(a);
+        }
+        if ("department".equals(key) || "dept".equals(key)) {
+            return department(a);
+        }
+        if ("position".equals(key)) {
+            return position(a);
+        }
+        if ("salary".equals(key)) {
+            return salary(a);
+        }
+        if ("bankcard".equals(key)) {
+            return bankCard(a);
+        }
+        if ("creditcard".equals(key)) {
+            return creditCard(a);
+        }
+        if ("currency".equals(key)) {
+            return currency(a);
+        }
+        if ("mac".equals(key)) {
+            return mac(a);
+        }
+        if ("useragent".equals(key) || "ua".equals(key)) {
+            return userAgent(a);
+        }
+        if ("password".equals(key) || "pwd".equals(key)) {
+            return password(a);
+        }
+        if ("token".equals(key)) {
+            return token(a);
+        }
+        if ("timestamp".equals(key)) {
+            return timestamp(a);
+        }
+        if ("filename".equals(key)) {
+            return fileName(a);
+        }
+        if ("mime".equals(key) || "mimetype".equals(key)) {
+            return mime(a);
         }
         throw new IllegalArgumentException("未知占位符：" + name);
     }
@@ -1121,6 +1233,184 @@ public class MockRandom {
      */
     public void resetIncrement() {
         incrementKey.set(0);
+    }
+
+    // --------------------------------------------------- 业务字段（与字段模式共用语料）
+
+    /**
+     * 中国大陆手机号：{@code 1[3-9]} 前缀 + 8 位数字。
+     *
+     * @param args 忽略
+     * @return 11 位手机号
+     */
+    public String phone(Object... args) {
+        return pickOne(MockDict.PHONE_PREFIXES) + string("number", 8);
+    }
+
+    /**
+     * 性别：{@code 男} 或 {@code 女}。
+     *
+     * @param args 忽略
+     * @return 性别
+     */
+    public String gender(Object... args) {
+        return random.nextDouble() > 0.5 ? "男" : "女";
+    }
+
+    /**
+     * 公司名：前缀 + 后缀，如 {@code 腾讯科技有限公司}。
+     *
+     * @param args 忽略
+     * @return 公司名
+     */
+    public String company(Object... args) {
+        return pickOne(MockDict.COMPANY_PREFIXES) + pickOne(MockDict.COMPANY_SUFFIXES);
+    }
+
+    /**
+     * 部门名，如 {@code 技术部}。
+     *
+     * @param args 忽略
+     * @return 部门名
+     */
+    public String department(Object... args) {
+        return pickOne(MockDict.DEPARTMENTS);
+    }
+
+    /**
+     * 职位名，如 {@code 后端工程师}。
+     *
+     * @param args 忽略
+     * @return 职位名
+     */
+    public String position(Object... args) {
+        return pickOne(MockDict.POSITIONS);
+    }
+
+    /**
+     * 月薪，5000 到 50000。
+     *
+     * @param args 可选 {@code (min, max)}
+     * @return 月薪
+     */
+    public long salary(Object... args) {
+        int min = argInt(args, 0, 5000);
+        int max = args.length > 1 ? argInt(args, 1, 50000) : 50000;
+        return integer(min, max);
+    }
+
+    /**
+     * 银行卡号：前缀 + 12 位数字。
+     *
+     * @param args 忽略
+     * @return 银行卡号
+     */
+    public String bankCard(Object... args) {
+        return pickOne(MockDict.BANK_CARD_PREFIXES) + string("number", 12);
+    }
+
+    /**
+     * 信用卡号：前缀 + 15 位数字。
+     *
+     * @param args 忽略
+     * @return 信用卡号
+     */
+    public String creditCard(Object... args) {
+        return pickOne(MockDict.CREDIT_CARD_PREFIXES) + string("number", 15);
+    }
+
+    /**
+     * 货币代码，如 {@code CNY}。
+     *
+     * @param args 忽略
+     * @return 货币代码
+     */
+    public String currency(Object... args) {
+        return pickOne(MockDict.CURRENCIES);
+    }
+
+    /**
+     * MAC 地址，冒号分隔的 6 组十六进制。
+     *
+     * @param args 忽略
+     * @return MAC 地址
+     */
+    public String mac(Object... args) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < 6; i++) {
+            if (i > 0) {
+                sb.append(':');
+            }
+            sb.append(character("hex")).append(character("hex"));
+        }
+        return sb.toString().toUpperCase();
+    }
+
+    /**
+     * 浏览器 User-Agent。
+     *
+     * @param args 忽略
+     * @return UA 字符串
+     */
+    public String userAgent(Object... args) {
+        return pickOne(MockDict.USER_AGENTS);
+    }
+
+    /**
+     * 密码：字母数字符号混合，默认 12 位。
+     *
+     * @param args 可选 {@code (length)} 或 {@code (min, max)}
+     * @return 密码
+     */
+    public String password(Object... args) {
+        int len = args.length > 1 ? (int) integer(argInt(args, 0, 8), argInt(args, 1, 16))
+                : argInt(args, 0, 12);
+        return string("undefined", Math.max(len, 1));
+    }
+
+    /**
+     * 令牌：32 位十六进制。
+     *
+     * @param args 可选 {@code (length)}
+     * @return 令牌
+     */
+    public String token(Object... args) {
+        return string("hex", argInt(args, 0, 32));
+    }
+
+    /**
+     * Unix 时间戳（毫秒），默认取当前时间，给参数则在距今一年内随机。
+     *
+     * @param args 传 {@code true} 时取当前时间，否则随机
+     * @return 时间戳
+     */
+    public long timestamp(Object... args) {
+        if (args.length > 0 && argBool(args, 0, true)) {
+            return System.currentTimeMillis();
+        }
+        long now = System.currentTimeMillis();
+        long year = 365L * 24 * 60 * 60 * 1000;
+        return now - (long) (random.nextDouble() * year);
+    }
+
+    /**
+     * 文件名：随机名 + 扩展名，如 {@code report_x8k2.pdf}。
+     *
+     * @param args 忽略
+     * @return 文件名
+     */
+    public String fileName(Object... args) {
+        return string("lower", 8) + "." + pickOne(MockDict.FILE_EXTENSIONS);
+    }
+
+    /**
+     * MIME 类型，如 {@code application/json}。
+     *
+     * @param args 忽略
+     * @return MIME 类型
+     */
+    public String mime(Object... args) {
+        return pickOne(MockDict.MIME_TYPES);
     }
 
     // ------------------------------------------------------------- 内部工具

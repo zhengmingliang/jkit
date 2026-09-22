@@ -87,7 +87,7 @@ List<Map<String, Object>> rows = js.mockRecords("{'list|3': [{'id|+1': 1}]}");
 
 ### 数据占位符定义（DPD）
 
-`MockRandom` 内置 58 个占位符（含 `bool` / `int` / `number` / `char` / `str` / `img` / `inc` 别名），覆盖 Mock.js 全部十类：
+`MockRandom` 内置 74 个占位符（含 `bool` / `int` / `number` / `char` / `str` / `img` / `inc` 等别名），覆盖 Mock.js 全部十类：
 
 | 分类 | 占位符 |
 | --- | --- |
@@ -102,6 +102,9 @@ List<Map<String, Object>> rows = js.mockRecords("{'list|3': [{'id|+1': 1}]}");
 | Helper | `capitalize` `upper` `lower` `pick` `shuffle` |
 | Misc | `guid` `uuid` `id` `increment` |
 | 中文 | `cparagraph` `csentence` `cword` `ctitle` `cfirst` `clast` `cname` |
+| 业务字段 | `phone` `gender` `company` `department` `position` `salary` `bankCard` `creditCard` `currency` `mac` `userAgent` `password` `token` `timestamp` `fileName` `mime` |
+
+最后一行是 Mock.js 规范之外的补充：字段模式原本能生成 MAC、银行卡、User-Agent 等，而模板模式写不出来，现在两边共用同一套语料与实现。
 
 占位符可带参数，写在括号内：`@integer(10, 20)`、`@string('lower', 8)`、`@float(1, 10, 2, 4)`、`@pick(['a','b','c'])`、`@image('200x100')`、`@now('year')`。单独使用（整个字符串就是一个占位符）时返回原始类型，混在文本里则替换成字符串：
 
@@ -113,7 +116,20 @@ r.invoke("image", "200x100");       // http://dummyimage.com/200x100
 r.invoke("pick", "a", "b", "c");    // 随机取一个
 ```
 
-语料（500 汉字、66 英文姓、32 英文名、100 中文姓、23 中文名、263 个 TLD、35 省 / 366 市 / 2595 县）从 mockjs 1.1.0 抽取，生成分布与原库一致。
+语料（500 汉字、66 英文姓、32 英文名、100 中文姓、23 中文名、263 个 TLD、35 省 / 366 市 / 2595 县，以及公司 / 部门 / 职位 / UA / MIME 等业务字典）统一收在 `MockDict`，字段模式与模板模式共用，不重复维护。
+
+### 自定义占位符
+
+`MockRandom.extend()` 对应 Mock.js 的 `Random.extend()`，可注册自己的占位符：
+
+```java
+MockRandom r = new MockRandom();
+r.extend("employeeNo", (random, args) -> "E" + random.invoke("integer", 1000, 9999));
+MockJs js = new MockJs(r);
+js.mock((Object) "{'no':'@employeeNo'}");   // => {no=E3821}
+```
+
+重名时自定义实现优先，可覆盖内置占位符。注意 `MockJs.mock(String)` 是**静态**便捷方法，内部新建实例，会丢掉已注册的扩展；需要 `extend` 时用实例方法 `mock((Object) template)`。`allPlaceholders()` 返回内置加已注册的全部占位符名。
 
 ### 正则反向生成
 
@@ -205,7 +221,11 @@ INSERT INTO fake_data (name, email) VALUES ('郑娜', 'VlZrQhGq@qq.com');
 
 ```bash
 mvn -pl jkit-mock test -DskipTests=false
-# Tests run: 69, Failures: 0, Errors: 0, Skipped: 0
+# Tests run: 83, Failures: 0, Errors: 0, Skipped: 0
 ```
 
-覆盖 `MockJsTest`（25 个，DTD 规则 / 占位符 / 正则 / 单引号兼容）、`MockRandomTest`（20 个，占位符全量取值与格式断言）、`MockRegexTest`（12 个，正则反向生成）、`MockValidTest`（6 个，校验与 Schema）、`MockDataProducerTest`（6 个，字段模式）。
+覆盖 `MockJsTest`（25 个，DTD 规则 / 占位符 / 正则 / 单引号兼容）、`MockRandomTest`（26 个，占位符全量取值、格式断言与 extend 扩展点）、`MockDataFormatterTest`（8 个，两种模式 JSON 风格一致、摊平下钻）、`MockRegexTest`（12 个，正则反向生成）、`MockValidTest`（6 个，校验与 Schema）、`MockDataProducerTest`（6 个，字段模式）。
+
+## 输出风格
+
+两种模式的 JSON 都走 `MockDataFormatter.prettyJson()`：对象与数组逐层缩进两空格，字符串按 JSON 规范转义。`toRows()` 会把 `{"list":[{...}]}` 下钻成记录列表，供 CSV / SQL / XML 使用。

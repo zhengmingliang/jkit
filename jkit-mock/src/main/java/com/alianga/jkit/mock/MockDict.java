@@ -321,6 +321,118 @@ public final class MockDict {
         "其它区"
     };
 
+public static final String[] SURNAMES = {
+            "王", "李", "张", "刘", "陈", "杨", "赵", "黄", "周", "吴",
+            "徐", "孙", "胡", "朱", "高", "林", "何", "郭", "马", "罗",
+            "梁", "宋", "郑", "谢", "韩", "唐", "冯", "于", "董", "萧"
+    };
+
+    public static final String[] GIVEN_NAMES = {
+            "伟", "芳", "娜", "秀英", "敏", "静", "丽", "强", "磊", "军",
+            "洋", "勇", "艳", "杰", "娟", "涛", "明", "超", "秀兰", "霞",
+            "平", "刚", "桂英", "永", "健", "鑫", "帅", "莉", "凯", "浩",
+            "宇", "琳", "雅", "欣", "晨", "阳", "雪", "晴", "萌", "悦"
+    };
+
+    public static final String[] COMPANY_SUFFIXES = {
+            "有限公司", "股份有限公司", "科技有限公司", "贸易有限公司", "实业有限公司",
+            "投资有限公司", "集团有限公司", "控股有限公司", "发展有限公司", "建设有限公司",
+            "咨询有限公司", "服务有限公司"
+    };
+
+    public static final String[] COMPANY_PREFIXES = {
+            "阿里巴巴", "腾讯", "百度", "京东", "美团", "字节跳动", "滴滴", "小米", "华为", "网易",
+            "新浪", "搜狐", "爱奇艺", "快手", "拼多多", "携程", "途牛", "去哪儿", "58同城", "赶集网",
+            "优酷", "土豆", "乐视", "暴风", "金山", "猎豹", "360", "蚂蚁金服", "陆金所",
+            "恒生电子", "同花顺", "东方财富"
+    };
+
+    public static final String[] DEPARTMENTS = {
+            "技术部", "产品部", "运营部", "市场部", "销售部", "人事部", "财务部", "行政部", "法务部",
+            "客服部", "设计部", "测试部", "运维部", "数据部", "商务部", "品牌部", "公关部", "投资部"
+    };
+
+    public static final String[] POSITIONS = {
+            "前端工程师", "后端工程师", "全栈工程师", "移动端工程师", "DevOps工程师",
+            "产品经理", "项目经理", "技术经理", "运营专员", "市场专员",
+            "UI设计师", "UX设计师", "测试工程师", "数据分析师", "算法工程师",
+            "架构师", "CTO", "CEO", "COO", "CFO", "总监", "主管", "专员"
+    };
+
+    public static final String[] PHONE_PREFIXES = {
+            "130", "131", "132", "133", "134", "135", "136", "137", "138", "139",
+            "150", "151", "152", "153", "155", "156", "157", "158", "159",
+            "180", "181", "182", "183", "184", "185", "186", "187", "188", "189"
+    };
+
+    public static final String[] EMAIL_DOMAINS = {
+            "gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "163.com", "126.com", "qq.com",
+            "sina.com", "sohu.com", "foxmail.com", "aliyun.com", "yeah.net", "vip.sina.com", "vip.163.com"
+    };
+
+    public static final String[] CURRENCIES = {
+            "CNY", "USD", "EUR", "JPY", "GBP", "AUD", "CAD", "CHF", "HKD", "SGD"
+    };
+
+    public static final String[] USER_AGENTS = {
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+                    + "Chrome/91.0.4472.124 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) "
+                    + "Chrome/91.0.4472.124 Safari/537.36",
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+                    + "Chrome/91.0.4472.124 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
+                    + "(KHTML, like Gecko) Version/14.1.1 Safari/605.1.15"
+    };
+
+    public static final String[] MIME_TYPES = {
+            "image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml",
+            "text/html", "text/css", "text/javascript", "text/plain", "text/csv",
+            "application/json", "application/xml", "application/pdf", "application/zip",
+            "video/mp4", "video/webm", "audio/mp3", "audio/wav", "audio/ogg"
+    };
+
+    public static final String[] FILE_EXTENSIONS = {
+            "jpg", "png", "gif", "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
+            "txt", "csv", "json", "xml", "zip", "rar", "mp4", "avi", "mov", "mp3",
+            "wav", "html", "css", "js"
+    };
+
+    public static final String[] DOMAIN_SUFFIXES = {
+            "com", "cn", "net", "org", "edu", "gov", "mil", "int",
+            "com.cn", "net.cn", "org.cn", "edu.cn", "gov.cn"
+    };
+
+    public static final String[] URL_DOMAINS = {
+            "example.com", "test.com", "demo.com", "sample.org", "mock.net"
+    };
+
+    public static final String[] URL_PATHS = {
+            "/", "/home", "/about", "/contact", "/products", "/services", "/blog"
+    };
+
+    public static final String[] URL_SCHEMES = {
+            "http", "https"
+    };
+
+    public static final String[] BANK_CARD_PREFIXES = {
+            "6225", "6222", "6228", "6229", "6227", "6223", "6226"
+    };
+
+    public static final String[] CREDIT_CARD_PREFIXES = {
+            "4", "5", "6"
+    };
+
+    public static final String[] ID_CARD_AREAS = {
+            "110000", "120000", "130000", "140000", "150000",
+            "210000", "220000", "230000"
+    };
+
+    public static final String[] ID_CARD_CHECK = {
+            "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "X"
+    };
+
     /** 行政区划节点：省 / 市 / 县三级共用一个结构。 */
     public static final class Region {
         private final String name;
