@@ -2,6 +2,8 @@ package com.alianga.jkit.mock;
 
 import com.alianga.jkit.json.JSON;
 
+import java.io.IOException;
+import java.io.StringWriter;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -52,13 +54,66 @@ public class MockDataFormatter {
      * @return 格式化后的字符串
      */
     public static String format(Object data, MockOutputFormat format) {
+        return format(data, format, null);
+    }
+
+    /**
+     * 将任意结构的数据按指定格式输出为字符串（可带 SQL 选项）。
+     *
+     * @param data    任意数据
+     * @param format  输出格式
+     * @param options SQL 选项（仅 SQL 格式生效）
+     * @return 格式化后的字符串
+     */
+    public static String format(Object data, MockOutputFormat format, MockSqlOptions options) {
         if (data == null) {
             return "";
         }
-        if (format == null || format == MockOutputFormat.JSON) {
-            return prettyJson(data);
+        StringWriter sw = new StringWriter();
+        try {
+            formatTo(sw, data, format, options);
+        } catch (IOException e) {
+            throw new IllegalStateException("StringWriter should not throw", e);
         }
-        return format(toRows(data), format);
+        return sw.toString();
+    }
+
+    /**
+     * 流式格式化入口：数据直接写入 {@link Appendable}，避免在内存中同时保留记录列表与完整输出字符串。
+     *
+     * @param out     输出目标
+     * @param data    任意数据
+     * @param format  输出格式
+     * @param options SQL 选项（仅 SQL 格式生效，null 走默认）
+     * @throws IOException 写入异常
+     */
+    public static void formatTo(Appendable out, Object data, MockOutputFormat format,
+                                MockSqlOptions options) throws IOException {
+        if (data == null) {
+            return;
+        }
+        if (format == null || format == MockOutputFormat.JSON) {
+            writeJson(data, out, 0);
+            return;
+        }
+        List<Map<String, Object>> rows = toRows(data);
+        if (rows.isEmpty()) {
+            return;
+        }
+        switch (format) {
+            case CSV:
+                toCsv(out, rows);
+                break;
+            case SQL:
+                toSql(out, rows, options);
+                break;
+            case XML:
+                toXml(out, rows);
+                break;
+            default:
+                writeJson(data, out, 0);
+                break;
+        }
     }
 
     /**
@@ -71,124 +126,136 @@ public class MockDataFormatter {
      * @return 缩进后的 JSON 字符串
      */
     public static String prettyJson(Object data) {
-        StringBuilder sb = new StringBuilder();
-        writeJson(data, sb, 0);
-        return sb.toString();
+        StringWriter sw = new StringWriter();
+        try {
+            writeJson(data, sw, 0);
+        } catch (IOException e) {
+            throw new IllegalStateException("StringWriter should not throw", e);
+        }
+        return sw.toString();
     }
 
-    private static void writeJson(Object value, StringBuilder sb, int depth) {
+    /**
+     * 流式写入 JSON（缩进两空格）。
+     *
+     * @param value 任意数据
+     * @param out   输出目标
+     * @param depth 当前缩进层级
+     * @throws IOException 写入异常
+     */
+    public static void writeJson(Object value, Appendable out, int depth) throws IOException {
         if (value == null) {
-            sb.append("null");
+            out.append("null");
             return;
         }
         if (value instanceof Map) {
-            writeMap((Map<?, ?>) value, sb, depth);
+            writeMap((Map<?, ?>) value, out, depth);
             return;
         }
         if (value instanceof List) {
-            writeList((List<?>) value, sb, depth);
+            writeList((List<?>) value, out, depth);
             return;
         }
         if (value instanceof String) {
-            writeString((String) value, sb);
+            writeString((String) value, out);
             return;
         }
         if (value instanceof Boolean || value instanceof Number) {
-            sb.append(value);
+            out.append(value.toString());
             return;
         }
         if (value instanceof Object[]) {
             Object[] arr = (Object[]) value;
-            sb.append('[');
+            out.append('[');
             for (int i = 0; i < arr.length; i++) {
                 if (i > 0) {
-                    sb.append(", ");
+                    out.append(", ");
                 }
-                writeJson(arr[i], sb, depth);
+                writeJson(arr[i], out, depth);
             }
-            sb.append(']');
+            out.append(']');
             return;
         }
-        writeString(String.valueOf(value), sb);
+        writeString(String.valueOf(value), out);
     }
 
-    private static void writeMap(Map<?, ?> map, StringBuilder sb, int depth) {
+    private static void writeMap(Map<?, ?> map, Appendable out, int depth) throws IOException {
         if (map.isEmpty()) {
-            sb.append("{}");
+            out.append("{}");
             return;
         }
-        sb.append('{');
+        out.append('{');
         int i = 0;
         for (Map.Entry<?, ?> entry : map.entrySet()) {
-            sb.append(i == 0 ? "\n" : ",\n");
-            indent(sb, depth + 1);
-            writeString(String.valueOf(entry.getKey()), sb);
-            sb.append(": ");
-            writeJson(entry.getValue(), sb, depth + 1);
+            out.append(i == 0 ? "\n" : ",\n");
+            indent(out, depth + 1);
+            writeString(String.valueOf(entry.getKey()), out);
+            out.append(": ");
+            writeJson(entry.getValue(), out, depth + 1);
             i++;
         }
-        sb.append('\n');
-        indent(sb, depth);
-        sb.append('}');
+        out.append('\n');
+        indent(out, depth);
+        out.append('}');
     }
 
-    private static void writeList(List<?> list, StringBuilder sb, int depth) {
+    private static void writeList(List<?> list, Appendable out, int depth) throws IOException {
         if (list.isEmpty()) {
-            sb.append("[]");
+            out.append("[]");
             return;
         }
-        sb.append('[');
+        out.append('[');
         for (int i = 0; i < list.size(); i++) {
-            sb.append(i == 0 ? "\n" : ",\n");
-            indent(sb, depth + 1);
-            writeJson(list.get(i), sb, depth + 1);
+            out.append(i == 0 ? "\n" : ",\n");
+            indent(out, depth + 1);
+            writeJson(list.get(i), out, depth + 1);
         }
-        sb.append('\n');
-        indent(sb, depth);
-        sb.append(']');
+        out.append('\n');
+        indent(out, depth);
+        out.append(']');
     }
 
-    private static void indent(StringBuilder sb, int depth) {
+    private static void indent(Appendable out, int depth) throws IOException {
         for (int i = 0; i < depth; i++) {
-            sb.append("  ");
+            out.append("  ");
         }
     }
 
-    private static void writeString(String text, StringBuilder sb) {
-        sb.append('"');
+    private static void writeString(String text, Appendable out) throws IOException {
+        out.append('"');
         for (int i = 0; i < text.length(); i++) {
             char c = text.charAt(i);
             switch (c) {
                 case '"':
-                    sb.append("\\\"");
+                    out.append("\\\"");
                     break;
                 case '\\':
-                    sb.append("\\\\");
+                    out.append("\\\\");
                     break;
                 case '\n':
-                    sb.append("\\n");
+                    out.append("\\n");
                     break;
                 case '\r':
-                    sb.append("\\r");
+                    out.append("\\r");
                     break;
                 case '\t':
-                    sb.append("\\t");
+                    out.append("\\t");
                     break;
                 case '\b':
-                    sb.append("\\b");
+                    out.append("\\b");
                     break;
                 case '\f':
-                    sb.append("\\f");
+                    out.append("\\f");
                     break;
                 default:
                     if (c < 0x20) {
-                        sb.append(String.format("\\u%04x", (int) c));
+                        out.append(String.format("\\u%04x", (int) c));
                     } else {
-                        sb.append(c);
+                        out.append(c);
                     }
             }
         }
-        sb.append('"');
+        out.append('"');
     }
 
     /**
@@ -260,33 +327,52 @@ public class MockDataFormatter {
      * @return JSON 字符串
      */
     public static String toJson(List<Map<String, Object>> records) {
-        StringBuilder sb = new StringBuilder();
-        sb.append('[');
-        sb.append('\n');
+        StringWriter sw = new StringWriter();
+        try {
+            toJson(sw, records);
+        } catch (IOException e) {
+            throw new IllegalStateException("StringWriter should not throw", e);
+        }
+        return sw.toString();
+    }
+
+    /**
+     * 将记录列表流式输出为 JSON。
+     *
+     * @param out     输出目标
+     * @param records 记录列表
+     * @throws IOException 写入异常
+     */
+    public static void toJson(Appendable out, List<Map<String, Object>> records) throws IOException {
+        if (records == null || records.isEmpty()) {
+            out.append("[]");
+            return;
+        }
+        out.append('[');
+        out.append('\n');
         for (int i = 0; i < records.size(); i++) {
             Map<String, Object> record = records.get(i);
-            sb.append("  {");
+            out.append("  {");
             boolean first = true;
             for (Map.Entry<String, Object> entry : record.entrySet()) {
                 if (!first) {
-                    sb.append(", ");
+                    out.append(", ");
                 }
                 first = false;
-                sb.append('"');
-                sb.append(escapeJson(entry.getKey()));
-                sb.append('"');
-                sb.append(':');
-                sb.append(' ');
-                sb.append(valueToJson(entry.getValue()));
+                out.append('"');
+                out.append(escapeJson(entry.getKey()));
+                out.append('"');
+                out.append(':');
+                out.append(' ');
+                out.append(valueToJson(entry.getValue()));
             }
-            sb.append('}');
+            out.append('}');
             if (i < records.size() - 1) {
-                sb.append(',');
+                out.append(',');
             }
-            sb.append('\n');
+            out.append('\n');
         }
-        sb.append(']');
-        return sb.toString();
+        out.append(']');
     }
 
     /**
@@ -296,14 +382,32 @@ public class MockDataFormatter {
      * @return CSV 字符串
      */
     public static String toCsv(List<Map<String, Object>> records) {
-        StringBuilder sb = new StringBuilder();
+        StringWriter sw = new StringWriter();
+        try {
+            toCsv(sw, records);
+        } catch (IOException e) {
+            throw new IllegalStateException("StringWriter should not throw", e);
+        }
+        return sw.toString();
+    }
+
+    /**
+     * 将记录列表流式输出为 CSV。
+     *
+     * @param out     输出目标
+     * @param records 记录列表
+     * @throws IOException 写入异常
+     */
+    public static void toCsv(Appendable out, List<Map<String, Object>> records) throws IOException {
+        if (records == null || records.isEmpty()) {
+            return;
+        }
         Map<String, Object> first = records.get(0);
         String[] keys = first.keySet().toArray(new String[0]);
-        appendCsvRow(sb, keys, records.get(0), true);
+        appendCsvRow(out, keys, first, true);
         for (Map<String, Object> record : records) {
-            appendCsvRow(sb, keys, record, false);
+            appendCsvRow(out, keys, record, false);
         }
-        return sb.toString();
     }
 
     /**
@@ -324,81 +428,101 @@ public class MockDataFormatter {
      * @return SQL 字符串
      */
     public static String toSql(List<Map<String, Object>> records, MockSqlOptions options) {
+        StringWriter sw = new StringWriter();
+        try {
+            toSql(sw, records, options);
+        } catch (IOException e) {
+            throw new IllegalStateException("StringWriter should not throw", e);
+        }
+        return sw.toString();
+    }
+
+    /**
+     * 按选项将记录列表流式输出为 SQL INSERT。
+     *
+     * @param out     输出目标
+     * @param records 记录列表
+     * @param options SQL 选项（null 走默认）
+     * @throws IOException 写入异常
+     */
+    public static void toSql(Appendable out, List<Map<String, Object>> records,
+                             MockSqlOptions options) throws IOException {
         MockSqlOptions opts = options == null ? MockSqlOptions.defaults() : options;
-        StringBuilder sb = new StringBuilder();
+        if (records == null || records.isEmpty()) {
+            return;
+        }
         Map<String, Object> first = records.get(0);
         String[] keys = first.keySet().toArray(new String[0]);
         String table = quoteIdentifier(opts.getTableName(), opts.getQuote());
         if (opts.isCreateTable()) {
-            sb.append("-- 表结构");
-            sb.append('\n');
-            sb.append("CREATE TABLE ");
-            sb.append(table);
-            sb.append(" (");
-            sb.append('\n');
+            out.append("-- 表结构");
+            out.append('\n');
+            out.append("CREATE TABLE ");
+            out.append(table);
+            out.append(" (");
+            out.append('\n');
             for (int i = 0; i < keys.length; i++) {
-                sb.append("  ");
-                sb.append(quoteIdentifier(keys[i], opts.getQuote()));
-                sb.append(' ');
-                sb.append(columnType(first.get(keys[i]), opts.getTypeMode()));
+                out.append("  ");
+                out.append(quoteIdentifier(keys[i], opts.getQuote()));
+                out.append(' ');
+                out.append(columnType(first.get(keys[i]), opts.getTypeMode()));
                 if (i < keys.length - 1) {
-                    sb.append(',');
+                    out.append(',');
                 }
-                sb.append('\n');
+                out.append('\n');
             }
-            sb.append(");");
-            sb.append('\n');
-            sb.append('\n');
+            out.append(");");
+            out.append('\n');
+            out.append('\n');
         }
-        sb.append("-- 数据插入");
-        sb.append('\n');
+        out.append("-- 数据插入");
+        out.append('\n');
         if (opts.isBatch()) {
-            sb.append("INSERT INTO ");
-            sb.append(table);
-            sb.append(" (");
+            out.append("INSERT INTO ");
+            out.append(table);
+            out.append(" (");
             for (int i = 0; i < keys.length; i++) {
-                sb.append(quoteIdentifier(keys[i], opts.getQuote()));
+                out.append(quoteIdentifier(keys[i], opts.getQuote()));
                 if (i < keys.length - 1) {
-                    sb.append(", ");
+                    out.append(", ");
                 }
             }
-            sb.append(") VALUES");
-            sb.append('\n');
+            out.append(") VALUES");
+            out.append('\n');
             for (int r = 0; r < records.size(); r++) {
-                sb.append('(');
+                out.append('(');
                 Map<String, Object> record = records.get(r);
                 for (int i = 0; i < keys.length; i++) {
-                    sb.append(valueToSql(record.get(keys[i])));
+                    out.append(valueToSql(record.get(keys[i])));
                     if (i < keys.length - 1) {
-                        sb.append(", ");
+                        out.append(", ");
                     }
                 }
-                sb.append(r < records.size() - 1 ? ")," : ");");
-                sb.append('\n');
+                out.append(r < records.size() - 1 ? ")," : ");");
+                out.append('\n');
             }
         } else {
             for (Map<String, Object> record : records) {
-                sb.append("INSERT INTO ");
-                sb.append(table);
-                sb.append(" (");
+                out.append("INSERT INTO ");
+                out.append(table);
+                out.append(" (");
                 for (int i = 0; i < keys.length; i++) {
-                    sb.append(quoteIdentifier(keys[i], opts.getQuote()));
+                    out.append(quoteIdentifier(keys[i], opts.getQuote()));
                     if (i < keys.length - 1) {
-                        sb.append(", ");
+                        out.append(", ");
                     }
                 }
-                sb.append(") VALUES (");
+                out.append(") VALUES (");
                 for (int i = 0; i < keys.length; i++) {
-                    sb.append(valueToSql(record.get(keys[i])));
+                    out.append(valueToSql(record.get(keys[i])));
                     if (i < keys.length - 1) {
-                        sb.append(", ");
+                        out.append(", ");
                     }
                 }
-                sb.append(");");
-                sb.append('\n');
+                out.append(");");
+                out.append('\n');
             }
         }
-        return sb.toString();
     }
 
     /**
@@ -408,7 +532,7 @@ public class MockDataFormatter {
      * @param quote      引号方式
      * @return 包裹后的标识符
      */
-    private static String quoteIdentifier(String identifier, MockSqlOptions.Quote quote) {
+    static String quoteIdentifier(String identifier, MockSqlOptions.Quote quote) {
         if (quote == null) {
             return identifier;
         }
@@ -429,7 +553,7 @@ public class MockDataFormatter {
      * @param mode  类型模式
      * @return SQL 列类型
      */
-    private static String columnType(Object value, MockSqlOptions.TypeMode mode) {
+    static String columnType(Object value, MockSqlOptions.TypeMode mode) {
         if (mode == MockSqlOptions.TypeMode.VARCHAR) {
             return "VARCHAR(255)";
         }
@@ -457,46 +581,73 @@ public class MockDataFormatter {
      * @return XML 字符串
      */
     public static String toXml(List<Map<String, Object>> records) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
-        sb.append('\n');
-        sb.append("<data>");
-        sb.append('\n');
+        StringWriter sw = new StringWriter();
+        try {
+            toXml(sw, records);
+        } catch (IOException e) {
+            throw new IllegalStateException("StringWriter should not throw", e);
+        }
+        return sw.toString();
+    }
+
+    /**
+     * 将记录列表流式输出为 XML。
+     *
+     * @param out     输出目标
+     * @param records 记录列表
+     * @throws IOException 写入异常
+     */
+    public static void toXml(Appendable out, List<Map<String, Object>> records) throws IOException {
+        if (records == null || records.isEmpty()) {
+            return;
+        }
+        out.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
+        out.append('\n');
+        out.append("<data>");
+        out.append('\n');
         for (int i = 0; i < records.size(); i++) {
             Map<String, Object> record = records.get(i);
-            sb.append("  <item id=\"");
-            sb.append(i + 1);
-            sb.append("\">");
-            sb.append('\n');
+            out.append("  <item id=\"");
+            out.append(String.valueOf(i + 1));
+            out.append("\">");
+            out.append('\n');
             for (Map.Entry<String, Object> entry : record.entrySet()) {
                 String key = entry.getKey();
                 Object value = entry.getValue();
-                sb.append("    <");
-                sb.append(key);
-                sb.append(">");
-                sb.append(escapeXml(value == null ? "" : String.valueOf(value)));
-                sb.append("</");
-                sb.append(key);
-                sb.append(">");
-                sb.append('\n');
+                out.append("    <");
+                out.append(key);
+                out.append(">");
+                out.append(escapeXml(value == null ? "" : String.valueOf(value)));
+                out.append("</");
+                out.append(key);
+                out.append(">");
+                out.append('\n');
             }
-            sb.append("  </item>");
-            sb.append('\n');
+            out.append("  </item>");
+            out.append('\n');
         }
-        sb.append("</data>");
-        return sb.toString();
+        out.append("</data>");
     }
 
-    private static void appendCsvRow(StringBuilder sb, String[] keys,
-                                     Map<String, Object> record, boolean header) {
+    /**
+     * 追加一条 CSV 行。
+     *
+     * @param out     输出目标
+     * @param keys    列顺序
+     * @param record  记录
+     * @param header  是否为表头
+     * @throws IOException 写入异常
+     */
+    static void appendCsvRow(Appendable out, String[] keys,
+                             Map<String, Object> record, boolean header) throws IOException {
         for (int i = 0; i < keys.length; i++) {
             String raw = header ? keys[i] : String.valueOf(record.get(keys[i]));
-            sb.append(escapeCsv(raw));
+            out.append(escapeCsv(raw));
             if (i < keys.length - 1) {
-                sb.append(',');
+                out.append(',');
             }
         }
-        sb.append('\n');
+        out.append('\n');
     }
 
     private static String escapeCsv(String value) {
@@ -510,7 +661,7 @@ public class MockDataFormatter {
         return "\"" + value.replace("\"", "\"\"") + "\"";
     }
 
-    private static String valueToSql(Object value) {
+    static String valueToSql(Object value) {
         if (value == null) {
             return "NULL";
         }
@@ -586,7 +737,7 @@ public class MockDataFormatter {
         return sb.toString();
     }
 
-    private static String escapeXml(String value) {
+    static String escapeXml(String value) {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < value.length(); i++) {
             char c = value.charAt(i);
