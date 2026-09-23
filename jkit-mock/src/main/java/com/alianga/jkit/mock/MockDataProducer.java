@@ -14,6 +14,7 @@ public class MockDataProducer {
     private final MockDataGenerator generator = new MockDataGenerator();
     private final List<MockFieldType> fieldTypes = new ArrayList<MockFieldType>();
     private final List<MockCustomField> customFields = new ArrayList<MockCustomField>();
+    private MockSqlOptions sqlOptions = MockSqlOptions.defaults();
     private int count = 10;
 
     /**
@@ -109,6 +110,22 @@ public class MockDataProducer {
      * @return 格式化后的字符串
      */
     public String format(MockOutputFormat format) {
+        if (format == MockOutputFormat.SQL) {
+            return MockDataFormatter.toSql(generate(), sqlOptions);
+        }
         return MockDataFormatter.format(generate(), format);
+    }
+
+    /**
+     * 设置 SQL 输出选项（仅 SQL 格式生效）。
+     *
+     * @param sqlOptions SQL 选项
+     * @return 当前对象，便于链式调用
+     */
+    public MockDataProducer setSqlOptions(MockSqlOptions sqlOptions) {
+        if (sqlOptions != null) {
+            this.sqlOptions = sqlOptions;
+        }
+        return this;
     }
 }

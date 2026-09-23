@@ -13,8 +13,6 @@ import java.util.Map;
  * @author 郑明亮
  */
 public class MockDataFormatter {
-    private static final String TABLE_NAME = "fake_data";
-
     private MockDataFormatter() {
         throw new UnsupportedOperationException("you can not instantiate me !");
     }
@@ -309,56 +307,147 @@ public class MockDataFormatter {
     }
 
     /**
-     * 将记录列表输出为 SQL INSERT。
+     * 将记录列表输出为 SQL INSERT（默认选项：自动类型、逐条、不加引号、含建表）。
      *
      * @param records 记录列表
      * @return SQL 字符串
      */
     public static String toSql(List<Map<String, Object>> records) {
+        return toSql(records, MockSqlOptions.defaults());
+    }
+
+    /**
+     * 按选项将记录列表输出为 SQL INSERT。
+     *
+     * @param records 记录列表
+     * @param options SQL 选项（null 走默认）
+     * @return SQL 字符串
+     */
+    public static String toSql(List<Map<String, Object>> records, MockSqlOptions options) {
+        MockSqlOptions opts = options == null ? MockSqlOptions.defaults() : options;
         StringBuilder sb = new StringBuilder();
         Map<String, Object> first = records.get(0);
         String[] keys = first.keySet().toArray(new String[0]);
-        sb.append("-- 表结构");
-        sb.append('\n');
-        sb.append("CREATE TABLE ");
-        sb.append(TABLE_NAME);
-        sb.append(" (");
-        sb.append('\n');
-        for (int i = 0; i < keys.length; i++) {
-            sb.append("  ");
-            sb.append(keys[i]);
-            sb.append(" VARCHAR(255)");
-            if (i < keys.length - 1) {
-                sb.append(',');
-            }
+        String table = quoteIdentifier(opts.getTableName(), opts.getQuote());
+        if (opts.isCreateTable()) {
+            sb.append("-- 表结构");
             sb.append('\n');
-        }
-        sb.append(");");
-        sb.append('\n');
-        sb.append('\n');
-        sb.append("-- 数据插入");
-        sb.append('\n');
-        for (Map<String, Object> record : records) {
-            sb.append("INSERT INTO ");
-            sb.append(TABLE_NAME);
+            sb.append("CREATE TABLE ");
+            sb.append(table);
             sb.append(" (");
+            sb.append('\n');
             for (int i = 0; i < keys.length; i++) {
-                sb.append(keys[i]);
+                sb.append("  ");
+                sb.append(quoteIdentifier(keys[i], opts.getQuote()));
+                sb.append(' ');
+                sb.append(columnType(first.get(keys[i]), opts.getTypeMode()));
                 if (i < keys.length - 1) {
-                    sb.append(", ");
+                    sb.append(',');
                 }
-            }
-            sb.append(") VALUES (");
-            for (int i = 0; i < keys.length; i++) {
-                sb.append(valueToSql(record.get(keys[i])));
-                if (i < keys.length - 1) {
-                    sb.append(", ");
-                }
+                sb.append('\n');
             }
             sb.append(");");
             sb.append('\n');
+            sb.append('\n');
+        }
+        sb.append("-- 数据插入");
+        sb.append('\n');
+        if (opts.isBatch()) {
+            sb.append("INSERT INTO ");
+            sb.append(table);
+            sb.append(" (");
+            for (int i = 0; i < keys.length; i++) {
+                sb.append(quoteIdentifier(keys[i], opts.getQuote()));
+                if (i < keys.length - 1) {
+                    sb.append(", ");
+                }
+            }
+            sb.append(") VALUES");
+            sb.append('\n');
+            for (int r = 0; r < records.size(); r++) {
+                sb.append('(');
+                Map<String, Object> record = records.get(r);
+                for (int i = 0; i < keys.length; i++) {
+                    sb.append(valueToSql(record.get(keys[i])));
+                    if (i < keys.length - 1) {
+                        sb.append(", ");
+                    }
+                }
+                sb.append(r < records.size() - 1 ? ")," : ");");
+                sb.append('\n');
+            }
+        } else {
+            for (Map<String, Object> record : records) {
+                sb.append("INSERT INTO ");
+                sb.append(table);
+                sb.append(" (");
+                for (int i = 0; i < keys.length; i++) {
+                    sb.append(quoteIdentifier(keys[i], opts.getQuote()));
+                    if (i < keys.length - 1) {
+                        sb.append(", ");
+                    }
+                }
+                sb.append(") VALUES (");
+                for (int i = 0; i < keys.length; i++) {
+                    sb.append(valueToSql(record.get(keys[i])));
+                    if (i < keys.length - 1) {
+                        sb.append(", ");
+                    }
+                }
+                sb.append(");");
+                sb.append('\n');
+            }
         }
         return sb.toString();
+    }
+
+    /**
+     * 按引号方式包裹标识符。
+     *
+     * @param identifier 标识符
+     * @param quote      引号方式
+     * @return 包裹后的标识符
+     */
+    private static String quoteIdentifier(String identifier, MockSqlOptions.Quote quote) {
+        if (quote == null) {
+            return identifier;
+        }
+        switch (quote) {
+            case BACKTICK:
+                return "`" + identifier + "`";
+            case DOUBLE_QUOTE:
+                return "\"" + identifier + "\"";
+            default:
+                return identifier;
+        }
+    }
+
+    /**
+     * 按类型模式推断列类型。
+     *
+     * @param value 首条记录中该列的值
+     * @param mode  类型模式
+     * @return SQL 列类型
+     */
+    private static String columnType(Object value, MockSqlOptions.TypeMode mode) {
+        if (mode == MockSqlOptions.TypeMode.VARCHAR) {
+            return "VARCHAR(255)";
+        }
+        if (mode == MockSqlOptions.TypeMode.TEXT) {
+            return "TEXT";
+        }
+        if (value instanceof Byte || value instanceof Short || value instanceof Integer
+                || value instanceof Long) {
+            return "BIGINT";
+        }
+        if (value instanceof Float || value instanceof Double
+                || value instanceof java.math.BigDecimal) {
+            return "DOUBLE";
+        }
+        if (value instanceof Boolean) {
+            return "BOOLEAN";
+        }
+        return "VARCHAR(255)";
     }
 
     /**
