@@ -23,13 +23,54 @@ public final class MockValid {
     }
 
     /**
-     * 按模板校验真实数据。
+     * 校验进度回调：驱动进度条，并支持中途取消。
+     */
+    public interface Progress {
+        /**
+         * 汇报校验进度。
+         *
+         * @param total   总条数（未知时为 -1）
+         * @param current 已校验条数
+         * @return {@code true} 继续校验；{@code false} 取消校验
+         */
+        boolean tick(long total, long current);
+    }
+
+    /** 永不取消、不汇报的默认回调，供同步 {@link #valid(String, Object)} 复用。 */
+    private static final Progress CONTINUE = new Progress() {
+        @Override
+        public boolean tick(long total, long current) {
+            return true;
+        }
+    };
+
+    /**
+     * 按模板校验真实数据（同步、不可取消）。
      *
      * @param template 数据模板
      * @param data     待校验的数据（JSON 字符串或已解析对象）
      * @return 问题列表，为空表示校验通过
      */
     public static List<String> valid(String template, Object data) {
+        return valid(template, data, CONTINUE);
+    }
+
+    /**
+     * 按模板校验真实数据，并在遍历过程中回调 {@link Progress}（可用于进度展示与取消）。
+     *
+     * <p>当 {@code data} 是惰性结构（例如 {@link MockRepeat}）时，本方法逐条取数并校验，
+     * 不会把全部记录同时压在内存里；数组遍历每处理若干条调用一次 {@code progress.tick}，
+     * 返回 {@code false} 即提前结束。</p>
+     *
+     * @param template 数据模板
+     * @param data     待校验的数据（JSON 字符串或已解析对象）
+     * @param progress 进度回调（{@code null} 视为 {@link #CONTINUE}）
+     * @return 问题列表，为空表示校验通过
+     */
+    public static List<String> valid(String template, Object data, Progress progress) {
+        if (progress == null) {
+            progress = CONTINUE;
+        }
         Object parsed = data;
         if (data instanceof String) {
             String text = ((String) data).trim();
@@ -45,7 +86,7 @@ public final class MockValid {
             }
         }
         List<String> problems = new ArrayList<String>();
-        walk(tpl, parsed, "ROOT", problems);
+        walk(tpl, parsed, "ROOT", problems, progress);
         return problems;
     }
 
@@ -98,7 +139,7 @@ public final class MockValid {
     }
 
     @SuppressWarnings("unchecked")
-    private static void walk(Object template, Object data, String path, List<String> problems) {
+    private static void walk(Object template, Object data, String path, List<String> problems, Progress progress) {
         if (template == null) {
             return;
         }
@@ -116,22 +157,57 @@ public final class MockValid {
                     problems.add(child + " 缺少属性");
                     continue;
                 }
-                checkRule(unwrapPickOne(entry.getValue(), rule), rule,
-                        dataMap.get(rule.getName()), child, problems);
+                Object tplVal = unwrapPickOne(entry.getValue(), rule);
+                Object dataVal = dataMap.get(rule.getName());
+                checkRule(tplVal, rule, dataVal, child, problems);
+                // 数组属性：进一步逐元素递归，既校验每条记录，也在遍历过程中回报进度 / 支持取消
+                if (tplVal instanceof List && dataVal instanceof Iterable && !(dataVal instanceof Map)) {
+                    walk(tplVal, dataVal, child, problems, progress);
+                }
             }
             return;
         }
         if (template instanceof List) {
-            if (!(data instanceof List)) {
+            if (data instanceof Map) {
                 problems.add(path + " 期望数组，实际为 " + typeName(data));
                 return;
             }
             List<Object> tplList = (List<Object>) template;
-            List<Object> dataList = (List<Object>) data;
-            if (!tplList.isEmpty()) {
+            if (tplList.isEmpty()) {
+                return;
+            }
+            Object tplItem = tplList.get(0);
+            if (data instanceof List) {
+                List<Object> dataList = (List<Object>) data;
+                long total = dataList.size();
                 for (int i = 0; i < dataList.size(); i++) {
-                    walk(tplList.get(0), dataList.get(i), path + "[" + i + "]", problems);
+                    walk(tplItem, dataList.get(i), path + "[" + i + "]", problems, progress);
+                    if ((i & 1023) == 0 && !progress.tick(total, (long) i + 1)) {
+                        return;
+                    }
                 }
+            } else if (data instanceof MockRepeat) {
+                MockRepeat mr = (MockRepeat) data;
+                long total = mr.size();
+                long i = 0;
+                for (Object el : mr) {
+                    walk(tplItem, el, path + "[" + i + "]", problems, progress);
+                    i++;
+                    if ((i & 1023) == 0 && !progress.tick(total, i)) {
+                        return;
+                    }
+                }
+            } else if (data instanceof Iterable) {
+                long i = 0;
+                for (Object el : (Iterable<Object>) data) {
+                    walk(tplItem, el, path + "[" + i + "]", problems, progress);
+                    i++;
+                    if ((i & 1023) == 0 && !progress.tick(-1L, i)) {
+                        return;
+                    }
+                }
+            } else if (data != null) {
+                problems.add(path + " 期望数组，实际为 " + typeName(data));
             }
             return;
         }
@@ -160,8 +236,8 @@ public final class MockValid {
         if (min == null && max == null) {
             return;
         }
-        if (data instanceof List) {
-            int size = ((List<?>) data).size();
+        if (data instanceof List || data instanceof MockRepeat) {
+            int size = data instanceof List ? ((List<?>) data).size() : ((MockRepeat) data).size();
             int unit = template instanceof List ? ((List<?>) template).size() : 1;
             if (unit < 1) {
                 unit = 1;
@@ -228,8 +304,14 @@ public final class MockValid {
         if (value instanceof List) {
             return "array";
         }
+        if (value instanceof MockRepeat) {
+            return "array";
+        }
         if (value instanceof Map) {
             return "object";
+        }
+        if (value instanceof Iterable) {
+            return "array";
         }
         return "unknown";
     }
