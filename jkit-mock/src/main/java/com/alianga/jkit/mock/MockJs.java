@@ -43,8 +43,14 @@ public class MockJs {
     private static final Pattern REGEX_VALUE = Pattern.compile("^/(.+)/[gimsuy]*$");
     private static final Pattern REGEX_META = Pattern.compile("[\\\\\\[\\](){}+*?|^$]");
 
+    /**
+     * 重复次数达到该值、且开启流式时，数组改为惰性生成。
+     */
+    private static final int STREAM_REPEAT_THRESHOLD = 1000;
+
     private final MockRandom random;
     private final Map<Object, Integer> orderIndex = new IdentityHashMap<Object, Integer>();
+    private boolean streaming;
 
     /**
      * 默认构造。
@@ -262,6 +268,9 @@ public class MockJs {
             return random.pick(expanded);
         }
         int count = rule.getCount() == null ? 1 : rule.getCount();
+        if (streaming && count >= STREAM_REPEAT_THRESHOLD) {
+            return new MockRepeat(this, template, count);
+        }
         for (int i = 0; i < count; i++) {
             for (int j = 0; j < template.size(); j++) {
                 result.add(gen(template.get(j), String.valueOf(j)));
@@ -311,6 +320,14 @@ public class MockJs {
             }
             if (sb.length() == 0) {
                 return Double.parseDouble(integerPart);
+            }
+            if (rule.hasRange() && rule.getMax() != null
+                    && Long.parseLong(integerPart) >= rule.getMax()) {
+                // 整数部分已取到上界，小数必须归零，否则 999.25 会超出模板声明的范围
+                sb.setLength(0);
+                for (int i = 0; i < dcount; i++) {
+                    sb.append('0');
+                }
             }
             return Double.parseDouble(integerPart + "." + sb);
         }
@@ -501,6 +518,29 @@ public class MockJs {
     public void reset() {
         orderIndex.clear();
         random.resetIncrement();
+    }
+
+    /**
+     * 是否开启流式生成。
+     *
+     * <p>开启后，重复次数达到 {@link #STREAM_REPEAT_THRESHOLD} 的数组不再一次性展开成
+     * {@code List}，而是返回 {@link MockRepeat} 惰性生成，配合
+     * {@link MockDataFormatter#formatTo(Appendable, Object, MockOutputFormat, MockSqlOptions)}
+     * 可以边生成边输出，把内存占用从「随条数线性增长」降到常量级。</p>
+     *
+     * @return true 表示流式
+     */
+    public boolean isStreaming() {
+        return streaming;
+    }
+
+    /**
+     * 设置是否开启流式生成。
+     *
+     * @param streaming true 表示流式
+     */
+    public void setStreaming(boolean streaming) {
+        this.streaming = streaming;
     }
 
     /**

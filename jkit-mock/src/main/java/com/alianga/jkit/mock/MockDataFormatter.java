@@ -5,6 +5,7 @@ import com.alianga.jkit.json.JSON;
 import java.io.IOException;
 import java.io.StringWriter;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -96,19 +97,15 @@ public class MockDataFormatter {
             writeJson(data, out, 0);
             return;
         }
-        List<Map<String, Object>> rows = toRows(data);
-        if (rows.isEmpty()) {
-            return;
-        }
         switch (format) {
             case CSV:
-                toCsv(out, rows);
+                writeCsv(out, data);
                 break;
             case SQL:
-                toSql(out, rows, options);
+                writeSql(out, data, options);
                 break;
             case XML:
-                toXml(out, rows);
+                writeXml(out, data);
                 break;
             default:
                 writeJson(data, out, 0);
@@ -150,6 +147,10 @@ public class MockDataFormatter {
         }
         if (value instanceof Map) {
             writeMap((Map<?, ?>) value, out, depth);
+            return;
+        }
+        if (value instanceof MockRepeat) {
+            writeRepeat((MockRepeat) value, out, depth);
             return;
         }
         if (value instanceof List) {
@@ -215,6 +216,32 @@ public class MockDataFormatter {
         out.append(']');
     }
 
+    /**
+     * 流式写出惰性数组：逐条生成、逐条写出，不缓存元素。
+     *
+     * @param repeat 惰性数组
+     * @param out    输出目标
+     * @param depth  当前缩进层级
+     * @throws IOException 写入异常
+     */
+    private static void writeRepeat(MockRepeat repeat, Appendable out, int depth) throws IOException {
+        if (repeat.isEmpty()) {
+            out.append("[]");
+            return;
+        }
+        out.append('[');
+        int i = 0;
+        for (Object item : repeat) {
+            out.append(i == 0 ? "\n" : ",\n");
+            indent(out, depth + 1);
+            writeJson(item, out, depth + 1);
+            i++;
+        }
+        out.append('\n');
+        indent(out, depth);
+        out.append(']');
+    }
+
     private static void indent(Appendable out, int depth) throws IOException {
         for (int i = 0; i < depth; i++) {
             out.append("  ");
@@ -266,6 +293,13 @@ public class MockDataFormatter {
      */
     @SuppressWarnings("unchecked")
     public static List<Map<String, Object>> toRows(Object data) {
+        if (data instanceof MockRepeat) {
+            List<Map<String, Object>> rows = new ArrayList<Map<String, Object>>();
+            for (Object item : (MockRepeat) data) {
+                rows.add(asRow(item));
+            }
+            return rows;
+        }
         if (data instanceof List) {
             List<Map<String, Object>> rows = new ArrayList<Map<String, Object>>();
             for (Object item : (List<Object>) data) {
@@ -304,20 +338,323 @@ public class MockDataFormatter {
      */
     @SuppressWarnings("unchecked")
     private static List<Map<String, Object>> longestList(Map<String, Object> map) {
-        List<Map<String, Object>> best = null;
+        Object best = null;
+        int bestSize = -1;
         for (Object value : map.values()) {
-            if (!(value instanceof List) || ((List<Object>) value).isEmpty()) {
+            int size = rowSourceSize(value);
+            if (size <= 0) {
                 continue;
             }
-            if (!(((List<Object>) value).get(0) instanceof Map)) {
-                continue;
-            }
-            List<Map<String, Object>> rows = toRows(value);
-            if (best == null || rows.size() > best.size()) {
-                best = rows;
+            if (best == null || size > bestSize) {
+                best = value;
+                bestSize = size;
             }
         }
-        return best;
+        return best == null ? null : toRows(best);
+    }
+
+    /**
+     * 判断一个值能否作为「记录集合」，并返回其条数；不能则返回 0。
+     *
+     * @param value 待判断的值
+     * @return 记录条数，0 表示不是记录集合或为空
+     */
+    @SuppressWarnings("unchecked")
+    private static int rowSourceSize(Object value) {
+        if (value instanceof MockRepeat) {
+            MockRepeat repeat = (MockRepeat) value;
+            return repeat.isEmpty() ? 0 : repeat.size();
+        }
+        if (value instanceof List) {
+            List<Object> list = (List<Object>) value;
+            if (list.isEmpty() || !(list.get(0) instanceof Map)) {
+                return 0;
+            }
+            return list.size();
+        }
+        return 0;
+    }
+
+    /**
+     * 把单个元素包成记录：本身是 Map 直接返回，否则包成 {@code value} 单列。
+     *
+     * @param item 元素
+     * @return 记录
+     */
+    private static Map<String, Object> asRow(Object item) {
+        if (item instanceof Map) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> row = (Map<String, Object>) item;
+            return row;
+        }
+        Map<String, Object> row = new LinkedHashMap<String, Object>();
+        row.put("value", item);
+        return row;
+    }
+
+    /**
+     * 统计记录条数，惰性数组不会因此被展开生成。
+     *
+     * @param data 任意数据
+     * @return 记录条数
+     */
+    public static int rowCount(Object data) {
+        if (data == null) {
+            return 0;
+        }
+        if (data instanceof MockRepeat) {
+            return ((MockRepeat) data).size();
+        }
+        if (data instanceof List) {
+            return ((List<?>) data).size();
+        }
+        if (data instanceof Map) {
+            int best = 0;
+            for (Object value : ((Map<?, ?>) data).values()) {
+                int size = rowSourceSize(value);
+                if (size > best) {
+                    best = size;
+                }
+            }
+            return best > 0 ? best : 1;
+        }
+        return 1;
+    }
+
+    /**
+     * 行消费器，用于逐行流式处理记录。
+     *
+     * <p>与 {@link #toRows(Object)} 不同，消费器不会把全部记录攒进内存，
+     * 生成一条消费一条，因此十万级数据也能保持常量内存。</p>
+     */
+    public interface RowConsumer {
+        /**
+         * 处理一行记录。
+         *
+         * @param row   记录
+         * @param index 从 0 开始的行号
+         * @param last  是否为最后一行（SQL 批量模式靠它决定行尾是逗号还是分号）
+         * @throws IOException 写入异常
+         */
+        void accept(Map<String, Object> row, int index, boolean last) throws IOException;
+    }
+
+    /**
+     * 逐行消费任意结构的数据，全程不缓存记录。
+     *
+     * <p>取值规则与 {@link #toRows(Object)} 一致：对象数组逐条、惰性数组逐条生成、
+     * 对象取内部最长的记录集合、其余包成 {@code value} 单列。</p>
+     *
+     * @param data     任意数据
+     * @param consumer 行消费器
+     * @throws IOException 写入异常
+     */
+    @SuppressWarnings("unchecked")
+    public static void forEachRow(Object data, RowConsumer consumer) throws IOException {
+        if (data == null) {
+            return;
+        }
+        Object source = null;
+        if (data instanceof List || data instanceof MockRepeat) {
+            source = data;
+        } else if (data instanceof Map) {
+            Object best = null;
+            int bestSize = -1;
+            for (Object value : ((Map<String, Object>) data).values()) {
+                int size = rowSourceSize(value);
+                if (size > bestSize) {
+                    best = value;
+                    bestSize = size;
+                }
+            }
+            source = bestSize > 0 ? best : null;
+        }
+        if (source == null) {
+            consumer.accept(asRow(data), 0, true);
+            return;
+        }
+        int total = source instanceof MockRepeat
+                ? ((MockRepeat) source).size()
+                : ((List<Object>) source).size();
+        int index = 0;
+        Iterator<Object> it = source instanceof MockRepeat
+                ? ((MockRepeat) source).iterator()
+                : ((List<Object>) source).iterator();
+        while (it.hasNext()) {
+            consumer.accept(asRow(it.next()), index, index == total - 1);
+            index++;
+        }
+    }
+
+    /**
+     * 将任意结构流式输出为 CSV。
+     *
+     * @param out  输出目标
+     * @param data 任意数据
+     * @throws IOException 写入异常
+     */
+    public static void writeCsv(Appendable out, Object data) throws IOException {
+        final String[][] keys = new String[1][];
+        forEachRow(data, new RowConsumer() {
+            @Override
+            public void accept(Map<String, Object> row, int index, boolean last) throws IOException {
+                if (index == 0) {
+                    keys[0] = row.keySet().toArray(new String[0]);
+                    appendCsvRow(out, keys[0], row, true);
+                }
+                appendCsvRow(out, keys[0], row, false);
+            }
+        });
+    }
+
+    /**
+     * 将任意结构按选项流式输出为 SQL INSERT。
+     *
+     * @param out     输出目标
+     * @param data    任意数据
+     * @param options SQL 选项（null 走默认）
+     * @throws IOException 写入异常
+     */
+    public static void writeSql(Appendable out, Object data, MockSqlOptions options)
+            throws IOException {
+        final MockSqlOptions opts = options == null ? MockSqlOptions.defaults() : options;
+        final String[][] keys = new String[1][];
+        final String table = quoteIdentifier(opts.getTableName(), opts.getQuote());
+        forEachRow(data, new RowConsumer() {
+            @Override
+            public void accept(Map<String, Object> row, int index, boolean last) throws IOException {
+                if (index == 0) {
+                    keys[0] = row.keySet().toArray(new String[0]);
+                    if (opts.isCreateTable()) {
+                        appendCreateTable(out, table, keys[0], row, opts);
+                    }
+                    out.append("-- 数据插入");
+                    out.append('\n');
+                    if (opts.isBatch()) {
+                        out.append("INSERT INTO ");
+                        out.append(table);
+                        out.append(" (");
+                        for (int i = 0; i < keys[0].length; i++) {
+                            out.append(quoteIdentifier(keys[0][i], opts.getQuote()));
+                            if (i < keys[0].length - 1) {
+                                out.append(", ");
+                            }
+                        }
+                        out.append(") VALUES");
+                        out.append('\n');
+                    }
+                }
+                if (opts.isBatch()) {
+                    out.append('(');
+                    for (int i = 0; i < keys[0].length; i++) {
+                        out.append(valueToSql(row.get(keys[0][i])));
+                        if (i < keys[0].length - 1) {
+                            out.append(", ");
+                        }
+                    }
+                    out.append(last ? ");" : "),");
+                    out.append('\n');
+                    return;
+                }
+                out.append("INSERT INTO ");
+                out.append(table);
+                out.append(" (");
+                for (int i = 0; i < keys[0].length; i++) {
+                    out.append(quoteIdentifier(keys[0][i], opts.getQuote()));
+                    if (i < keys[0].length - 1) {
+                        out.append(", ");
+                    }
+                }
+                out.append(") VALUES (");
+                for (int i = 0; i < keys[0].length; i++) {
+                    out.append(valueToSql(row.get(keys[0][i])));
+                    if (i < keys[0].length - 1) {
+                        out.append(", ");
+                    }
+                }
+                out.append(");");
+                out.append('\n');
+            }
+        });
+    }
+
+    /**
+     * 输出建表语句，列类型按首行记录推断。
+     *
+     * @param out   输出目标
+     * @param table 表名（已按引号方式包裹）
+     * @param keys  列名
+     * @param first 首行记录
+     * @param opts  SQL 选项
+     * @throws IOException 写入异常
+     */
+    private static void appendCreateTable(Appendable out, String table, String[] keys,
+                                          Map<String, Object> first, MockSqlOptions opts)
+            throws IOException {
+        out.append("-- 表结构");
+        out.append('\n');
+        out.append("CREATE TABLE ");
+        out.append(table);
+        out.append(" (");
+        out.append('\n');
+        for (int i = 0; i < keys.length; i++) {
+            out.append("  ");
+            out.append(quoteIdentifier(keys[i], opts.getQuote()));
+            out.append(' ');
+            out.append(columnType(first.get(keys[i]), opts.getTypeMode()));
+            if (i < keys.length - 1) {
+                out.append(',');
+            }
+            out.append('\n');
+        }
+        out.append(");");
+        out.append('\n');
+        out.append('\n');
+    }
+
+    /**
+     * 将任意结构流式输出为 XML。
+     *
+     * @param out  输出目标
+     * @param data 任意数据
+     * @throws IOException 写入异常
+     */
+    public static void writeXml(Appendable out, Object data) throws IOException {
+        if (data == null) {
+            return;
+        }
+        if ((data instanceof List && ((List<?>) data).isEmpty())
+                || (data instanceof MockRepeat && ((MockRepeat) data).isEmpty())) {
+            return;
+        }
+        out.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
+        out.append('\n');
+        out.append("<data>");
+        out.append('\n');
+        forEachRow(data, new RowConsumer() {
+            @Override
+            public void accept(Map<String, Object> row, int index, boolean last) throws IOException {
+                out.append("  <item id=\"");
+                out.append(String.valueOf(index + 1));
+                out.append("\">");
+                out.append('\n');
+                for (Map.Entry<String, Object> entry : row.entrySet()) {
+                    String key = entry.getKey();
+                    Object value = entry.getValue();
+                    out.append("    <");
+                    out.append(key);
+                    out.append(">");
+                    out.append(escapeXml(value == null ? "" : String.valueOf(value)));
+                    out.append("</");
+                    out.append(key);
+                    out.append(">");
+                    out.append('\n');
+                }
+                out.append("  </item>");
+                out.append('\n');
+            }
+        });
+        out.append("</data>");
     }
 
     /**
@@ -399,15 +736,7 @@ public class MockDataFormatter {
      * @throws IOException 写入异常
      */
     public static void toCsv(Appendable out, List<Map<String, Object>> records) throws IOException {
-        if (records == null || records.isEmpty()) {
-            return;
-        }
-        Map<String, Object> first = records.get(0);
-        String[] keys = first.keySet().toArray(new String[0]);
-        appendCsvRow(out, keys, first, true);
-        for (Map<String, Object> record : records) {
-            appendCsvRow(out, keys, record, false);
-        }
+        writeCsv(out, records);
     }
 
     /**
@@ -447,82 +776,7 @@ public class MockDataFormatter {
      */
     public static void toSql(Appendable out, List<Map<String, Object>> records,
                              MockSqlOptions options) throws IOException {
-        MockSqlOptions opts = options == null ? MockSqlOptions.defaults() : options;
-        if (records == null || records.isEmpty()) {
-            return;
-        }
-        Map<String, Object> first = records.get(0);
-        String[] keys = first.keySet().toArray(new String[0]);
-        String table = quoteIdentifier(opts.getTableName(), opts.getQuote());
-        if (opts.isCreateTable()) {
-            out.append("-- 表结构");
-            out.append('\n');
-            out.append("CREATE TABLE ");
-            out.append(table);
-            out.append(" (");
-            out.append('\n');
-            for (int i = 0; i < keys.length; i++) {
-                out.append("  ");
-                out.append(quoteIdentifier(keys[i], opts.getQuote()));
-                out.append(' ');
-                out.append(columnType(first.get(keys[i]), opts.getTypeMode()));
-                if (i < keys.length - 1) {
-                    out.append(',');
-                }
-                out.append('\n');
-            }
-            out.append(");");
-            out.append('\n');
-            out.append('\n');
-        }
-        out.append("-- 数据插入");
-        out.append('\n');
-        if (opts.isBatch()) {
-            out.append("INSERT INTO ");
-            out.append(table);
-            out.append(" (");
-            for (int i = 0; i < keys.length; i++) {
-                out.append(quoteIdentifier(keys[i], opts.getQuote()));
-                if (i < keys.length - 1) {
-                    out.append(", ");
-                }
-            }
-            out.append(") VALUES");
-            out.append('\n');
-            for (int r = 0; r < records.size(); r++) {
-                out.append('(');
-                Map<String, Object> record = records.get(r);
-                for (int i = 0; i < keys.length; i++) {
-                    out.append(valueToSql(record.get(keys[i])));
-                    if (i < keys.length - 1) {
-                        out.append(", ");
-                    }
-                }
-                out.append(r < records.size() - 1 ? ")," : ");");
-                out.append('\n');
-            }
-        } else {
-            for (Map<String, Object> record : records) {
-                out.append("INSERT INTO ");
-                out.append(table);
-                out.append(" (");
-                for (int i = 0; i < keys.length; i++) {
-                    out.append(quoteIdentifier(keys[i], opts.getQuote()));
-                    if (i < keys.length - 1) {
-                        out.append(", ");
-                    }
-                }
-                out.append(") VALUES (");
-                for (int i = 0; i < keys.length; i++) {
-                    out.append(valueToSql(record.get(keys[i])));
-                    if (i < keys.length - 1) {
-                        out.append(", ");
-                    }
-                }
-                out.append(");");
-                out.append('\n');
-            }
-        }
+        writeSql(out, records, options);
     }
 
     /**
@@ -598,46 +852,9 @@ public class MockDataFormatter {
      * @throws IOException 写入异常
      */
     public static void toXml(Appendable out, List<Map<String, Object>> records) throws IOException {
-        if (records == null || records.isEmpty()) {
-            return;
-        }
-        out.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
-        out.append('\n');
-        out.append("<data>");
-        out.append('\n');
-        for (int i = 0; i < records.size(); i++) {
-            Map<String, Object> record = records.get(i);
-            out.append("  <item id=\"");
-            out.append(String.valueOf(i + 1));
-            out.append("\">");
-            out.append('\n');
-            for (Map.Entry<String, Object> entry : record.entrySet()) {
-                String key = entry.getKey();
-                Object value = entry.getValue();
-                out.append("    <");
-                out.append(key);
-                out.append(">");
-                out.append(escapeXml(value == null ? "" : String.valueOf(value)));
-                out.append("</");
-                out.append(key);
-                out.append(">");
-                out.append('\n');
-            }
-            out.append("  </item>");
-            out.append('\n');
-        }
-        out.append("</data>");
+        writeXml(out, records);
     }
 
-    /**
-     * 追加一条 CSV 行。
-     *
-     * @param out     输出目标
-     * @param keys    列顺序
-     * @param record  记录
-     * @param header  是否为表头
-     * @throws IOException 写入异常
-     */
     static void appendCsvRow(Appendable out, String[] keys,
                              Map<String, Object> record, boolean header) throws IOException {
         for (int i = 0; i < keys.length; i++) {
