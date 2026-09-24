@@ -42,6 +42,66 @@ public class MockSchemaTest {
     }
 
     @Test
+    public void testOnlyMinimumOrOnlyMaximumDerivesOtherBound() {
+        // 只给 minimum：不得恒等于下界，且应在 [minimum, minimum+SPAN] 内
+        String onlyMin = "{\"type\":\"object\",\"properties\":{"
+                + "\"id\":{\"type\":\"integer\",\"minimum\":100}}}";
+        long minSeen = Long.MAX_VALUE;
+        long maxSeen = Long.MIN_VALUE;
+        for (int i = 0; i < 200; i++) {
+            Map<String, Object> data = obj(MockSchema.mock(onlyMin));
+            long id = ((Long) data.get("id")).longValue();
+            minSeen = Math.min(minSeen, id);
+            maxSeen = Math.max(maxSeen, id);
+            assertTrue("id 应 >=100：" + id, id >= 100);
+        }
+        assertTrue("只给 minimum 时 id 应在下界之上：" + minSeen, minSeen >= 100);
+        assertTrue("只给 minimum 时 id 应出现大于 100 的值（maxSeen=" + maxSeen + "）", maxSeen > 100);
+
+        // 只给 maximum：不得越界，且应在 [0, maximum] 内变化
+        String onlyMax = "{\"type\":\"object\",\"properties\":{"
+                + "\"score\":{\"type\":\"integer\",\"maximum\":60}}}";
+        long sMin = Long.MAX_VALUE;
+        long sMax = Long.MIN_VALUE;
+        for (int i = 0; i < 200; i++) {
+            Map<String, Object> data = obj(MockSchema.mock(onlyMax));
+            long score = ((Long) data.get("score")).longValue();
+            sMin = Math.min(sMin, score);
+            sMax = Math.max(sMax, score);
+            assertTrue("score 应 <=60：" + score, score <= 60);
+        }
+        assertTrue("只给 maximum 时 score 应出现小于 60 的值（sMax=" + sMax + "）", sMax < 60);
+        assertTrue("只给 maximum 时 score 应 >=0（sMin=" + sMin + "）", sMin >= 0);
+    }
+
+    @Test
+    public void testUserSchemaMixedBounds() {
+        // 用户原始 schema：id 只有 minimum，age 有上下界，应确保 id 不恒为 100
+        String schema = "{\"type\":\"object\",\"properties\":{"
+                + "\"id\":{\"type\":\"integer\",\"minimum\":100},"
+                + "\"name\":{\"type\":\"string\"},"
+                + "\"gender\":{\"type\":\"string\",\"enum\":[\"男\",\"女\"]},"
+                + "\"age\":{\"type\":\"integer\",\"minimum\":18,\"maximum\":60},"
+                + "\"email\":{\"type\":\"string\",\"format\":\"email\"},"
+                + "\"phone\":{\"type\":\"string\",\"pattern\":\"^1[3-9]\\\\d{9}$\"},"
+                + "\"vip\":{\"type\":\"boolean\"},"
+                + "\"balance\":{\"type\":\"number\",\"minimum\":0,\"maximum\":9999},"
+                + "\"city\":{\"type\":\"string\"},"
+                + "\"createdAt\":{\"type\":\"string\",\"format\":\"date-time\"}"
+                + "},\"required\":[\"id\",\"name\"]}";
+        long minId = Long.MAX_VALUE;
+        long maxId = Long.MIN_VALUE;
+        for (int i = 0; i < 100; i++) {
+            Map<String, Object> data = obj(MockSchema.mock(schema));
+            long id = ((Long) data.get("id")).longValue();
+            minId = Math.min(minId, id);
+            maxId = Math.max(maxId, id);
+            assertTrue("id 应 >=100", id >= 100);
+        }
+        assertTrue("用户 schema 中 id 不应恒为 100（maxId=" + maxId + "）", maxId > 100);
+    }
+
+    @Test
     public void testEnumAndConst() {
         String schema = "{\"type\":\"object\",\"properties\":{"
                 + "\"gender\":{\"type\":\"string\",\"enum\":[\"男\",\"女\"]},"

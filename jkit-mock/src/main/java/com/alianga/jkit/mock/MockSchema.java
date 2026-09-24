@@ -42,6 +42,12 @@ public class MockSchema {
     private final MockRandom random;
 
     /**
+     * 仅指定单边界（只有 minimum 或只有 maximum）时，用来推导另一侧的默认跨度。
+     * 避免「只有 minimum=100」退化成恒等于 100 的情况。
+     */
+    private static final double DEFAULT_NUM_SPAN = 1000;
+
+    /**
      * 默认构造。
      */
     public MockSchema() {
@@ -731,14 +737,23 @@ public class MockSchema {
      */
     private Object genNumber(Map<String, Object> schema, boolean isInteger) {
         double lo = 0;
-        double hi = isInteger ? 100 : 100;
+        double hi = 100;
         Double minimum = numOf(schema.get("minimum"));
         Double maximum = numOf(schema.get("maximum"));
-        if (minimum != null) {
+        boolean hasMin = minimum != null;
+        boolean hasMax = maximum != null;
+        if (hasMin) {
             lo = minimum;
         }
-        if (maximum != null) {
+        if (hasMax) {
             hi = maximum;
+        }
+        if (hasMin && !hasMax) {
+            // 仅指定下界：向上推导一个合理的默认上界，避免结果恒等于下界
+            hi = lo + DEFAULT_NUM_SPAN;
+        } else if (!hasMin && hasMax) {
+            // 仅指定上界：向下推导一个合理的默认下界（非负时从 0 起）
+            lo = hi > 0 ? 0 : hi - DEFAULT_NUM_SPAN;
         }
         Double exMin = numOf(schema.get("exclusiveMinimum"));
         Double exMax = numOf(schema.get("exclusiveMaximum"));
