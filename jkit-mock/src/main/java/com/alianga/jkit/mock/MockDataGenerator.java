@@ -1,8 +1,16 @@
 package com.alianga.jkit.mock;
 
+import com.alianga.jkit.IdCardUtils;
+import com.alianga.jkit.IdCardUtils.IdCardInfo;
+
 import java.security.SecureRandom;
+import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Date;
+import java.util.List;
+import java.util.Map;
 import java.util.Random;
 
 /**
@@ -20,28 +28,38 @@ public class MockDataGenerator {
             "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*";
     private static final String HEX = "0123456789ABCDEF";
     private static final String NUMERIC = "0123456789";
-    private static final String CHINESE_NUMBERS = "一二三四五六七八九十";
-
-    private static final String[] PROVINCES = {
-            "北京市", "上海市", "天津市", "重庆市", "河北省", "山西省", "辽宁省", "吉林省", "黑龙江省",
-            "江苏省", "浙江省", "安徽省", "福建省", "江西省", "山东省", "河南省", "湖北省", "湖南省",
-            "广东省", "海南省", "四川省", "贵州省", "云南省", "陕西省", "甘肃省", "青海省", "台湾省",
-            "内蒙古自治区", "广西壮族自治区", "西藏自治区", "宁夏回族自治区", "新疆维吾尔自治区",
-            "香港特别行政区", "澳门特别行政区"
+    private static final String[] ROADS = {
+            "中山路", "解放路", "人民路", "建设路", "文化路", "和平路", "新华路", "长江路"
     };
 
-    private static final String[] CITIES = {
-            "北京", "上海", "广州", "深圳", "杭州", "南京", "武汉", "成都", "西安", "郑州",
-            "青岛", "大连", "宁波", "厦门", "福州", "长沙", "济南", "重庆", "天津", "苏州",
-            "无锡", "石家庄", "太原", "沈阳", "长春", "哈尔滨", "合肥", "南昌", "昆明", "贵阳",
-            "兰州", "银川"
-    };
+    /** 同一条记录内共用的身份；{@link #beginRecord()} 之后重新抽取。 */
+    private Identity recordIdentity;
 
-    private static final String[] DISTRICTS = {
-            "朝阳区", "海淀区", "西城区", "东城区", "丰台区", "石景山区"
-    };
+    /** 为 true 时，本条记录里的身份字段共用 {@link #recordIdentity}。 */
+    private boolean recordOpen;
+
+    private static volatile int[] cachedDistrictCodes;
 
     private static final Random RANDOM = new SecureRandom();
+
+    /**
+     * 开始下一条记录。生日、性别、年龄、身份证和地址在这一条里共用同一份身份，
+     * 避免生日和证件、性别和顺序码、省和市各抽各的。
+     */
+    public void beginRecord() {
+        recordIdentity = null;
+        recordOpen = true;
+    }
+
+    private Identity identity() {
+        if (!recordOpen) {
+            return Identity.create();
+        }
+        if (recordIdentity == null) {
+            recordIdentity = Identity.create();
+        }
+        return recordIdentity;
+    }
 
     /**
      * 根据字段类型生成一个随机值。
@@ -186,65 +204,48 @@ public class MockDataGenerator {
     }
 
     /**
-     * 生成随机身份证号。
+     * 生成随机身份证号。同一条记录里与生日、性别、年龄、地址一致。
      *
      * @return 18 位身份证号
      */
     public String generateIdCard() {
-        String area = randomChoice(MockDict.ID_CARD_AREAS);
-        int year = randomInt(1970, 2000);
-        int month = randomInt(1, 12);
-        int day = randomInt(1, 28);
-        String birth = String.valueOf(year)
-                + padLeft(month, 2)
-                + padLeft(day, 2);
-        String seq = String.valueOf(randomInt(100, 999));
-        String check = randomChoice(MockDict.ID_CARD_CHECK);
-        return area.substring(0, 6) + birth + seq + check;
+        return identity().idCard;
     }
 
     /**
-     * 生成随机性别。
+     * 生成随机性别。同一条记录里与身份证第 17 位一致。
      *
      * @return "男" 或 "女"
      */
     public String generateGender() {
-        return RANDOM.nextDouble() > 0.5 ? "男" : "女";
+        return identity().gender;
     }
 
     /**
-     * 生成随机年龄。
+     * 生成随机年龄。同一条记录里由生日推算周岁。
      *
      * @return 18 到 65 之间的整数
      */
     public int generateAge() {
-        return randomInt(18, 65);
+        return identity().age;
     }
 
     /**
-     * 生成随机生日。
+     * 生成随机生日。同一条记录里写进身份证的出生日期。
      *
      * @return yyyy-MM-dd 格式的日期字符串
      */
     public String generateBirthday() {
-        int year = randomInt(1960, 2005);
-        int month = randomInt(1, 12);
-        int day = randomInt(1, 28);
-        return year + "-" + padLeft(month, 2) + "-" + padLeft(day, 2);
+        return identity().birthday;
     }
 
     /**
-     * 生成随机地址。
+     * 生成随机地址。省、市、区县来自身份证上的行政区划，不再各自乱配。
      *
      * @return 中文地址
      */
     public String generateAddress() {
-        String province = randomChoice(PROVINCES);
-        String city = randomChoice(CITIES);
-        String district = randomChoice(DISTRICTS);
-        String street = randomString(2, CHINESE_NUMBERS) + "街道";
-        String number = randomInt(1, 999) + "号";
-        return province + city + district + street + number;
+        return identity().address;
     }
 
     /**
@@ -593,5 +594,117 @@ public class MockDataGenerator {
         }
         sb.append(s);
         return sb.toString();
+    }
+
+    /**
+     * 县级行政区划代码，供身份证和地址共用。首次使用时从 GB/T 2260 表里筛出来。
+     *
+     * @return 代码表，不为空
+     */
+    private static int[] districtCodes() {
+        if (cachedDistrictCodes == null) {
+            synchronized (MockDataGenerator.class) {
+                if (cachedDistrictCodes == null) {
+                    cachedDistrictCodes = loadDistrictCodes();
+                }
+            }
+        }
+        return cachedDistrictCodes;
+    }
+
+    private static int[] loadDistrictCodes() {
+        List<Integer> codes = new ArrayList<Integer>();
+        for (Map.Entry<Integer, String> entry : IdCardUtils.getAreaNames().entrySet()) {
+            int code = entry.getKey().intValue();
+            if (code % 100 == 0) {
+                continue;
+            }
+            String name = entry.getValue();
+            if (name == null || name.isEmpty() || isGenericArea(name)) {
+                continue;
+            }
+            codes.add(Integer.valueOf(code));
+        }
+        if (codes.isEmpty()) {
+            return new int[] {110101};
+        }
+        int[] array = new int[codes.size()];
+        for (int i = 0; i < codes.size(); i++) {
+            array[i] = codes.get(i).intValue();
+        }
+        return array;
+    }
+
+    private static boolean isGenericArea(String name) {
+        return "市辖区".equals(name) || "县".equals(name) || name.contains("直辖县级");
+    }
+
+    /**
+     * 一条记录上互相推导的身份：先定性别和生日，再生成证件，地址和年龄从证件解析回来。
+     */
+    private static final class Identity {
+        private final String gender;
+        private final String birthday;
+        private final int age;
+        private final String idCard;
+        private final String address;
+
+        private Identity(String gender, String birthday, int age, String idCard, String address) {
+            this.gender = gender;
+            this.birthday = birthday;
+            this.age = age;
+            this.idCard = idCard;
+            this.address = address;
+        }
+
+        private static Identity create() {
+            for (int attempt = 0; attempt < 12; attempt++) {
+                Identity identity = tryCreate();
+                if (identity != null) {
+                    return identity;
+                }
+            }
+            IdCardInfo info = IdCardUtils.parse(IdCardUtils.generate(18, 65));
+            String place = info.getIssuePlace() == null ? "" : info.getIssuePlace();
+            return new Identity(info.getGender(), info.getBirthdayString(), info.getAge(),
+                    info.getIdNumber(), place + "中山路1号");
+        }
+
+        private static Identity tryCreate() {
+            boolean male = RANDOM.nextBoolean();
+            LocalDate today = LocalDate.now();
+            LocalDate oldest = today.minusYears(65);
+            LocalDate youngest = today.minusYears(18);
+            long span = ChronoUnit.DAYS.between(oldest, youngest);
+            int offset = span <= 0 ? 0 : RANDOM.nextInt((int) span + 1);
+            LocalDate birth = oldest.plusDays(offset);
+            String ymd = String.format("%04d%02d%02d",
+                    birth.getYear(), birth.getMonthValue(), birth.getDayOfMonth());
+            int[] codes = districtCodes();
+            int area = codes[RANDOM.nextInt(codes.length)];
+            String body = String.format("%06d", area) + ymd + sequence(male);
+            char check = IdCardUtils.calcTrailingNumber(body.toCharArray());
+            String idCard = body + check;
+            IdCardInfo info = IdCardUtils.parse(idCard);
+            if (info == null) {
+                return null;
+            }
+            String road = ROADS[RANDOM.nextInt(ROADS.length)];
+            int door = 1 + RANDOM.nextInt(200);
+            String place = info.getIssuePlace();
+            if (place == null || place.isEmpty()) {
+                place = info.getProvince() == null ? "" : info.getProvince();
+            }
+            return new Identity(info.getGender(), info.getBirthdayString(), info.getAge(),
+                    info.getIdNumber(), place + road + door + "号");
+        }
+
+        /** 顺序码末位：奇数男，偶数女。 */
+        private static String sequence(boolean male) {
+            int a = RANDOM.nextInt(10);
+            int b = RANDOM.nextInt(10);
+            int c = RANDOM.nextInt(5) * 2 + (male ? 1 : 0);
+            return "" + a + b + c;
+        }
     }
 }

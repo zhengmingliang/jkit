@@ -242,7 +242,7 @@ public class MockDataFormatter {
         out.append(']');
     }
 
-    private static void indent(Appendable out, int depth) throws IOException {
+    static void indent(Appendable out, int depth) throws IOException {
         for (int i = 0; i < depth; i++) {
             out.append("  ");
         }

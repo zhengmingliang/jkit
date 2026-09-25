@@ -99,6 +99,7 @@ public class MockDataProducer {
 
     private Map<String, Object> generateOne() {
         Map<String, Object> record = new LinkedHashMap<String, Object>();
+        generator.beginRecord();
         for (MockFieldType fieldType : fieldTypes) {
             record.put(fieldType.getKey(), generator.generate(fieldType));
         }
@@ -153,6 +154,7 @@ public class MockDataProducer {
                 out.append(',');
                 out.append('\n');
             }
+            MockDataFormatter.indent(out, 1);
             MockDataFormatter.writeJson(generateOne(), out, 1);
         }
         out.append('\n');

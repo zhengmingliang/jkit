@@ -1,10 +1,15 @@
 package com.alianga.jkit.mock;
 
+import com.alianga.jkit.IdCardUtils;
+import com.alianga.jkit.IdCardUtils.IdCardInfo;
+
 import org.junit.Assert;
 import org.junit.Test;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * MockDataProducer 单元测试。
@@ -78,6 +83,56 @@ public class MockDataProducerTest {
             Object score = record.get("score");
             Assert.assertTrue(score instanceof Number);
         }
+    }
+
+    @Test
+    public void identityFieldsStayConsistent() {
+        MockDataProducer producer = new MockDataProducer();
+        producer.addField(MockFieldType.GENDER);
+        producer.addField(MockFieldType.BIRTHDAY);
+        producer.addField(MockFieldType.AGE);
+        producer.addField(MockFieldType.ID_CARD);
+        producer.addField(MockFieldType.ADDRESS);
+        producer.setCount(40);
+        List<Map<String, Object>> records = producer.generate();
+        Set<String> ids = new HashSet<String>();
+        for (Map<String, Object> record : records) {
+            String id = (String) record.get("idCard");
+            ids.add(id);
+            IdCardInfo info = IdCardUtils.parse(id);
+            Assert.assertNotNull(id, info);
+            Assert.assertEquals(info.getGender(), record.get("gender"));
+            Assert.assertEquals(info.getBirthdayString(), record.get("birthday"));
+            Assert.assertEquals(info.getAge(), ((Number) record.get("age")).intValue());
+            int digit = id.charAt(16) - '0';
+            Assert.assertEquals("男".equals(info.getGender()) ? 1 : 0, digit % 2);
+            String address = (String) record.get("address");
+            if (info.getProvince() != null) {
+                Assert.assertTrue(address, address.contains(info.getProvince()));
+            }
+            if (info.getCity() != null) {
+                Assert.assertTrue(address, address.contains(info.getCity()));
+            }
+            if (info.getDistrict() != null) {
+                Assert.assertTrue(address, address.contains(info.getDistrict()));
+            }
+            Assert.assertFalse(address, address.contains("黑龙江省天津"));
+            Assert.assertFalse(address, address.contains("香港特别行政区南昌"));
+        }
+        Assert.assertTrue(ids.size() > 1);
+    }
+
+    @Test
+    public void jsonObjectsUseTwoSpaceIndent() {
+        MockDataProducer producer = new MockDataProducer();
+        producer.addField(MockFieldType.NAME);
+        producer.setCount(2);
+        String json = producer.format(MockOutputFormat.JSON);
+        Assert.assertTrue(json, json.startsWith("[\n  {"));
+        Assert.assertTrue(json, json.contains("\n    \"name\": "));
+        Assert.assertTrue(json, json.contains("\n  },\n  {"));
+        Assert.assertTrue(json, json.endsWith("\n  }\n]"));
+        Assert.assertFalse(json, json.contains("\n{"));
     }
 
     @Test
