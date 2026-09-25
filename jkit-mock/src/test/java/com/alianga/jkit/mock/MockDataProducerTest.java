@@ -32,6 +32,13 @@ public class MockDataProducerTest {
             Assert.assertTrue(record.containsKey("gender"));
             Assert.assertTrue(record.containsKey("age"));
             Assert.assertTrue(record.containsKey("address"));
+            Assert.assertTrue(record.containsKey("idCard"));
+            Assert.assertTrue(record.containsKey("birthday"));
+            IdCardInfo info = IdCardUtils.parse((String) record.get("idCard"));
+            Assert.assertNotNull(info);
+            Assert.assertEquals(info.getBirthdayString(), record.get("birthday"));
+            Assert.assertEquals(info.getGender(), record.get("gender"));
+            Assert.assertEquals(info.getAge(), ((Number) record.get("age")).intValue());
         }
     }
 

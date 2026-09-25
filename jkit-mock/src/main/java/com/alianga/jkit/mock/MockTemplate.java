@@ -14,7 +14,8 @@ public enum MockTemplate {
      * 用户信息模板。
      */
     USER("user", "用户信息模板", MockFieldType.NAME, MockFieldType.EMAIL, MockFieldType.PHONE,
-            MockFieldType.GENDER, MockFieldType.AGE, MockFieldType.ADDRESS),
+            MockFieldType.ID_CARD, MockFieldType.GENDER, MockFieldType.AGE,
+            MockFieldType.BIRTHDAY, MockFieldType.ADDRESS),
 
     /**
      * 员工信息模板。
