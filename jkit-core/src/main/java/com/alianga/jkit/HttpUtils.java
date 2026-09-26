@@ -3029,7 +3029,11 @@ public class HttpUtils {
         if (!request.isReadTimeoutSet()) {
             request.readTimeoutMs(cfg.getReadTimeoutMs());
         }
-        request.preferHttp2(cfg.isHttp2());
+        // 仅在调用方未显式设置时套用全局默认；否则无条件覆盖会让 preferHttp2(false)
+        // 失效——明文请求仍发 h2c Upgrade，部分服务器不支持会直接断连。
+        if (!request.isPreferHttp2Set()) {
+            request.preferHttp2(cfg.isHttp2());
+        }
         if (request.getSslContext() == null && cfg.getSslContext() != null) {
             request.sslContext(cfg.getSslContext());
         }

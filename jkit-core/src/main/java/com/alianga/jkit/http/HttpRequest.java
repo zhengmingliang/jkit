@@ -57,6 +57,8 @@ public class HttpRequest {
     private boolean ignoreSsl = true;
     private boolean ignoreSslSet;
     private boolean preferHttp2 = true;
+    /** 是否显式调用过 {@link #preferHttp2(boolean)}；未设置时才由全局配置补默认值。 */
+    private boolean preferHttp2Set;
     private long maxBufferBytes;
     private long totalTimeoutMs;
     private com.alianga.jkit.http.lb.EndpointPool endpointPool;
@@ -490,7 +492,15 @@ public class HttpRequest {
      */
     public HttpRequest preferHttp2(boolean preferHttp2) {
         this.preferHttp2 = preferHttp2;
+        this.preferHttp2Set = true;
         return this;
+    }
+
+    /**
+     * @return 是否显式设置过 HTTP/2 偏好
+     */
+    public boolean isPreferHttp2Set() {
+        return preferHttp2Set;
     }
 
     /**
