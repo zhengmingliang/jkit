@@ -25,30 +25,40 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 25          # 兜底：卡死时不要让 job 无限挂着
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5          # v4 仍跑在已弃用的 Node 20 运行时，升到 v5
         with:
           fetch-depth: 0
           fetch-tags: true
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5        # 同上，v4 → v5；Node 20 已 EOL，改用 22
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
+      # 原来裸跑 npm ci：缓存未命中时需要全量拉取依赖，单个 tarball 卡住
+      # 就会撞上 npm 默认 300s fetch-timeout 直接 exit 1。这里放开超时并加重试。
       - name: Install dependencies
-        run: npm ci
+        run: |
+          npm ci --no-audit --no-fund \
+            --fetch-retries=5 \
+            --fetch-retry-mintimeout=20000 \
+            --fetch-retry-maxtimeout=120000 \
+            --fetch-timeout=600000
+        # 若默认源持续超时，改用国内镜像（二者选一，不要同时跑）：
+        # npm ci --registry=https://registry.npmmirror.com --no-audit --no-fund
 
       - name: Build VitePress site (current + archived tags)
         run: npm run docs:build:all   # 产物在 docs/.vitepress/dist，历史版在 dist/vX.Y.Z/
 
       - name: Configure Pages
-        uses: actions/configure-pages@v4
+        uses: actions/configure-pages@v5
 
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v4
         with:
           path: docs/.vitepress/dist
 
