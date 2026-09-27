@@ -84,7 +84,7 @@ public class FileStorage {
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit-sql-auto-spring-boot-2</artifactId>
-    <version>2.0.2</version>
+    <version>2.0.3</version>
 </dependency>
 ```
 
@@ -94,7 +94,7 @@ public class FileStorage {
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit-sql-auto-spring-boot-3</artifactId>
-    <version>2.0.2</version>
+    <version>2.0.3</version>
 </dependency>
 ```
 
@@ -142,7 +142,7 @@ Boot 2 注册走 `spring.factories`，Boot 3 走 `AutoConfiguration.imports`，�
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit-sql-auto</artifactId>
-    <version>2.0.2</version>
+    <version>2.0.3</version>
 </dependency>
 ```
 

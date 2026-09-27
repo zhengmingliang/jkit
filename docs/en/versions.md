@@ -8,7 +8,8 @@ This documentation site always tracks the **current release** (see the version s
 
 | Version | Date | Docs |
 | --- | --- | --- |
-| 2.0.2 | 2026-09-14 | [This site](/en/) |
+| 2.0.3 | 2026-09-27 | [This site](/en/) |
+| 2.0.2 | 2026-09-14 | [v2.0.2 docs](/v2.0.2/en/) |
 | 2.0.1 | 2026-09-13 | [v2.0.1 docs](/v2.0.1/en/) |
 | 2.0.0 | — | [Source archive on GitHub](https://github.com/zhengmingliang/jkit/releases) (no standalone docs site yet) |
 

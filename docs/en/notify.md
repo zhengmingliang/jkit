@@ -9,7 +9,7 @@
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit-notify</artifactId>
-    <version>2.0.2</version>
+    <version>2.0.3</version>
 </dependency>
 ```
 
@@ -19,7 +19,7 @@
 > <dependency>
 >     <groupId>com.alianga</groupId>
 >     <artifactId>jkit-notify-extra</artifactId>
->     <version>2.0.2</version>
+>     <version>2.0.3</version>
 > </dependency>
 > ```
 

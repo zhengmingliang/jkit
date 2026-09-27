@@ -6,7 +6,7 @@ This document records user-visible changes in each jkit release. Each version nu
 
 Unreleased changes are appended to the **current version** section (currently 2.0.3); once released, that section is frozen and a new version section is added above it. Do not rewrite frozen historical versions, and do not open a new `unreleased` heading for the same version number.
 
-## 2.0.3 - unreleased
+## 2.0.3 - 2026-09-27
 
 ### Added
 

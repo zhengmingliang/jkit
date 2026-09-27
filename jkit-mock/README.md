@@ -13,7 +13,7 @@
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit-mock</artifactId>
-    <version>2.0.3-SNAPSHOT</version>
+    <version>2.0.3</version>
 </dependency>
 ```
 

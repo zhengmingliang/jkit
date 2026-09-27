@@ -17,7 +17,7 @@ It does not execute SQL and does not pull in any JDBC driver.
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit-sql</artifactId>
-    <version>2.0.2</version>
+    <version>2.0.3</version>
 </dependency>
 ```
 

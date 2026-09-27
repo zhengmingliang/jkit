@@ -41,7 +41,7 @@ Core library:
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit</artifactId>
-    <version>2.0.2</version>
+    <version>2.0.3</version>
 </dependency>
 ```
 
@@ -53,7 +53,7 @@ Optional modules:
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit-sql</artifactId>
-    <version>2.0.2</version>
+    <version>2.0.3</version>
 </dependency>
 ```
 
@@ -61,7 +61,7 @@ Optional modules:
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit-sql-auto</artifactId>
-    <version>2.0.2</version>
+    <version>2.0.3</version>
 </dependency>
 ```
 
@@ -69,7 +69,7 @@ Optional modules:
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit-sql-auto-spring-boot-2</artifactId>
-    <version>2.0.2</version>
+    <version>2.0.3</version>
 </dependency>
 ```
 
@@ -77,7 +77,7 @@ Optional modules:
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit-sql-auto-spring-boot-3</artifactId>
-    <version>2.0.2</version>
+    <version>2.0.3</version>
 </dependency>
 ```
 
@@ -85,7 +85,7 @@ Optional modules:
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit-notify</artifactId>
-    <version>2.0.2</version>
+    <version>2.0.3</version>
 </dependency>
 ```
 
@@ -93,7 +93,7 @@ Optional modules:
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit-notify-extra</artifactId>
-    <version>2.0.2</version>
+    <version>2.0.3</version>
 </dependency>
 ```
 
@@ -101,7 +101,7 @@ Optional modules:
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit-curl-codegen</artifactId>
-    <version>2.0.2</version>
+    <version>2.0.3</version>
 </dependency>
 ```
 
@@ -183,7 +183,7 @@ public class QuickStart {
 
 The Maven coordinates moved from `top.wuyongshi:ZmlTools` to `com.alianga:jkit`, and the package prefix from `top.wys.utils.*` to `com.alianga.jkit.*`:
 
-1. **Edit your POM** (recommended): switch the `groupId` / `artifactId` to `com.alianga:jkit:2.0.2` and rewrite `top.wys.utils.*` imports to `com.alianga.jkit.*`.
+1. **Edit your POM** (recommended): switch the `groupId` / `artifactId` to `com.alianga:jkit:2.0.3` and rewrite `top.wys.utils.*` imports to `com.alianga.jkit.*`.
 2. **Maven relocation**: after publishing `relocated/zmltools/pom.xml`, builds depending on the old coordinates are redirected automatically (imports still need manual rewriting).
 
 ## Limitations & compatibility

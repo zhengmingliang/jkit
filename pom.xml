@@ -52,7 +52,7 @@
 
     <properties>
         <!-- 全工程唯一版本号：升级版本只改这里（或命令行 -Drevision=x.y.z 覆盖） -->
-        <revision>2.0.3-SNAPSHOT</revision>
+        <revision>2.0.3</revision>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <maven.build.timestamp.format>yyyy-MM-dd HH:mm:ss</maven.build.timestamp.format>

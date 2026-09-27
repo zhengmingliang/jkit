@@ -67,7 +67,7 @@ HTML 解析模块以 Jsoup 1.18.1 为对照做了差分验证与性能对比（�
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit</artifactId>
-    <version>2.0.2</version>
+    <version>2.0.3</version>
 </dependency>
 ```
 
@@ -137,20 +137,20 @@ YamlDocument doc = YamlDocument.parse(yamlText);
 
 | 模块 | 坐标 | 说明 |
 |---|---|---|
-| 核心工具（必选） | `com.alianga:jkit:2.0.2` | 上表 `com.alianga.jkit.*` 全部内容 |
-| curl 转源码 | `com.alianga:jkit-curl-codegen:2.0.2` | 解析 curl 命令生成其它语言 HTTP 源码 |
-| 消息通知 | `com.alianga:jkit-notify:2.0.2` | 钉钉/企微/飞书/Server酱/Bark/SMTP/Webhook |
-| 通知扩展渠道 | `com.alianga:jkit-notify-extra:2.0.2` | Slack/Telegram/ntfy/阿里云等短信 |
-| SQL 解析与改写 | `com.alianga:jkit-sql:2.0.2` | 多方言解析、分页改写、注入与脱敏 |
-| Mock 数据生成 | `com.alianga:jkit-mock:2.0.3-SNAPSHOT` | 字段模式 30 种字段类型 + 模板模式完整 Mock.js 规范，JSON / CSV / SQL / XML 输出 |
-| 自动建表 | `com.alianga:jkit-sql-auto:2.0.2` | 按实体对照库表执行 CREATE/ALTER |
+| 核心工具（必选） | `com.alianga:jkit:2.0.3` | 上表 `com.alianga.jkit.*` 全部内容 |
+| curl 转源码 | `com.alianga:jkit-curl-codegen:2.0.3` | 解析 curl 命令生成其它语言 HTTP 源码 |
+| 消息通知 | `com.alianga:jkit-notify:2.0.3` | 钉钉/企微/飞书/Server酱/Bark/SMTP/Webhook |
+| 通知扩展渠道 | `com.alianga:jkit-notify-extra:2.0.3` | Slack/Telegram/ntfy/阿里云等短信 |
+| SQL 解析与改写 | `com.alianga:jkit-sql:2.0.3` | 多方言解析、分页改写、注入与脱敏 |
+| Mock 数据生成 | `com.alianga:jkit-mock:2.0.3` | 字段模式 30 种字段类型 + 模板模式完整 Mock.js 规范，JSON / CSV / SQL / XML 输出 |
+| 自动建表 | `com.alianga:jkit-sql-auto:2.0.3` | 按实体对照库表执行 CREATE/ALTER |
 | 自动建表 Starter | `com.alianga:jkit-sql-auto-spring-boot-2` / `-3` | Spring Boot 2 / 3 自动配置 |
 
 ```xml
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit-sql</artifactId>
-    <version>2.0.2</version>
+    <version>2.0.3</version>
 </dependency>
 ```
 

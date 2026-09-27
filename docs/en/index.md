@@ -70,12 +70,12 @@ features:
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit</artifactId>
-    <version>2.0.2</version>
+    <version>2.0.3</version>
 </dependency>
 ```
 
 ```groovy [Gradle]
-implementation 'com.alianga:jkit:2.0.2'
+implementation 'com.alianga:jkit:2.0.3'
 ```
 
 ```java [First program]
