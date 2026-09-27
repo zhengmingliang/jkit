@@ -323,10 +323,16 @@ public class MockJs {
             }
             if (rule.hasRange() && rule.getMax() != null
                     && Long.parseLong(integerPart) >= rule.getMax()) {
-                // 整数部分已取到上界，小数必须归零，否则 999.25 会超出模板声明的范围
-                sb.setLength(0);
-                for (int i = 0; i < dcount; i++) {
-                    sb.append('0');
+                if (rule.getMin() != null && rule.getMin() < rule.getMax()) {
+                    // 整数部分取到上界时回退 1，把余量留给小数（99.xx < 100），
+                    // 既不超出模板声明的范围，又保留 dcount 位有效小数
+                    integerPart = String.valueOf(rule.getMax() - 1L);
+                } else {
+                    // 退化区间 min==max：小数只能归零，否则 999.25 会超出模板声明的范围
+                    sb.setLength(0);
+                    for (int i = 0; i < dcount; i++) {
+                        sb.append('0');
+                    }
                 }
             }
             return Double.parseDouble(integerPart + "." + sb);

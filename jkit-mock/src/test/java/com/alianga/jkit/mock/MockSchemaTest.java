@@ -70,7 +70,9 @@ public class MockSchemaTest {
             sMax = Math.max(sMax, score);
             assertTrue("score 应 <=60：" + score, score <= 60);
         }
-        assertTrue("只给 maximum 时 score 应出现小于 60 的值（sMax=" + sMax + "）", sMax < 60);
+        // maximum 是闭区间，允许抽到 60；要验证的是结果没有恒等于上界，即出现过小于 60 的值
+        assertTrue("只给 maximum 时 score 应出现小于 60 的值（sMin=" + sMin + "）", sMin < 60);
+        assertTrue("只给 maximum 时 score 应 <=60（sMax=" + sMax + "）", sMax <= 60);
         assertTrue("只给 maximum 时 score 应 >=0（sMin=" + sMin + "）", sMin >= 0);
     }
 
