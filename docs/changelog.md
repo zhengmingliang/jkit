@@ -8,6 +8,17 @@
 
 ### 新增
 
+**jkit-mock**
+
+- 新增 `jkit-mock` 模块（坐标 `com.alianga:jkit-mock:2.0.3`，JPMS 模块名 `com.alianga.jkit.mock`），零第三方依赖。**模板模式**对标 Mock.js 1.1.0（语料与行为均按原库实测抽取，非照文档实现），**字段模式**按预置字段批量造数，两种模式共用同一份语料。
+- 模板模式的四个部分：`MockRule` 解析 `'name|min-max'` / `'name|+step'` / `'name|count'` / `'name|min-max.dmin-dmax'` 四类生成规则；`MockRandom` 提供 58 个占位符，覆盖 Basic / Date / Image / Color / Text / Name / Web / Address / Helper / Misc 十类与中文类，语料含 500 个常用汉字、263 个顶级域名、35 省 366 市 2595 县，取值分布与原库一致；`MockRegex` 做正则反向生成（递归下降，支持分组、选择、量词、字符集、反向引用与前瞻）；`MockJs` 是模板引擎，兼容单引号写法、未知占位符保留原样。相对 Mock.js 补了小数区间：支持 `'price|9.9-999.2'`（原版会把尾部 `.2` 解析成 `price.2` 这样的怪 key）。
+- 字段模式：`MockDataGenerator` 提供 30 种内置字段（个人信息 / 商业数据 / 技术数据三类）与 5 个快速模板（`MockTemplate`），`MockCustomField` / `MockCustomFieldType` 定义自定义字段，`MockDataProducer` 编排生成，结果经 `MockDataFormatter` 导出 JSON / CSV / SQL INSERT / XML（`MockOutputFormat`）。
+- `MockSchema`：由 JSON Schema 反向生成样例数据（`MockSchemaOptions` 为配套选项）。支持 `type` / `properties` / `required` / `items`（含元组）/ `additionalProperties` 与 `enum` / `const` / `default`；支持 `allOf` 合并、`oneOf` / `anyOf` 随机取分支、`$ref` 解析 `definitions` / `$defs` / `components.schemas`，`maxDepth` 兜底防止循环引用死递归。字符串取值依次按 `pattern`（交 `MockRegex` 反向生成）> `format`（email / date-time / uri / uuid 等）> 属性名语义推断（`name` 得中文姓名、`email` 得邮箱、`phone` 得手机号、`createdAt` 得时间）决定，并收敛到 `minLength` / `maxLength`；数值尊重 `minimum` / `maximum` / `exclusiveMinimum` / `exclusiveMaximum` / `multipleOf`。`MockSchemaOptions` 为 builder 风格，可控制是否生成非必填属性、数组默认条数、是否优先取 `default`、最大递归深度。提供 `mock` / `mockJson` / `mockMany` / `samples` 四个入口，可传入带种子的 `MockRandom` 复现同一批结果。
+- 业务占位符与扩展点：`MockRandom.extend()` 对应 Mock.js 的 `Random.extend`，可注册自定义占位符（允许覆盖内置），`allPlaceholders()` 返回全部可用名字；新增 16 个业务占位符 `@phone` `@gender` `@company` `@department` `@position` `@salary` `@bankCard` `@creditCard` `@currency` `@mac` `@userAgent` `@password` `@token` `@timestamp` `@fileName` `@mime`，模板模式原先写不出的 MAC、银行卡、User-Agent 等现在可直接生成。
+- 占位符速查基础：`MockRandom.placeholderGroups()` 按基础 / 日期 / 图片 / 颜色 / 文本 / 姓名 / 网络 / 地址 / 辅助 / 杂项 / 业务 / 中文 12 个分类返回占位符名清单，`sample(String name)` 返回带典型参数的推荐写法（如 `@integer(1,100)`、`@city(true)`、`@cparagraph(3)`，未收录的按 `"@" + name` 返回），为速查面板的分组与搜索奠基。
+- SQL 输出选项：`MockSqlOptions` 支持类型模式 `TypeMode`（AUTO 按值推断 / 全 VARCHAR / 全 TEXT）、批量 INSERT（多行 VALUES 合并成一条）、引号包裹（无 / 反引号 / 双引号）、表名（默认 `fake_data`）与是否输出建表语句。`MockDataFormatter.toSql(records, options)` 按选项输出，保留无参重载兼容旧调用；AUTO 模式按首条记录推断类型（整数 BIGINT / 小数 DOUBLE / 布尔 BOOLEAN / 其余 VARCHAR(255)），`MockDataProducer.setSqlOptions(options)` 供字段模式使用。
+- `MockValid` 做模板校验与 JSON Schema 推导；`MockJs.normalizeQuotes(String)` 本版由包级提升为 public 便于上层调用，新增 `MockJs.prettyTemplate(String)` 先把模板里的单引号统一为双引号、再对合法 JSON 做缩进美化，非法模板原样返回。
+
 **jkit-sql**
 
 - 达梦裸过程调用：disql 脚本中无 `CALL` 关键字的系统过程调用（如 `SP_SET_PARA_VALUE(1, 'HJ_BUF_GLOBAL_SIZE', 4000);`）此前在语句起始遇到 `IDENT (` 直接抛 unsupported statement，现在解析为 CALL（实参进 AST，支持 `schema.proc(...)` 限定名），回写保留裸形态，`parse → format → parse` 可往返。新增方言能力 `SqlDialectSpec.supportsImplicitProcedureCall()`，仅 `DAMENG` 开启（Oracle 系裸过程调用只能出现在 PL/SQL 块内），其余方言行为不变；`SqlSimpleStatement.implicitCall()` 可区分裸调用与显式 `CALL`。
@@ -20,7 +31,30 @@
 - dry-run 连库比对：新增 `connectOnDryRun(true)` / 配置 `jkit.sql.auto.connect-on-dry-run`。开启后 `dryRun(true)` 仍打开配置的数据源读取元数据、与现有表比对，`plan.sql()` / `plan.changes()` 产出的是实际增量变更（缺表 CREATE、缺列 ADD COLUMN 等）而非空库全量 CREATE，但不执行、不取锁、不写历史表；未配连接信息时回落原离线规划。
 - 保留字自动引号：表名 / 列名 / 索引名默认不加引号，检测到是目标库保留字（如 `order`、`desc`、`value`）时自动加引号兜底并打 WARN（每个标识符只告警一次）。CREATE / ADD / ALTER / DROP / CREATE INDEX / COMMENT 全链路同形态，二次启动不会因名字形态不一致重复改表；无需配置，默认开启。
 
+### 变更
+
+**jkit-mock**
+
+- 流式生成与格式化，解决 10 万条时的内存暴涨与卡死：`MockDataFormatter` 的 `formatTo` / `writeJson` / `toCsv` / `toSql` / `toXml` 提供 `Appendable` 版本，`MockDataProducer` 增加 `formatTo`，字段模式逐条生成直接输出、不再攒出完整 `List<Map>`；新增惰性容器 `MockRepeat`，复用单个 `MockJs` 实例边迭代边 gen（`size()` 不展开即可知总数），`genArray` 在流式且 `count >= 1000` 时返回它，避免把 10 万个对象全塞进 `ArrayList`——**峰值内存由 1.96 GB 降到约 150 MB**。字符串版本 API 全部保留，内部改为委托给流式实现，返回值不变。
+- `MockValid` 支持流式校验：新增 `Progress` 回调，对数组与惰性结构（`MockRepeat`）逐条校验并回报进度，可在中途取消；`typeName` 把 `MockRepeat` 与 `Iterable` 都识别为 array，既不误报也驱动逐元素递归。不可取消的同步路径保持向后兼容。
+- 身份字段按生日与性别联动：同一条记录先定性别和生日、再生成身份证号，年龄与地址从证件反解回来，省市区不再各抽各的；用户信息类快速模板带上身份证与生日，点一次就能看到证件、生日、性别、年龄是同一份身份。
+- 两种模式共用语料：`MockDataGenerator` 原有的 20 个字典（姓氏 / 公司 / 部门 / 职位 / User-Agent / MIME / 银行卡前缀等）迁入 `MockDict`，两边不再各维护一份；地址字典保留双份（字段模式是 FeHelper 随机拼接口径，模板模式是 Mock.js 真实省市区层级，语义不同不强行合并）。JSON 输出统一走 `MockDataFormatter.prettyJson()`，两种模式一律逐层缩进两空格（原先模板模式输出的是压缩单行）。
+
 ### 修复
+
+**jkit-mock**
+
+- `MockSchema` 数值只设单边界时恒等于边界：此前只给 `minimum` 或只给 `maximum`，可选区间会退化成 `[x, x]`，生成值永远等于那个边界。现在仅给 `minimum` 时向上推导默认上界（`DEFAULT_NUM_SPAN = 1000`），仅给 `maximum` 时向下推导默认下界（非负时从 0 起）；两侧都缺省才保留原来的 `[0, 100]`。
+- `MockJs` 上界保护丢小数位：整数部分取到上界时把小数直接归零，`100.00` 被 `Double` 输出成 `100.0`，与模板声明的两位小数冲突。区间非退化时改为整数部分回退 1（`99.xx < 100`），范围限制与小数位数两个保证同时成立。
+
+**jkit-http**
+
+- 显式 `preferHttp2` 不再被全局默认覆盖：`HttpUtils.applyDefaults` 对连接与读取超时都有 `isXxxSet()` 判空保护，唯独 `preferHttp2` 无条件用 `HttpConfig.isHttp2()` 覆盖，导致调用方显式 `preferHttp2(false)` 失效——明文 `http://` 请求仍会发出 `Upgrade: h2c`。部分不支持 h2c 的服务器（Next.js / Node 等开发服务器）收到后直接关闭连接且不回响应头，表现为 `HTTP/1.1 header parser received no bytes`。`HttpRequest` 增加 `preferHttp2Set` 标志（`copy()` 经 setter 保留显式意图，新增 `isPreferHttp2Set()`），`applyDefaults` 仅在未显式设置时才套用全局默认，语义与超时一致。
+
+**jkit-notify**
+
+- 钉钉自定义群机器人的单条图文（`NEWS`）改发 `msgtype=link`，带上标题、摘要、封面与跳转地址，不再用会丢掉正文的 `feedCard`。
+- 企微 `IMAGE` 支持只填 `EXTRA_PIC_URL` 公网地址，发送前下载并转 base64 + md5；新增 `Message.imageUrl` 与 `NotifyUtils.downloadBytes`。
 
 **jkit-sql-auto**
 
@@ -32,6 +66,11 @@
 - Spring Boot starter 多数据源场景：容器里有多个 DataSource 且无唯一候选时，从抛 `NoUniqueBeanDefinitionException` 改为 WARN 并跳过（提示标 `@Primary` 或配 `jkit.sql.auto.url`）；`phase` 配错值（非 eager / ready）打 WARN。
 - `jkit.sql.auto.mode` 配错值（如 `valdate`）此前静默回落 `UPDATE` 改库，现在打 WARN。
 - 历史表写入失败的捕获从 `Throwable` 收窄为 `Exception | LinkageError`；GBase 8a「已跳过 CREATE INDEX」日志只在计划里确有索引时打一次。
+
+### 构建
+
+- 引入 `flatten-maven-plugin` 与 `${revision}`，版本号全工程单点维护：父 POM 版本改为 `${revision}`，唯一来源是父 POM properties 里的 `revision` 属性，也可用 `-Drevision=x.y.z` 命令行覆盖。**8 个子模块的 parent 版本与模块间依赖版本统一引用 `${revision}`**，删掉各子模块中转用的 `jkit.version` 属性——今后发版只需改 `revision` 一处。插件以 `resolveCiFriendliesOnly` 模式在 `process-resources` 阶段生成版本已解析的 `.flattened-pom.xml`，install / deploy 发布该 POM（子模块内部依赖里的 `${revision}` 经已发布父 POM 的具体 `revision` 属性继承解析），源码 POM 其余内容原样保留、外部消费方无感知；`.flattened-pom.xml` 已加入 `.gitignore`。已验证 reactor 全模块 clean package / install 通过，且 reactor 外临时工程可离线解析 `jkit-sql` 与 `jkit-sql-auto-spring-boot-2` 的整条内部依赖链。
+- 各发布 jar 增加 `Automatic-Module-Name`（迈向 JPMS 的第一步）：父 POM 统一配置 `maven-jar-plugin` 写入，模块名由各子模块的 `jkit.module.name` 属性提供（核心模块为 `com.alianga.jkit`，其余按 `com.alianga.jkit.*` 命名，如 `jkit-mock` 为 `com.alianga.jkit.mock`）。不引入 `module-info`，对 JDK 8 与 classpath 场景零影响；走模块路径的用户由此拿到稳定模块名，不再随 jar 文件名派生变化。
 
 ## 2.0.2 - 2026-09-19
 
