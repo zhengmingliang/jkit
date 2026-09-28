@@ -206,8 +206,12 @@ MockDataProducer p = new MockDataProducer()
 | 用户名 30% | 英文名：`john.smith` / `jsmith87` / `daniel1996` |
 | 用户名 15% | 拼音加四位年份：`wangwei1988` |
 | 用户名 10% | 英文名加短数字：`laura28` |
-| 域名 88% | 主流服务商按真实占比加权（gmail 20% / QQ 16% / 163 14% / outlook 10% …） |
+| 域名 88% | 主流服务商，按普及度加权后各家的整体命中率：gmail 20% / QQ 16% / 163 14% / outlook 10% / 126 8% / hotmail 7%，其后 sina、yahoo、sohu、foxmail 递减 |
 | 域名 12% | 企业自建域名：`smithtech.com`、 `clarkcorp.com` |
+
+百分比是整体命中率而非「88% 里面再占 20%」。调用十万次的实测分布：gmail 19.8% / QQ 16.0% / 163 14.2% / outlook 9.8% / 126 8.0% / hotmail 7.2%，非法邮箱 0 条，平均长度 17。
+
+权重按表顺序逐个累加，加到 88 就切给自建域名，所以排在 `EMAIL_DOMAINS` 末尾的 `aliyun.com` / `yeah.net` / `vip.*` 实际抽不到 —— 想让它们出现得往前提。
 
 `@email('company.com')` 可指定域名，此时不再随机；生成的组合全部落在合法邮箱字符集 `[a-z0-9._]@[a-z0-9.-]` 内。
 

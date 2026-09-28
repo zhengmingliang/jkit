@@ -11,7 +11,7 @@
 **jkit-mock**
 
 - 邮箱用户名改为真实取名习惯：`MockRandom.email()` 此前生成的是「单个小写字母 + 随机字母串 + 随机二级域名」（如 `a.qwerty@xkcd.tv`）——每段的每个字符都来自 `MockRandom.word()`（逐字符随机的 N 位字母串），域名只能用随机单词配 `MockDict.TLDS` 里的冷门后缀，一眼就是假的。现在按真实账号的习惯分四类取词：45% 拼音姓名（`wangwei` / `zhang.wei` / `lisiw`）、30% 英文名（`john.smith` / `jsmith87` / `daniel1996`）、15% 拼音加四位年份（`wangwei1988`）、10% 英文名加短数字（`laura28`），年份落在 1970–2014。`@email('company.com')` 指定域名的行为不变。
-- 邮箱域名按主流服务商加权抽取：新增 `MockDict.EMAIL_DOMAIN_WEIGHTS`，下标与既有 `EMAIL_DOMAINS` 一一对应（gmail 20% / QQ 16% / 163 14% / outlook 10% …），取代此前的等概率乱抽；其余 12% 落到企业自建域名（`smithtech.com` / `clarkcorp.com`），由新增的 `MockDict.EMAIL_COMPANY_SUFFIXES` 与英文姓氏拼出，模拟带公司域名后缀的企业邮箱。权重表与域名表长度不一致时自动退回等概率，将来词典扩容忘了同步权重也不会下标越界。
+- 邮箱域名按主流服务商加权抽取：新增 `MockDict.EMAIL_DOMAIN_WEIGHTS`，下标与既有 `EMAIL_DOMAINS` 一一对应，整体命中率 gmail 20% / QQ 16% / 163 14% / outlook 10% / 126 8% / hotmail 7% / sina 5% / yahoo 4%（服务商合计 88%），取代此前的等概率乱抽；其余 12% 落到企业自建域名（`smithtech.com` / `clarkcorp.com`），由新增的 `MockDict.EMAIL_COMPANY_SUFFIXES` 与英文姓氏拼出，模拟带公司域名后缀的企业邮箱。权重表与域名表长度不一致时自动退回等概率，将来词典扩容忘了同步权重也不会下标越界。注意权重是**整体占比**而非「88% 里面的占比」：逐一累加到 88 为止，排在表尾的 `aliyun.com` / `yeah.net` / `vip.*` 会被 12% 的自建域名分支吃掉份额，实跑抽不到。
 - `MockDict.SURNAME_PINYIN` / `GIVEN_NAME_PINYIN`：与既有 `SURNAMES` / `GIVEN_NAMES` 汉字下标严格对齐的汉语拼音，供邮箱用户名取词。
 - 字段模式与模板模式共用一套邮箱算法：`MockDataGenerator.generateEmail()` 改为委托 `MockRandom.email()`。此前两处各写一份——模板模式走「随机字母串 + 随机二级域名」，字段模式走「6–12 位随机串 + `EMAIL_DOMAINS`」，同一套 API 喂出来的两批数据风格不一致。
 
