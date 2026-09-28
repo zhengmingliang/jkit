@@ -236,10 +236,10 @@ INSERT INTO fake_data (name, email) VALUES ('郑娜', 'zhang.wei1994@qq.com');
 
 ```bash
 mvn -pl jkit-mock test -DskipTests=false
-# Tests run: 83, Failures: 0, Errors: 0, Skipped: 0
+# Tests run: 115, Failures: 0, Errors: 0, Skipped: 0
 ```
 
-覆盖 `MockJsTest`（25 个，DTD 规则 / 占位符 / 正则 / 单引号兼容）、`MockRandomTest`（26 个，占位符全量取值、格式断言与 extend 扩展点）、`MockDataFormatterTest`（8 个，两种模式 JSON 风格一致、摊平下钻）、`MockRegexTest`（12 个，正则反向生成）、`MockValidTest`（6 个，校验与 Schema）、`MockDataProducerTest`（6 个，字段模式）。
+覆盖 `MockJsTest`（27 个，DTD 规则 / 占位符 / 正则 / 单引号兼容）、`MockRandomTest`（26 个，占位符全量取值、格式断言与 extend 扩展点）、`MockSchemaTest`（16 个，由 JSON Schema 反向生成样例数据）、`MockDataFormatterTest`（13 个，两种模式 JSON 风格一致、摊平下钻）、`MockRegexTest`（12 个，正则反向生成）、`MockDataProducerTest`（8 个，字段模式）、`MockEmailTest`（7 个，格式合法 / 用户名形态覆盖 / 域名分布）、`MockValidTest`（6 个，校验与 Schema）。
 
 ## 输出风格
 
