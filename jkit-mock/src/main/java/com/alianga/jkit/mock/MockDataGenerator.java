@@ -32,6 +32,9 @@ public class MockDataGenerator {
             "中山路", "解放路", "人民路", "建设路", "文化路", "和平路", "新华路", "长江路"
     };
 
+    /** 邮箱的用户名与 Mock.js 模板模式共用一套实现，避免两处算法走样。 */
+    private final MockRandom mockRandom = new MockRandom();
+
     /** 同一条记录内共用的身份；{@link #beginRecord()} 之后重新抽取。 */
     private Identity recordIdentity;
 
@@ -186,12 +189,13 @@ public class MockDataGenerator {
     /**
      * 生成随机邮箱。
      *
+     * <p>用户名按真实账号习惯生成（拼音姓名 / 英文名 / 单词加年份），域名以主流
+     * 邮箱服务商为主，与 {@link MockRandom#email()} 完全一致。</p>
+     *
      * @return 邮箱地址
      */
     public String generateEmail() {
-        String local = randomString(randomInt(6, 12));
-        String domain = randomChoice(MockDict.EMAIL_DOMAINS);
-        return local + "@" + domain;
+        return mockRandom.email();
     }
 
     /**

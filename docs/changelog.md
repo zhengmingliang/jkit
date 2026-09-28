@@ -2,7 +2,30 @@
 
 本文记录 jkit 各版本的用户可见变更。每个版本号只出现一次，按新到旧排列。
 
-未发版的改动追加到**当前版本**小节（现在是 2.0.3）；发版后冻结该小节，在上方新建下一版本。不要改写已冻结的历史版本，也不要为同一版本再开 `unreleased` 标题。
+未发版的改动追加到**当前版本**小节（现在是 2.0.4）；发版后冻结该小节，在上方新建下一版本。不要改写已冻结的历史版本，也不要为同一版本再开 `unreleased` 标题。
+
+## 2.0.4 - 2026-09-29
+
+### 新增
+
+**jkit-mock**
+
+- 邮箱用户名改为真实取名习惯：`MockRandom.email()` 此前生成的是「单个小写字母 + 随机字母串 + 随机二级域名」（如 `a.qwerty@xkcd.tv`）——每段的每个字符都来自 `MockRandom.word()`（逐字符随机的 N 位字母串），域名只能用随机单词配 `MockDict.TLDS` 里的冷门后缀，一眼就是假的。现在按真实账号的习惯分四类取词：45% 拼音姓名（`wangwei` / `zhang.wei` / `lisiw`）、30% 英文名（`john.smith` / `jsmith87` / `daniel1996`）、15% 拼音加四位年份（`wangwei1988`）、10% 英文名加短数字（`laura28`），年份落在 1970–2014。`@email('company.com')` 指定域名的行为不变。
+- 邮箱域名按主流服务商加权抽取：新增 `MockDict.EMAIL_DOMAIN_WEIGHTS`，下标与既有 `EMAIL_DOMAINS` 一一对应（gmail 20% / QQ 16% / 163 14% / outlook 10% …），取代此前的等概率乱抽；其余 12% 落到企业自建域名（`smithtech.com` / `clarkcorp.com`），由新增的 `MockDict.EMAIL_COMPANY_SUFFIXES` 与英文姓氏拼出，模拟带公司域名后缀的企业邮箱。权重表与域名表长度不一致时自动退回等概率，将来词典扩容忘了同步权重也不会下标越界。
+- `MockDict.SURNAME_PINYIN` / `GIVEN_NAME_PINYIN`：与既有 `SURNAMES` / `GIVEN_NAMES` 汉字下标严格对齐的汉语拼音，供邮箱用户名取词。
+- 字段模式与模板模式共用一套邮箱算法：`MockDataGenerator.generateEmail()` 改为委托 `MockRandom.email()`。此前两处各写一份——模板模式走「随机字母串 + 随机二级域名」，字段模式走「6–12 位随机串 + `EMAIL_DOMAINS`」，同一套 API 喂出来的两批数据风格不一致。
+
+### 变更
+
+**jkit-mock**
+
+- `MockRandom.email()` 生成更快：用户名与域名改为下标取词而不是逐字符随机，单封邮箱的随机数调用由约 17 次降到约 5 次（2 万封计数实测），中间也不再拼 `StringBuilder`。JMH `AverageTime` 实测单封由 2.467 µs 降到 0.519 µs，约 4.8 倍（`-f 1 -wi 3 -i 5 -r 2s`；对照用的 java-faker / mockneat / easy-random 与 JMH 本身仅服务于基准，未进入项目依赖，基准工程放在 `tools-test`）。真实度与性能是同向的——有意义的取词比随机字符更省随机数。
+
+### 修复
+
+**jkit-mock**
+
+- 模板模式 `@email` 此前完全绕开 `MockDict.EMAIL_DOMAINS`，域名取 `word() + '.' + tld()`，实跑拿到的是 `xkcd.tv`、`vsjhjek.org` 这类没人用的二级域名；这在 Mock.js 模板里批量生成用户数据时尤其明显，几百条里没有一条落在真实服务商上。
 
 ## 2.0.3 - 2026-09-27
 

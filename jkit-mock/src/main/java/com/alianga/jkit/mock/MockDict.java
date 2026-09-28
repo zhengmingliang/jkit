@@ -334,6 +334,29 @@ public static final String[] SURNAMES = {
             "宇", "琳", "雅", "欣", "晨", "阳", "雪", "晴", "萌", "悦"
     };
 
+    /**
+     * {@link #SURNAMES} 的汉语拼音，下标与汉字一一对应。
+     *
+     * @since 2.0.4
+     */
+    public static final String[] SURNAME_PINYIN = {
+            "wang", "li", "zhang", "liu", "chen", "yang", "zhao", "huang", "zhou", "wu",
+            "xu", "sun", "hu", "zhu", "gao", "lin", "he", "guo", "ma", "luo",
+            "liang", "song", "zheng", "xie", "han", "tang", "feng", "yu", "dong", "xiao"
+    };
+
+    /**
+     * {@link #GIVEN_NAMES} 的汉语拼音，下标与汉字一一对应。
+     *
+     * @since 2.0.4
+     */
+    public static final String[] GIVEN_NAME_PINYIN = {
+            "wei", "fang", "na", "xiuying", "min", "jing", "li", "qiang", "lei", "jun",
+            "yang", "yong", "yan", "jie", "juan", "tao", "ming", "chao", "xiulan", "xia",
+            "ping", "gang", "guiying", "yong", "jian", "xin", "shuai", "li", "kai", "hao",
+            "yu", "lin", "ya", "xin", "chen", "yang", "xue", "qing", "meng", "yue"
+    };
+
     public static final String[] COMPANY_SUFFIXES = {
             "有限公司", "股份有限公司", "科技有限公司", "贸易有限公司", "实业有限公司",
             "投资有限公司", "集团有限公司", "控股有限公司", "发展有限公司", "建设有限公司",
@@ -368,6 +391,25 @@ public static final String[] SURNAMES = {
     public static final String[] EMAIL_DOMAINS = {
             "gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "163.com", "126.com", "qq.com",
             "sina.com", "sohu.com", "foxmail.com", "aliyun.com", "yeah.net", "vip.sina.com", "vip.163.com"
+    };
+
+    /**
+     * {@link #EMAIL_DOMAINS} 的抽样权重，下标一一对应，总和 100。
+     * 按主流服务商的真实占比排：gmail / QQ / 163 最高，vip 邮箱最低。
+     *
+     * @since 2.0.4
+     */
+    public static final int[] EMAIL_DOMAIN_WEIGHTS = {
+            20, 4, 7, 10, 14, 8, 16, 5, 2, 6, 4, 2, 1, 1
+    };
+
+    /**
+     * 企业邮箱域名的中段词，拼在英文姓氏之后模拟公司域名（如 {@code smithtech.com}）。
+     *
+     * @since 2.0.4
+     */
+    public static final String[] EMAIL_COMPANY_SUFFIXES = {
+            "tech", "group", "labs", "soft", "media", "corp", "data", "cloud"
     };
 
     public static final String[] CURRENCIES = {

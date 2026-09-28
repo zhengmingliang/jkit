@@ -196,6 +196,21 @@ MockDataProducer p = new MockDataProducer()
 
 各类型取值规则：字符串 5–20 位随机串、数字 1–1000、布尔 true/false、日期 2020-01-01 至今、数组 1–5 个 5 位随机串。
 
+## 邮箱生成规则
+
+模板模式的 `@email` 与字段模式的「邮箱」字段共用同一套实现，结果风格一致：
+
+| 部分 | 规则 |
+| --- | --- |
+| 用户名 45% | 拼音姓名：`wangwei` / `zhang.wei` / `lisiw` |
+| 用户名 30% | 英文名：`john.smith` / `jsmith87` / `daniel1996` |
+| 用户名 15% | 拼音加四位年份：`wangwei1988` |
+| 用户名 10% | 英文名加短数字：`laura28` |
+| 域名 88% | 主流服务商按真实占比加权（gmail 20% / QQ 16% / 163 14% / outlook 10% …） |
+| 域名 12% | 企业自建域名：`smithtech.com`、 `clarkcorp.com` |
+
+`@email('company.com')` 可指定域名，此时不再随机；生成的组合全部落在合法邮箱字符集 `[a-z0-9._]@[a-z0-9.-]` 内。
+
 ## 输出示例
 
 `SQL` 会先建表再插入，表名固定 `fake_data`，列统一 `VARCHAR(255)`：
@@ -208,7 +223,7 @@ CREATE TABLE fake_data (
 );
 
 -- 数据插入
-INSERT INTO fake_data (name, email) VALUES ('郑娜', 'VlZrQhGq@qq.com');
+INSERT INTO fake_data (name, email) VALUES ('郑娜', 'zhang.wei1994@qq.com');
 ```
 
 字符串里的 `'` 转义为 `''`；CSV 中逗号与引号按 RFC 4180 用双引号包裹、`"` 转义为 `""`；XML 转义 `& < > " '`。

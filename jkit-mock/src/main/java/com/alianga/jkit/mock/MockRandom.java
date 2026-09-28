@@ -1084,15 +1084,112 @@ public class MockRandom {
     /**
      * 随机邮箱地址。
      *
-     * @param args 可选 {@code (domain)}
+     * <p>用户名按真实账号的取名习惯生成，而不是无意义随机串：
+     * 拼音姓名 {@code wangwei} / {@code zhang.wei} / {@code lina1988}、
+     * 英文名 {@code john.smith} / {@code jsmith87} / {@code laura28}。
+     * 域名以主流邮箱服务商为主，少量落在自建域名上（模拟企业邮箱）。</p>
+     *
+     * @param args 可选 {@code (domain)}，指定域名时不走随机域名
      * @return 邮箱
      */
     public String email(Object... args) {
         String domain = argStr(args, 0, null);
         if (domain == null || domain.isEmpty()) {
-            domain = word() + '.' + tld();
+            domain = emailDomain();
         }
-        return character("lower") + '.' + word() + '@' + domain;
+        return emailLocalPart() + '@' + domain;
+    }
+
+    /**
+     * 邮箱用户名：45% 拼音姓名、30% 英文名、15% 拼音加年份、10% 英文名加短数字。
+     *
+     * @return 用户名
+     */
+    private String emailLocalPart() {
+        int roll = random.nextInt(100);
+        if (roll < 45) {
+            return pinyinLocalPart();
+        }
+        if (roll < 75) {
+            return englishLocalPart();
+        }
+        if (roll < 90) {
+            return pinyinLocalPart() + birthYear();
+        }
+        return lower(pickOne(MockDict.EN_FIRST)) + (2 + random.nextInt(998));
+    }
+
+    /**
+     * 拼音型用户名：姓与名各自抽一个字再拼，四种常见写法。
+     *
+     * @return 用户名
+     */
+    private String pinyinLocalPart() {
+        String surname = MockDict.SURNAME_PINYIN[random.nextInt(MockDict.SURNAME_PINYIN.length)];
+        String given = MockDict.GIVEN_NAME_PINYIN[random.nextInt(MockDict.GIVEN_NAME_PINYIN.length)];
+        switch (random.nextInt(4)) {
+            case 0:
+                return surname + given;
+            case 1:
+                return surname + '.' + given;
+            case 2:
+                return surname + given.charAt(0);
+            default:
+                return surname.charAt(0) + given;
+        }
+    }
+
+    /**
+     * 英文型用户名：名在前姓在后，常见四种写法。
+     *
+     * @return 用户名
+     */
+    private String englishLocalPart() {
+        String first = lower(first());
+        String last = lower(last());
+        switch (random.nextInt(4)) {
+            case 0:
+                return first + '.' + last;
+            case 1:
+                return first.charAt(0) + last;
+            case 2:
+                return last + (2 + random.nextInt(98));
+            default:
+                return first + birthYear();
+        }
+    }
+
+    /**
+     * 邮箱域名：88% 按主流服务商的真实占比抽取，其余为企业自建域名。
+     *
+     * @return 域名
+     */
+    private String emailDomain() {
+        int roll = random.nextInt(100);
+        if (roll >= 88) {
+            return lower(pickOne(MockDict.EN_LAST)) + pickOne(MockDict.EMAIL_COMPANY_SUFFIXES) + ".com";
+        }
+        // 权重表与域名表下标对应；哪天词典扩容而忘记同步权重，退回等概率，不要越界
+        if (MockDict.EMAIL_DOMAIN_WEIGHTS.length != MockDict.EMAIL_DOMAINS.length) {
+            return pickOne(MockDict.EMAIL_DOMAINS);
+        }
+        int sum = 0;
+        for (int i = 0; i < MockDict.EMAIL_DOMAINS.length; i++) {
+            sum += MockDict.EMAIL_DOMAIN_WEIGHTS[i];
+            if (roll < sum) {
+                return MockDict.EMAIL_DOMAINS[i];
+            }
+        }
+        return MockDict.EMAIL_DOMAINS[0];
+    }
+
+    /**
+     * 1970 年起的随机年份，用作邮箱的用户名后缀。
+     *
+     * @return 四位年份
+     */
+    private int birthYear() {
+        return 1970 + random.nextInt(45);
     }
 
     /**
