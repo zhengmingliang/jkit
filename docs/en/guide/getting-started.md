@@ -30,6 +30,7 @@ This repository is a multi-module build rooted at `jkit-parent`. Pull in only wh
 | `jkit-notify` | `com.alianga:jkit-notify` | Notifications: DingTalk / WeCom / Feishu / ServerChan / Bark / Webhook / SMTP |
 | `jkit-notify-extra` | `com.alianga:jkit-notify-extra` | Optional channels: Slack / Telegram / ntfy / SMS (Alibaba Cloud, Tencent Cloud, Yunpian, Huawei Cloud) |
 | `jkit-curl-codegen` | `com.alianga:jkit-curl-codegen` | Convert curl commands into OkHttp / fetch / requests and other source code |
+| `jkit-mock` | `com.alianga:jkit-mock` | Mock data generation: 30 field types plus a full Mock.js template engine, exported as JSON / CSV / SQL / XML |
 
 ## Add the dependency
 
@@ -101,6 +102,14 @@ Optional modules:
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit-curl-codegen</artifactId>
+    <version>2.0.3</version>
+</dependency>
+```
+
+```xml [Mock data]
+<dependency>
+    <groupId>com.alianga</groupId>
+    <artifactId>jkit-mock</artifactId>
     <version>2.0.3</version>
 </dependency>
 ```
@@ -178,6 +187,7 @@ public class QuickStart {
 | GET/POST, upload & download, SSE, load balancing | [HTTP Client](/en/http) |
 | Multi-dialect SQL parsing, formatting, pagination rewrite | [SQL Parsing](/en/sql) |
 | DingTalk / WeCom / Feishu / email notifications | [Notification](/en/notify) |
+| Bulk data generation, Mock.js templates, JSON Schema sampling | [Mock Data](/en/mock) |
 
 ## Migrating from ZmlTools
 

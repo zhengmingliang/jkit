@@ -3,7 +3,7 @@
 零第三方依赖的 Mock 数据生成模块，两套能力并存：
 
 1. **字段模式**（`MockDataProducer`）：内置 30 种字段类型、5 个快速模板、自定义字段，一次生成可导出 **JSON / CSV / SQL INSERT / XML** —— 1:1 对齐 FeHelper「数据 Mock」Chrome 插件。
-2. **模板模式**（`MockJs`）：完整实现 **Mock.js 规范**，支持数据模板定义（DTD）与数据占位符定义（DPD），含 58 个占位符与正则反向生成。
+2. **模板模式**（`MockJs`）：完整实现 **Mock.js 规范**，支持数据模板定义（DTD）与数据占位符定义（DPD），含 75 个占位符（含 7 个简写别名，主名 68 个）与正则反向生成。
 
 两套能力共用同一套输出格式化器，模板生成的结果同样能直接导出四种格式。
 
@@ -87,7 +87,7 @@ List<Map<String, Object>> rows = js.mockRecords("{'list|3': [{'id|+1': 1}]}");
 
 ### 数据占位符定义（DPD）
 
-`MockRandom` 内置 74 个占位符（含 `bool` / `int` / `number` / `char` / `str` / `img` / `inc` 等别名），覆盖 Mock.js 全部十类：
+`MockRandom` 注册 75 个占位符名（含 `bool` / `int` / `number` / `char` / `str` / `img` / `inc` 等 7 个简写别名，主名 68 个），覆盖 Mock.js 全部十类：
 
 | 分类 | 占位符 |
 | --- | --- |
@@ -163,7 +163,11 @@ Map<String, Object> schema = MockValid.toJsonSchema(template);
 | `MockCustomField` + `MockCustomFieldType` | 自定义字段（字符串 / 数字 / 布尔 / 日期 / 数组） |
 | `MockOutputFormat` | 输出格式：`JSON` / `CSV` / `SQL` / `XML` |
 | `MockJs` | Mock.js 模板引擎：`mock` / `mockJson` / `mockRecords` / `samples` |
-| `MockRandom` | 58 个占位符生成器，`invoke(name, args...)` 调用 |
+| `MockRandom` | 75 个占位符生成器，`invoke(name, args...)` 调用 |
+| `MockDict` | 两种模式共用的语料字典（含 `regionTree()` 三级行政区划） |
+| `MockSchema` + `MockSchemaOptions` | 由 JSON Schema 反向生成样例数据与配套选项 |
+| `MockSqlOptions` | SQL 输出选项：类型模式 / 批量 INSERT / 引号 / 表名 / 是否建表 |
+| `MockRepeat` | 流式场景的惰性数组容器（包级构造，由 `MockJs` 在 `count >= 1000` 且开启流式时返回） |
 | `MockRule` | `'name\|rule'` 规则解析 |
 | `MockRegex` | 正则反向生成 |
 | `MockValid` | 模板校验与 JSON Schema 推导 |
@@ -178,7 +182,7 @@ Map<String, Object> schema = MockValid.toJsonSchema(template);
 
 | 模板 | 字段 |
 | --- | --- |
-| `USER` 用户信息 | name, email, phone, gender, age, address |
+| `USER` 用户信息 | name, email, phone, idCard, gender, age, birthday, address |
 | `EMPLOYEE` 员工信息 | name, email, phone, company, department, position, salary |
 | `PRODUCT` 商品信息 | name, price, currency, uuid, timestamp |
 | `ORDER` 订单信息 | uuid, name, email, phone, address, price, timestamp |
@@ -189,8 +193,8 @@ Map<String, Object> schema = MockValid.toJsonSchema(template);
 ```java
 MockDataProducer p = new MockDataProducer()
         .addField(MockFieldType.NAME)
-        .addCustomField(new MockCustomField("nickname", MockCustomFieldType.STRING))
-        .addCustomField(new MockCustomField("score", MockCustomFieldType.NUMBER))
+        .addCustomField(new MockCustomField("nickname", MockCustomFieldType.STRING, null))
+        .addCustomField(new MockCustomField("score", MockCustomFieldType.NUMBER, null))
         .setCount(5);
 ```
 
@@ -198,7 +202,17 @@ MockDataProducer p = new MockDataProducer()
 
 ## 输出示例
 
-`SQL` 会先建表再插入，表名固定 `fake_data`，列统一 `VARCHAR(255)`：
+`SQL` 默认先建表再插入，表名默认 `fake_data`，列类型按首条记录的值推断（`MockSqlOptions.TypeMode.AUTO`：整数 `BIGINT` / 小数 `DOUBLE` / 布尔 `BOOLEAN` / 其余 `VARCHAR(255)`）。想改表名、批量 INSERT、反引号包裹、全部 `VARCHAR(255)` / `TEXT` 或不输出建表语句，用 `MockSqlOptions`：
+
+```java
+producer.setSqlOptions(MockSqlOptions.builder()
+        .batch(true)
+        .quote(MockSqlOptions.Quote.BACKTICK)
+        .typeMode(MockSqlOptions.TypeMode.VARCHAR)
+        .tableName("product")
+        .createTable(false)
+        .build());
+```
 
 ```sql
 -- 表结构

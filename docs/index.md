@@ -53,6 +53,11 @@ features:
     details: 钉钉、企微、飞书、Server酱、Bark、SMTP、Webhook 开箱即用，扩展渠道覆盖 Slack、Telegram、短信。
     link: /notify
     linkText: 查看通知文档
+  - icon: 🎲
+    title: Mock 数据生成
+    details: 30 种字段类型批量造数，另有完整 Mock.js 模板引擎与正则 / JSON Schema 反向生成，一键导出 JSON / CSV / SQL / XML。
+    link: /mock
+    linkText: 查看 Mock 文档
   - icon: 🧩
     title: YAML 与配置
     details: YAML 解析、节点树、锚点、多文档；按 Spring Boot 优先级的外部化配置读取，无 Spring 依赖。

@@ -30,6 +30,7 @@ jkit 是**纯 JDK、零第三方依赖**的 Java 通用工具库，由 [ZmlTools
 | `jkit-notify` | `com.alianga:jkit-notify` | 消息通知：钉钉 / 企微 / 飞书 / Server酱 / Bark / Webhook / SMTP |
 | `jkit-notify-extra` | `com.alianga:jkit-notify-extra` | 可选渠道：Slack / Telegram / ntfy / 短信（阿里云、腾讯云、云片、华为云） |
 | `jkit-curl-codegen` | `com.alianga:jkit-curl-codegen` | 把 curl 转成 OkHttp / fetch / requests 等其它语言源码 |
+| `jkit-mock` | `com.alianga:jkit-mock` | Mock 数据生成：字段模式 30 种字段类型 + 模板模式完整 Mock.js 规范，导出 JSON / CSV / SQL / XML |
 
 ## 引入依赖
 
@@ -101,6 +102,14 @@ jkit 是**纯 JDK、零第三方依赖**的 Java 通用工具库，由 [ZmlTools
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit-curl-codegen</artifactId>
+    <version>2.0.3</version>
+</dependency>
+```
+
+```xml [Mock 数据生成]
+<dependency>
+    <groupId>com.alianga</groupId>
+    <artifactId>jkit-mock</artifactId>
     <version>2.0.3</version>
 </dependency>
 ```
@@ -178,6 +187,7 @@ public class QuickStart {
 | GET/POST/上传下载/SSE/负载均衡 | [HTTP 客户端](/http) |
 | 多方言 SQL 解析、格式化、分页改写 | [SQL 解析](/sql) |
 | 钉钉 / 企微 / 飞书 / 邮件等消息通知 | [消息通知](/notify) |
+| 批量造数、Mock.js 模板、JSON Schema 反向生成 | [Mock 数据生成](/mock) |
 
 ## 从 ZmlTools 迁移
 

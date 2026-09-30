@@ -53,6 +53,11 @@ features:
     details: DingTalk, WeCom, Feishu, ServerChan, Bark, SMTP and Webhook out of the box; optional channels cover Slack, Telegram and SMS.
     link: /en/notify
     linkText: Notification docs
+  - icon: 🎲
+    title: Mock Data Generation
+    details: 30 field types for bulk generation, plus a full Mock.js template engine and regex / JSON Schema reverse generation, exported as JSON / CSV / SQL / XML.
+    link: /en/mock
+    linkText: Mock docs
   - icon: 🧩
     title: YAML & Configuration
     details: YAML parsing, node tree, anchors and multi-documents; Spring Boot-style externalized configuration without Spring dependencies.
