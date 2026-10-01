@@ -27,6 +27,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
@@ -86,6 +87,10 @@ public final class MockHttpServer {
             "{\"error\":\"no matching route\"}".getBytes(StandardCharsets.UTF_8);
     private static final byte[] INVALID_STATUS_BODY =
             "{\"error\":\"invalid statusCode configured\"}".getBytes(StandardCharsets.UTF_8);
+    private static final byte[] BAD_REQUEST_BODY =
+            "{\"error\":\"json object body required\"}".getBytes(StandardCharsets.UTF_8);
+    private static final byte[] METHOD_NOT_ALLOWED_BODY =
+            "{\"error\":\"method not allowed\"}".getBytes(StandardCharsets.UTF_8);
     private static final List<String> HOP_BY_HOP = Collections.unmodifiableList(Arrays.asList(
             "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
             "te", "trailer", "trailers", "transfer-encoding", "upgrade"));
@@ -95,6 +100,8 @@ public final class MockHttpServer {
     private final List<Consumer<MockRequestLog>> listeners = new CopyOnWriteArrayList<>();
 
     private volatile List<MockRoute> routes = Collections.emptyList();
+    /** CRUD 资源存储；缺省纯内存，可换带落盘目录的实现。 */
+    private volatile MockCrudStore crudStore = MockCrudStore.inMemory();
     private volatile HttpServer server;
     private volatile ExecutorService executor;
     private volatile int port;
@@ -125,7 +132,8 @@ public final class MockHttpServer {
 
         HttpServer http = HttpServer.create(new InetSocketAddress("127.0.0.1", port), 0);
         http.createContext("/", this::handle);
-        ExecutorService pool = Executors.newCachedThreadPool(new DaemonFactory("jkit-mock"));
+        // 有界池：延迟压测场景下防止线程无界增长；排队由 HttpServer 自带派发承担
+        ExecutorService pool = Executors.newFixedThreadPool(200, new DaemonFactory("jkit-mock"));
         http.setExecutor(pool);
         http.start();
 
@@ -197,6 +205,21 @@ public final class MockHttpServer {
     }
 
     /**
+     * 配置 CRUD 资源存储。缺省纯内存；传入带 {@code dataDir} 的实现后，增删改会原子落盘
+     * 到 {@code <dataDir>/<resource>.json}，重启自动加载。
+     *
+     * @param store 资源存储，传 {@code null} 恢复纯内存
+     */
+    public void setDataStore(MockCrudStore store) {
+        this.crudStore = store == null ? MockCrudStore.inMemory() : store;
+    }
+
+    /** 当前 CRUD 资源存储。 */
+    public MockCrudStore getDataStore() {
+        return crudStore;
+    }
+
+    /**
      * 热更新路由表：服务运行中立即生效，无需重启。
      * {@code null} 视为空列表（全部 404）。
      *
@@ -258,7 +281,9 @@ public final class MockHttpServer {
                 MockRequestContext ctx = MockRequestContext.of(method, path,
                         matchPathParams(matched.path, path), rawQuery,
                         exchange.getRequestHeaders(), requestBody);
-                Resolved resolved = resolveRoute(matched, ctx, requestBody);
+                Resolved resolved = matched.crud
+                        ? serveCrud(matched, method, path, ctx)
+                        : resolveRoute(matched, ctx, requestBody);
                 latencyMs = resolved.latencyMs;
                 status = resolved.status;
                 contentType = resolved.contentType;
@@ -290,6 +315,14 @@ public final class MockHttpServer {
                 contentType = JSON_CT;
                 responseBytes = NOT_FOUND_BODY;
             }
+            if (latencyMs > 0) {
+                long maxMs = matched != null && matched.latencyMaxMs > latencyMs
+                        ? matched.latencyMaxMs : latencyMs;
+                if (maxMs > latencyMs) {
+                    // 延迟区间随机：[min, max]，更接近真实网络抖动
+                    latencyMs += ThreadLocalRandom.current().nextLong(maxMs - latencyMs + 1);
+                }
+            }
             if (latencyMs > 0 && !sleepInterruptible(latencyMs)) {
                 return; // 服务停止打断延迟等待：finally 里照常留痕并关闭连接
             }
@@ -316,6 +349,108 @@ public final class MockHttpServer {
                     truncateBytesForLog(requestBody, LOG_TEXT_MAX),
                     truncateBytesForLog(responseBytes, LOG_TEXT_MAX), proxied));
             exchange.close();
+        }
+    }
+
+    /**
+     * CRUD 资源模式：路由 path 即资源基址（如 {@code /users}），自动服务
+     * {@code GET /users}（列表 + 过滤分页排序）、{@code POST /users}、
+     * {@code GET/PUT/PATCH/DELETE /users/{id}}；数据来自 {@link MockCrudStore}，
+     * 初始数据可用 body（JSON 数组）播种。
+     */
+    private Resolved serveCrud(MockRoute route, String method, String path, MockRequestContext ctx) {
+        String base = route.path.endsWith("/")
+                ? route.path.substring(0, route.path.length() - 1) : route.path;
+        String resource = base;
+        int slash = base.lastIndexOf('/');
+        if (slash >= 0 && slash + 1 < base.length()) {
+            resource = base.substring(slash + 1);
+        }
+        String rest = path.equals(base) ? "" : path.substring(base.length());
+        if (rest.startsWith("/")) {
+            rest = rest.substring(1);
+        }
+        // 首次访问播种：body 为 JSON 数组时作为初始数据（盘上已有数据则 no-op）
+        if (route.body.trim().startsWith("[")) {
+            try {
+                Object parsed = com.alianga.jkit.json.JSON.parse(route.body.trim());
+                if (parsed instanceof List) {
+                    List<Map<String, Object>> seed = new ArrayList<>();
+                    for (Object o : (List<?>) parsed) {
+                        if (o instanceof Map) {
+                            @SuppressWarnings("unchecked")
+                            Map<String, Object> row = (Map<String, Object>) o;
+                            seed.add(row);
+                        }
+                    }
+                    crudStore.seed(resource, seed);
+                }
+            } catch (RuntimeException ignore) {
+                // 播种失败按空资源处理
+            }
+        }
+        long latencyMs = route.latencyMs;
+        Map<String, String> headers = renderHeadersSafe(route.headers, ctx);
+        boolean isGet = "GET".equalsIgnoreCase(method);
+        boolean isPost = "POST".equalsIgnoreCase(method);
+        boolean isPut = "PUT".equalsIgnoreCase(method);
+        boolean isPatch = "PATCH".equalsIgnoreCase(method);
+        boolean isDelete = "DELETE".equalsIgnoreCase(method);
+
+        if (rest.isEmpty()) {
+            if (isGet) {
+                List<Map<String, Object>> rows = crudStore.query(resource, ctx.queryMap());
+                return new Resolved(200, latencyMs, JSON_CT,
+                        MockDataFormatter.prettyJson(rows).getBytes(StandardCharsets.UTF_8), headers);
+            }
+            if (isPost) {
+                Map<String, Object> body = parseJsonObject(ctx);
+                if (body == null) {
+                    return new Resolved(400, latencyMs, JSON_CT,
+                            BAD_REQUEST_BODY, headers);
+                }
+                Map<String, Object> created = crudStore.insert(resource, body);
+                return new Resolved(201, latencyMs, JSON_CT,
+                        MockDataFormatter.prettyJson(created).getBytes(StandardCharsets.UTF_8), headers);
+            }
+            return new Resolved(405, latencyMs, JSON_CT, METHOD_NOT_ALLOWED_BODY, headers);
+        }
+
+        String id = rest.contains("/") ? rest.substring(0, rest.indexOf('/')) : rest;
+        if (isGet) {
+            Map<String, Object> row = crudStore.find(resource, id);
+            return row == null
+                    ? new Resolved(404, latencyMs, JSON_CT, NOT_FOUND_BODY, headers)
+                    : new Resolved(200, latencyMs, JSON_CT,
+                            MockDataFormatter.prettyJson(row).getBytes(StandardCharsets.UTF_8), headers);
+        }
+        if (isPut || isPatch) {
+            Map<String, Object> body = parseJsonObject(ctx);
+            if (body == null) {
+                return new Resolved(400, latencyMs, JSON_CT, BAD_REQUEST_BODY, headers);
+            }
+            Map<String, Object> updated = crudStore.update(resource, id, body, isPatch);
+            return updated == null
+                    ? new Resolved(404, latencyMs, JSON_CT, NOT_FOUND_BODY, headers)
+                    : new Resolved(200, latencyMs, JSON_CT,
+                            MockDataFormatter.prettyJson(updated).getBytes(StandardCharsets.UTF_8), headers);
+        }
+        if (isDelete) {
+            Map<String, Object> removed = crudStore.delete(resource, id);
+            return removed == null
+                    ? new Resolved(404, latencyMs, JSON_CT, NOT_FOUND_BODY, headers)
+                    : new Resolved(204, latencyMs, "text/plain", EMPTY_BODY, headers);
+        }
+        return new Resolved(405, latencyMs, JSON_CT, METHOD_NOT_ALLOWED_BODY, headers);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> parseJsonObject(MockRequestContext ctx) {
+        try {
+            Object parsed = com.alianga.jkit.json.JSON.parse(ctx.bodyText());
+            return parsed instanceof Map ? (Map<String, Object>) parsed : null;
+        } catch (RuntimeException e) {
+            return null;
         }
     }
 
@@ -520,11 +655,25 @@ public final class MockHttpServer {
             if (!route.enabled) {
                 continue;
             }
-            if (matchesMethod(route.method, method) && matchesPath(route.path, path)) {
+            // CRUD 路由独占基址上的 GET/POST/PUT/PATCH/DELETE，方法过滤交给 CRUD 分派
+            if (!route.crud && !matchesMethod(route.method, method)) {
+                continue;
+            }
+            if (route.crud ? matchesCrudBase(route.path, path) : matchesPath(route.path, path)) {
                 return route;
             }
         }
         return null;
+    }
+
+    /** CRUD 路由匹配基址或基址下的任意子路径（id 段）。 */
+    static boolean matchesCrudBase(String base, String path) {
+        if (base == null || path == null) {
+            return false;
+        }
+        String trimmed = base.endsWith("/") && base.length() > 1
+                ? base.substring(0, base.length() - 1) : base;
+        return path.equals(trimmed) || path.startsWith(trimmed + "/");
     }
 
     /**
@@ -560,12 +709,35 @@ public final class MockHttpServer {
         }
         String[] pSeg = splitPath(pattern);
         String[] rSeg = splitPath(path);
-        if (pSeg.length != rSeg.length) {
+        boolean tailWildcard = pSeg.length > 0
+                && pSeg[pSeg.length - 1].length() >= 4
+                && pSeg[pSeg.length - 1].charAt(0) == '{'
+                && pSeg[pSeg.length - 1].endsWith("*}");
+        if (pSeg.length != rSeg.length && !tailWildcard) {
+            return null;
+        }
+        if (tailWildcard && rSeg.length < pSeg.length - 1) {
             return null;
         }
         Map<String, String> params = null;
         for (int i = 0; i < pSeg.length; i++) {
             String p = pSeg[i];
+            // 尾段 {name*}：吞掉剩余全部段（可空），如 /static/{file*}
+            if (i == pSeg.length - 1 && p.length() >= 4 && p.charAt(0) == '{'
+                    && p.endsWith("*}")) {
+                if (params == null) {
+                    params = new LinkedHashMap<>();
+                }
+                StringBuilder tail = new StringBuilder();
+                for (int j = i; j < rSeg.length; j++) {
+                    if (j > i) {
+                        tail.append('/');
+                    }
+                    tail.append(rSeg[j]);
+                }
+                params.put(p.substring(1, p.length() - 2), tail.toString());
+                return Collections.unmodifiableMap(params);
+            }
             String r = rSeg[i];
             if (isParam(p)) {
                 if (r.isEmpty()) {

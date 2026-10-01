@@ -39,6 +39,10 @@ public final class MockRoute {
     public final boolean echo;
     /** 为 false 时本路由不参与匹配（热更新立即生效）。 */
     public final boolean enabled;
+    /** 延迟区间上限（毫秒）；大于 {@link #latencyMs} 时每次请求在区间内随机，0 表示固定延迟。 */
+    public final long latencyMaxMs;
+    /** 为 true 时本路由按 CRUD 资源模式服务（{@code GET/POST /base}、{@code GET/PUT/PATCH/DELETE /base/{id}}）。 */
+    public final boolean crud;
     /** 为 true 时 body 按 Mock.js 模板（{@code @cname}、{@code 'list|1-3'} 等）每次请求渲染。 */
     public final boolean dynamicTemplate;
     /** 附加响应头（保序）；值支持 {@code {{query.x}}} 等占位符。 */
@@ -50,14 +54,14 @@ public final class MockRoute {
                      String contentType, String body) {
         this(method, path, statusCode, latencyMs, contentType, body, "", false, false,
                 true, false, Collections.<String, String>emptyMap(),
-                Collections.<MockResponse>emptyList());
+                Collections.<MockResponse>emptyList(), 0L, false);
     }
 
     public MockRoute(String method, String path, int statusCode, long latencyMs,
                      String contentType, String body, String responseSchema, boolean dynamicSchema) {
         this(method, path, statusCode, latencyMs, contentType, body, responseSchema, dynamicSchema,
                 false, true, false, Collections.<String, String>emptyMap(),
-                Collections.<MockResponse>emptyList());
+                Collections.<MockResponse>emptyList(), 0L, false);
     }
 
     /** 历史 eight-arg + echo 的便捷重载。 */
@@ -66,7 +70,7 @@ public final class MockRoute {
                      boolean echo) {
         this(method, path, statusCode, latencyMs, contentType, body, responseSchema, dynamicSchema,
                 echo, true, false, Collections.<String, String>emptyMap(),
-                Collections.<MockResponse>emptyList());
+                Collections.<MockResponse>emptyList(), 0L, false);
     }
 
     /**
@@ -75,7 +79,8 @@ public final class MockRoute {
     public MockRoute(String method, String path, int statusCode, long latencyMs,
                      String contentType, String body, String responseSchema, boolean dynamicSchema,
                      boolean echo, boolean enabled, boolean dynamicTemplate,
-                     Map<String, String> headers, List<MockResponse> responses) {
+                     Map<String, String> headers, List<MockResponse> responses,
+                     long latencyMaxMs, boolean crud) {
         this.method = method == null || method.trim().isEmpty() ? "*" : method.trim();
         this.path = path == null || path.trim().isEmpty() ? "/" : path.trim();
         this.statusCode = statusCode <= 0 ? 200 : statusCode;
@@ -89,6 +94,8 @@ public final class MockRoute {
         this.echo = echo;
         this.enabled = enabled;
         this.dynamicTemplate = dynamicTemplate;
+        this.latencyMaxMs = Math.max(0L, latencyMaxMs);
+        this.crud = crud;
         Map<String, String> headerCopy = new LinkedHashMap<>();
         if (headers != null) {
             for (Map.Entry<String, String> e : headers.entrySet()) {
@@ -124,6 +131,8 @@ public final class MockRoute {
         private boolean dynamicTemplate;
         private Map<String, String> headers = new LinkedHashMap<>();
         private List<MockResponse> responses = new ArrayList<>();
+        private long latencyMaxMs;
+        private boolean crud;
 
         public Builder method(String value) {
             this.method = value;
@@ -180,6 +189,16 @@ public final class MockRoute {
             return this;
         }
 
+        public Builder latencyMaxMs(long value) {
+            this.latencyMaxMs = value;
+            return this;
+        }
+
+        public Builder crud(boolean value) {
+            this.crud = value;
+            return this;
+        }
+
         public Builder header(String name, String value) {
             this.headers.put(name, value);
             return this;
@@ -207,7 +226,7 @@ public final class MockRoute {
         public MockRoute build() {
             return new MockRoute(method, path, statusCode, latencyMs, contentType, body,
                     responseSchema, dynamicSchema, echo, enabled, dynamicTemplate,
-                    headers, responses);
+                    headers, responses, latencyMaxMs, crud);
         }
     }
 
