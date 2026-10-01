@@ -12,6 +12,10 @@
 
 - 新增本地 Mock HTTP 服务包 `com.alianga.jkit.mock.server`（`MockHttpServer` / `MockRoute` / `MockRequestLog`）：纯 JDK `com.sun.net.httpserver` 实现，零第三方依赖、不依赖 JavaFX，可嵌入桌面工具、单测与脚本。方法（`*` 任意）+ 路径模板（`{name}` 单段参数）匹配，路径先 percent-decode 再匹配（含中文 / 空格的请求可命中，`+` 按字面量）；支持状态码、固定延迟、任意 Content-Type、固定 body、`echo` 请求体回显（沿用请求 Content-Type）与 `dynamicSchema` 按 JSON Schema 每次请求动态生成（失败回落固定 body 或错误 JSON）。所有响应带 CORS 三头，未命中 OPTIONS 路由的预检自动 204；运行中 `setRoutes` 热更新无需重启；请求日志环形保留最近 200 条、超长内容按 2048 字符截断，支持 `snapshotLogs` / `clearLogs` / `addLogListener`。
 
+- 响应方案与动态模板：`MockRoute` 新增 `responses`（`MockResponse` 多响应 + `MockResponseRule` 激活规则，query / header / body 相等 / 正则 / EXISTS，body 支持 JSON 点分路径与数组下标；带规则的方案先评估，第一个全中的生效，全不中回落无规则的默认方案）、`dynamicTemplate`（body 按 Mock.js 模板每次请求渲染，非法模板回落占位符替换后的原文）、`headers`（附加响应头，值支持占位符）与 `enabled` 开关。`MockRequestLog` 新增 `proxied` 标记。
+- 占位符渲染（`MockTemplateRenderer`）：响应体与响应头值支持 `{{param.id}}`（路径模板参数）/ `{{query.x}}` / `{{header.X-Token}}` / `{{body.user.name}}`（请求体 JSON 点分路径）/ `{{method}}` / `{{path}}`；`dynamicSchema` 的 Schema 文本同样先做占位符替换。
+- 代理回源：`setProxyTarget(baseUrl)` 后未命中路由的请求原样转发真实后端（复用 jkit HTTP 客户端，剥 hop-by-hop / Host / Content-Length 请求头与 hop-by-hop / CORS / Content-Length / Server / Date 响应头），失败按 502 返回错误 JSON；未配代理时 OPTIONS 预检行为不变。
+
 ### 修复
 
 **jkit-mock**

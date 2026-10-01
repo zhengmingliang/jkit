@@ -158,13 +158,23 @@ Map<String, Object> schema = MockValid.toJsonSchema(template);
 ```java
 MockHttpServer server = new MockHttpServer();
 server.start(18081, MockRoute.demoRoutes());   // 立即可用：/health、/api/hello、POST /api/echo
+server.setProxyTarget("https://real-api.example.com");  // 可选：未命中路由转发真实后端
 
-// 业务路由：路径参数、固定延迟、动态 Schema、请求体回显
+// 业务路由：路径参数、固定延迟、动态 Schema、Mock.js 模板、响应方案、附加响应头
 List<MockRoute> routes = Arrays.asList(
         new MockRoute("GET", "/users/{id}", 200, 120,
                 "application/json; charset=utf-8", "{\"id\":1}"),
         new MockRoute("GET", "/order", 200, 0,
                 "application/json; charset=utf-8", "", orderSchema, true),  // dynamicSchema：每次请求重新生成
+        MockRoute.builder()
+                .method("GET").path("/random/{id}")
+                .dynamicTemplate(true)                                     // Mock.js 模板每次请求渲染
+                .body("{\"id\":\"{{param.id}}\",\"name\":\"@cname\"}")
+                .header("X-Who", "user-{{param.name}}")                     // 响应头值支持占位符
+                .response(MockResponse.builder().statusCode(500)            // 响应方案：规则全中生效
+                        .rule(MockResponseRule.queryEquals("debug", "1"))
+                        .body("{\"code\":500}").build())
+                .build(),
         new MockRoute("POST", "/api/echo", 200, 0,
                 "application/json; charset=utf-8", "", "", false, true));   // echo：原样回写请求体
 server.setRoutes(routes);                       // 运行中热更新，无需重启
@@ -177,7 +187,13 @@ server.stop();                                  // 释放端口，中断延迟�
 
 - **匹配**：方法（`*` 任意）+ 路径模板（`{name}` 匹配任意单段）；路径先 percent-decode 再匹配，含中文 / 空格的请求路径也能命中；`+` 按字面量处理（不当空格）。
 - **响应**：状态码、固定延迟（毫秒）、任意 Content-Type、固定 body、Schema 动态生成（失败回落固定 body 或 `schema mock failed` 错误 JSON）。
-- **CORS**：所有响应带 `Access-Control-Allow-Origin: *` 等三个头；未命中 OPTIONS 路由的预检请求自动 204。
+- **占位符**：响应体与响应头值支持 `{{param.id}}` / `{{query.x}}` / `{{header.X-Token}}` / `{{body.user.name}}`（请求体 JSON 点分路径）/ `{{method}}` / `{{path}}`，未知取值替换为空串。
+- **动态数据**：`dynamicSchema` 按 JSON Schema 生成（优先）；`dynamicTemplate` 把 body 当 Mock.js 模板每次请求渲染（`@cname`、`'list|1-3'` 等），非法模板回落占位符替换后的原文。
+- **响应方案**：`MockRoute.builder().response(MockResponse)` 挂多条响应；带激活规则的方案先评估（query / header / body 相等 / 正则 / EXISTS，body 支持点分路径与数组下标），第一个全中的生效；全不中回落无规则的默认方案。
+- **附加响应头**：`builder().header(name, value)` 每路由任意多个，值支持占位符。
+- **代理回源**：`setProxyTarget(baseUrl)` 后未命中路由的请求原样转发真实后端（复用 jkit HTTP 客户端，剥 hop-by-hop 头），失败按 502 返回；日志条目标记 `proxied`。
+- **CORS**：所有响应带 `Access-Control-Allow-Origin: *` 等三个头；未配代理时未命中 OPTIONS 路由的预检请求自动 204。
+- **启用开关**：`builder().enabled(false)` 的路由不参与匹配，热更新立即生效。
 - **健壮性**：空路由表即全 404（不回落演示路由）；状态码超出 100–599 的路由按 500 兜底返回错误 JSON；handler 顶层兜底异常，客户端提前断开 / 服务停止打断延迟的请求同样留下日志。
 - **日志**：环形保留最近 200 条（`MockRequestLog`），query / 请求体 / 响应体按 2048 字符截断；`snapshotLogs()` / `clearLogs()` / `addLogListener()` 三种消费方式。
 - 线程模型：每个请求一个 daemon 线程（缓存池），路由表为 volatile 不可变快照，热更新无锁。

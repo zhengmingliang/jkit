@@ -1,6 +1,9 @@
 package com.alianga.jkit.mock.server;
 
+import com.alianga.jkit.http.HttpRequest;
+import com.alianga.jkit.http.HttpResponse;
 import com.alianga.jkit.mock.MockDataFormatter;
+import com.alianga.jkit.mock.MockJs;
 import com.alianga.jkit.mock.MockSchema;
 import com.sun.net.httpserver.Headers;
 import com.sun.net.httpserver.HttpExchange;
@@ -14,8 +17,11 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
@@ -26,31 +32,43 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 /**
- * 零依赖的本地 Mock HTTP 服务：纯 JDK {@link HttpServer} 实现，不依赖 JavaFX 与任何第三方库，
- * 供桌面工具、单测与脚本复用。
+ * 零依赖的本地 Mock HTTP 服务：纯 JDK {@link HttpServer} 实现（代理转发复用 jkit 自带
+ * HTTP 客户端），不依赖 JavaFX 与任何第三方库，供桌面工具、单测与脚本复用。
  *
  * <p><b>能力</b>：</p>
  * <ul>
  *   <li>匹配：HTTP 方法（{@code *} 任意）+ 路径模板（{@code {name}} 单段参数），路径先做
- *       percent-decode 再匹配（含中文 / 空格的请求路径可命中）</li>
- *   <li>响应：状态码、固定延迟（毫秒）、任意 Content-Type、固定响应体、
- *       {@link MockRoute#echo} 请求体回显（沿用请求 Content-Type）</li>
- *   <li>动态数据：{@link MockRoute#dynamicSchema} 开启后按 JSON Schema 每次请求生成响应体
- *       （{@link MockSchema}），生成失败回落固定 body 或错误 JSON</li>
- *   <li>CORS：所有响应带 {@code Access-Control-Allow-*}；未命中 OPTIONS 路由的预检自动 204</li>
+ *       percent-decode 再匹配；{@code enabled=false} 的路由跳过</li>
+ *   <li>响应：状态码、固定延迟、任意 Content-Type、固定响应体、{@link MockRoute#echo}
+ *       请求体回显、附加响应头；动态数据三选一——{@code dynamicSchema} 按 JSON Schema 生成
+ *       （优先）、{@code dynamicTemplate} 按 Mock.js 模板生成、静态 body</li>
+ *   <li>响应方案：{@link MockRoute#responses} 多响应，按激活规则（query / header / body）
+ *       带规则的方案先评估，第一个全中的生效；全不中回落无规则的默认方案</li>
+ *   <li>占位符：响应体与响应头值支持 {@code {{param.id}}} / {@code {{query.x}}} /
+ *       {@code {{header.x}}} / {@code {{body.a.b}}} / {@code {{method}}} / {@code {{path}}}</li>
+ *   <li>代理回源：{@link #setProxyTarget(String)} 后未命中路由的请求原样转发到真实后端</li>
+ *   <li>CORS：所有响应带 {@code Access-Control-Allow-*}；无代理时未命中 OPTIONS 路由的
+ *       预检自动 204</li>
  *   <li>热更新：运行中 {@link #setRoutes(List)} 立即生效，无需重启</li>
- *   <li>请求日志：环形保留最近 200 条，query / 请求体 / 响应体按 {@link #LOG_TEXT_MAX}
- *       字符截断；客户端提前断开、服务停止打断延迟同样留痕</li>
+ *   <li>请求日志：环形保留最近 200 条；客户端提前断开、服务停止打断延迟同样留痕</li>
  * </ul>
  *
- * <p><b>健壮性</b>：路由表为空即全 404（不回落演示路由）；状态码超出 100–599 的路由按
- * 500 兜底返回错误 JSON，不让底层连接裸断；handler 顶层兜底异常并保证每条请求都有日志。</p>
+ * <p><b>健壮性</b>：路由表为空且无代理即全 404（不回落演示路由）；状态码超出 100–599 的
+ * 响应按 500 兜底返回错误 JSON；handler 顶层兜底异常并保证每条请求都有日志。</p>
  *
  * <pre>{@code
  * MockHttpServer server = new MockHttpServer();
  * server.start(18081, MockRoute.demoRoutes());
- * server.setRoutes(Arrays.asList(
- *         new MockRoute("GET", "/users/{id}", 200, 120, "application/json; charset=utf-8", "{\"id\":1}")));
+ * server.setProxyTarget("https://real-api.example.com");   // 可选：未命中转发真实后端
+ * server.setRoutes(Arrays.asList(MockRoute.builder()
+ *         .method("GET").path("/users/{id}")
+ *         .dynamicTemplate(true)
+ *         .body("{\"id\":\"{{param.id}}\",\"name\":\"@cname\"}")
+ *         .header("X-Mock", "1")
+ *         .response(MockResponse.builder().statusCode(404)
+ *                 .rule(MockResponseRule.queryEquals("debug", "1"))
+ *                 .body("{\"error\":\"not found\"}").build())
+ *         .build()));
  * server.stop();
  * }</pre>
  *
@@ -68,6 +86,9 @@ public final class MockHttpServer {
             "{\"error\":\"no matching route\"}".getBytes(StandardCharsets.UTF_8);
     private static final byte[] INVALID_STATUS_BODY =
             "{\"error\":\"invalid statusCode configured\"}".getBytes(StandardCharsets.UTF_8);
+    private static final List<String> HOP_BY_HOP = Collections.unmodifiableList(Arrays.asList(
+            "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
+            "te", "trailer", "trailers", "transfer-encoding", "upgrade"));
 
     private final Object lock = new Object();
     private final List<MockRequestLog> logs = new ArrayList<>();
@@ -77,6 +98,7 @@ public final class MockHttpServer {
     private volatile HttpServer server;
     private volatile ExecutorService executor;
     private volatile int port;
+    private volatile String proxyTarget;
     private final AtomicBoolean stopping = new AtomicBoolean(false);
     /** 本次启动时刻；未运行时为 null。 */
     private volatile Instant startedAt;
@@ -156,6 +178,25 @@ public final class MockHttpServer {
     }
 
     /**
+     * 配置代理回源：未命中路由的请求原样转发到该基址（如 {@code https://real-api.example.com}）。
+     * 传 {@code null} / 空串关闭。
+     *
+     * @param baseUrl 目标基址；末尾 {@code /} 会去掉
+     */
+    public void setProxyTarget(String baseUrl) {
+        String target = baseUrl == null ? "" : baseUrl.trim();
+        while (target.endsWith("/")) {
+            target = target.substring(0, target.length() - 1);
+        }
+        this.proxyTarget = target.isEmpty() ? null : target;
+    }
+
+    /** 当前代理回源基址；未配置返回 {@code null}。 */
+    public String getProxyTarget() {
+        return proxyTarget;
+    }
+
+    /**
      * 热更新路由表：服务运行中立即生效，无需重启。
      * {@code null} 视为空列表（全部 404）。
      *
@@ -201,31 +242,44 @@ public final class MockHttpServer {
         String method = exchange.getRequestMethod() == null ? "GET" : exchange.getRequestMethod();
         String rawPath = exchange.getRequestURI().getRawPath();
         String path = rawPath == null || rawPath.isEmpty() ? "/" : decodePath(rawPath);
-        String query = exchange.getRequestURI().getRawQuery();
-        if (query == null) {
-            query = "";
-        }
+        String rawQuery = exchange.getRequestURI().getRawQuery();
 
         MockRoute matched = null;
         int status = 500;
         byte[] responseBytes = NOT_FOUND_BODY;
         String contentType = JSON_CT;
-        byte[] requestBody = EMPTY_BODY;
         long latencyMs = 0L;
+        byte[] requestBody = EMPTY_BODY;
+        boolean proxied = false;
         try {
             requestBody = readAll(exchange.getRequestBody());
             matched = findRoute(method, path);
             if (matched != null) {
-                latencyMs = matched.latencyMs;
-                status = matched.statusCode;
-                contentType = matched.contentType;
-                responseBytes = renderResponse(matched, requestBody);
-                if (matched.echo) {
-                    String reqCt = exchange.getRequestHeaders().getFirst("Content-Type");
-                    if (reqCt != null && !reqCt.trim().isEmpty()) {
-                        contentType = reqCt;
+                MockRequestContext ctx = MockRequestContext.of(method, path,
+                        matchPathParams(matched.path, path), rawQuery,
+                        exchange.getRequestHeaders(), requestBody);
+                Resolved resolved = resolveRoute(matched, ctx, requestBody);
+                latencyMs = resolved.latencyMs;
+                status = resolved.status;
+                contentType = resolved.contentType;
+                responseBytes = resolved.body;
+                if (resolved.headers != null && !resolved.headers.isEmpty()) {
+                    for (Map.Entry<String, String> e : resolved.headers.entrySet()) {
+                        exchange.getResponseHeaders().set(e.getKey(), e.getValue());
                     }
                 }
+            } else if (proxyTarget != null) {
+                // 代理回源：未命中路由原样转发真实后端
+                Resolved forwarded = forward(exchange, method, rawPath, rawQuery, requestBody);
+                status = forwarded.status;
+                contentType = forwarded.contentType;
+                responseBytes = forwarded.body;
+                if (forwarded.headers != null && !forwarded.headers.isEmpty()) {
+                    for (Map.Entry<String, String> e : forwarded.headers.entrySet()) {
+                        exchange.getResponseHeaders().set(e.getKey(), e.getValue());
+                    }
+                }
+                proxied = true;
             } else if ("OPTIONS".equalsIgnoreCase(method)) {
                 // 无显式 OPTIONS 路由时自动 CORS 预检
                 status = 204;
@@ -257,27 +311,170 @@ public final class MockHttpServer {
         } finally {
             long durationMs = (System.nanoTime() - startNs) / 1_000_000L;
             pushLog(new MockRequestLog(Instant.now(), method, path,
-                    truncateForLog(query, LOG_TEXT_MAX), matched != null, status, durationMs,
+                    truncateForLog(rawQuery == null ? "" : rawQuery, LOG_TEXT_MAX),
+                    matched != null || proxied, status, durationMs,
                     truncateBytesForLog(requestBody, LOG_TEXT_MAX),
-                    truncateBytesForLog(responseBytes, LOG_TEXT_MAX)));
+                    truncateBytesForLog(responseBytes, LOG_TEXT_MAX), proxied));
             exchange.close();
         }
     }
 
-    /** 按路由渲染响应字节：动态 Schema > 固定 body；echo 的请求体由调用方处理。 */
-    private byte[] renderResponse(MockRoute route, byte[] requestBody) {
-        if (route.dynamicSchema && route.responseSchema != null && !route.responseSchema.trim().isEmpty()) {
-            try {
-                Object data = new MockSchema().generate(route.responseSchema.trim());
-                return MockDataFormatter.prettyJson(data).getBytes(StandardCharsets.UTF_8);
-            } catch (RuntimeException ex) {
-                String fallback = route.body == null || route.body.isEmpty()
-                        ? "{\"error\":\"schema mock failed\",\"message\":\"" + escapeJsonBrief(ex.getMessage()) + "\"}"
-                        : route.body;
-                return fallback.getBytes(StandardCharsets.UTF_8);
+    /** 组装一条路由的响应：回显 > 响应方案 > 动态 Schema > 动态模板 > 静态 body。 */
+    private Resolved resolveRoute(MockRoute route, MockRequestContext ctx, byte[] requestBody) {
+        if (route.echo) {
+            String reqCt = ctx.headerFirst("Content-Type");
+            return new Resolved(route.statusCode, route.latencyMs,
+                    reqCt == null || reqCt.trim().isEmpty() ? route.contentType : reqCt,
+                    requestBody, renderHeadersSafe(route.headers, ctx));
+        }
+        MockResponse picked = pickResponse(route.responses, ctx);
+        if (picked != null) {
+            String body = renderBody(picked.body, picked.dynamicTemplate, ctx);
+            return new Resolved(picked.statusCode, picked.latencyMs, picked.contentType,
+                    body.getBytes(StandardCharsets.UTF_8), renderHeadersSafe(picked.headers, ctx));
+        }
+        if (route.dynamicSchema && !route.responseSchema.trim().isEmpty()) {
+            return new Resolved(route.statusCode, route.latencyMs, route.contentType,
+                    renderSchemaBody(route, ctx).getBytes(StandardCharsets.UTF_8),
+                    renderHeadersSafe(route.headers, ctx));
+        }
+        String body = renderBody(route.body, route.dynamicTemplate, ctx);
+        return new Resolved(route.statusCode, route.latencyMs, route.contentType,
+                body.getBytes(StandardCharsets.UTF_8), renderHeadersSafe(route.headers, ctx));
+    }
+
+    /**
+     * 响应方案挑选：先按顺序评估带激活规则的方案，第一个规则全中的生效；
+     * 全不中回落到无规则的默认方案（没有默认方案则取第一条）。
+     */
+    private static MockResponse pickResponse(List<MockResponse> responses, MockRequestContext ctx) {
+        if (responses == null || responses.isEmpty()) {
+            return null;
+        }
+        MockResponse fallback = null;
+        for (MockResponse response : responses) {
+            if (response.rules.isEmpty()) {
+                if (fallback == null) {
+                    fallback = response;
+                }
+                continue;
+            }
+            if (allRulesMatch(response, ctx)) {
+                return response;
             }
         }
-        return route.echo ? requestBody : route.body.getBytes(StandardCharsets.UTF_8);
+        return fallback != null ? fallback : responses.get(0);
+    }
+
+    private static boolean allRulesMatch(MockResponse response, MockRequestContext ctx) {
+        for (MockResponseRule rule : response.rules) {
+            if (!rule.matches(ctx)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private String renderBody(String raw, boolean dynamicTemplate, MockRequestContext ctx) {
+        String rendered = MockTemplateRenderer.render(raw, ctx);
+        if (!dynamicTemplate) {
+            return rendered;
+        }
+        try {
+            return MockJs.mockJson(rendered);
+        } catch (RuntimeException ex) {
+            // 模板非法回落占位符替换后的原文，避免整个请求 500
+            return rendered;
+        }
+    }
+
+    private String renderSchemaBody(MockRoute route, MockRequestContext ctx) {
+        try {
+            String schemaText = MockTemplateRenderer.render(route.responseSchema, ctx);
+            Object data = new MockSchema().generate(schemaText.trim());
+            return MockDataFormatter.prettyJson(data);
+        } catch (RuntimeException ex) {
+            return route.body == null || route.body.isEmpty()
+                    ? "{\"error\":\"schema mock failed\",\"message\":\"" + escapeJsonBrief(ex.getMessage()) + "\"}"
+                    : route.body;
+        }
+    }
+
+    private static Map<String, String> renderHeadersSafe(Map<String, String> headers,
+                                                         MockRequestContext ctx) {
+        if (headers == null || headers.isEmpty()) {
+            return null;
+        }
+        return MockTemplateRenderer.renderHeaders(headers, ctx);
+    }
+
+    /** 代理转发：未命中路由的请求原样打到真实后端，失败按 502 返回。 */
+    private Resolved forward(HttpExchange exchange, String method, String rawPath,
+                             String rawQuery, byte[] requestBody) {
+        String target = proxyTarget + rawPath
+                + (rawQuery == null || rawQuery.isEmpty() ? "" : "?" + rawQuery);
+        HttpRequest request = HttpRequest.get(target).method(method);
+        for (Map.Entry<String, List<String>> e : exchange.getRequestHeaders().entrySet()) {
+            String name = e.getKey();
+            if (name == null) {
+                continue;
+            }
+            String lower = name.toLowerCase();
+            if (HOP_BY_HOP.contains(lower) || "host".equals(lower) || "content-length".equals(lower)) {
+                continue;
+            }
+            for (String value : e.getValue()) {
+                request.header(name, value);
+            }
+        }
+        if (requestBody.length > 0) {
+            request.body(requestBody);
+        }
+        try {
+            HttpResponse response = request.execute();
+            Map<String, String> headers = new LinkedHashMap<>();
+            String contentType = null;
+            for (Map.Entry<String, List<String>> e : response.headers().entrySet()) {
+                String name = e.getKey();
+                if (name == null || e.getValue() == null || e.getValue().isEmpty()) {
+                    continue;
+                }
+                String lower = name.toLowerCase();
+                if (HOP_BY_HOP.contains(lower) || lower.startsWith("access-control-")
+                        || "content-length".equals(lower) || "server".equals(lower) || "date".equals(lower)) {
+                    continue;
+                }
+                headers.put(name, e.getValue().get(0));
+                if ("content-type".equals(lower)) {
+                    contentType = e.getValue().get(0);
+                }
+            }
+            byte[] body = response.body().bytes();
+            return new Resolved(response.code(), 0L,
+                    contentType == null ? JSON_CT : contentType, body, headers);
+        } catch (IOException ex) {
+            byte[] body = ("{\"error\":\"proxy failed\",\"message\":\""
+                    + escapeJsonBrief(ex.getMessage()) + "\"}").getBytes(StandardCharsets.UTF_8);
+            return new Resolved(502, 0L, JSON_CT, body, null);
+        }
+    }
+
+    /** 一次响应的解析结果。 */
+    private static final class Resolved {
+        private final int status;
+        private final long latencyMs;
+        private final String contentType;
+        private final byte[] body;
+        private final Map<String, String> headers;
+
+        Resolved(int status, long latencyMs, String contentType, byte[] body,
+                 Map<String, String> headers) {
+            this.status = status;
+            this.latencyMs = latencyMs;
+            this.contentType = contentType;
+            this.body = body;
+            this.headers = headers;
+        }
     }
 
     private void writeResponse(HttpExchange exchange, int status, String contentType, byte[] body)
@@ -320,6 +517,9 @@ public final class MockHttpServer {
 
     private MockRoute findRoute(String method, String path) {
         for (MockRoute route : routes) {
+            if (!route.enabled) {
+                continue;
+            }
             if (matchesMethod(route.method, method) && matchesPath(route.path, path)) {
                 return route;
             }
@@ -341,31 +541,49 @@ public final class MockHttpServer {
      * 路径匹配：精确相等，或逐段比较、{@code {name}} 段匹配任意非空段；首尾多余 {@code /} 不影响。
      */
     public static boolean matchesPath(String pattern, String path) {
+        return matchPathParams(pattern, path) != null;
+    }
+
+    /**
+     * 路径匹配并提取 {@code {name}} 参数；不匹配返回 {@code null}，匹配返回不可变参数表。
+     *
+     * @param pattern 路由模板
+     * @param path    解码后的请求路径
+     * @return 参数表（可能为空表）或 {@code null}
+     */
+    public static Map<String, String> matchPathParams(String pattern, String path) {
         if (Objects.equals(pattern, path)) {
-            return true;
+            return Collections.emptyMap();
         }
         if (pattern == null || path == null) {
-            return false;
+            return null;
         }
         String[] pSeg = splitPath(pattern);
         String[] rSeg = splitPath(path);
         if (pSeg.length != rSeg.length) {
-            return false;
+            return null;
         }
+        Map<String, String> params = null;
         for (int i = 0; i < pSeg.length; i++) {
             String p = pSeg[i];
             String r = rSeg[i];
             if (isParam(p)) {
                 if (r.isEmpty()) {
-                    return false;
+                    return null;
                 }
+                if (params == null) {
+                    params = new LinkedHashMap<>();
+                }
+                params.put(p.substring(1, p.length() - 1), r);
                 continue;
             }
             if (!p.equals(r)) {
-                return false;
+                return null;
             }
         }
-        return true;
+        return params == null
+                ? Collections.<String, String>emptyMap()
+                : Collections.unmodifiableMap(params);
     }
 
     private static boolean isParam(String segment) {

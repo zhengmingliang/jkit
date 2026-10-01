@@ -22,15 +22,24 @@ public final class MockRequestLog {
     public final String requestBody;
     /** 可能已截断的响应体摘要；无体时为空串。 */
     public final String responseBody;
+    /** 为 true 表示该请求未命中路由、被代理转发到真实后端。 */
+    public final boolean proxied;
 
     public MockRequestLog(Instant timestamp, String method, String path, String query,
                           boolean matched, int status, long durationMs) {
-        this(timestamp, method, path, query, matched, status, durationMs, "", "");
+        this(timestamp, method, path, query, matched, status, durationMs, "", "", false);
     }
 
     public MockRequestLog(Instant timestamp, String method, String path, String query,
                           boolean matched, int status, long durationMs,
                           String requestBody, String responseBody) {
+        this(timestamp, method, path, query, matched, status, durationMs,
+                requestBody, responseBody, false);
+    }
+
+    public MockRequestLog(Instant timestamp, String method, String path, String query,
+                          boolean matched, int status, long durationMs,
+                          String requestBody, String responseBody, boolean proxied) {
         this.timestamp = timestamp == null ? Instant.now() : timestamp;
         this.method = method == null ? "" : method;
         this.path = path == null ? "" : path;
@@ -40,12 +49,14 @@ public final class MockRequestLog {
         this.durationMs = durationMs;
         this.requestBody = requestBody == null ? "" : requestBody;
         this.responseBody = responseBody == null ? "" : responseBody;
+        this.proxied = proxied;
     }
 
     @Override
     public String toString() {
         String q = query.isEmpty() ? "" : "?" + query;
-        return String.format("%s %s%s -> %d (%dms)%s",
-                method, path, q, status, durationMs, matched ? "" : " [miss]");
+        return String.format("%s %s%s -> %d (%dms)%s%s",
+                method, path, q, status, durationMs,
+                matched ? "" : " [miss]", proxied ? " [proxy]" : "");
     }
 }
