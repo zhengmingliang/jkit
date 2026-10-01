@@ -74,6 +74,23 @@ public class MockHttpServerV2Test {
     }
 
     @Test
+    public void globalVariablesSubstitutedViaVarPrefix() throws Exception {
+        int port = freePort();
+        server.start(port, Collections.singletonList(
+                MockRoute.builder().method("GET").path("/env")
+                        .body("{\"base\":\"{{var.baseUrl}}\"}")
+                        .header("X-Env", "{{var.env}}")
+                        .build()));
+        java.util.Map<String, String> vars = new java.util.LinkedHashMap<>();
+        vars.put("baseUrl", "https://api.example.com");
+        vars.put("env", "staging");
+        server.setVariables(vars);
+        HttpResponse<String> resp = get(port, "/env");
+        assertTrue(resp.body().contains("api.example.com"));
+        assertEquals("staging", resp.headers().firstValue("X-Env").orElse(""));
+    }
+
+    @Test
     public void disabledRouteIsSkipped() throws Exception {
         int port = freePort();
         server.start(port, Arrays.asList(

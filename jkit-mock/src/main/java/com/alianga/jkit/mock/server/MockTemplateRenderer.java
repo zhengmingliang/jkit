@@ -90,6 +90,8 @@ public final class MockTemplateRenderer {
                 return valueOrEmpty(ctx.headerFirst(key));
             case "body":
                 return valueOrEmpty(ctx.bodyPathOrRaw(key));
+            case "var":
+                return valueOrEmpty(ctx.variable(key));
             default:
                 return "";
         }

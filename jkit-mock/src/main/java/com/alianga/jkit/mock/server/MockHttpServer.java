@@ -102,6 +102,8 @@ public final class MockHttpServer {
     private volatile List<MockRoute> routes = Collections.emptyList();
     /** CRUD 资源存储；缺省纯内存，可换带落盘目录的实现。 */
     private volatile MockCrudStore crudStore = MockCrudStore.inMemory();
+    /** 全局变量（{{var.name}} 取值来源）。 */
+    private volatile Map<String, String> variables = Collections.emptyMap();
     private volatile HttpServer server;
     private volatile ExecutorService executor;
     private volatile int port;
@@ -220,6 +222,21 @@ public final class MockHttpServer {
     }
 
     /**
+     * 配置服务级全局变量：模板占位符 {@code {{var.name}}} 的取值来源。
+     * 传 {@code null} / 空表清空。
+     */
+    public void setVariables(Map<String, String> variables) {
+        this.variables = variables == null
+                ? Collections.<String, String>emptyMap()
+                : Collections.unmodifiableMap(new LinkedHashMap<>(variables));
+    }
+
+    /** 当前全局变量（不可变）。 */
+    public Map<String, String> getVariables() {
+        return variables;
+    }
+
+    /**
      * 热更新路由表：服务运行中立即生效，无需重启。
      * {@code null} 视为空列表（全部 404）。
      *
@@ -280,7 +297,7 @@ public final class MockHttpServer {
             if (matched != null) {
                 MockRequestContext ctx = MockRequestContext.of(method, path,
                         matchPathParams(matched.path, path), rawQuery,
-                        exchange.getRequestHeaders(), requestBody);
+                        exchange.getRequestHeaders(), requestBody, variables);
                 Resolved resolved = matched.crud
                         ? serveCrud(matched, method, path, ctx)
                         : resolveRoute(matched, ctx, requestBody);

@@ -22,10 +22,11 @@ public final class MockRequestContext {
     private final Map<String, List<String>> headers;
     private final byte[] body;
     private final String bodyText;
+    private final Map<String, String> variables;
 
     private MockRequestContext(String method, String path, Map<String, String> pathParams,
                                Map<String, List<String>> query, Map<String, List<String>> headers,
-                               byte[] body) {
+                               byte[] body, Map<String, String> variables) {
         this.method = method;
         this.path = path;
         this.pathParams = pathParams;
@@ -33,15 +34,24 @@ public final class MockRequestContext {
         this.headers = headers;
         this.body = body;
         this.bodyText = new String(body, StandardCharsets.UTF_8);
+        this.variables = variables;
     }
 
     static MockRequestContext of(String method, String path, Map<String, String> pathParams,
                                  String rawQuery, Map<String, List<String>> headers, byte[] body) {
+        return of(method, path, pathParams, rawQuery, headers, body,
+                Collections.<String, String>emptyMap());
+    }
+
+    static MockRequestContext of(String method, String path, Map<String, String> pathParams,
+                                 String rawQuery, Map<String, List<String>> headers, byte[] body,
+                                 Map<String, String> variables) {
         return new MockRequestContext(method, path,
                 pathParams == null ? Collections.<String, String>emptyMap() : pathParams,
                 parseQuery(rawQuery),
                 headers == null ? Collections.<String, List<String>>emptyMap() : headers,
-                body == null ? new byte[0] : body);
+                body == null ? new byte[0] : body,
+                variables == null ? Collections.<String, String>emptyMap() : variables);
     }
 
     public String method() {
@@ -71,6 +81,11 @@ public final class MockRequestContext {
     /** 请求头第一个值（忽略大小写）；不存在返回 {@code null}。 */
     public String headerFirst(String name) {
         return MockResponseRule.firstValue(headers, name);
+    }
+
+    /** 服务级全局变量取值；不存在返回 {@code null}。 */
+    public String variable(String name) {
+        return variables.get(name);
     }
 
     /** 请求体字节。 */
