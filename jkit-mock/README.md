@@ -4,6 +4,7 @@
 
 1. **字段模式**（`MockDataProducer`）：内置 30 种字段类型、5 个快速模板、自定义字段，一次生成可导出 **JSON / CSV / SQL INSERT / XML** —— 1:1 对齐 FeHelper「数据 Mock」Chrome 插件。
 2. **模板模式**（`MockJs`）：完整实现 **Mock.js 规范**，支持数据模板定义（DTD）与数据占位符定义（DPD），含 58 个占位符与正则反向生成。
+3. **本地 Mock HTTP 服务**（`server.MockHttpServer`，2.0.4 起）：零依赖本地 Mock 服务，方法 + 路径模板匹配、延迟、动态 Schema、请求体回显、CORS、热更新与请求日志。
 
 两套能力共用同一套输出格式化器，模板生成的结果同样能直接导出四种格式。
 
@@ -13,7 +14,7 @@
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit-mock</artifactId>
-    <version>2.0.3</version>
+    <version>2.0.4</version>
 </dependency>
 ```
 
@@ -150,10 +151,44 @@ Map<String, Object> schema = MockValid.toJsonSchema(template);
 
 `valid` 会检查属性是否缺失、类型是否匹配、数值与数组是否落在规则区间内（数组按「重复次数」折算）。`toJsonSchema` 输出含 `type` / `properties` / `range` / `increment` 的 JSON Schema，其中 `'name|1'` 会降级为元素类型。
 
+## 本地 Mock HTTP 服务（2.0.4 起）
+
+`com.alianga.jkit.mock.server` 包提供一个零依赖的本地 Mock HTTP 服务：纯 JDK `com.sun.net.httpserver` 实现，不依赖 JavaFX 与任何第三方库，可嵌入桌面工具、单测或脚本。
+
+```java
+MockHttpServer server = new MockHttpServer();
+server.start(18081, MockRoute.demoRoutes());   // 立即可用：/health、/api/hello、POST /api/echo
+
+// 业务路由：路径参数、固定延迟、动态 Schema、请求体回显
+List<MockRoute> routes = Arrays.asList(
+        new MockRoute("GET", "/users/{id}", 200, 120,
+                "application/json; charset=utf-8", "{\"id\":1}"),
+        new MockRoute("GET", "/order", 200, 0,
+                "application/json; charset=utf-8", "", orderSchema, true),  // dynamicSchema：每次请求重新生成
+        new MockRoute("POST", "/api/echo", 200, 0,
+                "application/json; charset=utf-8", "", "", false, true));   // echo：原样回写请求体
+server.setRoutes(routes);                       // 运行中热更新，无需重启
+
+server.addLogListener(log -> System.out.println(log));  // 引擎线程回调
+server.stop();                                  // 释放端口，中断延迟等待
+```
+
+要点：
+
+- **匹配**：方法（`*` 任意）+ 路径模板（`{name}` 匹配任意单段）；路径先 percent-decode 再匹配，含中文 / 空格的请求路径也能命中；`+` 按字面量处理（不当空格）。
+- **响应**：状态码、固定延迟（毫秒）、任意 Content-Type、固定 body、Schema 动态生成（失败回落固定 body 或 `schema mock failed` 错误 JSON）。
+- **CORS**：所有响应带 `Access-Control-Allow-Origin: *` 等三个头；未命中 OPTIONS 路由的预检请求自动 204。
+- **健壮性**：空路由表即全 404（不回落演示路由）；状态码超出 100–599 的路由按 500 兜底返回错误 JSON；handler 顶层兜底异常，客户端提前断开 / 服务停止打断延迟的请求同样留下日志。
+- **日志**：环形保留最近 200 条（`MockRequestLog`），query / 请求体 / 响应体按 2048 字符截断；`snapshotLogs()` / `clearLogs()` / `addLogListener()` 三种消费方式。
+- 线程模型：每个请求一个 daemon 线程（缓存池），路由表为 volatile 不可变快照，热更新无锁。
+
 ## 核心 API
 
 | 类 | 作用 |
 | --- | --- |
+| `server.MockHttpServer` | 本地 Mock HTTP 服务：启停、热更新路由、CORS、请求日志（2.0.4 起） |
+| `server.MockRoute` | 一条路由定义：方法 / 路径模板 / 状态码 / 延迟 / Content-Type / body / Schema / 回显 |
+| `server.MockRequestLog` | 一次入站请求的日志条目（内容已按长度截断） |
 | `MockDataProducer` | 字段模式门面：装配字段 → `generate()` 得 `List<Map>`，`format()` 得字符串 |
 | `MockDataGenerator` | 单字段值生成器，`generate(MockFieldType)` / `generateCustom(MockCustomField)` |
 | `MockDataFormatter` | 静态格式化：`toJson` / `toCsv` / `toSql` / `toXml` / `format(Object, MockOutputFormat)` / `toRows(Object)` |

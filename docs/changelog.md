@@ -2,7 +2,21 @@
 
 本文记录 jkit 各版本的用户可见变更。每个版本号只出现一次，按新到旧排列。
 
-未发版的改动追加到**当前版本**小节（现在是 2.0.3）；发版后冻结该小节，在上方新建下一版本。不要改写已冻结的历史版本，也不要为同一版本再开 `unreleased` 标题。
+未发版的改动追加到**当前版本**小节（现在是 2.0.4）；发版后冻结该小节，在上方新建下一版本。不要改写已冻结的历史版本，也不要为同一版本再开 `unreleased` 标题。
+
+## 2.0.4 - 未发布
+
+### 新增
+
+**jkit-mock**
+
+- 新增本地 Mock HTTP 服务包 `com.alianga.jkit.mock.server`（`MockHttpServer` / `MockRoute` / `MockRequestLog`）：纯 JDK `com.sun.net.httpserver` 实现，零第三方依赖、不依赖 JavaFX，可嵌入桌面工具、单测与脚本。方法（`*` 任意）+ 路径模板（`{name}` 单段参数）匹配，路径先 percent-decode 再匹配（含中文 / 空格的请求可命中，`+` 按字面量）；支持状态码、固定延迟、任意 Content-Type、固定 body、`echo` 请求体回显（沿用请求 Content-Type）与 `dynamicSchema` 按 JSON Schema 每次请求动态生成（失败回落固定 body 或错误 JSON）。所有响应带 CORS 三头，未命中 OPTIONS 路由的预检自动 204；运行中 `setRoutes` 热更新无需重启；请求日志环形保留最近 200 条、超长内容按 2048 字符截断，支持 `snapshotLogs` / `clearLogs` / `addLogListener`。
+
+### 修复
+
+**jkit-mock**
+
+- 服务健壮性收口：路由表为空时所有请求 404（此前会回落演示路由，与 `setRoutes(null)` 的「全部 404」语义冲突）；状态码超出 100–599 的路由按 500 兜底返回错误 JSON（此前会让 `sendResponseHeaders` 抛异常裸断连接且不留日志）；handler 顶层兜底异常并保证每条请求都有日志，客户端提前断开 / 服务停止打断延迟的请求不再无痕消失；空响应体不再误用 chunked 编码（`sendResponseHeaders` 对 0 长度传 -1）。
 
 ## 2.0.3 - 2026-09-27
 
