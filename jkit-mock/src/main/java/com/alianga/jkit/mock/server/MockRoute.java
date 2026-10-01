@@ -23,6 +23,10 @@ import java.util.Map;
  * @since 2.0.4
  */
 public final class MockRoute {
+    /** 可选显示名（纯元信息，引擎不参与匹配与响应）。 */
+    public final String name;
+    /** 可选描述（纯元信息，引擎不参与匹配与响应）。 */
+    public final String description;
     /** HTTP 方法，或 {@code *} 表示任意方法。 */
     public final String method;
     /** 精确路径如 {@code /foo}，或带 {@code {name}} 段的模板。 */
@@ -54,14 +58,14 @@ public final class MockRoute {
                      String contentType, String body) {
         this(method, path, statusCode, latencyMs, contentType, body, "", false, false,
                 true, false, Collections.<String, String>emptyMap(),
-                Collections.<MockResponse>emptyList(), 0L, false);
+                Collections.<MockResponse>emptyList(), 0L, false, "", "");
     }
 
     public MockRoute(String method, String path, int statusCode, long latencyMs,
                      String contentType, String body, String responseSchema, boolean dynamicSchema) {
         this(method, path, statusCode, latencyMs, contentType, body, responseSchema, dynamicSchema,
                 false, true, false, Collections.<String, String>emptyMap(),
-                Collections.<MockResponse>emptyList(), 0L, false);
+                Collections.<MockResponse>emptyList(), 0L, false, "", "");
     }
 
     /** 历史 eight-arg + echo 的便捷重载。 */
@@ -70,7 +74,7 @@ public final class MockRoute {
                      boolean echo) {
         this(method, path, statusCode, latencyMs, contentType, body, responseSchema, dynamicSchema,
                 echo, true, false, Collections.<String, String>emptyMap(),
-                Collections.<MockResponse>emptyList(), 0L, false);
+                Collections.<MockResponse>emptyList(), 0L, false, "", "");
     }
 
     /**
@@ -80,7 +84,7 @@ public final class MockRoute {
                      String contentType, String body, String responseSchema, boolean dynamicSchema,
                      boolean echo, boolean enabled, boolean dynamicTemplate,
                      Map<String, String> headers, List<MockResponse> responses,
-                     long latencyMaxMs, boolean crud) {
+                     long latencyMaxMs, boolean crud, String name, String description) {
         this.method = method == null || method.trim().isEmpty() ? "*" : method.trim();
         this.path = path == null || path.trim().isEmpty() ? "/" : path.trim();
         this.statusCode = statusCode <= 0 ? 200 : statusCode;
@@ -96,6 +100,8 @@ public final class MockRoute {
         this.dynamicTemplate = dynamicTemplate;
         this.latencyMaxMs = Math.max(0L, latencyMaxMs);
         this.crud = crud;
+        this.name = name == null ? "" : name.trim();
+        this.description = description == null ? "" : description.trim();
         Map<String, String> headerCopy = new LinkedHashMap<>();
         if (headers != null) {
             for (Map.Entry<String, String> e : headers.entrySet()) {
@@ -133,6 +139,8 @@ public final class MockRoute {
         private List<MockResponse> responses = new ArrayList<>();
         private long latencyMaxMs;
         private boolean crud;
+        private String name = "";
+        private String description = "";
 
         public Builder method(String value) {
             this.method = value;
@@ -199,6 +207,16 @@ public final class MockRoute {
             return this;
         }
 
+        public Builder name(String value) {
+            this.name = value == null ? "" : value;
+            return this;
+        }
+
+        public Builder description(String value) {
+            this.description = value == null ? "" : value;
+            return this;
+        }
+
         public Builder header(String name, String value) {
             this.headers.put(name, value);
             return this;
@@ -226,7 +244,7 @@ public final class MockRoute {
         public MockRoute build() {
             return new MockRoute(method, path, statusCode, latencyMs, contentType, body,
                     responseSchema, dynamicSchema, echo, enabled, dynamicTemplate,
-                    headers, responses, latencyMaxMs, crud);
+                    headers, responses, latencyMaxMs, crud, name, description);
         }
     }
 

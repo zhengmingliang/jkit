@@ -194,6 +194,7 @@ server.stop();                                  // 释放端口，中断延迟�
 - **代理回源**：`setProxyTarget(baseUrl)` 后未命中路由的请求原样转发真实后端（复用 jkit HTTP 客户端，剥 hop-by-hop 头），失败按 502 返回；日志条目标记 `proxied`。
 - **CORS**：所有响应带 `Access-Control-Allow-Origin: *` 等三个头；未配代理时未命中 OPTIONS 路由的预检请求自动 204。
 - **启用开关**：`builder().enabled(false)` 的路由不参与匹配，热更新立即生效。
+- **元信息**：`builder().name("用户列表").description("联调 mock")` 给路由挂显示名与备注，纯元数据不参与匹配。
 - **健壮性**：空路由表即全 404（不回落演示路由）；状态码超出 100–599 的路由按 500 兜底返回错误 JSON；handler 顶层兜底异常，客户端提前断开 / 服务停止打断延迟的请求同样留下日志。
 - **日志**：环形保留最近 200 条（`MockRequestLog`），query / 请求体 / 响应体按 2048 字符截断；`snapshotLogs()` / `clearLogs()` / `addLogListener()` 三种消费方式。
 - 线程模型：每个请求一个 daemon 线程（缓存池），路由表为 volatile 不可变快照，热更新无锁。

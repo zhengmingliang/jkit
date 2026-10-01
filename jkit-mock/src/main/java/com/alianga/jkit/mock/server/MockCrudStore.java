@@ -250,6 +250,9 @@ public final class MockCrudStore {
             int size = limit != null && limit > 0 ? limit : 10;
             from = (page - 1) * size;
             to = Math.min(rows.size(), from + size);
+        } else if (limit != null && limit > 0) {
+            // json-server 惯例：单独 _limit 直接截断列表
+            to = Math.min(rows.size(), limit);
         } else {
             if (start != null && start > 0) {
                 from = Math.min(start, rows.size());

@@ -18,6 +18,7 @@
 - CRUD 资源：`MockRoute.crud` 开启后路由基址即资源，自动服务列表 / 详情 / 新增 / 更新 / 删除五类端点（`GET/POST /users`、`GET/PUT/PATCH/DELETE /users/{id}`，自增 id，body 为 JSON 数组时播种初始数据）；查询参数支持 json-server 子集（字段等值过滤、`q` / `_q` 全文、`_sort` + `_order`、`_page` + `_limit`、`_start` / `_end`）。配套 `MockCrudStore`：内存存储，可选 `dataDir` 原子落盘并在重启后加载。CRUD 路由独占基址上的五类方法（忽略配置的 method），PUT 整替、PATCH 合并、DELETE 成功返回 204。
 - 延迟区间与通配尾段：`latencyMaxMs` 大于 `latencyMs` 时每次请求在区间内随机（贴近真实网络抖动）；路径模板尾段支持 `{name*}` 匹配任意多段（可空）并捕获整段路径，如 `/static/{file*}`。
 - 全局变量：`setVariables(Map)` 服务级变量表，模板占位符 `{{var.name}}`（响应体与响应头均可用），切换环境变量热生效。
+- 路由元信息：`MockRoute` 新增 `name` / `description` 可选字段（builder `.name(...)` / `.description(...)`），纯展示用元数据，不参与匹配与响应；供上层 UI 命名接口与备注，随路由文件序列化。
 - 稳定性：引擎线程池从无界 cachedThreadPool 改为有界固定池（200 daemon 线程），延迟压测场景下防止线程无界增长。
 
 ### 修复

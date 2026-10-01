@@ -153,6 +153,17 @@ public class MockCrudAndMiscTest {
                 .get("file").equals("js/app.js"));
     }
 
+    @Test
+    public void routeMetadataFieldsArePurelyInformational() {
+        MockRoute route = MockRoute.builder().method("GET").path("/users")
+                .name("用户列表").description("联调用 mock").build();
+        assertEquals("用户列表", route.name);
+        assertEquals("联调用 mock", route.description);
+        // 元信息不影响匹配与响应
+        assertEquals(Collections.emptyMap(), MockHttpServer.matchPathParams("/users", "/users"));
+        assertEquals("", new MockRoute("GET", "/x", 200, 0, "text/plain", "ok").name);
+    }
+
     private HttpResponse<String> get(int port, String path) throws IOException, InterruptedException {
         return send(port, "GET", path, "");
     }
