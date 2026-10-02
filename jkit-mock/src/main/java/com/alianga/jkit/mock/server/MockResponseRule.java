@@ -22,7 +22,9 @@ public final class MockResponseRule {
         /** 请求头（忽略大小写）。 */
         HEADER,
         /** 请求体（JSON 点分路径或整段文本）。 */
-        BODY
+        BODY,
+        /** HTTP 方法（GET/POST/…；key 忽略）。 */
+        METHOD
     }
 
     /** 比较方式。 */
@@ -32,7 +34,19 @@ public final class MockResponseRule {
         /** 整串正则匹配。 */
         REGEX,
         /** 存在即命中（不看 value）。 */
-        EXISTS
+        EXISTS,
+        /** 包含子串。 */
+        CONTAINS,
+        /** 期望值逗号分隔，实际命中任一即成立（大小写不敏感的逐项精确匹配）。 */
+        IN,
+        /** 数值大于（双方按 double 解析，解析失败不命中）。 */
+        GT,
+        /** 数值大于等于。 */
+        GTE,
+        /** 数值小于。 */
+        LT,
+        /** 数值小于等于。 */
+        LTE
     }
 
     public final Source source;
@@ -57,6 +71,9 @@ public final class MockResponseRule {
             case BODY:
                 actual = ctx.bodyPathOrRaw(key);
                 break;
+            case METHOD:
+                actual = ctx.method();
+                break;
             case QUERY:
             default:
                 actual = ctx.queryFirst(key);
@@ -67,17 +84,97 @@ public final class MockResponseRule {
                 return actual != null && !actual.isEmpty();
             case REGEX:
                 return actual != null && Pattern.compile(value).matcher(actual).matches();
+            case CONTAINS:
+                return actual != null && actual.contains(value);
+            case IN:
+                return matchesAny(actual);
+            case GT:
+            case GTE:
+            case LT:
+            case LTE:
+                return compareNumbers(actual, value, op);
             case EQUALS:
             default:
                 return actual != null && actual.equals(value);
         }
     }
 
+    /** IN：期望值按逗号拆分，实际与任一项相等（忽略首尾空白）即命中。 */
+    private boolean matchesAny(String actual) {
+        if (actual == null || value == null) {
+            return false;
+        }
+        for (String part : value.split(",")) {
+            if (actual.equals(part.trim())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 数值比较：双方都能解析为 double 时按指定操作符比较，否则不命中。 */
+    private static boolean compareNumbers(String actual, String expected, Op op) {
+        Double a = parseDoubleQuietly(actual);
+        Double b = parseDoubleQuietly(expected);
+        if (a == null || b == null) {
+            return false;
+        }
+        int cmp = Double.compare(a, b);
+        switch (op) {
+            case GT:
+                return cmp > 0;
+            case GTE:
+                return cmp >= 0;
+            case LT:
+                return cmp < 0;
+            case LTE:
+                return cmp <= 0;
+            default:
+                return false;
+        }
+    }
+
+    private static Double parseDoubleQuietly(String text) {
+        if (text == null || text.trim().isEmpty()) {
+            return null;
+        }
+        try {
+            return Double.valueOf(text.trim());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
     @Override
     public String toString() {
         return source.name().toLowerCase() + ":" + (key.isEmpty() ? "*" : key)
-                + " " + op.name().toLowerCase()
+                + " " + opSymbol()
                 + (op == Op.EXISTS ? "" : " '" + value + "'");
+    }
+
+    /** 比较方式的紧凑符号（弹层摘要用）。 */
+    private String opSymbol() {
+        switch (op) {
+            case REGEX:
+                return "=~";
+            case EXISTS:
+                return "exists";
+            case CONTAINS:
+                return "contains";
+            case IN:
+                return "in";
+            case GT:
+                return ">";
+            case GTE:
+                return ">=";
+            case LT:
+                return "<";
+            case LTE:
+                return "<=";
+            case EQUALS:
+            default:
+                return "=";
+        }
     }
 
     /** 便捷构造：query 相等。 */

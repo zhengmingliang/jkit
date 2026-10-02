@@ -3,7 +3,6 @@ package com.alianga.jkit.mock.server;
 import com.alianga.jkit.http.HttpRequest;
 import com.alianga.jkit.http.HttpResponse;
 import com.alianga.jkit.mock.MockDataFormatter;
-import com.alianga.jkit.mock.MockJs;
 import com.alianga.jkit.mock.MockSchema;
 import com.sun.net.httpserver.Headers;
 import com.sun.net.httpserver.HttpExchange;
@@ -23,9 +22,12 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.TreeMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -51,7 +53,8 @@ import java.util.function.Consumer;
  *   <li>CORS：所有响应带 {@code Access-Control-Allow-*}；无代理时未命中 OPTIONS 路由的
  *       预检自动 204</li>
  *   <li>热更新：运行中 {@link #setRoutes(List)} 立即生效，无需重启</li>
- *   <li>请求日志：环形保留最近 200 条；客户端提前断开、服务停止打断延迟同样留痕</li>
+ *   <li>请求日志：环形保留最近 200 条，含请求头 / 响应头（每名首值）；客户端提前断开、
+ *       服务停止打断延迟同样留痕</li>
  * </ul>
  *
  * <p><b>健壮性</b>：路由表为空且无代理即全 404（不回落演示路由）；状态码超出 100–599 的
@@ -91,6 +94,12 @@ public final class MockHttpServer {
             "{\"error\":\"json object body required\"}".getBytes(StandardCharsets.UTF_8);
     private static final byte[] METHOD_NOT_ALLOWED_BODY =
             "{\"error\":\"method not allowed\"}".getBytes(StandardCharsets.UTF_8);
+    private static final byte[] UPGRADE_REQUIRED_BODY =
+            "{\"error\":\"this route is a WebSocket mock; connect with ws://\"}"
+                    .getBytes(StandardCharsets.UTF_8);
+    private static final String SSE_CONTENT_TYPE = "text/event-stream; charset=utf-8";
+    /** 自动 WS 端口时从 HTTP 端口 +1 起最多扫描的端口数。 */
+    private static final int WS_PORT_SCAN = 20;
     private static final List<String> HOP_BY_HOP = Collections.unmodifiableList(Arrays.asList(
             "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
             "te", "trailer", "trailers", "transfer-encoding", "upgrade"));
@@ -106,11 +115,19 @@ public final class MockHttpServer {
     private volatile Map<String, String> variables = Collections.emptyMap();
     private volatile HttpServer server;
     private volatile ExecutorService executor;
+    /** SSE 帧推送共享调度器（随 HTTP 服务启停）。 */
+    private volatile ScheduledExecutorService scheduler;
+    /** 伴随 WebSocket 服务；{@code webSocketPort < 0} 时不启动。 */
+    private volatile MockWebSocketServer webSocketServer;
+    /** WS 监听端口：-1 关闭（缺省，历史行为）；0=HTTP 端口+1；正数为指定端口。 */
+    private volatile int webSocketPort = -1;
+    private volatile int actualWebSocketPort = -1;
     private volatile int port;
     private volatile String proxyTarget;
     private final AtomicBoolean stopping = new AtomicBoolean(false);
     /** 本次启动时刻；未运行时为 null。 */
     private volatile Instant startedAt;
+    private final Consumer<MockWebSocketServer.WsEvent> wsLogListener = this::onWsEvent;
 
     /**
      * 启动监听。若已在运行则先停止再启。
@@ -134,14 +151,36 @@ public final class MockHttpServer {
 
         HttpServer http = HttpServer.create(new InetSocketAddress("127.0.0.1", port), 0);
         http.createContext("/", this::handle);
-        // 有界池：延迟压测场景下防止线程无界增长；排队由 HttpServer 自带派发承担
+        // 有界池：延迟压测场景下防止线程无界增长；排队由 HttpServer 自带派发承担。
+        // SSE 长连接会长期占用池线程（阻塞在读上检测断开），200 对本地联调足够。
         ExecutorService pool = Executors.newFixedThreadPool(200, new DaemonFactory("jkit-mock"));
         http.setExecutor(pool);
+        ScheduledExecutorService sseScheduler =
+                MockPushScheduler.newDaemonScheduler("jkit-mock-sse");
         http.start();
+
+        MockWebSocketServer ws = null;
+        int wsPort = -1;
+        if (webSocketPort >= 0) {
+            ws = new MockWebSocketServer();
+            ws.setVariables(variables);
+            ws.addEventListener(wsLogListener);
+            try {
+                wsPort = startCompanionWs(ws, effective, port);
+            } catch (IOException | RuntimeException ex) {
+                http.stop(0);
+                pool.shutdownNow();
+                sseScheduler.shutdownNow();
+                throw ex;
+            }
+        }
 
         synchronized (lock) {
             this.server = http;
             this.executor = pool;
+            this.scheduler = sseScheduler;
+            this.webSocketServer = ws;
+            this.actualWebSocketPort = wsPort;
             this.startedAt = Instant.now();
         }
     }
@@ -153,16 +192,30 @@ public final class MockHttpServer {
         stopping.set(true);
         HttpServer http;
         ExecutorService pool;
+        ScheduledExecutorService sseScheduler;
+        MockWebSocketServer ws;
         synchronized (lock) {
             http = this.server;
             pool = this.executor;
+            sseScheduler = this.scheduler;
+            ws = this.webSocketServer;
             this.server = null;
             this.executor = null;
+            this.scheduler = null;
+            this.webSocketServer = null;
+            this.actualWebSocketPort = -1;
             this.startedAt = null;
         }
+        if (ws != null) {
+            ws.removeEventListener(wsLogListener);
+            ws.stop();
+        }
         if (http != null) {
-            // 立刻停，中断正在 sleep 的 handler 线程
+            // 立刻停，中断正在 sleep 或阻塞读的 handler 线程
             http.stop(0);
+        }
+        if (sseScheduler != null) {
+            sseScheduler.shutdownNow();
         }
         if (pool != null) {
             pool.shutdownNow();
@@ -173,6 +226,33 @@ public final class MockHttpServer {
         return server != null;
     }
 
+    /**
+     * 启动伴随 WS 服务：自动模式（{@code webSocketPort==0}）从 HTTP 端口 +1 起顺延，
+     * 最多尝试 {@link #WS_PORT_SCAN} 个端口；显式端口则只绑该端口（占用即失败）。
+     *
+     * @return 实际绑定的 WS 端口
+     * @throws IOException 全部候选端口均不可用（自动）或指定端口被占用（显式）
+     */
+    private int startCompanionWs(MockWebSocketServer ws, List<MockRoute> routes, int httpPort)
+            throws IOException {
+        if (webSocketPort > 0) {
+            ws.start(webSocketPort, routes);
+            return webSocketPort;
+        }
+        IOException last = null;
+        for (int candidate = httpPort + 1; candidate <= httpPort + WS_PORT_SCAN; candidate++) {
+            try {
+                ws.start(candidate, routes);
+                return candidate;
+            } catch (IOException | RuntimeException ex) {
+                last = ex instanceof IOException ? (IOException) ex
+                        : new IOException(ex.getMessage(), ex);
+            }
+        }
+        throw new IOException("WebSocket 伴随端口 " + (httpPort + 1) + "-"
+                + (httpPort + WS_PORT_SCAN) + " 均被占用", last);
+    }
+
     /** 基址；未运行返回 {@code null}。 */
     public String baseUrl() {
         return isRunning() ? "http://127.0.0.1:" + port : null;
@@ -180,6 +260,32 @@ public final class MockHttpServer {
 
     public int getPort() {
         return port;
+    }
+
+    /**
+     * 配置伴随 WebSocket 服务端口：{@code -1}（缺省）不启动；{@code 0} 跟随 HTTP
+     * 端口 +1；正数为指定端口。仅在下一次 {@link #start} 生效，运行中改动需重启服务。
+     *
+     * @param wsPort WS 端口
+     */
+    public void setWebSocketPort(int wsPort) {
+        this.webSocketPort = wsPort;
+    }
+
+    /** 当前 WS 端口配置（-1 关闭 / 0 跟随）。 */
+    public int getWebSocketPort() {
+        return webSocketPort;
+    }
+
+    /** 运行中伴随 WS 服务的实际端口；未启动返回 {@code -1}。 */
+    public int actualWebSocketPort() {
+        return actualWebSocketPort;
+    }
+
+    /** WS 基址；WS 未启用或未运行返回 {@code null}。 */
+    public String webSocketUrl() {
+        MockWebSocketServer ws = webSocketServer;
+        return ws == null || !ws.isRunning() ? null : "ws://127.0.0.1:" + actualWebSocketPort;
     }
 
     /** 本次启动时刻；未运行时返回 {@code null}。 */
@@ -226,9 +332,14 @@ public final class MockHttpServer {
      * 传 {@code null} / 空表清空。
      */
     public void setVariables(Map<String, String> variables) {
-        this.variables = variables == null
+        Map<String, String> snapshot = variables == null
                 ? Collections.<String, String>emptyMap()
                 : Collections.unmodifiableMap(new LinkedHashMap<>(variables));
+        this.variables = snapshot;
+        MockWebSocketServer ws = webSocketServer;
+        if (ws != null) {
+            ws.setVariables(snapshot);
+        }
     }
 
     /** 当前全局变量（不可变）。 */
@@ -243,9 +354,14 @@ public final class MockHttpServer {
      * @param routes 新路由快照
      */
     public void setRoutes(List<MockRoute> routes) {
-        this.routes = routes == null
+        List<MockRoute> snapshot = routes == null
                 ? Collections.<MockRoute>emptyList()
                 : Collections.unmodifiableList(new ArrayList<>(routes));
+        this.routes = snapshot;
+        MockWebSocketServer ws = webSocketServer;
+        if (ws != null) {
+            ws.setRoutes(snapshot);
+        }
     }
 
     /** 当前生效路由快照（不可变）。 */
@@ -283,9 +399,11 @@ public final class MockHttpServer {
         String rawPath = exchange.getRequestURI().getRawPath();
         String path = rawPath == null || rawPath.isEmpty() ? "/" : decodePath(rawPath);
         String rawQuery = exchange.getRequestURI().getRawQuery();
+        Map<String, String> requestHeaders = headerSnapshot(exchange.getRequestHeaders());
 
-        MockRoute matched = null;
-        int status = 500;
+            MockRoute matched = null;
+            String protocol = "HTTP";
+            int status = 500;
         byte[] responseBytes = NOT_FOUND_BODY;
         String contentType = JSON_CT;
         long latencyMs = 0L;
@@ -294,18 +412,34 @@ public final class MockHttpServer {
         try {
             requestBody = readAll(exchange.getRequestBody());
             matched = findRoute(method, path);
+            boolean streamed = false;
             if (matched != null) {
                 MockRequestContext ctx = MockRequestContext.of(method, path,
                         matchPathParams(matched.path, path), rawQuery,
                         exchange.getRequestHeaders(), requestBody, variables);
-                Resolved resolved = matched.crud
-                        ? serveCrud(matched, method, path, ctx)
-                        : resolveRoute(matched, ctx, requestBody);
+                Resolved resolved;
+                if (matched.isSse()) {
+                    // SSE：sendResponseHeaders 后长连接推送，本线程阻塞到客户端断开
+                    resolved = serveSse(matched, ctx, exchange);
+                    streamed = true;
+                    protocol = "SSE";
+                } else if (matched.isWebSocket()) {
+                    // WS 路由被当普通 HTTP 访问：提示需要 Upgrade（浏览器 EventSource/fetch 可见）
+                    Map<String, String> upgrade = new LinkedHashMap<>();
+                    upgrade.put("Upgrade", "websocket");
+                    upgrade.put("Connection", "Upgrade");
+                    resolved = new Resolved(426, 0L, JSON_CT, UPGRADE_REQUIRED_BODY, upgrade);
+                } else {
+                    resolved = matched.crud
+                            ? serveCrud(matched, method, path, ctx)
+                            : resolveRoute(matched, ctx, requestBody);
+                }
                 latencyMs = resolved.latencyMs;
                 status = resolved.status;
                 contentType = resolved.contentType;
                 responseBytes = resolved.body;
-                if (resolved.headers != null && !resolved.headers.isEmpty()) {
+                if (!streamed && resolved.headers != null && !resolved.headers.isEmpty()) {
+                    // SSE 已在分派内部提交响应头，不能再改；普通响应统一在这里挂附加头
                     for (Map.Entry<String, String> e : resolved.headers.entrySet()) {
                         exchange.getResponseHeaders().set(e.getKey(), e.getValue());
                     }
@@ -332,24 +466,26 @@ public final class MockHttpServer {
                 contentType = JSON_CT;
                 responseBytes = NOT_FOUND_BODY;
             }
-            if (latencyMs > 0) {
-                long maxMs = matched != null && matched.latencyMaxMs > latencyMs
-                        ? matched.latencyMaxMs : latencyMs;
-                if (maxMs > latencyMs) {
-                    // 延迟区间随机：[min, max]，更接近真实网络抖动
-                    latencyMs += ThreadLocalRandom.current().nextLong(maxMs - latencyMs + 1);
+            if (!streamed) {
+                if (latencyMs > 0) {
+                    long maxMs = matched != null && matched.latencyMaxMs > latencyMs
+                            ? matched.latencyMaxMs : latencyMs;
+                    if (maxMs > latencyMs) {
+                        // 延迟区间随机：[min, max]，更接近真实网络抖动
+                        latencyMs += ThreadLocalRandom.current().nextLong(maxMs - latencyMs + 1);
+                    }
                 }
+                if (latencyMs > 0 && !sleepInterruptible(latencyMs)) {
+                    return; // 服务停止打断延迟等待：finally 里照常留痕并关闭连接
+                }
+                // 状态码守门：超范围会让 sendResponseHeaders 抛异常裸断连接，这里按 500 兜底
+                if (status < 100 || status > 599) {
+                    status = 500;
+                    contentType = JSON_CT;
+                    responseBytes = INVALID_STATUS_BODY;
+                }
+                writeResponse(exchange, status, contentType, responseBytes);
             }
-            if (latencyMs > 0 && !sleepInterruptible(latencyMs)) {
-                return; // 服务停止打断延迟等待：finally 里照常留痕并关闭连接
-            }
-            // 状态码守门：超范围会让 sendResponseHeaders 抛异常裸断连接，这里按 500 兜底
-            if (status < 100 || status > 599) {
-                status = 500;
-                contentType = JSON_CT;
-                responseBytes = INVALID_STATUS_BODY;
-            }
-            writeResponse(exchange, status, contentType, responseBytes);
         } catch (IOException ex) {
             // 客户端提前断开等 IO 异常：响应未完成，交 finally 留痕
         } catch (RuntimeException ex) {
@@ -360,11 +496,15 @@ public final class MockHttpServer {
             responseBytes = fallback;
         } finally {
             long durationMs = (System.nanoTime() - startNs) / 1_000_000L;
+            // 响应头在统一出口拍快照：普通 / 代理 / SSE / 兜底 500 四条路径此刻都已把
+            // 实际写出的头放进 getResponseHeaders()（含 CORS 与 Content-Type）
+            Map<String, String> responseHeaders = headerSnapshot(exchange.getResponseHeaders());
             pushLog(new MockRequestLog(Instant.now(), method, path,
                     truncateForLog(rawQuery == null ? "" : rawQuery, LOG_TEXT_MAX),
                     matched != null || proxied, status, durationMs,
                     truncateBytesForLog(requestBody, LOG_TEXT_MAX),
-                    truncateBytesForLog(responseBytes, LOG_TEXT_MAX), proxied));
+                    truncateBytesForLog(responseBytes, LOG_TEXT_MAX), proxied, protocol,
+                    requestHeaders, responseHeaders));
             exchange.close();
         }
     }
@@ -471,7 +611,10 @@ public final class MockHttpServer {
         }
     }
 
-    /** 组装一条路由的响应：回显 > 响应方案 > 动态 Schema > 动态模板 > 静态 body。 */
+    /**
+     * 组装一条路由的响应：历史整包回显 > 请求参数回显（显式开启）> 响应方案
+     * > 动态 Schema > 动态模板 / 静态 body。
+     */
     private Resolved resolveRoute(MockRoute route, MockRequestContext ctx, byte[] requestBody) {
         if (route.echo) {
             String reqCt = ctx.headerFirst("Content-Type");
@@ -479,20 +622,206 @@ public final class MockHttpServer {
                     reqCt == null || reqCt.trim().isEmpty() ? route.contentType : reqCt,
                     requestBody, renderHeadersSafe(route.headers, ctx));
         }
+        if (route.echoRequest.enabled) {
+            // 「返回请求参数」模式：body 为空直接返回回显 JSON；非空时与模板叠加（{{request}}）
+            String body = MockBodyRenderer.routeFrame(route, ctx);
+            return new Resolved(route.statusCode, route.latencyMs, route.contentType,
+                    body.getBytes(StandardCharsets.UTF_8),
+                    renderHeadersSafe(route.headers, ctx));
+        }
         MockResponse picked = pickResponse(route.responses, ctx);
         if (picked != null) {
-            String body = renderBody(picked.body, picked.dynamicTemplate, ctx);
+            List<String> errors = new ArrayList<>();
+            String body = MockBodyRenderer.render(picked.body, picked.dynamicTemplate, ctx,
+                    null, errors);
             return new Resolved(picked.statusCode, picked.latencyMs, picked.contentType,
-                    body.getBytes(StandardCharsets.UTF_8), renderHeadersSafe(picked.headers, ctx));
+                    body.getBytes(StandardCharsets.UTF_8),
+                    withWarning(renderHeadersSafe(picked.headers, ctx), errors));
         }
         if (route.dynamicSchema && !route.responseSchema.trim().isEmpty()) {
             return new Resolved(route.statusCode, route.latencyMs, route.contentType,
                     renderSchemaBody(route, ctx).getBytes(StandardCharsets.UTF_8),
                     renderHeadersSafe(route.headers, ctx));
         }
-        String body = renderBody(route.body, route.dynamicTemplate, ctx);
+        List<String> errors = new ArrayList<>();
+        String body = MockBodyRenderer.render(route.body, route.dynamicTemplate, ctx,
+                null, errors);
         return new Resolved(route.statusCode, route.latencyMs, route.contentType,
-                body.getBytes(StandardCharsets.UTF_8), renderHeadersSafe(route.headers, ctx));
+                body.getBytes(StandardCharsets.UTF_8),
+                withWarning(renderHeadersSafe(route.headers, ctx), errors));
+    }
+
+    /**
+     * 模板渲染失败时把原因通过 {@code X-Mock-Warning} 响应头暴露（HTTP 头只能 ASCII，
+     * 原因截断并去非法字符）；无错误返回原表。
+     */
+    private static Map<String, String> withWarning(Map<String, String> headers,
+                                                   List<String> errors) {
+        if (errors == null || errors.isEmpty()) {
+            return headers;
+        }
+        String reason = errors.get(0);
+        String cleaned = reason.replaceAll("[^\\x20-\\x7E]", "?");
+        if (cleaned.length() > 160) {
+            cleaned = cleaned.substring(0, 160);
+        }
+        Map<String, String> out = headers == null
+                ? new LinkedHashMap<String, String>() : new LinkedHashMap<>(headers);
+        out.put("X-Mock-Warning", "dynamic-template-failed: " + cleaned);
+        return out;
+    }
+
+    /** SSE 心跳注释间隔：同时承担断开探测（写出失败即结束连接），1s 让单测能快速收尾。 */
+    private static final long SSE_HEARTBEAT_MS = 1000L;
+
+    /**
+     * SSE 长连接：先响应 {@code 200 + text/event-stream}，再按 {@link MockPushPolicy}
+     * 定时写帧；EventSource（GET）无请求体可探测断开，因此靠每秒一次的注释心跳写出失败
+     * 感知客户端关闭。本方法阻塞到客户端断开、有限次推送完成或服务停止，
+     * 返回后由统一出口留日志。帧内容与 HTTP 同源（占位符 / Mock.js / 请求参数回显）。
+     */
+    private Resolved serveSse(MockRoute route, MockRequestContext ctx, HttpExchange exchange) {
+        Map<String, String> headers = renderHeadersSafe(route.headers, ctx);
+        int status = route.statusCode <= 0 ? 200 : route.statusCode;
+        SsePusher pusher = null;
+        try {
+            exchange.getResponseHeaders().set("Content-Type", SSE_CONTENT_TYPE);
+            exchange.getResponseHeaders().set("Cache-Control", "no-cache");
+            exchange.getResponseHeaders().set("Connection", "keep-alive");
+            exchange.getResponseHeaders().set("Access-Control-Allow-Origin", CORS_ORIGIN);
+            if (headers != null) {
+                for (Map.Entry<String, String> e : headers.entrySet()) {
+                    exchange.getResponseHeaders().set(e.getKey(), e.getValue());
+                }
+            }
+            exchange.sendResponseHeaders(status, 0);
+            pusher = new SsePusher(exchange.getResponseBody(), route, ctx);
+            MockPushPolicy policy = route.pushPolicy;
+            if (policy == null || policy.mode == MockPushPolicy.Mode.EVENT) {
+                // SSE 没有客户端上行通道，EVENT 策略不可用：防御性按「连接后推一次」处理
+                policy = MockPushPolicy.once();
+            }
+            ScheduledFuture<?> pushFuture = MockPushScheduler.schedule(scheduler, policy, pusher);
+            ScheduledFuture<?> heartbeat = scheduler.scheduleAtFixedRate(pusher::heartbeat,
+                    SSE_HEARTBEAT_MS, SSE_HEARTBEAT_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
+            pusher.awaitClose(stopping);
+            if (pushFuture != null) {
+                pushFuture.cancel(false);
+            }
+            heartbeat.cancel(true);
+            pusher.finish();
+            return new Resolved(status, route.latencyMs, SSE_CONTENT_TYPE,
+                    pusher.summary().getBytes(StandardCharsets.UTF_8), null);
+        } catch (IOException | RuntimeException e) {
+            // 客户端断开等 IO 异常：连接已结束，按当时状态留痕
+            byte[] summary = pusher == null ? EMPTY_BODY
+                    : pusher.summary().getBytes(StandardCharsets.UTF_8);
+            return new Resolved(status, route.latencyMs, SSE_CONTENT_TYPE, summary, null);
+        }
+    }
+
+    /** 单个 SSE 连接的帧写出器（调度线程回调，写操作串行化，断开后放行 handler 线程）。 */
+    private final class SsePusher implements Runnable {
+        private final OutputStream out;
+        private final MockRoute route;
+        private final MockRequestContext ctx;
+        private final Object writeLock = new Object();
+        private final AtomicInteger sequence = new AtomicInteger();
+        private final java.util.concurrent.CountDownLatch closed =
+                new java.util.concurrent.CountDownLatch(1);
+        private final StringBuilder pushed = new StringBuilder();
+
+        SsePusher(OutputStream out, MockRoute route, MockRequestContext ctx) {
+            this.out = out;
+            this.route = route;
+            this.ctx = ctx;
+        }
+
+        @Override
+        public void run() {
+            String frame = MockBodyRenderer.routeFrame(route, ctx);
+            String eventName = route.pushPolicy == null ? "" : route.pushPolicy.eventName;
+            StringBuilder sb = new StringBuilder(frame.length() + 32);
+            if (eventName != null && !eventName.isEmpty()) {
+                sb.append("event: ").append(eventName).append('\n');
+            }
+            sb.append("id: ").append(sequence.incrementAndGet()).append('\n');
+            String[] lines = frame.replace("\r\n", "\n").split("\n", -1);
+            for (String line : lines) {
+                sb.append("data: ").append(line).append('\n');
+            }
+            sb.append('\n');
+            writeRaw(sb.toString().getBytes(StandardCharsets.UTF_8));
+            synchronized (pushed) {
+                if (pushed.length() < LOG_TEXT_MAX) {
+                    pushed.append(frame).append('\n');
+                }
+            }
+            // 有限次推送全部发完即结束连接（与调度器侧的自取消双保险）
+            MockPushPolicy policy = route.pushPolicy;
+            int maxTimes = policy == null ? 0 : policy.repeat;
+            if (maxTimes > 0 && sequence.get() >= maxTimes) {
+                closed.countDown();
+            }
+        }
+
+        /** SSE 注释行心跳：真实链路用于保活，这里同时探测客户端断开。 */
+        void heartbeat() {
+            writeRaw(": ping\n\n".getBytes(StandardCharsets.UTF_8));
+        }
+
+        private void writeRaw(byte[] bytes) {
+            try {
+                synchronized (writeLock) {
+                    out.write(bytes);
+                    out.flush();
+                }
+            } catch (IOException e) {
+                closed.countDown();
+                throw new RuntimeException(e);
+            }
+        }
+
+        void awaitClose(AtomicBoolean stopping) {
+            while (closed.getCount() > 0 && !stopping.get()) {
+                try {
+                    closed.await(200L, java.util.concurrent.TimeUnit.MILLISECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+            }
+        }
+
+        void finish() {
+            synchronized (writeLock) {
+                try {
+                    out.flush();
+                } catch (IOException ignore) {
+                    // 关闭路径无需上报
+                }
+            }
+        }
+
+        String summary() {
+            synchronized (pushed) {
+                return truncateForLog(pushed.toString(), LOG_TEXT_MAX);
+            }
+        }
+    }
+
+    /** WS 伴随服务的连接 / 消息事件记入请求日志（关闭不记，避免噪声）。 */
+    private void onWsEvent(MockWebSocketServer.WsEvent event) {
+        if (event.kind == MockWebSocketServer.WsEvent.Kind.CLOSE) {
+            return;
+        }
+        int status = event.kind == MockWebSocketServer.WsEvent.Kind.CONNECT ? 101 : 200;
+        // WS 条目记录的是握手请求头；消息帧不是 HTTP 交互，无响应头
+        Map<String, String> reqHeaders = event.kind == MockWebSocketServer.WsEvent.Kind.CONNECT
+                ? event.headers : Collections.<String, String>emptyMap();
+        pushLog(new MockRequestLog(Instant.now(), "WS", event.path, "",
+                true, status, 0L, truncateForLog(event.text, LOG_TEXT_MAX), "", false, "WS",
+                reqHeaders, Collections.<String, String>emptyMap()));
     }
 
     /**
@@ -525,19 +854,6 @@ public final class MockHttpServer {
             }
         }
         return true;
-    }
-
-    private String renderBody(String raw, boolean dynamicTemplate, MockRequestContext ctx) {
-        String rendered = MockTemplateRenderer.render(raw, ctx);
-        if (!dynamicTemplate) {
-            return rendered;
-        }
-        try {
-            return MockJs.mockJson(rendered);
-        } catch (RuntimeException ex) {
-            // 模板非法回落占位符替换后的原文，避免整个请求 500
-            return rendered;
-        }
     }
 
     private String renderSchemaBody(MockRoute route, MockRequestContext ctx) {
@@ -672,8 +988,9 @@ public final class MockHttpServer {
             if (!route.enabled) {
                 continue;
             }
-            // CRUD 路由独占基址上的 GET/POST/PUT/PATCH/DELETE，方法过滤交给 CRUD 分派
-            if (!route.crud && !matchesMethod(route.method, method)) {
+            // CRUD 路由的方法过滤交给资源分派；SSE / WS 握手恒为 GET，方法列不参与匹配
+            if (!route.crud && !route.isSse() && !route.isWebSocket()
+                    && !matchesMethod(route.method, method)) {
                 continue;
             }
             if (route.crud ? matchesCrudBase(route.path, path) : matchesPath(route.path, path)) {
@@ -834,6 +1151,22 @@ public final class MockHttpServer {
             }
         }
         return false;
+    }
+
+    /**
+     * 请求/响应头日志快照：每名取首值，键名不区分大小写排序（同一请求多次记录展示稳定），
+     * 返回不可变表。多值头（如重复 Set-Cookie 场景）仅保留第一个值。
+     */
+    static Map<String, String> headerSnapshot(Map<String, List<String>> headers) {
+        Map<String, String> out = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+        if (headers != null) {
+            for (Map.Entry<String, List<String>> e : headers.entrySet()) {
+                if (e.getKey() != null && e.getValue() != null && !e.getValue().isEmpty()) {
+                    out.put(e.getKey(), e.getValue().get(0));
+                }
+            }
+        }
+        return Collections.unmodifiableMap(out);
     }
 
     private void pushLog(MockRequestLog entry) {

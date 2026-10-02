@@ -53,6 +53,14 @@ public final class MockRoute {
     public final Map<String, String> headers;
     /** 响应方案；非空时按「规则全中者优，无中者取第一条」挑选，主字段不再参与。 */
     public final List<MockResponse> responses;
+    /** 标签（逗号分隔的自由文本，纯元信息：搜索 / 分组用，引擎不参与匹配）。 */
+    public final String tags;
+    /** 协议：{@code HTTP}（缺省，历史行为）、{@code SSE}（同端口长连接推送）、{@code WS}（伴随 WebSocket 端口）。 */
+    public final String protocol;
+    /** 「返回请求参数」模式配置；{@code enabled=false} 时不影响历史行为。 */
+    public final MockEchoConfig echoRequest;
+    /** SSE / WebSocket 推送策略；HTTP 路由忽略，为 null 时按「连接后推一次」。 */
+    public final MockPushPolicy pushPolicy;
 
     public MockRoute(String method, String path, int statusCode, long latencyMs,
                      String contentType, String body) {
@@ -85,6 +93,41 @@ public final class MockRoute {
                      boolean echo, boolean enabled, boolean dynamicTemplate,
                      Map<String, String> headers, List<MockResponse> responses,
                      long latencyMaxMs, boolean crud, String name, String description) {
+        this(method, path, statusCode, latencyMs, contentType, body, responseSchema, dynamicSchema,
+                echo, enabled, dynamicTemplate, headers, responses, latencyMaxMs, crud,
+                name, description, "HTTP", MockEchoConfig.disabled(), null, "");
+    }
+
+    /**
+     * 全参构造（2.0.5 起含协议 / 请求回显 / 推送策略）；一般用 {@link #builder()} 更易读。
+     *
+     * @param protocol    HTTP / SSE / WS；空白按 HTTP
+     * @param echoRequest 请求参数回显配置；null 按关闭
+     * @param pushPolicy  长连接推送策略；null 时 SSE/WS 按「连接后推一次」
+     */
+    public MockRoute(String method, String path, int statusCode, long latencyMs,
+                     String contentType, String body, String responseSchema, boolean dynamicSchema,
+                     boolean echo, boolean enabled, boolean dynamicTemplate,
+                     Map<String, String> headers, List<MockResponse> responses,
+                     long latencyMaxMs, boolean crud, String name, String description,
+                     String protocol, MockEchoConfig echoRequest, MockPushPolicy pushPolicy) {
+        this(method, path, statusCode, latencyMs, contentType, body, responseSchema, dynamicSchema,
+                echo, enabled, dynamicTemplate, headers, responses, latencyMaxMs, crud,
+                name, description, protocol, echoRequest, pushPolicy, "");
+    }
+
+    /**
+     * 全参构造（2.0.4 后增量字段：协议 / 请求回显 / 推送策略 / 标签）。
+     *
+     * @param tags 逗号分隔标签，纯元信息
+     */
+    public MockRoute(String method, String path, int statusCode, long latencyMs,
+                     String contentType, String body, String responseSchema, boolean dynamicSchema,
+                     boolean echo, boolean enabled, boolean dynamicTemplate,
+                     Map<String, String> headers, List<MockResponse> responses,
+                     long latencyMaxMs, boolean crud, String name, String description,
+                     String protocol, MockEchoConfig echoRequest, MockPushPolicy pushPolicy,
+                     String tags) {
         this.method = method == null || method.trim().isEmpty() ? "*" : method.trim();
         this.path = path == null || path.trim().isEmpty() ? "/" : path.trim();
         this.statusCode = statusCode <= 0 ? 200 : statusCode;
@@ -102,6 +145,7 @@ public final class MockRoute {
         this.crud = crud;
         this.name = name == null ? "" : name.trim();
         this.description = description == null ? "" : description.trim();
+        this.tags = tags == null ? "" : tags.trim();
         Map<String, String> headerCopy = new LinkedHashMap<>();
         if (headers != null) {
             for (Map.Entry<String, String> e : headers.entrySet()) {
@@ -116,6 +160,21 @@ public final class MockRoute {
             responseCopy.addAll(responses);
         }
         this.responses = Collections.unmodifiableList(responseCopy);
+        String proto = protocol == null || protocol.trim().isEmpty()
+                ? "HTTP" : protocol.trim().toUpperCase(java.util.Locale.ROOT);
+        this.protocol = "SSE".equals(proto) || "WS".equals(proto) ? proto : "HTTP";
+        this.echoRequest = echoRequest == null ? MockEchoConfig.disabled() : echoRequest;
+        this.pushPolicy = pushPolicy;
+    }
+
+    /** 是否为 SSE 路由。 */
+    public boolean isSse() {
+        return "SSE".equals(protocol);
+    }
+
+    /** 是否为 WebSocket 路由。 */
+    public boolean isWebSocket() {
+        return "WS".equals(protocol);
     }
 
     public static Builder builder() {
@@ -141,6 +200,10 @@ public final class MockRoute {
         private boolean crud;
         private String name = "";
         private String description = "";
+        private String protocol = "HTTP";
+        private MockEchoConfig echoRequest = MockEchoConfig.disabled();
+        private MockPushPolicy pushPolicy;
+        private String tags = "";
 
         public Builder method(String value) {
             this.method = value;
@@ -217,6 +280,32 @@ public final class MockRoute {
             return this;
         }
 
+        /**
+         * @param value HTTP / SSE / WS；空白或无法识别按 HTTP
+         */
+        public Builder protocol(String value) {
+            this.protocol = value == null ? "HTTP" : value;
+            return this;
+        }
+
+        public Builder echoRequest(MockEchoConfig value) {
+            this.echoRequest = value == null ? MockEchoConfig.disabled() : value;
+            return this;
+        }
+
+        public Builder pushPolicy(MockPushPolicy value) {
+            this.pushPolicy = value;
+            return this;
+        }
+
+        /**
+         * @param value 逗号分隔的标签文本
+         */
+        public Builder tags(String value) {
+            this.tags = value == null ? "" : value;
+            return this;
+        }
+
         public Builder header(String name, String value) {
             this.headers.put(name, value);
             return this;
@@ -244,7 +333,8 @@ public final class MockRoute {
         public MockRoute build() {
             return new MockRoute(method, path, statusCode, latencyMs, contentType, body,
                     responseSchema, dynamicSchema, echo, enabled, dynamicTemplate,
-                    headers, responses, latencyMaxMs, crud, name, description);
+                    headers, responses, latencyMaxMs, crud, name, description,
+                    protocol, echoRequest, pushPolicy, tags);
         }
     }
 

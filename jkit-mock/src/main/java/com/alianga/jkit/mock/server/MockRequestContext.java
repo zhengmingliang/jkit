@@ -23,10 +23,12 @@ public final class MockRequestContext {
     private final byte[] body;
     private final String bodyText;
     private final Map<String, String> variables;
+    /** EVENT 推送策略下，触发本次响应的客户端消息文本（无则 null）。 */
+    private final String eventText;
 
     private MockRequestContext(String method, String path, Map<String, String> pathParams,
                                Map<String, List<String>> query, Map<String, List<String>> headers,
-                               byte[] body, Map<String, String> variables) {
+                               byte[] body, Map<String, String> variables, String eventText) {
         this.method = method;
         this.path = path;
         this.pathParams = pathParams;
@@ -35,6 +37,7 @@ public final class MockRequestContext {
         this.body = body;
         this.bodyText = new String(body, StandardCharsets.UTF_8);
         this.variables = variables;
+        this.eventText = eventText;
     }
 
     static MockRequestContext of(String method, String path, Map<String, String> pathParams,
@@ -46,12 +49,33 @@ public final class MockRequestContext {
     static MockRequestContext of(String method, String path, Map<String, String> pathParams,
                                  String rawQuery, Map<String, List<String>> headers, byte[] body,
                                  Map<String, String> variables) {
+        return of(method, path, pathParams, rawQuery, headers, body, variables, null);
+    }
+
+    static MockRequestContext of(String method, String path, Map<String, String> pathParams,
+                                 String rawQuery, Map<String, List<String>> headers, byte[] body,
+                                 Map<String, String> variables, String eventText) {
         return new MockRequestContext(method, path,
                 pathParams == null ? Collections.<String, String>emptyMap() : pathParams,
                 parseQuery(rawQuery),
                 headers == null ? Collections.<String, List<String>>emptyMap() : headers,
                 body == null ? new byte[0] : body,
-                variables == null ? Collections.<String, String>emptyMap() : variables);
+                variables == null ? Collections.<String, String>emptyMap() : variables,
+                eventText);
+    }
+
+    /** 携带触发事件文本派生一个上下文（EVENT 推送模板渲染用）。 */
+    MockRequestContext withEvent(String text) {
+        return new MockRequestContext(method, path, pathParams, query, headers,
+                body, variables, text);
+    }
+
+    /** WebSocket EVENT 推送：以客户端消息作为请求体与事件文本派生上下文。 */
+    static MockRequestContext forMessage(MockRequestContext base, String message) {
+        byte[] bytes = message == null ? new byte[0]
+                : message.getBytes(StandardCharsets.UTF_8);
+        return new MockRequestContext(base.method, base.path, base.pathParams,
+                base.query, base.headers, bytes, base.variables, message);
     }
 
     public String method() {
@@ -71,6 +95,16 @@ public final class MockRequestContext {
     /** query 多值表（原始键）。 */
     public Map<String, List<String>> queryMap() {
         return query;
+    }
+
+    /** 请求头多值表（原始键，取值需自行忽略大小写）。 */
+    public Map<String, List<String>> headersMap() {
+        return headers;
+    }
+
+    /** 触发本次 EVENT 推送的客户端消息文本；非事件响应为 {@code null}。 */
+    public String eventText() {
+        return eventText;
     }
 
     /** query 第一个值；不存在返回 {@code null}。 */
