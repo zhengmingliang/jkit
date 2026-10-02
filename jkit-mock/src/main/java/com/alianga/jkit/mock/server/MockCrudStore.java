@@ -38,6 +38,8 @@ public final class MockCrudStore {
 
     private final Map<String, List<Map<String, Object>>> resources = new LinkedHashMap<>();
     private final Map<String, AtomicLong> sequences = new LinkedHashMap<>();
+    /** 已播种 / 已落盘加载过的资源；与列表是否为空无关（删光后不能重新播种）。 */
+    private final java.util.Set<String> initialized = new java.util.HashSet<>();
     private final Path dataDir;
 
     /**
@@ -52,20 +54,23 @@ public final class MockCrudStore {
         return new MockCrudStore(null);
     }
 
-    /** 资源是否已有数据（含已落盘加载）。 */
+    /** 资源是否已初始化（播种过 / 落盘加载过 / 已有增删改）。 */
     public synchronized boolean exists(String resource) {
-        return resources.containsKey(resource);
+        return initialized.contains(resource);
     }
 
     /**
-     * 播种初始数据（仅在资源尚不存在时生效），并立即落盘。
+     * 播种初始数据（每个资源只生效一次），并立即落盘。
+     * 注意：即使后续记录被全部删除（列表为空），也不会重新播种——
+     * 「列表为空」不等于「从未播种」。
      *
      * @param resource 资源名
      * @param rows     初始记录（深拷贝后保存）
      */
     public synchronized void seed(String resource, List<Map<String, Object>> rows) {
-        // 盘上有历史数据就先加载，绝不覆盖
-        if (!rowsOf(resource).isEmpty()) {
+        // 先触发一次 rowsOf：若盘上有历史数据会在此加载并入册，此时直接跳过，绝不覆盖。
+        rowsOf(resource);
+        if (initialized.contains(resource)) {
             return;
         }
         List<Map<String, Object>> copy = new ArrayList<>();
@@ -74,6 +79,7 @@ public final class MockCrudStore {
         }
         resources.put(resource, copy);
         sequences.put(resource, maxId(copy));
+        initialized.add(resource);
         persistQuietly(resource);
     }
 
@@ -111,6 +117,7 @@ public final class MockCrudStore {
     /** 新增：生成自增 id，返回带 id 的新记录。 */
     public synchronized Map<String, Object> insert(String resource, Map<String, Object> body) {
         List<Map<String, Object>> rows = rowsOf(resource);
+        initialized.add(resource);
         AtomicLong seq = sequences.computeIfAbsent(resource, k -> maxId(rows));
         Map<String, Object> row = new LinkedHashMap<>();
         row.put("id", seq.incrementAndGet());
@@ -161,6 +168,7 @@ public final class MockCrudStore {
     public synchronized void reset(String resource) {
         resources.remove(resource);
         sequences.remove(resource);
+        initialized.remove(resource);
     }
 
     private List<Map<String, Object>> rowsOf(String resource) {
@@ -170,9 +178,18 @@ public final class MockCrudStore {
             if (rows != null) {
                 resources.put(resource, rows);
                 sequences.put(resource, maxId(rows));
+                // 盘上确实有该资源的数据，标记为已初始化（即使为空列表也不重新播种）
+                initialized.add(resource);
             }
         }
-        return rows != null ? rows : new ArrayList<>();
+        if (rows == null) {
+            // 首次出现（未播种 / body 非数组 / 无落盘）：建表但暂不标记 initialized，
+            // 把「是否播种」的决定权留给随后可能到达的 seed()。
+            rows = new ArrayList<>();
+            resources.put(resource, rows);
+            sequences.computeIfAbsent(resource, k -> new AtomicLong(0L));
+        }
+        return rows;
     }
 
     @SuppressWarnings("unchecked")

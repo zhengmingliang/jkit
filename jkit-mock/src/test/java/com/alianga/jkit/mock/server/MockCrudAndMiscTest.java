@@ -164,6 +164,77 @@ public class MockCrudAndMiscTest {
         assertEquals("", new MockRoute("GET", "/x", 200, 0, "text/plain", "ok").name);
     }
 
+    @Test
+    public void crudResourceWithSingleJsonObjectBodySeedsAndAcceptsPosts() throws Exception {
+        // body 是单个 JSON 对象（而非数组）：作为唯一一条初始记录，POST 后必须能在列表/详情读到
+        int port = freePort();
+        String body = "{\"id\":11,\"name\":\"zhutao\"}";
+        server.start(port, Collections.singletonList(
+                MockRoute.builder().method("GET").path("/aaaa")
+                        .crud(true).body(body).build()));
+
+        HttpResponse<String> list = get(port, "/aaaa");
+        assertEquals(200, list.statusCode());
+        assertTrue("object body seeds one row: " + list.body(), list.body().contains("zhutao"));
+        assertEquals(200, get(port, "/aaaa/11").statusCode());
+        assertTrue(get(port, "/aaaa/11").body().contains("zhutao"));
+
+        // POST 后立刻能读到（回归：insert 写入游离 list 导致数据丢失）
+        HttpResponse<String> post = post(port, "/aaaa", "{\"name\":\"newone\"}");
+        assertEquals(201, post.statusCode());
+        assertTrue("POST returns generated id", post.body().contains("\"id\""));
+        HttpResponse<String> after = get(port, "/aaaa");
+        assertTrue("list keeps seed and new row: " + after.body(),
+                after.body().contains("zhutao") && after.body().contains("newone"));
+    }
+
+    @Test
+    public void crudResourceWithEmptyBodyKeepsInsertedRecords() throws Exception {
+        // body 为空：不播种，但 POST 的数据必须保留（同一引擎内 insert 与 query 共享资源表）
+        int port = freePort();
+        server.start(port, Collections.singletonList(
+                MockRoute.builder().method("GET").path("/empty")
+                        .crud(true).body("").build()));
+        assertEquals("[]", get(port, "/empty").body());
+        assertEquals(201, post(port, "/empty", "{\"name\":\"x\"}").statusCode());
+        HttpResponse<String> after = get(port, "/empty");
+        assertEquals(200, after.statusCode());
+        assertTrue("empty-body resource keeps POSTed row: " + after.body(),
+                after.body().contains("x"));
+    }
+
+    @Test
+    public void deletingSameRecordTwiceYields404AndDoesNotReseed() throws Exception {
+        // 回归：首次 DELETE 204；删空后不得因「列表为空」重新播种，二次 DELETE 必须 404
+        int port = freePort();
+        server.start(port, Collections.singletonList(
+                MockRoute.builder().method("GET").path("/items")
+                        .crud(true).body("[{\"id\":1,\"name\":\"a\"},{\"id\":2,\"name\":\"b\"}]")
+                        .build()));
+        assertEquals(204, send(port, "DELETE", "/items/1", "").statusCode());
+        HttpResponse<String> second = send(port, "DELETE", "/items/1", "");
+        assertEquals(404, second.statusCode());
+        assertTrue("资源级 404 应说明记录不存在，而非路由未匹配: " + second.body(),
+                second.body().contains("record not found"));
+        // 删掉另一条后列表应为空，且不会重新播种
+        assertEquals(204, send(port, "DELETE", "/items/2", "").statusCode());
+        assertEquals("[]", get(port, "/items").body());
+        assertEquals(404, get(port, "/items/1").statusCode());
+    }
+
+    @Test
+    public void missingRecordReturnsResourceLevel404ForAllMutations() throws Exception {
+        int port = freePort();
+        server.start(port, Collections.singletonList(
+                MockRoute.builder().method("GET").path("/items").crud(true).body("[]").build()));
+        assertEquals(404, get(port, "/items/999").statusCode());
+        assertTrue(get(port, "/items/999").body().contains("record not found"));
+        assertEquals(404, send(port, "PUT", "/items/999", "{\"name\":\"x\"}").statusCode());
+        assertEquals(404, send(port, "PATCH", "/items/999", "{\"name\":\"x\"}").statusCode());
+        // 多段子路径不属于资源详情
+        assertEquals(404, get(port, "/items/1/extra").statusCode());
+    }
+
     private HttpResponse<String> get(int port, String path) throws IOException, InterruptedException {
         return send(port, "GET", path, "");
     }

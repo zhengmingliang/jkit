@@ -88,6 +88,9 @@ public final class MockHttpServer {
     private static final byte[] EMPTY_BODY = new byte[0];
     private static final byte[] NOT_FOUND_BODY =
             "{\"error\":\"no matching route\"}".getBytes(StandardCharsets.UTF_8);
+    /** 资源存在但指定 id 的记录不存在（REST 资源级 404，与「路由未匹配」区分）。 */
+    private static final byte[] RESOURCE_NOT_FOUND_BODY =
+            "{\"error\":\"record not found\"}".getBytes(StandardCharsets.UTF_8);
     private static final byte[] INVALID_STATUS_BODY =
             "{\"error\":\"invalid statusCode configured\"}".getBytes(StandardCharsets.UTF_8);
     private static final byte[] BAD_REQUEST_BODY =
@@ -527,12 +530,13 @@ public final class MockHttpServer {
         if (rest.startsWith("/")) {
             rest = rest.substring(1);
         }
-        // 首次访问播种：body 为 JSON 数组时作为初始数据（盘上已有数据则 no-op）
-        if (route.body.trim().startsWith("[")) {
+        // 首次访问播种：body 为 JSON 数组时整体作为初始数据；为单个 JSON 对象时作为唯一一条记录。
+        String seedText = route.body == null ? "" : route.body.trim();
+        if (seedText.startsWith("[") || seedText.startsWith("{")) {
             try {
-                Object parsed = com.alianga.jkit.json.JSON.parse(route.body.trim());
+                Object parsed = com.alianga.jkit.json.JSON.parse(seedText);
+                List<Map<String, Object>> seed = new ArrayList<>();
                 if (parsed instanceof List) {
-                    List<Map<String, Object>> seed = new ArrayList<>();
                     for (Object o : (List<?>) parsed) {
                         if (o instanceof Map) {
                             @SuppressWarnings("unchecked")
@@ -540,6 +544,12 @@ public final class MockHttpServer {
                             seed.add(row);
                         }
                     }
+                } else if (parsed instanceof Map) {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> row = (Map<String, Object>) parsed;
+                    seed.add(row);
+                }
+                if (!seed.isEmpty()) {
                     crudStore.seed(resource, seed);
                 }
             } catch (RuntimeException ignore) {
@@ -573,11 +583,15 @@ public final class MockHttpServer {
             return new Resolved(405, latencyMs, JSON_CT, METHOD_NOT_ALLOWED_BODY, headers);
         }
 
-        String id = rest.contains("/") ? rest.substring(0, rest.indexOf('/')) : rest;
+        // rest 形如 "107" 或 "107/extra"：资源详情只允许单层，多段路径视为未匹配
+        if (rest.contains("/")) {
+            return new Resolved(404, latencyMs, JSON_CT, NOT_FOUND_BODY, headers);
+        }
+        String id = rest;
         if (isGet) {
             Map<String, Object> row = crudStore.find(resource, id);
             return row == null
-                    ? new Resolved(404, latencyMs, JSON_CT, NOT_FOUND_BODY, headers)
+                    ? new Resolved(404, latencyMs, JSON_CT, RESOURCE_NOT_FOUND_BODY, headers)
                     : new Resolved(200, latencyMs, JSON_CT,
                             MockDataFormatter.prettyJson(row).getBytes(StandardCharsets.UTF_8), headers);
         }
@@ -588,14 +602,14 @@ public final class MockHttpServer {
             }
             Map<String, Object> updated = crudStore.update(resource, id, body, isPatch);
             return updated == null
-                    ? new Resolved(404, latencyMs, JSON_CT, NOT_FOUND_BODY, headers)
+                    ? new Resolved(404, latencyMs, JSON_CT, RESOURCE_NOT_FOUND_BODY, headers)
                     : new Resolved(200, latencyMs, JSON_CT,
                             MockDataFormatter.prettyJson(updated).getBytes(StandardCharsets.UTF_8), headers);
         }
         if (isDelete) {
             Map<String, Object> removed = crudStore.delete(resource, id);
             return removed == null
-                    ? new Resolved(404, latencyMs, JSON_CT, NOT_FOUND_BODY, headers)
+                    ? new Resolved(404, latencyMs, JSON_CT, RESOURCE_NOT_FOUND_BODY, headers)
                     : new Resolved(204, latencyMs, "text/plain", EMPTY_BODY, headers);
         }
         return new Resolved(405, latencyMs, JSON_CT, METHOD_NOT_ALLOWED_BODY, headers);
