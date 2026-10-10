@@ -58,6 +58,12 @@ features:
     details: YAML 解析、节点树、锚点、多文档；按 Spring Boot 优先级的外部化配置读取，无 Spring 依赖。
     link: /yaml
     linkText: 查看 YAML 文档
+  - icon: 🧮
+    title: 在线工具：Excel 转 JSON
+    details: 浏览器本地运行的 Excel/CSV 转 JSON 工具，支持多工作表、TSV 粘贴、SQL Insert 导出，文件不上传。
+    link: /tools/excel2json/
+    linkText: 打开工具
+    target: _blank
 ---
 
 <DocBadges />

@@ -1,5 +1,37 @@
+import { existsSync } from 'node:fs'
+import { join, normalize } from 'node:path'
 import { defineConfig, type DefaultTheme } from 'vitepress'
 import { repoUrl } from './data/versions'
+
+// dev 模式下 Vite 的 public 中间件只认确切文件路径，/tools/excel2json/ 这类
+// 目录式 URL 会落到 SPA 回退页、前端再渲染成 404；生产环境由静态服务器的目录
+// index 与 cleanUrls 处理，没有这个问题。这里加一个仅 dev 生效的中间件，把
+// public/ 下实际存在的目录 URL 重写到 /index.html，两端行为对齐。
+function publicDirIndexPlugin() {
+  return {
+    name: 'jkit-public-dir-index',
+    configureServer(server: {
+      config: { publicDir: string }
+      middlewares: { use: (fn: (req: { method?: string; url?: string }, res: unknown, next: () => void) => void) => void }
+    }) {
+      server.middlewares.use((req, _res, next) => {
+        const raw = req.url
+        if (raw && (!req.method || req.method === 'GET' || req.method === 'HEAD')) {
+          const qIdx = raw.indexOf('?')
+          const pathname = qIdx >= 0 ? raw.slice(0, qIdx) : raw
+          // 跳过带扩展名的资源请求和根路径
+          if (pathname.startsWith('/') && !pathname.endsWith('/index.html') && !pathname.slice(1).includes('.')) {
+            const indexRel = normalize(join(decodeURIComponent(pathname.slice(1)), 'index.html'))
+            if (!indexRel.startsWith('..') && existsSync(join(server.config.publicDir, indexRel))) {
+              req.url = (pathname.endsWith('/') ? pathname : pathname + '/') + 'index.html' + (qIdx >= 0 ? raw.slice(qIdx) : '')
+            }
+          }
+        }
+        next()
+      })
+    },
+  }
+}
 
 // 中文没有空格分词，用 Intl.Segmenter 按词切分（对英文同样有效），
 // 让 minisearch 的本地索引能命中中文词。
@@ -34,6 +66,10 @@ const zhSearchTranslations = {
   },
 }
 
+// public/tools/ 下是独立静态工具页，不经过 VitePress 客户端路由；
+// 链接必须带 target 才能走整页跳转，否则 SPA 接管后会落到 404。
+const toolLink = { target: '_blank', rel: 'noopener' } as const
+
 const zhNav: DefaultTheme.NavItem[] = [
   { text: '首页', link: '/' },
   { text: '快速开始', link: '/guide/getting-started' },
@@ -49,6 +85,12 @@ const zhNav: DefaultTheme.NavItem[] = [
       { text: 'SQL 解析', link: '/sql' },
       { text: '自动建表', link: '/sql-auto' },
       { text: '消息通知', link: '/notify' },
+    ],
+  },
+  {
+    text: '在线工具',
+    items: [
+      { text: 'Excel/CSV 转 JSON', link: '/tools/excel2json/', ...toolLink },
     ],
   },
   { text: '更新日志', link: '/changelog' },
@@ -110,6 +152,12 @@ const enNav: DefaultTheme.NavItem[] = [
       { text: 'Notification', link: '/en/notify' },
     ],
   },
+  {
+    text: 'Tools',
+    items: [
+      { text: 'Excel/CSV to JSON', link: '/tools/excel2json/', ...toolLink },
+    ],
+  },
   { text: 'Changelog', link: '/en/changelog' },
 ]
 
@@ -162,9 +210,17 @@ export default defineConfig({
   cleanUrls: true,
   lastUpdated: true,
   // /v2.0.1/ 是 CI 从 tag 嵌进来的另一份站点，当前构建里还不存在
-  ignoreDeadLinks: [(url) => /\/v\d+\.\d+\.\d+(\/|$)/.test(url)],
+  ignoreDeadLinks: [
+    (url) => /\/v\d+\.\d+\.\d+(\/|$)/.test(url),
+    // public/ 下的独立静态工具页，不经过 VitePress 的 Markdown 路由
+    (url) => url.startsWith('/tools/'),
+  ],
   // next-plan 是内部开发计划，不构建进站点
   srcExclude: ['**/next-plan.md'],
+
+  vite: {
+    plugins: [publicDirIndexPlugin()],
+  },
 
   head: [
     ['link', { rel: 'icon', type: 'image/svg+xml', href: `${base}favicon.svg` }],

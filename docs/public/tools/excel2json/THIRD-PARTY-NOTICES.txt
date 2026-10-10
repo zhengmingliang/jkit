@@ -1,0 +1,42 @@
+# 第三方版权声明
+
+本工具（`/tools/excel2json/`）在本地浏览器中完成全部转换，不向任何服务器上传文件。
+
+## SheetJS Community Edition
+
+- 文件：`vendor/xlsx.full.min.js`
+- 来源：<https://github.com/SheetJS/sheetjs>
+- 版本：0.18.5（经 FeHelper 分发版本核验）
+- 许可协议：Apache License 2.0（与本项目根目录 `LICENSE` 相同）
+- 用途：解析 .xlsx / .xls 工作簿
+
+## FeHelper（Web 前端助手）
+
+- 来源：<https://github.com/zxlie/FeHelper>（`apps/excel2json/`）
+- 许可协议：MIT
+- 用途：本工具的功能设计（文件上传、CSV/TSV/单列文本转 JSON、示例数据、SQL Insert
+  输出）参考了 FeHelper 同名工具的实现与交互，代码为本项目重新编写。
+
+```
+MIT License
+
+Copyright (c) 2019 zhaoxianlie (xianliezhao@foxmail.com)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```

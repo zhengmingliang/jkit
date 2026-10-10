@@ -58,6 +58,12 @@ features:
     details: YAML parsing, node tree, anchors and multi-documents; Spring Boot-style externalized configuration without Spring dependencies.
     link: /en/yaml
     linkText: YAML docs
+  - icon: 🧮
+    title: "Online Tool: Excel to JSON"
+    details: A fully local, in-browser Excel/CSV to JSON converter with multi-sheet support, TSV pasting and SQL Insert export — files never leave your machine.
+    link: /tools/excel2json/
+    linkText: Open tool
+    target: _blank
 ---
 
 <DocBadges />

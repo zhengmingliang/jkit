@@ -1,0 +1,427 @@
+/* Excel/CSV 转 JSON 工具样式（jkit 在线工具） */
+:root {
+  --brand: #ea580c;
+  --brand-hover: #c2410c;
+  --warn: #d97706;
+  --warn-hover: #b45309;
+  --bg: #f5f6f8;
+  --card-bg: #ffffff;
+  --text: #1f2329;
+  --text-muted: #6b7280;
+  --border: #e3e6ea;
+  --textarea-bg: #fbfbfc;
+  --code-bg: #f6f8fa;
+  --shadow: 0 1px 3px rgba(16, 24, 40, 0.06), 0 1px 2px rgba(16, 24, 40, 0.04);
+  --error: #dc2626;
+  --error-bg: #fef2f2;
+  --ok: #16a34a;
+}
+
+[data-theme='dark'] {
+  --brand: #f97316;
+  --brand-hover: #fb923c;
+  --warn: #f59e0b;
+  --warn-hover: #fbbf24;
+  --bg: #0f1115;
+  --card-bg: #181b21;
+  --text: #e5e7eb;
+  --text-muted: #9ca3af;
+  --border: #2a2f38;
+  --textarea-bg: #121419;
+  --code-bg: #121419;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --error: #f87171;
+  --error-bg: #2a1717;
+  --ok: #4ade80;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.6 -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------- 顶栏 ---------- */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 24px;
+  height: 56px;
+  background: var(--card-bg);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-decoration: none;
+  color: var(--text);
+  font-weight: 600;
+  min-width: 0;
+}
+
+.brand-logo {
+  width: 26px;
+  height: 26px;
+}
+
+.brand-name {
+  font-size: 17px;
+}
+
+.brand-sep {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.brand-tool {
+  color: var(--brand);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.top-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-shrink: 0;
+}
+
+.ghost-link {
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.ghost-link:hover {
+  color: var(--brand);
+}
+
+.icon-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+#langBtn {
+  width: auto;
+  padding: 0 10px;
+}
+
+.icon-btn:hover {
+  border-color: var(--brand);
+  color: var(--brand);
+}
+
+.icon-moon {
+  display: none;
+}
+
+[data-theme='dark'] .icon-sun {
+  display: none;
+}
+
+[data-theme='dark'] .icon-moon {
+  display: inline;
+}
+
+/* ---------- 布局 ---------- */
+.container {
+  flex: 1;
+  width: 100%;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 20px 24px 12px;
+}
+
+.card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+}
+
+.toolbar {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.toolbar-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.toolbar-row-bottom {
+  justify-content: flex-start;
+}
+
+.toolbar-sep {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+  margin: 0 4px;
+}
+
+.muted {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.sheet-select {
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--card-bg);
+  color: var(--text);
+  padding: 0 8px;
+  font-size: 13px;
+  max-width: 240px;
+}
+
+.table-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.table-name input {
+  width: 160px;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--textarea-bg);
+  color: var(--text);
+  padding: 0 10px;
+  font-size: 13px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.table-name input:focus {
+  outline: none;
+  border-color: var(--brand);
+}
+
+.status-msg {
+  color: var(--ok);
+  font-size: 13px;
+}
+
+.error-msg {
+  color: var(--error);
+  font-size: 13px;
+}
+
+.error-msg:not(:empty) {
+  background: var(--error-bg);
+  padding: 3px 10px;
+  border-radius: 6px;
+}
+
+/* ---------- 按钮 ---------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--card-bg);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.btn:hover {
+  border-color: var(--brand);
+  color: var(--brand);
+}
+
+.btn-primary {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
+  font-weight: 600;
+}
+
+.btn-primary:hover {
+  background: var(--brand-hover);
+  border-color: var(--brand-hover);
+  color: #fff;
+}
+
+.btn-warn {
+  background: var(--warn);
+  border-color: var(--warn);
+  color: #fff;
+  font-weight: 600;
+}
+
+.btn-warn:hover {
+  background: var(--warn-hover);
+  border-color: var(--warn-hover);
+  color: #fff;
+}
+
+.btn-link {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--brand);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.btn-link:hover {
+  text-decoration: underline;
+}
+
+.btn.copied {
+  background: var(--ok);
+  border-color: var(--ok);
+  color: #fff;
+}
+
+/* ---------- 双栏 ---------- */
+.panes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.pane-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.pane-head h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.pane-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pane-textarea {
+  width: 100%;
+  flex: 1;
+  min-height: 460px;
+  border: none;
+  outline: none;
+  resize: vertical;
+  padding: 14px;
+  background: var(--textarea-bg);
+  color: var(--text);
+  border-radius: 0 0 10px 10px;
+  font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas,
+    'Liberation Mono', monospace;
+  tab-size: 2;
+}
+
+.pane-textarea::placeholder {
+  color: var(--text-muted);
+  font-family: inherit;
+}
+
+/* ---------- 页脚 ---------- */
+.foot {
+  margin: 18px 0 8px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.foot p {
+  margin: 4px 0;
+}
+
+.foot a {
+  color: var(--brand);
+  text-decoration: none;
+}
+
+.foot a:hover {
+  text-decoration: underline;
+}
+
+/* ---------- 响应式 ---------- */
+@media (max-width: 960px) {
+  .panes {
+    grid-template-columns: 1fr;
+  }
+
+  .pane-textarea {
+    min-height: 280px;
+  }
+
+  .topbar {
+    padding: 0 14px;
+  }
+
+  .container {
+    padding: 14px;
+  }
+
+  .brand-sep,
+  .ghost-link[href='/'] {
+    display: none;
+  }
+}
