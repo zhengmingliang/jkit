@@ -39,7 +39,6 @@ import static org.junit.Assert.assertTrue;
  * @author 郑明亮
  */
 public class CopypartyRealStorageTest {
-
     private static final String USER = "tester";
     private static final String PASSWORD = "testpw";
 
@@ -321,8 +320,7 @@ public class CopypartyRealStorageTest {
             dav.upload(stage2 + "/new.txt", "new".getBytes(StandardCharsets.UTF_8));
             com.alianga.jkit.storage.sync.SyncResult third =
                     com.alianga.jkit.storage.sync.SyncEngine.sync(dav, stage2, sftp, stage3,
-                            com.alianga.jkit.storage.sync.SyncOptions.mirror(),
-null
+                            com.alianga.jkit.storage.sync.SyncOptions.mirror(), null);
             assertEquals(3L, third.copied());
             assertEquals(1L, third.deleted());
             assertFalse(sftp.exists(stage3 + "/stale.txt"));

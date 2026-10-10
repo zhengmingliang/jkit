@@ -107,6 +107,30 @@ public interface FileStorage extends AutoCloseable {
     void rename(String src, String dst);
 
     /**
+     * 上传流并携带元数据（如同步 / 迁移时保留源端修改时间）。平台支持元数据则存储，
+     * 不支持则忽略；contentType 为 null 时按扩展名推断。
+     *
+     * @param path 目标路径
+     * @param in   数据源
+     * @param size 已知字节数，未知传 -1
+     * @param meta 元数据，null 等价于三参 upload
+     */
+    default void upload(String path, InputStream in, long size, UploadMetadata meta) {
+        upload(path, in, size);
+    }
+
+    /**
+     * 便捷上传：内存数据并携带元数据。
+     *
+     * @param path 目标路径
+     * @param data 数据
+     * @param meta 元数据，null 等价于两参 upload
+     */
+    default void upload(String path, byte[] data, UploadMetadata meta) {
+        upload(path, new ByteArrayInputStream(data), data == null ? 0L : data.length, meta);
+    }
+
+    /**
      * 便捷上传：内存数据。
      *
      * @param path 目标路径

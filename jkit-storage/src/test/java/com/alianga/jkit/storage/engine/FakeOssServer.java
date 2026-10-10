@@ -21,10 +21,12 @@ import java.util.concurrent.ConcurrentHashMap;
  * @author 郑明亮
  */
 final class FakeOssServer {
-
     final Map<String, byte[]> objects = new ConcurrentHashMap<>();
     final Map<String, String> lastDate = new ConcurrentHashMap<>();
     final Map<String, String> lastAuthorization = new ConcurrentHashMap<>();
+    /** 分片上传状态：uploadId → (partNumber → 数据)。完成后清空。 */
+    final Map<String, Map<Integer, byte[]>> multipartParts = new ConcurrentHashMap<>();
+    private final java.util.concurrent.atomic.AtomicLong uploadIds = new java.util.concurrent.atomic.AtomicLong();
     private HttpServer server;
     private String bucket;
 
@@ -74,6 +76,28 @@ final class FakeOssServer {
                 return;
             }
             String key = path.substring(("/" + bucket + "/").length());
+            if ("POST".equals(method) && query.containsKey("uploads")) {
+                String uploadId = "upload-" + uploadIds.incrementAndGet();
+                multipartParts.put(uploadId, new java.util.concurrent.ConcurrentHashMap<Integer, byte[]>());
+                respond(exchange, 200, "<InitiateMultipartUploadResult><Bucket>" + bucket
+                        + "</Bucket><Key>" + key + "</Key><UploadId>" + uploadId
+                        + "</UploadId></InitiateMultipartUploadResult>");
+                return;
+            }
+            if ("POST".equals(method) && query.containsKey("uploadId")) {
+                handleComplete(exchange, key, query.get("uploadId"));
+                return;
+            }
+            if ("DELETE".equals(method) && query.containsKey("uploadId")) {
+                multipartParts.remove(query.get("uploadId"));
+                respond(exchange, 204, "");
+                return;
+            }
+            if ("PUT".equals(method) && query.containsKey("uploadId")) {
+                handlePart(exchange, key, Integer.parseInt(query.getOrDefault("partNumber", "0")),
+                        query.get("uploadId"));
+                return;
+            }
             switch (method) {
                 case "PUT":
                     handlePut(exchange, key);
@@ -94,6 +118,42 @@ final class FakeOssServer {
         } finally {
             exchange.close();
         }
+    }
+
+    private void handlePart(HttpExchange exchange, String key, int partNumber,
+                            String uploadId) throws IOException {
+        Map<Integer, byte[]> parts = multipartParts.get(uploadId);
+        if (parts == null) {
+            respondXmlError(exchange, 404, "NoSuchUpload", "分片上传不存在");
+            return;
+        }
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        byte[] chunk = new byte[8192];
+        try (InputStream in = exchange.getRequestBody()) {
+            int read;
+            while ((read = in.read(chunk)) >= 0) {
+                out.write(chunk, 0, read);
+            }
+        }
+        parts.put(partNumber, out.toByteArray());
+        exchange.getResponseHeaders().set("ETag", "\"part-" + partNumber + "\"");
+        exchange.sendResponseHeaders(200, -1);
+    }
+
+    private void handleComplete(HttpExchange exchange, String key, String uploadId) throws IOException {
+        Map<Integer, byte[]> parts = multipartParts.remove(uploadId);
+        if (parts == null) {
+            respondXmlError(exchange, 404, "NoSuchUpload", "分片上传不存在");
+            return;
+        }
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        for (byte[] part : new TreeMap<>(parts).values()) {
+            out.writeBytes(part);
+        }
+        objects.put(key, out.toByteArray());
+        respond(exchange, 200, "<CompleteMultipartUploadResult><Bucket>" + bucket
+                + "</Bucket><Key>" + key + "</Key><ETag>\"multipart\"</ETag>"
+                + "</CompleteMultipartUploadResult>");
     }
 
     private void handlePut(HttpExchange exchange, String key) throws IOException {

@@ -26,6 +26,8 @@ public final class SyncOptions {
     private int concurrency = 4;
     private long maxErrors = 100;
     private Predicate<String> filter;
+    private SyncCancel cancelToken;
+    private boolean preserveMtime = true;
 
     private SyncOptions() {
     }
@@ -125,6 +127,47 @@ public final class SyncOptions {
     public SyncOptions filter(Predicate<String> filter) {
         this.filter = filter;
         return this;
+    }
+
+    /**
+     * 取消令牌：引擎在每完成一个文件后检查，取消后停止调度剩余动作。
+     *
+     * @param cancelToken 取消令牌
+     * @return 自身
+     */
+    public SyncOptions cancelToken(SyncCancel cancelToken) {
+        this.cancelToken = cancelToken;
+        return this;
+    }
+
+    /**
+     * 是否在复制时保留源端修改时间（平台支持元数据则存对象 meta，
+     * 本地文件系统直接设置 mtime）。默认开启。
+     *
+     * @param preserveMtime true 保留
+     * @return 自身
+     */
+    public SyncOptions preserveMtime(boolean preserveMtime) {
+        this.preserveMtime = preserveMtime;
+        return this;
+    }
+
+    /**
+     * 当前取消令牌。
+     *
+     * @return 令牌，可能为 null
+     */
+    public SyncCancel cancelToken() {
+        return cancelToken;
+    }
+
+    /**
+     * 是否保留修改时间。
+     *
+     * @return true 保留
+     */
+    public boolean isPreserveMtime() {
+        return preserveMtime;
     }
 
     public CompareMode compareMode() {

@@ -17,7 +17,6 @@ import static org.junit.Assert.fail;
  * 「classpath 无 jsch → 首次操作抛 UNSUPPORTED / 有 jsch 但无服务器 → CONNECT_FAILED」。
  */
 public class SftpFileStorageTest {
-
     @Test
     public void missingHostThrowsInvalidConfig() {
         try {

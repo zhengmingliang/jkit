@@ -116,6 +116,19 @@ public final class AwsSigners {
     public static String sigV2(String prefix, String accessKey, String secretKey, String method,
                                String contentType, String date, Map<String, String> amzHeaders,
                                String bucket, String key) {
+        return sigV2(prefix, accessKey, secretKey, method, contentType, date, amzHeaders,
+                bucket, key, null);
+    }
+
+    /**
+     * SigV2 签名（带查询子资源）：Multipart 的 partNumber / uploadId 属于
+     * CanonicalizedResource 的一部分，必须参与签名。
+     *
+     * @param subResources 子资源键值对（如 partNumber / uploadId），可为 null
+     */
+    public static String sigV2(String prefix, String accessKey, String secretKey, String method,
+                               String contentType, String date, Map<String, String> amzHeaders,
+                               String bucket, String key, Map<String, String> subResources) {
         StringBuilder toSign = new StringBuilder();
         toSign.append(method).append('\n');
         toSign.append('\n');
@@ -133,6 +146,17 @@ public final class AwsSigners {
         toSign.append('/').append(bucket);
         if (key != null && !key.isEmpty()) {
             toSign.append('/').append(key);
+        }
+        if (subResources != null && !subResources.isEmpty()) {
+            toSign.append('?');
+            boolean first = true;
+            for (Map.Entry<String, String> entry : new TreeMap<String, String>(subResources).entrySet()) {
+                if (!first) {
+                    toSign.append('&');
+                }
+                first = false;
+                toSign.append(entry.getKey()).append('=').append(entry.getValue());
+            }
         }
         String signature = base64(hmacSha1(secretKey.getBytes(StandardCharsets.UTF_8),
                 toSign.toString()));

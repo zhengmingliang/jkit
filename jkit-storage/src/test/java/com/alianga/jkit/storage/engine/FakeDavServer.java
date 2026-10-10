@@ -22,7 +22,6 @@ import java.util.concurrent.ConcurrentHashMap;
  * @author 郑明亮
  */
 final class FakeDavServer {
-
     /** 内存条目：目录或文件。 */
     static final class Entity {
         final boolean directory;

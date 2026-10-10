@@ -6,6 +6,7 @@ import com.alianga.jkit.storage.StorageEntry;
 import com.alianga.jkit.storage.StorageErrorCode;
 import com.alianga.jkit.storage.StorageException;
 import com.alianga.jkit.storage.StoragePaths;
+import com.alianga.jkit.storage.UploadMetadata;
 import com.alianga.jkit.storage.internal.AwsSigners;
 import com.alianga.jkit.storage.internal.HttpCore;
 import com.alianga.jkit.storage.internal.MimeTypes;
@@ -36,6 +37,7 @@ public class S3FileStorage implements FileStorage {
     /** 分页拉取全量列表时的最大页数（每页 1000 条，防御性上限）。 */
     private static final int MAX_LIST_PAGES = 500;
 
+    private final StorageConfig config;
     private final String endpoint;
     private final String bucket;
     private final String accessKey;
@@ -45,6 +47,10 @@ public class S3FileStorage implements FileStorage {
     private final String basePath;
     private final boolean listV2;
     private final String authPrefix;
+    /** 单片阈值：超过该大小走 Multipart（默认 64MB）。 */
+    private final long multipartThreshold;
+    /** 分片大小（默认 8MB，S3 规范最小 5MB）。 */
+    private final long partSize;
 
     /**
      * 由配置创建（配置键：endpoint / bucket / accessKey / secretKey / region /
@@ -53,6 +59,7 @@ public class S3FileStorage implements FileStorage {
      * @param config 连接配置
      */
     public S3FileStorage(StorageConfig config) {
+        this.config = config;
         String raw = config.require("endpoint");
         if (!raw.startsWith("http://") && !raw.startsWith("https://")) {
             raw = "https://" + raw;
@@ -71,6 +78,9 @@ public class S3FileStorage implements FileStorage {
         String authStyle = config.getOr("authStyle", "v4");
         this.authPrefix = "ksyun".equalsIgnoreCase(authStyle) ? "KSYUN"
                 : "v2".equalsIgnoreCase(authStyle) ? "AWS" : null;
+        this.partSize = Math.max(5L * 1024L * 1024L, config.longOr("partSize", 8L * 1024L * 1024L));
+        this.multipartThreshold = Math.max(this.partSize,
+                config.longOr("multipartThreshold", 64L * 1024L * 1024L));
     }
 
     @Override
@@ -103,8 +113,8 @@ public class S3FileStorage implements FileStorage {
         String key = objectKey(normalized);
         HttpCore.Response response = request("HEAD", key, null, null, null, -1L, null);
         if (response.status() < 400) {
-            return StorageEntry.file(normalized, lengthOf(response), lastModifiedOf(response),
-                    response.header("ETag"));
+            return StorageEntry.file(normalized, lengthOf(response),
+                    metaMtimeOr(response, lastModifiedOf(response)), response.header("ETag"));
         }
         response = request("HEAD", key + "/", null, null, null, -1L, null);
         if (response.status() < 400) {
@@ -138,14 +148,185 @@ public class S3FileStorage implements FileStorage {
 
     @Override
     public void upload(String path, InputStream in, long size) {
+        upload(path, in, size, null);
+    }
+
+    @Override
+    public void upload(String path, InputStream in, long size, UploadMetadata meta) {
         String normalized = requireFile(path);
         String contentType = MimeTypes.of(normalized);
+        if (meta != null && meta.contentType() != null) {
+            contentType = meta.contentType();
+        }
+        boolean knownBig = size >= 0 && size > multipartThreshold;
+        if (size >= 0 && !knownBig) {
+            putObject(normalized, contentType, in, size, meta);
+            return;
+        }
+        if (size < 0) {
+            // 未知长度：读出一个分片，单片则退回普通 PUT，多片走流式 Multipart
+            byte[] first = readChunk(in, partSize);
+            if (first.length < partSize) {
+                putObjectBytes(normalized, contentType, first, meta);
+                return;
+            }
+            multipart(normalized, contentType, first, in, null);
+            return;
+        }
+        multipart(normalized, contentType, null, in, size);
+    }
+
+    private void putObject(String normalized, String contentType, InputStream in, long size,
+                           UploadMetadata meta) {
         HttpCore.Response response = request("PUT", objectKey(normalized), null, contentType,
-                null, size, null, in);
+                null, size, null, in, metaHeaders(meta));
         try {
             ensureSuccess(response, normalized);
         } finally {
             response.close();
+        }
+    }
+
+    private void putObjectBytes(String normalized, String contentType, byte[] data,
+                                UploadMetadata meta) {
+        HttpCore.Response response = request("PUT", objectKey(normalized), null, contentType,
+                data, -1L, null, null, metaHeaders(meta));
+        try {
+            ensureSuccess(response, normalized);
+        } finally {
+            response.close();
+        }
+    }
+
+    /** mtime 保留：S3 用户元数据 x-amz-meta-mtime。 */
+    private Map<String, String> metaHeaders(UploadMetadata meta) {
+        Map<String, String> extra = new LinkedHashMap<String, String>();
+        if (meta != null && meta.hasLastModified()) {
+            extra.put("x-amz-meta-mtime", String.valueOf(meta.lastModified()));
+        }
+        return extra;
+    }
+
+    /** 读取至多 limit 字节（阻塞到读满或 EOF）。 */
+    private static byte[] readChunk(InputStream in, long limit) {
+        try {
+            java.io.ByteArrayOutputStream out =
+                    new java.io.ByteArrayOutputStream((int) Math.min(limit, Integer.MAX_VALUE));
+            byte[] chunk = new byte[8192];
+            long total = 0L;
+            int read;
+            while (total < limit && (read = in.read(chunk, 0,
+                    (int) Math.min(chunk.length, limit - total))) >= 0) {
+                out.write(chunk, 0, read);
+                total += read;
+            }
+            return out.toByteArray();
+        } catch (IOException e) {
+            throw StorageException.io("读取上传流失败: " + e.getMessage(), "-", e);
+        }
+    }
+
+    /**
+     * Multipart 上传：firstPart 非空表示已读出的首片（流式未知长度），
+     * 否则按已知 totalSize 均匀分片。
+     */
+    private void multipart(String path, String contentType, byte[] firstPart,
+                           InputStream in, Long totalSize) {
+        String normalized = path;
+        String key = objectKey(normalized);
+        String uploadId = initiateMultipart(normalized, key);
+        List<String> etags = new ArrayList<String>();
+        try {
+            int partNumber = 1;
+            if (firstPart != null) {
+                etags.add(uploadPart(normalized, key, uploadId, partNumber++,
+                        new java.io.ByteArrayInputStream(firstPart), firstPart.length));
+            }
+            long uploaded = firstPart == null ? 0L : firstPart.length;
+            while (totalSize == null || uploaded < totalSize) {
+                long limit = partSize;
+                if (totalSize != null) {
+                    limit = Math.min(partSize, totalSize - uploaded);
+                }
+                byte[] part = readChunk(in, limit);
+                if (part.length == 0) {
+                    break;
+                }
+                etags.add(uploadPart(normalized, key, uploadId, partNumber++,
+                        new java.io.ByteArrayInputStream(part), part.length));
+                uploaded += part.length;
+                if (totalSize == null && part.length < partSize) {
+                    break;
+                }
+            }
+            completeMultipart(normalized, key, uploadId, etags);
+        } catch (RuntimeException e) {
+            abortMultipart(key, uploadId);
+            throw e;
+        }
+    }
+
+    private String initiateMultipart(String normalized, String key) {
+        Map<String, String> query = new LinkedHashMap<String, String>();
+        query.put("uploads", "");
+        HttpCore.Response response = request("POST", key, query, null, new byte[0], -1L, null);
+        try {
+            ensureSuccess(response, normalized);
+            Element root = Xmls.parse(Xmls.readAll(response.body()));
+            String uploadId = Xmls.textOr(root, "UploadId", null);
+            if (uploadId == null || uploadId.isEmpty()) {
+                throw StorageException.serverError("Multipart 初始化未返回 UploadId", normalized);
+            }
+            return uploadId;
+        } finally {
+            response.close();
+        }
+    }
+
+    private String uploadPart(String normalized, String key, String uploadId, int partNumber,
+                              InputStream in, long length) {
+        Map<String, String> query = new LinkedHashMap<String, String>();
+        query.put("partNumber", String.valueOf(partNumber));
+        query.put("uploadId", uploadId);
+        HttpCore.Response response = request("PUT", key, query, null, null, length, null, in);
+        try {
+            ensureSuccess(response, normalized);
+            String etag = response.header("ETag");
+            if (etag == null || etag.isEmpty()) {
+                throw StorageException.serverError("分片 " + partNumber + " 未返回 ETag", normalized);
+            }
+            return etag;
+        } finally {
+            response.close();
+        }
+    }
+
+    private void completeMultipart(String normalized, String key, String uploadId,
+                                   List<String> etags) {
+        StringBuilder xml = new StringBuilder("<CompleteMultipartUpload>");
+        for (int i = 0; i < etags.size(); i++) {
+            xml.append("<Part><PartNumber>").append(i + 1).append("</PartNumber><ETag>")
+                    .append(etags.get(i)).append("</ETag></Part>");
+        }
+        xml.append("</CompleteMultipartUpload>");
+        Map<String, String> query = new LinkedHashMap<String, String>();
+        query.put("uploadId", uploadId);
+        HttpCore.Response response = request("POST", key, query, "application/xml",
+                xml.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8), -1L, null);
+        try {
+            ensureSuccess(response, normalized);
+        } finally {
+            response.close();
+        }
+    }
+
+    private void abortMultipart(String key, String uploadId) {
+        Map<String, String> query = new LinkedHashMap<String, String>();
+        query.put("uploadId", uploadId);
+        try {
+            closeQuietly(request("DELETE", key, query, null, null, -1L, null));
+        } catch (RuntimeException ignore) {
+            // 中止失败不影响原错误
         }
     }
 
@@ -381,6 +562,13 @@ public class S3FileStorage implements FileStorage {
     private HttpCore.Response request(String method, String key, Map<String, String> query,
                                       String contentType, byte[] body, long streamLength,
                                       String copySource, InputStream stream) {
+        return request(method, key, query, contentType, body, streamLength, copySource, stream, null);
+    }
+
+    private HttpCore.Response request(String method, String key, Map<String, String> query,
+                                      String contentType, byte[] body, long streamLength,
+                                      String copySource, InputStream stream,
+                                      Map<String, String> extraXamz) {
         String encodedPath = Urls.encodePath(key);
         String urlPath = pathStyle ? "/" + bucket + (encodedPath.isEmpty() ? "" : "/" + encodedPath)
                 : (encodedPath.isEmpty() ? "/" : "/" + encodedPath);
@@ -392,6 +580,11 @@ public class S3FileStorage implements FileStorage {
         }
         if (copySource != null) {
             headers.put("x-amz-copy-source", "/" + bucket + "/" + Urls.encodePath(copySource));
+        }
+        if (extraXamz != null) {
+            for (Map.Entry<String, String> entry : extraXamz.entrySet()) {
+                headers.put(entry.getKey(), entry.getValue());
+            }
         }
         if (authPrefix == null) {
             String amzDate = AwsSigners.amzDateNow();
@@ -414,8 +607,18 @@ public class S3FileStorage implements FileStorage {
                 }
             }
             String keyPath = pathStyle ? bucket + "/" + key : key;
+            Map<String, String> subResources = null;
+            if (query != null && (query.containsKey("uploadId") || query.containsKey("partNumber"))) {
+                subResources = new LinkedHashMap<String, String>();
+                if (query.containsKey("partNumber")) {
+                    subResources.put("partNumber", query.get("partNumber"));
+                }
+                if (query.containsKey("uploadId")) {
+                    subResources.put("uploadId", query.get("uploadId"));
+                }
+            }
             String authorization = AwsSigners.sigV2(authPrefix, accessKey, secretKey, method,
-                    contentType, date, amzHeaders, bucket, keyPath);
+                    contentType, date, amzHeaders, bucket, keyPath, subResources);
             headers.put("Authorization", authorization);
         }
         HttpCore.Request request = new HttpCore.Request(method, url);
@@ -427,7 +630,7 @@ public class S3FileStorage implements FileStorage {
         } else if (stream != null) {
             request.body(stream, streamLength);
         }
-        return HttpCore.execute(request);
+        return HttpCore.execute(HttpCore.configured(request, config));
     }
 
     private String hostOf() {
@@ -526,6 +729,19 @@ public class S3FileStorage implements FileStorage {
             throw StorageException.invalidConfig("路径不能为存储根目录");
         }
         return normalized;
+    }
+
+    /** 同步保留的 mtime 存在 x-amz-meta-mtime，优先于服务端 Last-Modified。 */
+    private static long metaMtimeOr(HttpCore.Response response, long fallback) {
+        String meta = response.header("x-amz-meta-mtime");
+        if (meta == null) {
+            return fallback;
+        }
+        try {
+            return Long.parseLong(meta.trim());
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
     }
 
     private static long lengthOf(HttpCore.Response response) {

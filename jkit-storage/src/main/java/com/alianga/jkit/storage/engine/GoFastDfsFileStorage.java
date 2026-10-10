@@ -43,6 +43,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * @author 郑明亮
  */
 public class GoFastDfsFileStorage implements FileStorage {
+    private final StorageConfig config;
     private final String endpoint;
     private final String group;
     private final String basePath;
@@ -56,6 +57,7 @@ public class GoFastDfsFileStorage implements FileStorage {
      * @param config 连接配置
      */
     public GoFastDfsFileStorage(StorageConfig config) {
+        this.config = config;
         String raw = config.require("endpoint");
         this.endpoint = raw.endsWith("/") ? raw.substring(0, raw.length() - 1) : raw;
         this.group = config.getOr("group", "group1");
@@ -343,7 +345,7 @@ public class GoFastDfsFileStorage implements FileStorage {
         HttpCore.Request request =
                 new HttpCore.Request(method, endpoint + "/" + group + "/" + Urls.encodePath(objectPath));
         authorize(request);
-        return HttpCore.execute(request);
+        return HttpCore.execute(HttpCore.configured(request, config));
     }
 
     private void authorize(HttpCore.Request request) {

@@ -49,6 +49,7 @@ public class AzureBlobFileStorage implements FileStorage {
     /** 每页请求的最大条数（Azure 单页上限 5000）。 */
     private static final String PAGE_SIZE = "5000";
 
+    private final StorageConfig config;
     private final String endpoint;
     private final String container;
     private final String account;
@@ -61,6 +62,7 @@ public class AzureBlobFileStorage implements FileStorage {
      * @param config 连接配置
      */
     public AzureBlobFileStorage(StorageConfig config) {
+        this.config = config;
         String raw = config.require("endpoint");
         if (!raw.startsWith("http://") && !raw.startsWith("https://")) {
             raw = "https://" + raw;
@@ -412,7 +414,7 @@ public class AzureBlobFileStorage implements FileStorage {
         } else if (stream != null) {
             request.body(stream, streamLength);
         }
-        return HttpCore.execute(request);
+        return HttpCore.execute(HttpCore.configured(request, config));
     }
 
     /**

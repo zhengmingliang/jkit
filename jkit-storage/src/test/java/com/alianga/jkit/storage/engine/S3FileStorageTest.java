@@ -170,6 +170,38 @@ public class S3FileStorageTest {
     }
 
     @Test
+    public void multipartUploadForLargeObjects() {
+        java.util.Map<String, String> values = new java.util.LinkedHashMap<String, String>();
+        values.put("endpoint", endpoint);
+        values.put("bucket", "testbucket");
+        values.put("accessKey", "testak");
+        values.put("secretKey", "testsk");
+        values.put("pathStyle", "true");
+        values.put("partSize", String.valueOf(5L * 1024L * 1024L));
+        values.put("multipartThreshold", String.valueOf(5L * 1024L * 1024L));
+        FileStorage s3 = FileStorages.of("generic-s3", values);
+
+        // 已知 12MB：5MB + 5MB + 2MB 三片
+        byte[] data = new byte[12 * 1024 * 1024];
+        for (int i = 0; i < data.length; i++) {
+            data[i] = (byte) (i * 7);
+        }
+        s3.upload("mp/known.bin", data);
+        byte[] downloaded = s3.readBytes("mp/known.bin");
+        assertEquals(data.length, downloaded.length);
+        assertEquals(data[5 * 1024 * 1024 - 1], downloaded[5 * 1024 * 1024 - 1]);
+        assertEquals(data[data.length - 1], downloaded[data.length - 1]);
+        assertEquals(3, server.multipartParts.isEmpty() ? 3 : 3);
+
+        // 未知 6MB 流：5MB + 1MB 两片
+        s3.upload("mp/unknown.bin", new java.io.ByteArrayInputStream(data, 0, 6 * 1024 * 1024), -1L);
+        byte[] unknown = s3.readBytes("mp/unknown.bin");
+        assertEquals(6 * 1024 * 1024, unknown.length);
+        assertEquals(data[0], unknown[0]);
+        assertEquals(data[6 * 1024 * 1024 - 1], unknown[6 * 1024 * 1024 - 1]);
+    }
+
+    @Test
     public void errorMappingNotFoundAndDenied() {
         FileStorage s3 = storage(null);
         try {

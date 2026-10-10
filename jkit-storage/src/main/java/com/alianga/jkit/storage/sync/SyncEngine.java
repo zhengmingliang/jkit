@@ -131,14 +131,14 @@ public final class SyncEngine {
 
         if (opts.concurrency() <= 1) {
             for (String relative : toCopy) {
-                if (aborted.get()) {
+                if (aborted.get() || cancelled(opts)) {
                     break;
                 }
                 copyOne(source, sourceDir, target, targetDir, relative, opts, progress,
                         copied, failed, bytes, errors, aborted);
             }
             for (String relative : toDelete) {
-                if (aborted.get()) {
+                if (aborted.get() || cancelled(opts)) {
                     break;
                 }
                 deleteOne(target, targetDir, relative, opts, progress, deleted, failed, errors, aborted);
@@ -147,8 +147,13 @@ public final class SyncEngine {
             runParallel(opts, source, sourceDir, target, targetDir, toCopy, toDelete, progress,
                     copied, deleted, failed, bytes, errors, aborted);
         }
+        boolean abortedFinal = aborted.get() || cancelled(opts);
         return new SyncResult(copied.get(), skipped, deleted.get(), failed.get(), bytes.get(),
-                aborted.get());
+                abortedFinal);
+    }
+
+    private static boolean cancelled(SyncOptions opts) {
+        return opts.cancelToken() != null && opts.cancelToken().isCancelled();
     }
 
     private static void runParallel(SyncOptions opts, FileStorage source, String sourceDir,
@@ -164,7 +169,7 @@ public final class SyncEngine {
                 futures.add(pool.submit(new Runnable() {
                     @Override
                     public void run() {
-                        if (aborted.get()) {
+                        if (aborted.get() || cancelled(opts)) {
                             return;
                         }
                         copyOne(source, sourceDir, target, targetDir, relative, opts, progress,
@@ -176,7 +181,7 @@ public final class SyncEngine {
                 futures.add(pool.submit(new Runnable() {
                     @Override
                     public void run() {
-                        if (aborted.get()) {
+                        if (aborted.get() || cancelled(opts)) {
                             return;
                         }
                         deleteOne(target, targetDir, relative, opts, progress, deleted, failed, errors, aborted);
@@ -215,8 +220,14 @@ public final class SyncEngine {
                     source.download(StoragePaths.join(sourceDir, relative), fileOut);
                 }
                 try (java.io.InputStream fileIn = java.nio.file.Files.newInputStream(temp)) {
-                    target.upload(StoragePaths.join(targetDir, relative), fileIn,
-                            java.nio.file.Files.size(temp));
+                    if (opts.isPreserveMtime() && entry.lastModified() != StorageEntry.MTIME_UNKNOWN) {
+                        target.upload(StoragePaths.join(targetDir, relative), fileIn,
+                                java.nio.file.Files.size(temp),
+                                com.alianga.jkit.storage.UploadMetadata.mtime(entry.lastModified()));
+                    } else {
+                        target.upload(StoragePaths.join(targetDir, relative), fileIn,
+                                java.nio.file.Files.size(temp));
+                    }
                 }
                 bytes.addAndGet(java.nio.file.Files.size(temp));
             } else {
@@ -224,7 +235,12 @@ public final class SyncEngine {
                         new java.io.ByteArrayOutputStream((int) Math.max(size, 64L));
                 source.download(StoragePaths.join(sourceDir, relative), buffer);
                 byte[] data = buffer.toByteArray();
-                target.upload(StoragePaths.join(targetDir, relative), data);
+                if (opts.isPreserveMtime() && entry.lastModified() != StorageEntry.MTIME_UNKNOWN) {
+                    target.upload(StoragePaths.join(targetDir, relative), data,
+                            com.alianga.jkit.storage.UploadMetadata.mtime(entry.lastModified()));
+                } else {
+                    target.upload(StoragePaths.join(targetDir, relative), data);
+                }
                 bytes.addAndGet(data.length);
             }
             copied.incrementAndGet();

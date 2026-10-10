@@ -5,6 +5,7 @@ import com.alianga.jkit.storage.StorageConfig;
 import com.alianga.jkit.storage.StorageEntry;
 import com.alianga.jkit.storage.StorageException;
 import com.alianga.jkit.storage.StoragePaths;
+import com.alianga.jkit.storage.UploadMetadata;
 
 import java.io.File;
 import java.io.IOException;
@@ -146,6 +147,20 @@ public class LocalFileStorage implements FileStorage {
             }
         } catch (IOException e) {
             throw StorageException.io("上传失败: " + normalized + "（" + e.getMessage() + "）", normalized, e);
+        }
+    }
+
+    @Override
+    public void upload(String path, InputStream in, long size, UploadMetadata meta) {
+        String normalized = requireFile(path);
+        upload(path, in, size);
+        if (meta != null && meta.hasLastModified()) {
+            try {
+                Files.setLastModifiedTime(resolve(normalized),
+                        java.nio.file.attribute.FileTime.fromMillis(meta.lastModified()));
+            } catch (IOException ignore) {
+                // mtime 保留失败不影响上传结果
+            }
         }
     }
 

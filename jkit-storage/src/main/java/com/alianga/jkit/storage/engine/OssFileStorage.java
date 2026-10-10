@@ -6,6 +6,7 @@ import com.alianga.jkit.storage.StorageEntry;
 import com.alianga.jkit.storage.StorageErrorCode;
 import com.alianga.jkit.storage.StorageException;
 import com.alianga.jkit.storage.StoragePaths;
+import com.alianga.jkit.storage.UploadMetadata;
 import com.alianga.jkit.storage.internal.AwsSigners;
 import com.alianga.jkit.storage.internal.HttpCore;
 import com.alianga.jkit.storage.internal.MimeTypes;
@@ -15,6 +16,7 @@ import org.w3c.dom.Element;
 
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -31,12 +33,17 @@ import java.util.TreeMap;
 public class OssFileStorage implements FileStorage {
     private static final int MAX_LIST_PAGES = 500;
 
+    private final StorageConfig config;
     private final String endpoint;
     private final String bucket;
     private final String accessKey;
     private final String secretKey;
     private final String basePath;
     private final boolean pathStyle;
+    /** 单片阈值：超过该大小走 Multipart（默认 64MB）。 */
+    private final long multipartThreshold;
+    /** 分片大小（默认 8MB，OSS 规范最小 100KB）。 */
+    private final long partSize;
 
     /**
      * 由配置创建（配置键：endpoint / bucket / accessKey / secretKey / basePath）。
@@ -44,6 +51,7 @@ public class OssFileStorage implements FileStorage {
      * @param config 连接配置
      */
     public OssFileStorage(StorageConfig config) {
+        this.config = config;
         String raw = config.require("endpoint");
         if (!raw.startsWith("http://") && !raw.startsWith("https://")) {
             raw = "https://" + raw;
@@ -54,6 +62,9 @@ public class OssFileStorage implements FileStorage {
         this.secretKey = config.require("secretKey");
         this.basePath = StoragePaths.normalize(config.getOr("basePath", ""));
         this.pathStyle = config.boolOr("pathStyle", false);
+        this.partSize = Math.max(100L * 1024L, config.longOr("partSize", 8L * 1024L * 1024L));
+        this.multipartThreshold = Math.max(this.partSize,
+                config.longOr("multipartThreshold", 64L * 1024L * 1024L));
     }
 
     @Override
@@ -85,7 +96,7 @@ public class OssFileStorage implements FileStorage {
         HttpCore.Response response = request("HEAD", normalized, null, null, null, -1L, null);
         if (response.status() < 400) {
             StorageEntry entry = StorageEntry.file(normalized, lengthOf(response),
-                    lastModifiedOf(response), response.header("ETag"));
+                    metaMtimeOr(response, lastModifiedOf(response)), response.header("ETag"));
             response.close();
             return entry;
         }
@@ -122,13 +133,165 @@ public class OssFileStorage implements FileStorage {
 
     @Override
     public void upload(String path, InputStream in, long size) {
+        upload(path, in, size, null);
+    }
+
+    @Override
+    public void upload(String path, InputStream in, long size, UploadMetadata meta) {
         String normalized = requireFile(path);
-        HttpCore.Response response = request("PUT", normalized, null,
-                MimeTypes.of(normalized), null, size, in);
+        String contentType = MimeTypes.of(normalized);
+        if (meta != null && meta.contentType() != null) {
+            contentType = meta.contentType();
+        }
+        boolean knownBig = size >= 0 && size > multipartThreshold;
+        if (size >= 0 && !knownBig) {
+            Map<String, String> extra = new LinkedHashMap<String, String>();
+            if (meta != null && meta.hasLastModified()) {
+                extra.put("x-oss-meta-mtime", String.valueOf(meta.lastModified()));
+            }
+            HttpCore.Response response = request("PUT", normalized, null, contentType,
+                    null, size, in, extra);
+            try {
+                ensureSuccess(response, normalized);
+            } finally {
+                response.close();
+            }
+            return;
+        }
+        if (size < 0) {
+            byte[] first = readChunk(in, partSize);
+            if (first.length < partSize) {
+                HttpCore.Response response = request("PUT", normalized, null, contentType,
+                        first, -1L, null);
+                try {
+                    ensureSuccess(response, normalized);
+                } finally {
+                    response.close();
+                }
+                return;
+            }
+            multipart(normalized, contentType, first, in, null);
+            return;
+        }
+        multipart(normalized, contentType, null, in, size);
+    }
+
+    private static byte[] readChunk(InputStream in, long limit) {
+        try {
+            java.io.ByteArrayOutputStream out =
+                    new java.io.ByteArrayOutputStream((int) Math.min(limit, Integer.MAX_VALUE));
+            byte[] chunk = new byte[8192];
+            long total = 0L;
+            int read;
+            while (total < limit && (read = in.read(chunk, 0,
+                    (int) Math.min(chunk.length, limit - total))) >= 0) {
+                out.write(chunk, 0, read);
+                total += read;
+            }
+            return out.toByteArray();
+        } catch (java.io.IOException e) {
+            throw StorageException.io("读取上传流失败: " + e.getMessage(), "-", e);
+        }
+    }
+
+    /** Multipart 上传：firstPart 非空表示已读出的首片，否则按已知 totalSize 分片。 */
+    private void multipart(String path, String contentType, byte[] firstPart,
+                           InputStream in, Long totalSize) {
+        String key = objectKey(path);
+        String uploadId = initiateMultipart(path, key);
+        List<String> etags = new ArrayList<String>();
+        try {
+            int partNumber = 1;
+            if (firstPart != null) {
+                etags.add(uploadPart(path, key, uploadId, partNumber++,
+                        new java.io.ByteArrayInputStream(firstPart), firstPart.length));
+            }
+            long uploaded = firstPart == null ? 0L : firstPart.length;
+            while (totalSize == null || uploaded < totalSize) {
+                long limit = partSize;
+                if (totalSize != null) {
+                    limit = Math.min(partSize, totalSize - uploaded);
+                }
+                byte[] part = readChunk(in, limit);
+                if (part.length == 0) {
+                    break;
+                }
+                etags.add(uploadPart(path, key, uploadId, partNumber++,
+                        new java.io.ByteArrayInputStream(part), part.length));
+                uploaded += part.length;
+                if (totalSize == null && part.length < partSize) {
+                    break;
+                }
+            }
+            completeMultipart(path, key, uploadId, etags);
+        } catch (RuntimeException e) {
+            abortMultipart(key, uploadId);
+            throw e;
+        }
+    }
+
+    private String initiateMultipart(String normalized, String key) {
+        Map<String, String> query = new TreeMap<String, String>();
+        query.put("uploads", "");
+        HttpCore.Response response = request("POST", key, query, null, new byte[0], -1L, null);
+        try {
+            ensureSuccess(response, normalized);
+            Element root = Xmls.parse(Xmls.readAll(response.body()));
+            String uploadId = Xmls.textOr(root, "UploadId", null);
+            if (uploadId == null || uploadId.isEmpty()) {
+                throw StorageException.serverError("Multipart 初始化未返回 UploadId", normalized);
+            }
+            return uploadId;
+        } finally {
+            response.close();
+        }
+    }
+
+    private String uploadPart(String normalized, String key, String uploadId, int partNumber,
+                              InputStream in, long length) {
+        Map<String, String> query = new TreeMap<String, String>();
+        query.put("partNumber", String.valueOf(partNumber));
+        query.put("uploadId", uploadId);
+        HttpCore.Response response = request("PUT", key, query, null, null, length, in);
+        try {
+            ensureSuccess(response, normalized);
+            String etag = response.header("ETag");
+            if (etag == null || etag.isEmpty()) {
+                throw StorageException.serverError("分片 " + partNumber + " 未返回 ETag", normalized);
+            }
+            return etag;
+        } finally {
+            response.close();
+        }
+    }
+
+    private void completeMultipart(String normalized, String key, String uploadId,
+                                   List<String> etags) {
+        StringBuilder xml = new StringBuilder("<CompleteMultipartUpload>");
+        for (int i = 0; i < etags.size(); i++) {
+            xml.append("<Part><PartNumber>").append(i + 1).append("</PartNumber><ETag>")
+                    .append(etags.get(i)).append("</ETag></Part>");
+        }
+        xml.append("</CompleteMultipartUpload>");
+        Map<String, String> query = new TreeMap<String, String>();
+        query.put("uploadId", uploadId);
+        HttpCore.Response response = request("POST", key, query, "application/xml",
+                xml.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8), -1L, null);
         try {
             ensureSuccess(response, normalized);
         } finally {
             response.close();
+        }
+    }
+
+    private void abortMultipart(String key, String uploadId) {
+        Map<String, String> query = new TreeMap<String, String>();
+        query.put("uploadId", uploadId);
+        try {
+            HttpCore.Response response = request("DELETE", key, query, null, null, -1L, null);
+            response.close();
+        } catch (RuntimeException ignore) {
+            // 中止失败不影响原错误
         }
     }
 
@@ -330,6 +493,21 @@ public class OssFileStorage implements FileStorage {
         if (!key.isEmpty()) {
             canonical.append('/').append(key);
         }
+        if (query != null && (query.containsKey("uploadId") || query.containsKey("partNumber"))) {
+            canonical.append('?');
+            boolean first = true;
+            for (Map.Entry<String, String> entry : new TreeMap<String, String>(java.util.Collections
+                    .unmodifiableMap(query)).entrySet()) {
+                if (!entry.getKey().equals("partNumber") && !entry.getKey().equals("uploadId")) {
+                    continue;
+                }
+                if (!first) {
+                    canonical.append('&');
+                }
+                first = false;
+                canonical.append(entry.getKey()).append('=').append(entry.getValue());
+            }
+        }
         String toSign = method + "\n\n" + (contentType == null ? "" : contentType) + "\n"
                 + date + "\n" + canonical;
         String signature = AwsSigners.base64(
@@ -348,7 +526,7 @@ public class OssFileStorage implements FileStorage {
         } else if (stream != null) {
             request.body(stream, streamLength);
         }
-        return HttpCore.execute(request);
+        return HttpCore.execute(HttpCore.configured(request, config));
     }
 
     private String buildUrl(String base, Map<String, String> query) {
@@ -400,6 +578,19 @@ public class OssFileStorage implements FileStorage {
             throw StorageException.invalidConfig("路径不能为存储根目录");
         }
         return normalized;
+    }
+
+    /** 同步保留的 mtime 存在 x-oss-meta-mtime，优先于服务端 Last-Modified。 */
+    private static long metaMtimeOr(HttpCore.Response response, long fallback) {
+        String meta = response.header("x-oss-meta-mtime");
+        if (meta == null) {
+            return fallback;
+        }
+        try {
+            return Long.parseLong(meta.trim());
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
     }
 
     private static long lengthOf(HttpCore.Response response) {

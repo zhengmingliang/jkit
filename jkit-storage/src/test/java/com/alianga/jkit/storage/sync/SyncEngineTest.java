@@ -151,6 +151,50 @@ public class SyncEngineTest {
     }
 
     @Test
+    public void cancelStopsRemainingWork() {
+        source.upload("a.txt", "A".getBytes(StandardCharsets.UTF_8));
+        source.upload("b.txt", "B".getBytes(StandardCharsets.UTF_8));
+        source.upload("c.txt", "C".getBytes(StandardCharsets.UTF_8));
+        final SyncCancel cancel = new SyncCancel();
+        SyncProgress cancelAfterFirst = new SyncProgress() {
+            @Override
+            public void onStart(long totalFiles, long totalBytes) {
+            }
+
+            @Override
+            public void onFileDone(String relativePath, long bytes, String action) {
+                cancel.cancel();
+            }
+
+            @Override
+            public void onFileError(String relativePath, Exception error) {
+            }
+        };
+        SyncResult result = SyncEngine.sync(source, "", target, "",
+                SyncOptions.incremental().concurrency(1).cancelToken(cancel), cancelAfterFirst);
+        assertEquals("copied", 1L, result.copied());
+        assertTrue("aborted=" + result, result.aborted());
+        // 目录枚举顺序不定，只能断言未把三个文件全部复制完
+        assertFalse(target.exists("a.txt") && target.exists("b.txt") && target.exists("c.txt"));
+    }
+
+    @Test
+    public void preserveMtimeOnCopy() throws Exception {
+        java.nio.file.attribute.FileTime mtime =
+                java.nio.file.attribute.FileTime.fromMillis(1_000_000_000_000L);
+        source.upload("old.txt", "OLD".getBytes(StandardCharsets.UTF_8));
+        Files.setLastModifiedTime(sourceRoot.resolve("old.txt"), mtime);
+        SyncEngine.sync(source, "", target, "", SyncOptions.incremental(), null);
+        assertEquals(mtime.toMillis(), Files.getLastModifiedTime(targetRoot.resolve("old.txt")).toMillis());
+        // 关闭保留则用当前时间
+        source.upload("now.txt", "NOW".getBytes(StandardCharsets.UTF_8));
+        SyncEngine.sync(source, "", target, "",
+                SyncOptions.incremental().preserveMtime(false), null);
+        assertTrue(Files.getLastModifiedTime(targetRoot.resolve("now.txt")).toMillis()
+                > System.currentTimeMillis() - 60_000L);
+    }
+
+    @Test
     public void maxErrorsAborts() {
         source.upload("a.txt", "A".getBytes(StandardCharsets.UTF_8));
         source.upload("b.txt", "B".getBytes(StandardCharsets.UTF_8));

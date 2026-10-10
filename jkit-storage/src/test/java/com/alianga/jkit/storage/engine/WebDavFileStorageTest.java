@@ -26,7 +26,6 @@ import static org.junit.Assert.assertTrue;
  * @author 郑明亮
  */
 public class WebDavFileStorageTest {
-
     private FakeDavServer server;
     private String endpoint;
 

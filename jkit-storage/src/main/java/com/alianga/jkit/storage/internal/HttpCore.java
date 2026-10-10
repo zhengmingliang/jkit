@@ -251,6 +251,28 @@ public final class HttpCore {
     }
 
     /**
+     * 把通用网络配置（proxyHost / proxyPort / connectTimeoutMs / readTimeoutMs）
+     * 应用到请求上。所有 HTTP 引擎统一走这里，键不存在时保持默认值。
+     *
+     * @param request 请求
+     * @param config  连接配置，可为 null
+     * @return 自身
+     */
+    public static Request configured(Request request, com.alianga.jkit.storage.StorageConfig config) {
+        if (config == null) {
+            return request;
+        }
+        Proxy proxy = null;
+        String proxyHost = config.getOr("proxyHost", "");
+        int proxyPort = config.intOr("proxyPort", 0);
+        if (!proxyHost.isEmpty() && proxyPort > 0) {
+            proxy = new Proxy(Proxy.Type.HTTP, new java.net.InetSocketAddress(proxyHost, proxyPort));
+        }
+        request.timeouts(proxy, config.intOr("connectTimeoutMs", 0), config.intOr("readTimeoutMs", 0));
+        return request;
+    }
+
+    /**
      * 执行请求。网络异常统一翻译为 {@link StorageException}：
      * DNS / 连接失败 → {@link StorageErrorCode#CONNECT_FAILED}，
      * 超时 → {@link StorageErrorCode#TIMEOUT}，其余 → {@link StorageErrorCode#IO_ERROR}。

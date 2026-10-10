@@ -28,7 +28,6 @@ import static org.junit.Assert.assertTrue;
  * @author 郑明亮
  */
 public class OssFileStorageTest {
-
     private FakeOssServer server;
     private String endpoint;
 
@@ -112,6 +111,35 @@ public class OssFileStorageTest {
         assertFalse(oss.exists("b/h.txt"));
         oss.deleteDir("a");
         assertFalse(oss.exists("a"));
+    }
+
+    @Test
+    public void multipartUploadForLargeObjects() {
+        java.util.Map<String, String> values = new java.util.LinkedHashMap<String, String>();
+        values.put("endpoint", endpoint);
+        values.put("bucket", "testbucket");
+        values.put("accessKey", "testak");
+        values.put("secretKey", "testsk");
+        values.put("basePath", "/");
+        values.put("pathStyle", "true");
+        values.put("partSize", String.valueOf(5L * 1024L * 1024L));
+        values.put("multipartThreshold", String.valueOf(5L * 1024L * 1024L));
+        FileStorage oss = FileStorages.of("aliyun-oss", values);
+
+        byte[] data = new byte[12 * 1024 * 1024];
+        for (int i = 0; i < data.length; i++) {
+            data[i] = (byte) (i * 13);
+        }
+        oss.upload("mp/known.bin", data);
+        byte[] downloaded = oss.readBytes("mp/known.bin");
+        assertEquals(data.length, downloaded.length);
+        assertEquals(data[5 * 1024 * 1024], downloaded[5 * 1024 * 1024]);
+        assertEquals(data[data.length - 1], downloaded[data.length - 1]);
+
+        oss.upload("mp/unknown.bin", new java.io.ByteArrayInputStream(data, 0, 6 * 1024 * 1024), -1L);
+        byte[] unknown = oss.readBytes("mp/unknown.bin");
+        assertEquals(6 * 1024 * 1024, unknown.length);
+        assertEquals(data[6 * 1024 * 1024 - 1], unknown[6 * 1024 * 1024 - 1]);
     }
 
     @Test

@@ -40,6 +40,7 @@ public class WebDavFileStorage implements FileStorage {
                     + "<D:getlastmodified/><D:getetag/>"
                     + "</D:prop></D:propfind>";
 
+    private final StorageConfig config;
     private final String endpoint;
     private final String basePath;
     /** endpoint 自带路径 + basePath 合成的服务器侧路径前缀（用于剥离 PROPFIND href）。 */
@@ -53,6 +54,7 @@ public class WebDavFileStorage implements FileStorage {
      * @param config 连接配置
      */
     public WebDavFileStorage(StorageConfig config) {
+        this.config = config;
         String raw = config.require("endpoint");
         if (!raw.startsWith("http://") && !raw.startsWith("https://")) {
             raw = "https://" + raw;
@@ -269,7 +271,7 @@ public class WebDavFileStorage implements FileStorage {
         } else if (stream != null) {
             request.body(stream, streamLength);
         }
-        return HttpCore.execute(request);
+        return HttpCore.execute(HttpCore.configured(request, config));
     }
 
     private HttpCore.Response propfind(String path, int depth) {
@@ -280,7 +282,7 @@ public class WebDavFileStorage implements FileStorage {
         request.header("Depth", String.valueOf(depth));
         request.header("Content-Type", "application/xml");
         request.body(PROPFIND_BODY.getBytes(StandardCharsets.UTF_8));
-        return HttpCore.execute(request);
+        return HttpCore.execute(HttpCore.configured(request, config));
     }
 
     private List<StorageEntry> parseMultistatus(String xml, String dir, boolean includeSelf) {
