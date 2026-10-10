@@ -13,11 +13,11 @@
 - 新增本地 Mock HTTP 服务包 `com.alianga.jkit.mock.server`（`MockHttpServer` / `MockRoute` / `MockRequestLog`）：纯 JDK `com.sun.net.httpserver` 实现，零第三方依赖、不依赖 JavaFX，可嵌入桌面工具、单测与脚本。方法（`*` 任意）+ 路径模板（`{name}` 单段参数）匹配，路径先 percent-decode 再匹配（含中文 / 空格的请求可命中，`+` 按字面量）；支持状态码、固定延迟、任意 Content-Type、固定 body、`echo` 请求体回显（沿用请求 Content-Type）与 `dynamicSchema` 按 JSON Schema 每次请求动态生成（失败回落固定 body 或错误 JSON）。所有响应带 CORS 三头，未命中 OPTIONS 路由的预检自动 204；运行中 `setRoutes` 热更新无需重启；请求日志环形保留最近 200 条、超长内容按 2048 字符截断，支持 `snapshotLogs` / `clearLogs` / `addLogListener`。
 
 - 响应方案与动态模板：`MockRoute` 新增 `responses`（`MockResponse` 多响应 + `MockResponseRule` 激活规则，query / header / body 相等 / 正则 / EXISTS，body 支持 JSON 点分路径与数组下标；带规则的方案先评估，第一个全中的生效，全不中回落无规则的默认方案）、`dynamicTemplate`（body 按 Mock.js 模板每次请求渲染，非法模板回落占位符替换后的原文）、`headers`（附加响应头，值支持占位符）与 `enabled` 开关。`MockRequestLog` 新增 `proxied` 标记。
-- 占位符渲染（`MockTemplateRenderer`）：响应体与响应头值支持 `{{param.id}}`（路径模板参数）/ `{{query.x}}` / `{{header.X-Token}}` / `{{body.user.name}}`（请求体 JSON 点分路径）/ `{{method}}` / `{{path}}`；`dynamicSchema` 的 Schema 文本同样先做占位符替换。
+- 占位符渲染（`MockTemplateRenderer`）：响应体与响应头值支持 <code v-pre>{{param.id}}</code>（路径模板参数）/ <code v-pre>{{query.x}}</code> / <code v-pre>{{header.X-Token}}</code> / <code v-pre>{{body.user.name}}</code>（请求体 JSON 点分路径）/ <code v-pre>{{method}}</code> / <code v-pre>{{path}}</code>；`dynamicSchema` 的 Schema 文本同样先做占位符替换。
 - 代理回源：`setProxyTarget(baseUrl)` 后未命中路由的请求原样转发真实后端（复用 jkit HTTP 客户端，剥 hop-by-hop / Host / Content-Length 请求头与 hop-by-hop / CORS / Content-Length / Server / Date 响应头），失败按 502 返回错误 JSON；未配代理时 OPTIONS 预检行为不变。
 - CRUD 资源：`MockRoute.crud` 开启后路由基址即资源，自动服务列表 / 详情 / 新增 / 更新 / 删除五类端点（`GET/POST /users`、`GET/PUT/PATCH/DELETE /users/{id}`，自增 id，body 为 JSON 数组时播种初始数据）；查询参数支持 json-server 子集（字段等值过滤、`q` / `_q` 全文、`_sort` + `_order`、`_page` + `_limit`、`_start` / `_end`）。配套 `MockCrudStore`：内存存储，可选 `dataDir` 原子落盘并在重启后加载。CRUD 路由独占基址上的五类方法（忽略配置的 method），PUT 整替、PATCH 合并、DELETE 成功返回 204。
 - 延迟区间与通配尾段：`latencyMaxMs` 大于 `latencyMs` 时每次请求在区间内随机（贴近真实网络抖动）；路径模板尾段支持 `{name*}` 匹配任意多段（可空）并捕获整段路径，如 `/static/{file*}`。
-- 全局变量：`setVariables(Map)` 服务级变量表，模板占位符 `{{var.name}}`（响应体与响应头均可用），切换环境变量热生效。
+- 全局变量：`setVariables(Map)` 服务级变量表，模板占位符 <code v-pre>{{var.name}}</code>（响应体与响应头均可用），切换环境变量热生效。
 - 路由元信息：`MockRoute` 新增 `name` / `description` 可选字段（builder `.name(...)` / `.description(...)`），纯展示用元数据，不参与匹配与响应；供上层 UI 命名接口与备注，随路由文件序列化。
 - 稳定性：引擎线程池从无界 cachedThreadPool 改为有界固定池（200 daemon 线程），延迟压测场景下防止线程无界增长。
 
