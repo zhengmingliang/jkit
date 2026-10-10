@@ -1,0 +1,366 @@
+package com.alianga.jkit.storage.internal;
+
+import com.alianga.jkit.storage.StorageErrorCode;
+import com.alianga.jkit.storage.StorageException;
+
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.lang.reflect.Field;
+import java.net.HttpURLConnection;
+import java.net.Proxy;
+import java.net.SocketTimeoutException;
+import java.net.UnknownHostException;
+import java.nio.file.Files;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * 存储模块内部 HTTP 层：直接基于 JDK {@link HttpURLConnection}，不依赖任何第三方库。
+ * 相比通用 HTTP 封装，这里需要几个存储协议特有的能力：
+ * 任意方法（PROPFIND / MKCOL / MOVE）、定长流式请求体、关闭重定向、错误响应体可读。
+ *
+ * <p>请求体未知长度时先缓冲到临时文件，再按定长发送——对象存储的 PUT / PUT Blob
+ * 都要求 Content-Length。已知长度的流直接透传，不落盘。</p>
+ *
+ * @author 郑明亮
+ */
+public final class HttpCore {
+    private static final int CONNECT_TIMEOUT_DEFAULT_MS = 15_000;
+    private static final int READ_TIMEOUT_DEFAULT_MS = 60_000;
+
+    private HttpCore() {
+    }
+
+    /** 请求描述。 */
+    public static final class Request {
+        private final String method;
+        private final String url;
+        private final Map<String, String> headers = new LinkedHashMap<String, String>();
+        private byte[] bodyBytes;
+        private InputStream bodyStream;
+        private long bodyLength = -1L;
+        private Proxy proxy;
+        private int connectTimeoutMs = CONNECT_TIMEOUT_DEFAULT_MS;
+        private int readTimeoutMs = READ_TIMEOUT_DEFAULT_MS;
+
+        /**
+         * 创建请求。
+         *
+         * @param method HTTP 方法
+         * @param url    完整 URL
+         */
+        public Request(String method, String url) {
+            this.method = method;
+            this.url = url;
+        }
+
+        /**
+         * 设置请求头。
+         *
+         * @param name  头名
+         * @param value 头值，null 忽略
+         * @return 自身
+         */
+        public Request header(String name, String value) {
+            if (value != null) {
+                headers.put(name, value);
+            }
+            return this;
+        }
+
+        /**
+         * 设置内存请求体（Content-Length 自动取其长度）。
+         *
+         * @param body 请求体，null 视为空体
+         * @return 自身
+         */
+        public Request body(byte[] body) {
+            this.bodyBytes = body == null ? new byte[0] : body;
+            return this;
+        }
+
+        /**
+         * 设置流式请求体。
+         *
+         * @param body   数据源（发送过程中由本类读取并关闭）
+         * @param length 已知长度；未知传 -1（缓冲到临时文件后定长发送）
+         * @return 自身
+         */
+        public Request body(InputStream body, long length) {
+            this.bodyStream = body;
+            this.bodyLength = length;
+            return this;
+        }
+
+        /**
+         * 设置代理与超时。
+         *
+         * @param proxy            代理，null 直连
+         * @param connectTimeoutMs 连接超时毫秒
+         * @param readTimeoutMs    读超时毫秒
+         * @return 自身
+         */
+        public Request timeouts(Proxy proxy, int connectTimeoutMs, int readTimeoutMs) {
+            this.proxy = proxy;
+            if (connectTimeoutMs > 0) {
+                this.connectTimeoutMs = connectTimeoutMs;
+            }
+            if (readTimeoutMs > 0) {
+                this.readTimeoutMs = readTimeoutMs;
+            }
+            return this;
+        }
+    }
+
+    /** 响应描述。 */
+    public static final class Response implements java.io.Closeable {
+        private final int status;
+        private final String message;
+        private final Map<String, List<String>> headers;
+        private final InputStream body;
+        private final HttpURLConnection connection;
+
+        private Response(int status, String message, Map<String, List<String>> headers,
+                         InputStream body, HttpURLConnection connection) {
+            this.status = status;
+            this.message = message;
+            this.headers = headers;
+            this.body = body;
+            this.connection = connection;
+        }
+
+        public int status() {
+            return status;
+        }
+
+        public String message() {
+            return message;
+        }
+
+        /**
+         * 取响应头（大小写不敏感）。
+         *
+         * @param name 头名
+         * @return 头值，不存在返回 null
+         */
+        public String header(String name) {
+            for (Map.Entry<String, List<String>> entry : headers.entrySet()) {
+                if (entry.getKey() != null && entry.getKey().equalsIgnoreCase(name)
+                        && entry.getValue() != null && !entry.getValue().isEmpty()) {
+                    return entry.getValue().get(0);
+                }
+            }
+            return null;
+        }
+
+        public Map<String, List<String>> headers() {
+            return headers;
+        }
+
+        /**
+         * 响应体流（4xx/5xx 时是错误响应体）。读取后调用 {@link #close()}。
+         *
+         * @return 响应体流，无响应体返回空流
+         */
+        public InputStream body() {
+            return body;
+        }
+
+        /**
+         * 读取整个响应体到内存（用于小对象与错误 XML），读取后自动关闭。
+         *
+         * @return 响应体字节
+         */
+        public byte[] bodyBytes() {
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream(8192);
+            try {
+                byte[] chunk = new byte[8192];
+                int read;
+                while ((read = body.read(chunk)) >= 0) {
+                    out.write(chunk, 0, read);
+                }
+                return out.toByteArray();
+            } catch (IOException e) {
+                throw StorageException.io("读取响应体失败: " + e.getMessage(), "-", e);
+            } finally {
+                close();
+            }
+        }
+
+        @Override
+        public void close() {
+            try {
+                if (body != null) {
+                    body.close();
+                }
+            } catch (IOException ignore) {
+                // 关闭失败不影响结果
+            }
+            if (connection != null) {
+                connection.disconnect();
+            }
+        }
+    }
+
+    /**
+     * 执行请求。网络异常统一翻译为 {@link StorageException}：
+     * DNS / 连接失败 → {@link StorageErrorCode#CONNECT_FAILED}，
+     * 超时 → {@link StorageErrorCode#TIMEOUT}，其余 → {@link StorageErrorCode#IO_ERROR}。
+     *
+     * @param request 请求
+     * @return 响应（调用方负责 close）
+     */
+    public static Response execute(Request request) {
+        HttpURLConnection connection = null;
+        try {
+            connection = open(request);
+            writeBody(connection, request);
+            int status = connection.getResponseCode();
+            Map<String, List<String>> headers =
+                    new LinkedHashMap<String, List<String>>(connection.getHeaderFields());
+            InputStream body = status >= 400 ? connection.getErrorStream() : connection.getInputStream();
+            if (body == null) {
+                body = new ByteArrayInputStream(new byte[0]);
+            }
+            return new Response(status, connection.getResponseMessage(), headers, body, connection);
+        } catch (SocketTimeoutException e) {
+            closeQuietly(connection);
+            throw StorageException.timeout("请求超时: " + e.getMessage());
+        } catch (UnknownHostException e) {
+            closeQuietly(connection);
+            throw StorageException.connectFailed("无法解析主机: " + e.getMessage());
+        } catch (IOException e) {
+            closeQuietly(connection);
+            throw mapIoException(e);
+        }
+    }
+
+    private static HttpURLConnection open(Request request) throws IOException {
+        java.net.URL url = new java.net.URL(request.url);
+        HttpURLConnection connection = (HttpURLConnection) (request.proxy == null
+                ? url.openConnection() : url.openConnection(request.proxy));
+        connection.setConnectTimeout(request.connectTimeoutMs);
+        connection.setReadTimeout(request.readTimeoutMs);
+        connection.setInstanceFollowRedirects(false);
+        connection.setUseCaches(false);
+        setMethod(connection, request.method);
+        for (Map.Entry<String, String> header : request.headers.entrySet()) {
+            connection.setRequestProperty(header.getKey(), header.getValue());
+        }
+        return connection;
+    }
+
+    private static void setMethod(HttpURLConnection connection, String method) throws IOException {
+        try {
+            connection.setRequestMethod(method);
+        } catch (IOException e) {
+            // JDK 只接受标准方法，PROPFIND / MKCOL / MOVE / REPORT 等走反射设置
+            forceMethod(connection, method);
+        }
+    }
+
+    private static void forceMethod(HttpURLConnection connection, String method) {
+        try {
+            Field field = HttpURLConnection.class.getDeclaredField("method");
+            field.setAccessible(true);
+            field.set(connection, method);
+        } catch (ReflectiveOperationException ignore) {
+            // 反射失败会在 getResponseCode 时以 ProtocolException 暴露，这里不吞请求
+        }
+    }
+
+    private static void writeBody(HttpURLConnection connection, Request request) throws IOException {
+        if (request.bodyBytes != null) {
+            connection.setFixedLengthStreamingMode(request.bodyBytes.length);
+            if (request.bodyBytes.length > 0 || "POST".equals(request.method)
+                    || "PUT".equals(request.method) || "PATCH".equals(request.method)) {
+                connection.setDoOutput(true);
+                OutputStream out = connection.getOutputStream();
+                out.write(request.bodyBytes);
+                out.flush();
+            }
+            return;
+        }
+        if (request.bodyStream == null) {
+            return;
+        }
+        if (request.bodyLength >= 0) {
+            connection.setFixedLengthStreamingMode(request.bodyLength);
+            connection.setDoOutput(true);
+            pumpAndClose(request.bodyStream, connection.getOutputStream());
+            return;
+        }
+        spoolUnknownLength(connection, request);
+    }
+
+    /** 未知长度请求体：全部缓冲到临时文件后按实际长度发送。 */
+    private static void spoolUnknownLength(HttpURLConnection connection, Request request) throws IOException {
+        java.io.File temp = java.io.File.createTempFile("jkit-storage-spool", ".tmp");
+        try {
+            long total;
+            try (OutputStream fileOut = Files.newOutputStream(temp.toPath())) {
+                total = pumpCounting(request.bodyStream, fileOut);
+            }
+            connection.setFixedLengthStreamingMode(total);
+            connection.setDoOutput(true);
+            InputStream fileIn = Files.newInputStream(temp.toPath());
+            try {
+                pumpAndClose(fileIn, connection.getOutputStream());
+            } finally {
+                fileIn.close();
+            }
+        } finally {
+            try {
+                Files.deleteIfExists(temp.toPath());
+            } catch (IOException ignore) {
+                // 临时文件清理失败不影响请求结果
+            }
+        }
+    }
+
+    private static void pumpAndClose(InputStream in, OutputStream out) throws IOException {
+        try {
+            byte[] chunk = new byte[8192];
+            int read;
+            while ((read = in.read(chunk)) >= 0) {
+                out.write(chunk, 0, read);
+            }
+            out.flush();
+        } finally {
+            try {
+                in.close();
+            } catch (IOException ignore) {
+                // 关闭失败不影响结果
+            }
+        }
+    }
+
+    private static long pumpCounting(InputStream in, OutputStream out) throws IOException {
+        long total = 0L;
+        byte[] chunk = new byte[8192];
+        int read;
+        while ((read = in.read(chunk)) >= 0) {
+            out.write(chunk, 0, read);
+            total += read;
+        }
+        return total;
+    }
+
+    private static StorageException mapIoException(IOException e) {
+        String message = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+        if (message != null && message.toLowerCase().contains("timed out")) {
+            return StorageException.timeout("请求超时: " + message);
+        }
+        return StorageException.connectFailed(
+                "网络错误: " + message + "（" + e.getClass().getSimpleName() + "）");
+    }
+
+    private static void closeQuietly(HttpURLConnection connection) {
+        if (connection != null) {
+            connection.disconnect();
+        }
+    }
+}
