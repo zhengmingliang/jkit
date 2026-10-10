@@ -71,6 +71,20 @@ SyncEngine.sync(local, "backup", oss, "backup", SyncOptions.incremental(), progr
 
 云端 presets 的默认端点随版本内置（如 `qiniu-kodo → s3.cn-north-1.qiniucs.com`），自建 / 内网部署直接覆盖 `endpoint`。腾讯云 COS 走 S3 兼容 API 时 SecretKey 需 MD5 变换（`md5Secret=true` 已内置默认）。
 
+## 真实服务器集成测试
+
+`src/test/java/com/alianga/jkit/storage/real/CopypartyRealStorageTest.java` 用
+[copyparty](https://github.com/9001/copyparty) 单进程同时提供 FTP / SFTP / WebDAV
+三个真实协议实现，验证三个引擎的完整行为矩阵（上传下载含中文路径、列表、目录占位、
+重命名复制、递归删除、错误码）。本机运行前提：
+
+```bash
+python3 -m pip install copyparty pyftpdlib paramiko   # PATH 中有 copyparty 即可
+mvn -pl jkit-storage test -Dtest=CopypartyRealStorageTest
+```
+
+任一前提不满足时对应用例自动跳过（JUnit Assume），不影响 CI。
+
 ## 自定义平台与引擎
 
 ```java

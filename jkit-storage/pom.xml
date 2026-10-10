@@ -35,6 +35,13 @@
             <version>4.13.2</version>
             <scope>test</scope>
         </dependency>
+        <!-- SFTP 真实协议集成测试用（CopypartyRealStorageTest），不随发布传播 -->
+        <dependency>
+            <groupId>com.github.mwiede</groupId>
+            <artifactId>jsch</artifactId>
+            <version>0.2.20</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
