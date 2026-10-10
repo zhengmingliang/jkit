@@ -3,26 +3,57 @@ package com.alianga.jkit.storage.engine;
 import com.alianga.jkit.storage.FileStorage;
 import com.alianga.jkit.storage.StorageConfig;
 import com.alianga.jkit.storage.StorageEntry;
+import com.alianga.jkit.storage.StorageErrorCode;
 import com.alianga.jkit.storage.StorageException;
+import com.alianga.jkit.storage.StoragePaths;
+import com.alianga.jkit.storage.internal.AwsSigners;
+import com.alianga.jkit.storage.internal.HttpCore;
+import com.alianga.jkit.storage.internal.MimeTypes;
+import com.alianga.jkit.storage.internal.Urls;
+import com.alianga.jkit.storage.internal.Xmls;
+import org.w3c.dom.Element;
 
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 
 /**
- * 阿里云 OSS 原生协议引擎（占位）：功能实现中，所有操作先返回 UNSUPPORTED。
+ * 阿里云 OSS 原生协议引擎（非 S3 兼容层）：官方 v1 签名
+ * {@code Authorization: OSS AccessKeyId:Signature}，虚拟主机寻址
+ * {@code bucket.endpoint/key}，ListObjects 翻页、目录占位对象、服务端复制
+ * （x-oss-copy-source，参与签名）。零第三方依赖。
  *
  * @author 郑明亮
  */
 public class OssFileStorage implements FileStorage {
-    private final StorageConfig config;
+    private static final int MAX_LIST_PAGES = 500;
 
-    /** 由配置创建。
+    private final String endpoint;
+    private final String bucket;
+    private final String accessKey;
+    private final String secretKey;
+    private final String basePath;
+    private final boolean pathStyle;
+
+    /**
+     * 由配置创建（配置键：endpoint / bucket / accessKey / secretKey / basePath）。
      *
      * @param config 连接配置
      */
     public OssFileStorage(StorageConfig config) {
-        this.config = config;
+        String raw = config.require("endpoint");
+        if (!raw.startsWith("http://") && !raw.startsWith("https://")) {
+            raw = "https://" + raw;
+        }
+        this.endpoint = raw.endsWith("/") ? raw.substring(0, raw.length() - 1) : raw;
+        this.bucket = config.require("bucket");
+        this.accessKey = config.require("accessKey");
+        this.secretKey = config.require("secretKey");
+        this.basePath = StoragePaths.normalize(config.getOr("basePath", ""));
+        this.pathStyle = config.boolOr("pathStyle", false);
     }
 
     @Override
@@ -32,50 +63,406 @@ public class OssFileStorage implements FileStorage {
 
     @Override
     public boolean exists(String path) {
-        throw unsupported();
+        String normalized = StoragePaths.normalize(path);
+        if (normalized.isEmpty()) {
+            return true;
+        }
+        if (head(normalized) < 400) {
+            return true;
+        }
+        if (head(normalized + "/") < 400) {
+            return true;
+        }
+        return !listRaw(normalized + "/", 1).isEmpty();
     }
 
     @Override
     public StorageEntry stat(String path) {
-        throw unsupported();
+        String normalized = StoragePaths.normalize(path);
+        if (normalized.isEmpty()) {
+            return StorageEntry.dir("", 0L);
+        }
+        HttpCore.Response response = request("HEAD", normalized, null, null, null, -1L, null);
+        if (response.status() < 400) {
+            StorageEntry entry = StorageEntry.file(normalized, lengthOf(response),
+                    lastModifiedOf(response), response.header("ETag"));
+            response.close();
+            return entry;
+        }
+        response.close();
+        response = request("HEAD", normalized + "/", null, null, null, -1L, null);
+        if (response.status() < 400) {
+            StorageEntry entry = StorageEntry.dir(normalized, lastModifiedOf(response));
+            response.close();
+            return entry;
+        }
+        response.close();
+        throw StorageException.notFound(normalized);
     }
 
     @Override
     public List<StorageEntry> list(String dir) {
-        throw unsupported();
+        return listRaw(dir, Integer.MAX_VALUE);
     }
 
     @Override
     public void mkdir(String dir) {
-        throw unsupported();
+        String normalized = StoragePaths.normalize(dir);
+        if (normalized.isEmpty() || exists(normalized)) {
+            return;
+        }
+        HttpCore.Response response = request("PUT", normalized + "/", null, null,
+                new byte[0], -1L, null);
+        try {
+            ensureSuccess(response, normalized);
+        } finally {
+            response.close();
+        }
     }
 
     @Override
     public void upload(String path, InputStream in, long size) {
-        throw unsupported();
+        String normalized = requireFile(path);
+        HttpCore.Response response = request("PUT", normalized, null,
+                MimeTypes.of(normalized), null, size, in);
+        try {
+            ensureSuccess(response, normalized);
+        } finally {
+            response.close();
+        }
     }
 
     @Override
     public void download(String path, OutputStream out) {
-        throw unsupported();
+        String normalized = requireFile(path);
+        HttpCore.Response response = request("GET", normalized, null, null, null, -1L, null);
+        if (response.status() == 404) {
+            response.close();
+            throw StorageException.notFound(normalized);
+        }
+        ensureSuccess(response, normalized);
+        try {
+            byte[] chunk = new byte[8192];
+            int read;
+            while ((read = response.body().read(chunk)) >= 0) {
+                out.write(chunk, 0, read);
+            }
+        } catch (java.io.IOException e) {
+            throw StorageException.io("下载失败: " + normalized + "（" + e.getMessage() + "）", normalized, e);
+        } finally {
+            response.close();
+        }
     }
 
     @Override
     public void delete(String path) {
-        throw unsupported();
+        String normalized = StoragePaths.normalize(path);
+        if (normalized.isEmpty()) {
+            throw StorageException.invalidConfig("拒绝删除存储根目录");
+        }
+        if (!listRaw(normalized + "/", 2).isEmpty()) {
+            throw StorageException.conflict("目录非空: " + normalized + "，请用 deleteDir", normalized);
+        }
+        HttpCore.Response response = request("DELETE", normalized, null, null, null, -1L, null);
+        if (response.status() == 404 || response.status() == 204 || response.status() == 200) {
+            response.close();
+            return;
+        }
+        ensureSuccess(response, normalized);
+        response.close();
     }
 
     @Override
     public void copy(String src, String dst) {
-        throw unsupported();
+        String source = requireFile(src);
+        String target = requireFile(dst);
+        if (exists(source + "/") && !exists(source)) {
+            copyDir(source, target);
+            return;
+        }
+        copyObject(objectKey(source), objectKey(target));
     }
 
     @Override
     public void rename(String src, String dst) {
-        throw unsupported();
+        String source = requireFile(src);
+        String target = requireFile(dst);
+        if (exists(source + "/") && !exists(source)) {
+            copyDir(source, target);
+            deleteDir(source);
+            return;
+        }
+        copyObject(objectKey(source), objectKey(target));
+        deleteQuietly(objectKey(source));
     }
 
-    private StorageException unsupported() {
-        return StorageException.unsupported("OssFileStorage 引擎实现中");
+    private void copyDir(String source, String target) {
+        mkdir(target);
+        for (StorageEntry entry : list(source)) {
+            if (entry.isDirectory()) {
+                copyDir(entry.path(), StoragePaths.join(target, entry.name()));
+            } else {
+                copy(entry.path(), StoragePaths.join(target, entry.name()));
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ 列表
+
+    private List<StorageEntry> listRaw(String dir, int limit) {
+        String prefix = StoragePaths.normalize(dir);
+        String fullPrefix = objectKey(prefix);
+        if (!fullPrefix.isEmpty() && !fullPrefix.endsWith("/")) {
+            fullPrefix = fullPrefix + "/";
+        }
+        List<StorageEntry> entries = new java.util.ArrayList<StorageEntry>();
+        String marker = null;
+        int pages = 0;
+        while (pages++ < MAX_LIST_PAGES) {
+            Map<String, String> query = new TreeMap<String, String>();
+            query.put("prefix", fullPrefix);
+            query.put("delimiter", "/");
+            query.put("max-keys", "1000");
+            if (marker != null && !marker.isEmpty()) {
+                query.put("marker", marker);
+            }
+            HttpCore.Response response = request("GET", "", query, null, null, -1L, null);
+            ensureSuccess(response, prefix);
+            String xml = Xmls.readAll(response.body());
+            response.close();
+            Element root = Xmls.parse(xml);
+            boolean truncated = Boolean.parseBoolean(Xmls.textOr(root, "IsTruncated", "false"));
+            for (Element content : Xmls.children(root, "Contents")) {
+                String key = Xmls.textOr(content, "Key", "");
+                if (key.equals(fullPrefix)) {
+                    continue;
+                }
+                String relative = relativeOf(key, fullPrefix);
+                if (relative.isEmpty()) {
+                    continue;
+                }
+                if (key.endsWith("/")) {
+                    entries.add(StorageEntry.dir(StoragePaths.join(prefix, relative)));
+                } else {
+                    entries.add(StorageEntry.file(StoragePaths.join(prefix, relative),
+                            parseLong(Xmls.textOr(content, "Size", "0")),
+                            parseIso8601(Xmls.textOr(content, "LastModified", null)),
+                            Xmls.textOr(content, "ETag", null)));
+                }
+            }
+            for (Element common : Xmls.children(root, "CommonPrefixes")) {
+                String key = Xmls.textOr(common, "Prefix", "");
+                String relative = relativeOf(key, fullPrefix);
+                if (relative.endsWith("/")) {
+                    relative = relative.substring(0, relative.length() - 1);
+                }
+                if (!relative.isEmpty()) {
+                    entries.add(StorageEntry.dir(StoragePaths.join(prefix, relative)));
+                }
+            }
+            if (entries.size() >= limit || !truncated) {
+                break;
+            }
+            marker = Xmls.textOr(root, "NextMarker", null);
+            if (marker == null || marker.isEmpty()) {
+                List<Element> contents = Xmls.children(root, "Contents");
+                marker = contents.isEmpty() ? null
+                        : Xmls.textOr(contents.get(contents.size() - 1), "Key", null);
+                if (marker == null) {
+                    break;
+                }
+            }
+        }
+        return entries;
+    }
+
+    private static String relativeOf(String key, String fullPrefix) {
+        if (!fullPrefix.isEmpty() && key.startsWith(fullPrefix)) {
+            return key.substring(fullPrefix.length());
+        }
+        return key;
+    }
+
+    // ------------------------------------------------------------------ 请求
+
+    private String objectKey(String path) {
+        String normalized = StoragePaths.normalize(path);
+        if (basePath.isEmpty()) {
+            return normalized;
+        }
+        return basePath + (normalized.isEmpty() ? "" : "/" + normalized);
+    }
+
+    private int head(String path) {
+        HttpCore.Response response = request("HEAD", path, null, null, null, -1L, null);
+        int status = response.status();
+        response.close();
+        return status;
+    }
+
+    private HttpCore.Response request(String method, String path, Map<String, String> query,
+                                      String contentType, byte[] body, long streamLength,
+                                      InputStream stream) {
+        return request(method, path, query, contentType, body, streamLength, stream, null);
+    }
+
+    private HttpCore.Response request(String method, String path, Map<String, String> query,
+                                      String contentType, byte[] body, long streamLength,
+                                      InputStream stream, Map<String, String> extraHeaders) {
+        String key = objectKey(path);
+        String encodedKey = Urls.encodePath(key);
+        String url = pathStyle
+                ? endpoint + "/" + bucket + (encodedKey.isEmpty() ? "" : "/" + encodedKey)
+                : endpoint.replace("://", "://" + bucket + ".")
+                        + (encodedKey.isEmpty() ? "/" : "/" + encodedKey);
+        url = buildUrl(url, query);
+        String date = AwsSigners.httpDateNow();
+        Map<String, String> ossHeaders = new LinkedHashMap<String, String>();
+        if (extraHeaders != null) {
+            ossHeaders.putAll(extraHeaders);
+        }
+        StringBuilder canonical = new StringBuilder();
+        for (Map.Entry<String, String> entry : ossHeaders.entrySet()) {
+            canonical.append(entry.getKey()).append(':').append(entry.getValue()).append('\n');
+        }
+        canonical.append('/').append(bucket);
+        if (!key.isEmpty()) {
+            canonical.append('/').append(key);
+        }
+        String toSign = method + "\n\n" + (contentType == null ? "" : contentType) + "\n"
+                + date + "\n" + canonical;
+        String signature = AwsSigners.base64(
+                AwsSigners.hmacSha1(secretKey.getBytes(java.nio.charset.StandardCharsets.UTF_8), toSign));
+        HttpCore.Request request = new HttpCore.Request(method, url);
+        request.header("Date", date);
+        request.header("Authorization", "OSS " + accessKey + ":" + signature);
+        if (contentType != null) {
+            request.header("Content-Type", contentType);
+        }
+        for (Map.Entry<String, String> entry : ossHeaders.entrySet()) {
+            request.header(entry.getKey(), entry.getValue());
+        }
+        if (body != null) {
+            request.body(body);
+        } else if (stream != null) {
+            request.body(stream, streamLength);
+        }
+        return HttpCore.execute(request);
+    }
+
+    private String buildUrl(String base, Map<String, String> query) {
+        if (query == null || query.isEmpty()) {
+            return base;
+        }
+        StringBuilder builder = new StringBuilder(base);
+        boolean first = true;
+        for (Map.Entry<String, String> entry : query.entrySet()) {
+            builder.append(first ? '?' : '&');
+            first = false;
+            builder.append(Urls.encodeQuery(entry.getKey())).append('=')
+                    .append(Urls.encodeQuery(entry.getValue()));
+        }
+        return builder.toString();
+    }
+
+    private void copyObject(String srcKey, String dstKey) {
+        Map<String, String> extra = new LinkedHashMap<String, String>();
+        extra.put("x-oss-copy-source", "/" + bucket + "/" + Urls.encodePath(srcKey));
+        HttpCore.Response response = request("PUT", dstKey, null, MimeTypes.of(dstKey),
+                new byte[0], -1L, null, extra);
+        try {
+            ensureSuccess(response, dstKey);
+        } finally {
+            response.close();
+        }
+    }
+
+    private void deleteQuietly(String key) {
+        HttpCore.Response response = request("DELETE", key, null, null, null, -1L, null);
+        response.close();
+    }
+
+    private String requireFile(String path) {
+        String normalized = StoragePaths.normalize(path);
+        if (normalized.isEmpty()) {
+            throw StorageException.invalidConfig("路径不能为存储根目录");
+        }
+        return normalized;
+    }
+
+    private static long lengthOf(HttpCore.Response response) {
+        String length = response.header("Content-Length");
+        if (length == null) {
+            return StorageEntry.SIZE_UNKNOWN;
+        }
+        return parseLong(length);
+    }
+
+    private static long lastModifiedOf(HttpCore.Response response) {
+        String date = response.header("Last-Modified");
+        if (date == null) {
+            return StorageEntry.MTIME_UNKNOWN;
+        }
+        try {
+            java.text.SimpleDateFormat format =
+                    new java.text.SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss 'GMT'", java.util.Locale.US);
+            format.setTimeZone(java.util.TimeZone.getTimeZone("GMT"));
+            return format.parse(date).getTime();
+        } catch (java.text.ParseException e) {
+            return StorageEntry.MTIME_UNKNOWN;
+        }
+    }
+
+    private static long parseLong(String value) {
+        try {
+            return Long.parseLong(value.trim());
+        } catch (NumberFormatException e) {
+            return 0L;
+        }
+    }
+
+    private static long parseIso8601(String value) {
+        if (value == null) {
+            return StorageEntry.MTIME_UNKNOWN;
+        }
+        try {
+            String normalized = value.trim().replaceAll("\\.\\d+", "");
+            if (normalized.endsWith("Z")) {
+                normalized = normalized.substring(0, normalized.length() - 1) + "+0000";
+            }
+            java.text.SimpleDateFormat format =
+                    new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssZ");
+            return format.parse(normalized).getTime();
+        } catch (java.text.ParseException e) {
+            return StorageEntry.MTIME_UNKNOWN;
+        }
+    }
+
+    private void ensureSuccess(HttpCore.Response response, String path) {
+        if (response.status() < 400) {
+            return;
+        }
+        int status = response.status();
+        String body = Xmls.readAll(response.body());
+        response.close();
+        StorageErrorCode byStatus = status >= 500 ? StorageErrorCode.SERVER_ERROR
+                : status == 404 ? StorageErrorCode.NOT_FOUND
+                : status == 403 || status == 401 ? StorageErrorCode.AUTH_FAILED
+                : status == 409 ? StorageErrorCode.CONFLICT
+                : status == 429 ? StorageErrorCode.RATE_LIMITED
+                : StorageErrorCode.IO_ERROR;
+        try {
+            Element error = Xmls.parse(body);
+            String code = Xmls.textOr(error, "Code", null);
+            String message = Xmls.textOr(error, "Message", null);
+            if (message != null) {
+                throw new StorageException(byStatus, message + "（" + code + "）", path);
+            }
+        } catch (StorageException e) {
+            throw e;
+        } catch (RuntimeException ignore) {
+            // 非 XML 错误体，退回状态码语义
+        }
+        throw new StorageException(byStatus, "OSS HTTP " + status, path);
     }
 }
