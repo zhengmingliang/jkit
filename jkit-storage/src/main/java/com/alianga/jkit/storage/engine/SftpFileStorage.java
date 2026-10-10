@@ -24,6 +24,8 @@ import java.util.Vector;
 /**
  * SFTP 引擎：通过<b>反射</b>调用 JSch（com.jcraft.jsch），编译期与 pom 均不引入任何依赖。
  * 运行环境把 com.github.mwiede:jsch（或原版 com.jcraft:jsch）加入 classpath 即可启用；
+ * JSch 的 Session / Channel 非线程安全，本引擎在同一实例上对全部操作做串行化
+ * （同步引擎的多并发会在此排队，正确性优先）；
  * 缺依赖时构造成功、首次操作抛 {@link StorageErrorCode#UNSUPPORTED} 并给出明确提示。
  *
  * <p>连接：密码与私钥二选一（私钥可带口令）；StrictHostKeyChecking 默认关闭，
@@ -82,7 +84,7 @@ public class SftpFileStorage implements FileStorage {
     }
 
     @Override
-    public boolean exists(String path) {
+    public synchronized boolean exists(String path) {
         String normalized = StoragePaths.normalize(path);
         if (normalized.isEmpty()) {
             return true;
@@ -99,7 +101,7 @@ public class SftpFileStorage implements FileStorage {
     }
 
     @Override
-    public StorageEntry stat(String path) {
+    public synchronized StorageEntry stat(String path) {
         String normalized = StoragePaths.normalize(path);
         if (normalized.isEmpty()) {
             return StorageEntry.dir("", 0L);
@@ -112,7 +114,7 @@ public class SftpFileStorage implements FileStorage {
     }
 
     @Override
-    public List<StorageEntry> list(String dir) {
+    public synchronized List<StorageEntry> list(String dir) {
         String normalized = StoragePaths.normalize(dir);
         List<StorageEntry> entries = new ArrayList<StorageEntry>();
         for (JschBridge.Entry entry : bridge().list(remoteOf(normalized))) {
@@ -127,7 +129,7 @@ public class SftpFileStorage implements FileStorage {
     }
 
     @Override
-    public void mkdir(String dir) {
+    public synchronized void mkdir(String dir) {
         String normalized = StoragePaths.normalize(dir);
         if (normalized.isEmpty()) {
             return;
@@ -150,7 +152,7 @@ public class SftpFileStorage implements FileStorage {
     }
 
     @Override
-    public void upload(String path, InputStream in, long size) {
+    public synchronized void upload(String path, InputStream in, long size) {
         String normalized = requireFile(path);
         String parent = StoragePaths.parent(normalized);
         if (!parent.isEmpty()) {
@@ -160,13 +162,13 @@ public class SftpFileStorage implements FileStorage {
     }
 
     @Override
-    public void download(String path, OutputStream out) {
+    public synchronized void download(String path, OutputStream out) {
         String normalized = requireFile(path);
         bridge().get(remoteOf(normalized), out);
     }
 
     @Override
-    public void delete(String path) {
+    public synchronized void delete(String path) {
         String normalized = StoragePaths.normalize(path);
         if (normalized.isEmpty()) {
             throw StorageException.invalidConfig("拒绝删除存储根目录");
@@ -189,7 +191,7 @@ public class SftpFileStorage implements FileStorage {
     }
 
     @Override
-    public void copy(String src, String dst) {
+    public synchronized void copy(String src, String dst) {
         String source = requireFile(src);
         String target = requireFile(dst);
         if (isDirectory(source)) {
@@ -200,7 +202,7 @@ public class SftpFileStorage implements FileStorage {
     }
 
     @Override
-    public void rename(String src, String dst) {
+    public synchronized void rename(String src, String dst) {
         String source = requireFile(src);
         String target = requireFile(dst);
         if (isDirectory(source) && exists(target)) {
@@ -219,7 +221,7 @@ public class SftpFileStorage implements FileStorage {
     }
 
     @Override
-    public void close() {
+    public synchronized void close() {
         JschBridge current = bridge;
         bridge = null;
         if (current != null) {

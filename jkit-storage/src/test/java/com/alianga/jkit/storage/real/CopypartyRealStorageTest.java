@@ -51,47 +51,77 @@ public class CopypartyRealStorageTest {
     private static boolean sftpUp;
 
     /** 三个引擎共用的行为矩阵：上传下载 / 列表 / 目录 / 重命名复制 / 删除。 */
-    private static void exercise(FileStorage fs) throws Exception {
+    private static void exercise(FileStorage fs, String root) throws Exception {
         byte[] data = "你好，真实服务器！real-protocol".getBytes(StandardCharsets.UTF_8);
-        fs.upload("docs/中文说明.txt", data);
+        fs.upload(root + "/docs/中文说明.txt", data);
         assertEquals(new String(data, StandardCharsets.UTF_8),
-                new String(fs.readBytes("docs/中文说明.txt"), StandardCharsets.UTF_8));
-        fs.upload("docs/inner/deep.bin", new byte[]{9, 8, 7});
-        fs.upload("root.txt", "r".getBytes(StandardCharsets.UTF_8));
+                new String(fs.readBytes(root + "/docs/中文说明.txt"), StandardCharsets.UTF_8));
+        fs.upload(root + "/docs/inner/deep.bin", new byte[]{9, 8, 7});
+        fs.upload(root + "/root.txt", "r".getBytes(StandardCharsets.UTF_8));
 
-        assertTrue(fs.exists("docs"));
-        assertTrue(fs.exists("docs/中文说明.txt"));
-        assertFalse(fs.exists("no/such/object"));
+        assertTrue(fs.exists(root + "/docs"));
+        assertTrue(fs.exists(root + "/docs/中文说明.txt"));
+        assertFalse(fs.exists(root + "/no/such/object"));
 
-        StorageEntry entry = fs.stat("docs/中文说明.txt");
+        StorageEntry entry = fs.stat(root + "/docs/中文说明.txt");
         assertEquals(data.length, entry.size());
         assertFalse(entry.isDirectory());
 
-        fs.mkdir("docs/empty");
-        fs.mkdir("docs/empty");
-        assertTrue(fs.exists("docs/empty"));
+        fs.mkdir(root + "/docs/empty");
+        fs.mkdir(root + "/docs/empty");
+        assertTrue(fs.exists(root + "/docs/empty"));
 
-        List<StorageEntry> list = fs.list("docs");
+        List<StorageEntry> list = fs.list(root + "/docs");
         assertTrue(names(list).contains("中文说明.txt"));
         assertTrue(names(list).contains("inner"));
         assertTrue(names(list).contains("empty"));
 
-        fs.rename("docs/inner/deep.bin", "docs/inner/deep2.bin");
-        assertFalse(fs.exists("docs/inner/deep.bin"));
-        assertTrue(fs.exists("docs/inner/deep2.bin"));
-        fs.copy("docs/inner/deep2.bin", "docs/inner/deep3.bin");
-        assertEquals(3, fs.readBytes("docs/inner/deep3.bin").length);
+        fs.rename(root + "/docs/inner/deep.bin", root + "/docs/inner/deep2.bin");
+        assertFalse(fs.exists(root + "/docs/inner/deep.bin"));
+        assertTrue(fs.exists(root + "/docs/inner/deep2.bin"));
+        fs.copy(root + "/docs/inner/deep2.bin", root + "/docs/inner/deep3.bin");
+        assertEquals(3, fs.readBytes(root + "/docs/inner/deep3.bin").length);
 
-        fs.delete("docs/inner/deep3.bin");
-        assertFalse(fs.exists("docs/inner/deep3.bin"));
-        fs.deleteDir("docs/inner");
-        assertFalse(fs.exists("docs/inner"));
+        // 目录级 rename / copy（服务端整体搬移或递归实现）
+        fs.rename(root + "/docs/inner", root + "/docs/inner2");
+        assertTrue(fs.exists(root + "/docs/inner2/deep2.bin"));
+        assertFalse(fs.exists(root + "/docs/inner"));
+        fs.copy(root + "/docs/inner2", root + "/docs/inner3");
+        assertTrue(fs.exists(root + "/docs/inner3/deep2.bin"));
+
+        // 空文件与 1MB 二进制
+        fs.upload(root + "/empty.txt", new byte[0]);
+        assertEquals(0, fs.stat(root + "/empty.txt").size());
+        byte[] big = new byte[1024 * 1024];
+        for (int i = 0; i < big.length; i++) {
+            big[i] = (byte) (i * 31);
+        }
+        fs.upload(root + "/big/large.bin", big);
+        byte[] roundTrip = fs.readBytes(root + "/big/large.bin");
+        assertEquals(big.length, roundTrip.length);
+        assertEquals(big[123456], roundTrip[123456]);
+
+        fs.delete(root + "/docs/inner3/deep2.bin");
+        assertFalse(fs.exists(root + "/docs/inner3/deep2.bin"));
+        fs.deleteDir(root + "/docs/inner3");
+        assertFalse(fs.exists(root + "/docs/inner3"));
 
         try {
-            fs.stat("ghost.txt");
+            fs.stat(root + "/ghost.txt");
             throw new AssertionError("应抛 NOT_FOUND");
         } catch (StorageException e) {
             assertEquals(StorageErrorCode.NOT_FOUND, e.code());
+        }
+    }
+
+    private static void deleteRecursively(Path root) throws IOException {
+        if (!Files.exists(root)) {
+            return;
+        }
+        try (java.util.stream.Stream<Path> walk = Files.walk(root)) {
+            for (Path path : walk.sorted(java.util.Comparator.reverseOrder()).toArray(Path[]::new)) {
+                Files.deleteIfExists(path);
+            }
         }
     }
 
@@ -197,7 +227,12 @@ public class CopypartyRealStorageTest {
         values.put("password", PASSWORD);
         values.put("basePath", "/data");
         values.put("passive", "true");
-        exercise(FileStorages.of("ftp", values));
+        String root = "jkit-ftp-" + System.nanoTime();
+        try {
+            exercise(FileStorages.of("ftp", values), root);
+        } finally {
+            FileStorages.of("ftp", values).deleteDir(root);
+        }
     }
 
     @Test
@@ -209,7 +244,12 @@ public class CopypartyRealStorageTest {
         values.put("user", USER);
         values.put("password", PASSWORD);
         values.put("basePath", "/data");
-        exercise(FileStorages.of("sftp", values));
+        String root = "jkit-sftp-" + System.nanoTime();
+        try {
+            exercise(FileStorages.of("sftp", values), root);
+        } finally {
+            FileStorages.of("sftp", values).deleteDir(root);
+        }
     }
 
     @Test
@@ -219,7 +259,78 @@ public class CopypartyRealStorageTest {
         values.put("user", USER);
         values.put("password", PASSWORD);
         values.put("basePath", "/data");
-        exercise(FileStorages.of("webdav", values));
+        String root = "jkit-dav-" + System.nanoTime();
+        try {
+            exercise(FileStorages.of("webdav", values), root);
+        } finally {
+            FileStorages.of("webdav", values).deleteDir(root);
+        }
+    }
+
+    @Test
+    public void crossStorageSyncAcrossRealProtocols() throws Exception {
+        Path localRoot = Files.createTempDirectory("copyparty-sync");
+        String runRoot = "jkit-sync-" + System.nanoTime();
+        String stage1 = runRoot + "/stage1";
+        String stage2 = runRoot + "/stage2";
+        String stage3 = runRoot + "/stage3";
+        try {
+            Map<String, String> localValues = new LinkedHashMap<String, String>();
+            localValues.put("basePath", localRoot.toString());
+            FileStorage local = FileStorages.of("local", localValues);
+            local.upload("sync-src/a.txt", "A".getBytes(StandardCharsets.UTF_8));
+            local.upload("sync-src/sub/b.txt", "BB".getBytes(StandardCharsets.UTF_8));
+
+            Map<String, String> ftpValues = new LinkedHashMap<String, String>();
+            ftpValues.put("host", "127.0.0.1");
+            ftpValues.put("port", String.valueOf(ftpPort));
+            ftpValues.put("user", USER);
+            ftpValues.put("password", PASSWORD);
+            ftpValues.put("basePath", "/data");
+            FileStorage ftp = FileStorages.of("ftp", ftpValues);
+
+            // 本地 → FTP（真实协议）
+            com.alianga.jkit.storage.sync.SyncResult first =
+                    com.alianga.jkit.storage.sync.SyncEngine.sync(local, "sync-src", ftp, stage1,
+                            com.alianga.jkit.storage.sync.SyncOptions.incremental(), null);
+            assertEquals(2L, first.copied());
+            assertEquals("BB", new String(ftp.readBytes(stage1 + "/sub/b.txt"),
+                    StandardCharsets.UTF_8));
+
+            // FTP → WebDAV
+            Map<String, String> davValues = new LinkedHashMap<String, String>();
+            davValues.put("endpoint", "http://127.0.0.1:" + httpPort);
+            davValues.put("user", USER);
+            davValues.put("password", PASSWORD);
+            davValues.put("basePath", "/data");
+            FileStorage dav = FileStorages.of("webdav", davValues);
+            com.alianga.jkit.storage.sync.SyncResult second =
+                    com.alianga.jkit.storage.sync.SyncEngine.sync(ftp, stage1, dav, stage2,
+                            com.alianga.jkit.storage.sync.SyncOptions.incremental(), null);
+            assertEquals(2L, second.copied());
+
+            // WebDAV → SFTP（镜像：多出的文件被删除）
+            Map<String, String> sftpValues = new LinkedHashMap<String, String>();
+            sftpValues.put("host", "127.0.0.1");
+            sftpValues.put("port", String.valueOf(sftpPort));
+            sftpValues.put("user", USER);
+            sftpValues.put("password", PASSWORD);
+            sftpValues.put("basePath", "/data");
+            FileStorage sftp = FileStorages.of("sftp", sftpValues);
+            sftp.upload(stage3 + "/stale.txt", "old".getBytes(StandardCharsets.UTF_8));
+            dav.upload(stage2 + "/new.txt", "new".getBytes(StandardCharsets.UTF_8));
+            com.alianga.jkit.storage.sync.SyncResult third =
+                    com.alianga.jkit.storage.sync.SyncEngine.sync(dav, stage2, sftp, stage3,
+                            com.alianga.jkit.storage.sync.SyncOptions.mirror(),
+null
+            assertEquals(3L, third.copied());
+            assertEquals(1L, third.deleted());
+            assertFalse(sftp.exists(stage3 + "/stale.txt"));
+            assertEquals("new", sftp.readString(stage3 + "/new.txt"));
+            sftp.deleteDir(runRoot);
+        } finally {
+            deleteRecursively(localRoot);
+        }
     }
 
     @Test
