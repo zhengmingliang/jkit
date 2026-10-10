@@ -15,7 +15,7 @@
     <packaging>jar</packaging>
 
     <name>jkit-mock</name>
-    <description>零依赖中文 Mock 数据生成器：个人信息、商业数据、技术数据、自定义规则，支持 JSON / CSV / SQL / XML 输出。</description>
+    <description>零第三方依赖的 Mock 工具：Mock.js 兼容中文数据生成器（30 种内置字段、自定义规则、JSON / CSV / SQL / XML 输出）与纯 JDK 本地 Mock HTTP 服务（路径模板、多响应规则与动态模板、CRUD 资源、SSE / WebSocket 推送、代理回源）。</description>
 
     <properties>
         <maven.compiler.source>8</maven.compiler.source>

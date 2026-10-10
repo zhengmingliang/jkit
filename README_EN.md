@@ -53,7 +53,7 @@ Also measured: streaming CSV reads 107 MB / 1M rows in 582 ms with a 29.8 MB pea
 <dependency>
     <groupId>com.alianga</groupId>
     <artifactId>jkit</artifactId>
-    <version>2.0.3</version>
+    <version>2.0.4</version>
 </dependency>
 ```
 
@@ -121,12 +121,13 @@ Full API documentation (12,000+ lines, Chinese and English): **[jkit.alianga.com
 
 | Module | Coordinate | Purpose |
 |---|---|---|
-| Core (required) | `com.alianga:jkit:2.0.3` | Everything under `com.alianga.jkit.*` |
-| curl → source | `com.alianga:jkit-curl-codegen:2.0.3` | Turn curl commands into idiomatic HTTP source code |
-| Notifications | `com.alianga:jkit-notify:2.0.3` | DingTalk/WeCom/Feishu/ServerChan/Bark/SMTP/Webhook |
-| Extra channels | `com.alianga:jkit-notify-extra:2.0.3` | Slack/Telegram/ntfy/Aliyun & more SMS |
-| SQL parsing | `com.alianga:jkit-sql:2.0.3` | Multi-dialect parsing, pagination rewrite, injection & masking |
-| Auto schema | `com.alianga:jkit-sql-auto:2.0.3` | CREATE/ALTER tables from entities on startup |
+| Core (required) | `com.alianga:jkit:2.0.4` | Everything under `com.alianga.jkit.*` |
+| curl → source | `com.alianga:jkit-curl-codegen:2.0.4` | Turn curl commands into idiomatic HTTP source code |
+| Notifications | `com.alianga:jkit-notify:2.0.4` | DingTalk/WeCom/Feishu/ServerChan/Bark/SMTP/Webhook |
+| Extra channels | `com.alianga:jkit-notify-extra:2.0.4` | Slack/Telegram/ntfy/Aliyun & more SMS |
+| SQL parsing | `com.alianga:jkit-sql:2.0.4` | Multi-dialect parsing, pagination rewrite, injection & masking |
+| Mock toolkit | `com.alianga:jkit-mock:2.0.4` | 30 built-in field types + full Mock.js-style templates + embedded local Mock HTTP server; JSON / CSV / SQL / XML output |
+| Auto schema | `com.alianga:jkit-sql-auto:2.0.4` | CREATE/ALTER tables from entities on startup |
 | Auto schema Starter | `com.alianga:jkit-sql-auto-spring-boot-2` / `-3` | Spring Boot 2 / 3 auto configuration |
 
 ## 🛠 Build & Test
