@@ -49,6 +49,7 @@
         <module>jkit-sql-auto-spring-boot-3</module>
         <module>jkit-mock</module>
         <module>jkit-storage</module>
+        <module>jkit-captcha</module>
     </modules>
 
     <properties>
