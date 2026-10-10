@@ -90,6 +90,7 @@ const zhNav: DefaultTheme.NavItem[] = [
   {
     text: '在线工具',
     items: [
+      { text: '正则表达式速查', link: '/tools/regexp/', ...toolLink },
       { text: 'Excel/CSV 转 JSON', link: '/tools/excel2json/', ...toolLink },
     ],
   },
@@ -155,6 +156,7 @@ const enNav: DefaultTheme.NavItem[] = [
   {
     text: 'Tools',
     items: [
+      { text: 'Regex Cheat Sheet', link: '/tools/regexp/', ...toolLink },
       { text: 'Excel/CSV to JSON', link: '/tools/excel2json/', ...toolLink },
     ],
   },

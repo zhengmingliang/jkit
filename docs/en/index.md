@@ -58,6 +58,12 @@ features:
     details: YAML parsing, node tree, anchors and multi-documents; Spring Boot-style externalized configuration without Spring dependencies.
     link: /en/yaml
     linkText: YAML docs
+  - icon: "🔎"
+    title: "Online Tool: Regex Cheat Sheet"
+    details: A fully local, in-browser regex debugger with live match highlighting, capture groups and positions, plus 93 common patterns with JavaScript/Python/PHP/Java variants — test text never leaves your machine.
+    link: /tools/regexp/
+    linkText: Open tool
+    target: _blank
   - icon: 🧮
     title: "Online Tool: Excel to JSON"
     details: A fully local, in-browser Excel/CSV to JSON converter with multi-sheet support, TSV pasting and SQL Insert export — files never leave your machine.
