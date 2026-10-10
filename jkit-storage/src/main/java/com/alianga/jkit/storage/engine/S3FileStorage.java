@@ -182,13 +182,9 @@ public class S3FileStorage implements FileStorage {
         if (!children.entries.isEmpty()) {
             throw StorageException.conflict("目录非空: " + normalized + "，请用 deleteDir", normalized);
         }
-        HttpCore.Response response = request("DELETE", objectKey(normalized), null, null, null, -1L, null);
-        if (response.status() == 404 || response.status() == 204 || response.status() == 200) {
-            response.close();
-            return;
-        }
-        ensureSuccess(response, normalized);
-        response.close();
+        deleteQuietly(objectKey(normalized));
+        // 目录占位对象（key 以 / 结尾）一并清理，保证 deleteDir 后目录真正消失
+        deleteQuietly(objectKey(normalized) + "/");
     }
 
     @Override
@@ -240,9 +236,20 @@ public class S3FileStorage implements FileStorage {
         }
     }
 
+    /** 幂等删除：404 / 204 / 200 都算成功，其它状态抛出。 */
     private void deleteQuietly(String key) {
         HttpCore.Response response = request("DELETE", key, null, null, null, -1L, null);
+        int status = response.status();
+        if (status < 400) {
+            response.close();
+            return;
+        }
+        String body = Xmls.readAll(response.body());
         response.close();
+        if (status == 404) {
+            return;
+        }
+        throw toException(status, body, key);
     }
 
     private boolean isDirectoryKey(String dirKey) {

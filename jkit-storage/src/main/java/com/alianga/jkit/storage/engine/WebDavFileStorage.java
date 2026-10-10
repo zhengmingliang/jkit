@@ -42,6 +42,8 @@ public class WebDavFileStorage implements FileStorage {
 
     private final String endpoint;
     private final String basePath;
+    /** endpoint 自带路径 + basePath 合成的服务器侧路径前缀（用于剥离 PROPFIND href）。 */
+    private final String serverBasePath;
     private final String credentials;
     private final boolean anonymous;
 
@@ -57,6 +59,15 @@ public class WebDavFileStorage implements FileStorage {
         }
         this.endpoint = raw.endsWith("/") ? raw.substring(0, raw.length() - 1) : raw;
         this.basePath = StoragePaths.normalize(config.getOr("basePath", ""));
+        String endpointPath;
+        try {
+            endpointPath = new java.net.URL(this.endpoint).getPath();
+        } catch (java.net.MalformedURLException e) {
+            throw StorageException.invalidConfig("endpoint 非法: " + this.endpoint);
+        }
+        String endpointPrefix = (endpointPath == null || endpointPath.isEmpty() || "/".equals(endpointPath))
+                ? "" : StoragePaths.normalize(endpointPath);
+        this.serverBasePath = StoragePaths.join(endpointPrefix, this.basePath);
         String user = config.getOr("user", "");
         String password = config.get("password") == null ? "" : config.get("password");
         this.anonymous = user.isEmpty();
@@ -121,19 +132,28 @@ public class WebDavFileStorage implements FileStorage {
         if (normalized.isEmpty() || exists(normalized)) {
             return;
         }
-        HttpCore.Response response = request("MKCOL", normalized, null, null, null, -1L, null, null);
-        if (response.status() == 405) {
-            // 已存在：mkdir 幂等
-            response.close();
-            return;
+        // WebDAV 要求父集合存在：逐级补齐（405 = 已存在，幂等）
+        List<String> missing = new ArrayList<String>();
+        String parent = normalized;
+        while (!parent.isEmpty() && !exists(parent)) {
+            missing.add(parent);
+            parent = StoragePaths.parent(parent);
         }
-        ensureSuccess(response, normalized);
-        response.close();
+        for (int i = missing.size() - 1; i >= 0; i--) {
+            HttpCore.Response response = request("MKCOL", missing.get(i), null, null, null, -1L, null, null);
+            if (response.status() == 405) {
+                response.close();
+                continue;
+            }
+            ensureSuccess(response, missing.get(i));
+            response.close();
+        }
     }
 
     @Override
     public void upload(String path, InputStream in, long size) {
         String normalized = requireFile(path);
+        mkdir(StoragePaths.parent(normalized));
         HttpCore.Response response = request("PUT", normalized, null,
                 MimeTypes.of(normalized), null, size, in, null);
         try {
@@ -268,17 +288,19 @@ public class WebDavFileStorage implements FileStorage {
         List<Element> responses = Xmls.deepAll(root, "response");
         List<StorageEntry> entries = new ArrayList<StorageEntry>();
         String prefix = StoragePaths.normalize(dir);
+        // href 是服务器侧完整路径（含 endpoint 自带路径与 basePath），换算成相对 prefix 的相对路径
+        String serverPrefix = StoragePaths.join(serverBasePath, prefix);
         for (Element response : responses) {
             String href = Xmls.text(response, "href");
             if (href == null || href.isEmpty()) {
                 continue;
             }
             String decoded = decodeHref(href);
-            String relative = toRelative(decoded, prefix);
+            String relative = toRelative(decoded, serverPrefix);
             if (relative == null) {
                 continue;
             }
-            boolean collection = Xmls.first(response, "collection") != null
+            boolean collection = !Xmls.deepAll(response, "collection").isEmpty()
                     || relative.endsWith("/");
             if (relative.endsWith("/")) {
                 relative = relative.substring(0, relative.length() - 1);
@@ -286,7 +308,7 @@ public class WebDavFileStorage implements FileStorage {
             if (relative.isEmpty()) {
                 // 自身条目：stat（includeSelf）时作为返回值，list 时跳过
                 if (includeSelf) {
-                    entries.add(buildEntry(response, prefix, true));
+                    entries.add(buildEntry(response, prefix, collection));
                 }
                 continue;
             }
@@ -299,11 +321,13 @@ public class WebDavFileStorage implements FileStorage {
     }
 
     private StorageEntry buildEntry(Element response, String path, boolean collection) {
+        // DAV 属性嵌套在 propstat/prop 之下，统一按本地名深度查找
+        String lastModified = Xmls.deepText(response, "getlastmodified");
         if (collection) {
-            return StorageEntry.dir(path, parseHttpDate(Xmls.text(response, "getlastmodified")));
+            return StorageEntry.dir(path, parseHttpDate(lastModified));
         }
         long size = StorageEntry.SIZE_UNKNOWN;
-        String length = Xmls.text(response, "getcontentlength");
+        String length = Xmls.deepText(response, "getcontentlength");
         if (length != null) {
             try {
                 size = Long.parseLong(length.trim());
@@ -311,9 +335,8 @@ public class WebDavFileStorage implements FileStorage {
                 // 部分服务器对目录返回空串，保持未知
             }
         }
-        return StorageEntry.file(path, size,
-                parseHttpDate(Xmls.text(response, "getlastmodified")),
-                Xmls.text(response, "getetag"));
+        return StorageEntry.file(path, size, parseHttpDate(lastModified),
+                Xmls.deepText(response, "getetag"));
     }
 
     /** href 可能是完整 URL 或路径，且逐段百分号编码。 */

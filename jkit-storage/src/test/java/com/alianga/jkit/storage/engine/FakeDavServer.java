@@ -73,6 +73,9 @@ final class FakeDavServer {
 
     private void handle(HttpExchange exchange) throws IOException {
         try {
+            // com.sun server 对 PROPFIND/MKCOL/MOVE/COPY 等非常规方法的 keep-alive
+            // 与 JDK 客户端不同步（复用即 EOF），测试服务器统一 Connection: close
+            exchange.getResponseHeaders().set("Connection", "close");
             if (!checkAuth(exchange)) {
                 exchange.getResponseHeaders().set("WWW-Authenticate", "Basic realm=\"fake\"");
                 respond(exchange, 401, "");
@@ -81,6 +84,9 @@ final class FakeDavServer {
             String method = exchange.getRequestMethod();
             String path = decode(exchange.getRequestURI().getRawPath());
             if (deny) {
+                if ("PUT".equals(method)) {
+                    drain(exchange.getRequestBody());
+                }
                 respond(exchange, 403, "");
                 return;
             }
@@ -265,6 +271,13 @@ final class FakeDavServer {
     private static String parentOf(String path) {
         int at = path.lastIndexOf('/');
         return at <= 0 ? "/" : path.substring(0, at);
+    }
+
+    private static void drain(InputStream in) throws IOException {
+        byte[] chunk = new byte[8192];
+        while (in.read(chunk) >= 0) {
+            // 排空请求体，避免提前响应导致客户端写请求体被 RST
+        }
     }
 
     private static void respond(HttpExchange exchange, int status, String body) throws IOException {

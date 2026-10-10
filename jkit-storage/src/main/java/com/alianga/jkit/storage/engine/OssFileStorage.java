@@ -163,13 +163,9 @@ public class OssFileStorage implements FileStorage {
         if (!listRaw(normalized + "/", 2).isEmpty()) {
             throw StorageException.conflict("目录非空: " + normalized + "，请用 deleteDir", normalized);
         }
-        HttpCore.Response response = request("DELETE", normalized, null, null, null, -1L, null);
-        if (response.status() == 404 || response.status() == 204 || response.status() == 200) {
-            response.close();
-            return;
-        }
-        ensureSuccess(response, normalized);
-        response.close();
+        deleteQuietly(objectKey(normalized));
+        // 目录占位对象（key 以 / 结尾）一并清理，保证 deleteDir 后目录真正消失
+        deleteQuietly(objectKey(normalized) + "/");
     }
 
     @Override
@@ -287,10 +283,15 @@ public class OssFileStorage implements FileStorage {
 
     private String objectKey(String path) {
         String normalized = StoragePaths.normalize(path);
-        if (basePath.isEmpty()) {
-            return normalized;
+        String key = basePath.isEmpty() ? normalized
+                : (basePath + (normalized.isEmpty() ? "" : "/" + normalized));
+        // 目录占位对象以 "/" 结尾（exists/mkdir 会显式传入带斜杠的路径），
+        // normalize 会剥掉尾斜杠，这里按原始输入补回
+        if (!key.isEmpty() && !key.endsWith("/") && path != null
+                && path.replace('\\', '/').endsWith("/")) {
+            key = key + "/";
         }
-        return basePath + (normalized.isEmpty() ? "" : "/" + normalized);
+        return key;
     }
 
     private int head(String path) {
@@ -377,9 +378,20 @@ public class OssFileStorage implements FileStorage {
         }
     }
 
+    /** 幂等删除：404 / 204 / 200 都算成功，其它状态抛出。 */
     private void deleteQuietly(String key) {
         HttpCore.Response response = request("DELETE", key, null, null, null, -1L, null);
+        int status = response.status();
+        if (status < 400) {
+            response.close();
+            return;
+        }
+        String body = Xmls.readAll(response.body());
         response.close();
+        if (status == 404) {
+            return;
+        }
+        throw toException(status, body, key);
     }
 
     private String requireFile(String path) {
@@ -445,6 +457,10 @@ public class OssFileStorage implements FileStorage {
         int status = response.status();
         String body = Xmls.readAll(response.body());
         response.close();
+        throw toException(status, body, path);
+    }
+
+    private StorageException toException(int status, String body, String path) {
         StorageErrorCode byStatus = status >= 500 ? StorageErrorCode.SERVER_ERROR
                 : status == 404 ? StorageErrorCode.NOT_FOUND
                 : status == 403 || status == 401 ? StorageErrorCode.AUTH_FAILED
@@ -456,13 +472,11 @@ public class OssFileStorage implements FileStorage {
             String code = Xmls.textOr(error, "Code", null);
             String message = Xmls.textOr(error, "Message", null);
             if (message != null) {
-                throw new StorageException(byStatus, message + "（" + code + "）", path);
+                return new StorageException(byStatus, message + "（" + code + "）", path);
             }
-        } catch (StorageException e) {
-            throw e;
         } catch (RuntimeException ignore) {
             // 非 XML 错误体，退回状态码语义
         }
-        throw new StorageException(byStatus, "OSS HTTP " + status, path);
+        return new StorageException(byStatus, "OSS HTTP " + status, path);
     }
 }
