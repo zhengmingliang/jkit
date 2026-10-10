@@ -153,6 +153,9 @@ public class LocalFileStorage implements FileStorage {
     public void download(String path, OutputStream out) {
         String normalized = requireFile(path);
         Path target = resolve(normalized);
+        if (!Files.exists(target)) {
+            throw StorageException.notFound(normalized);
+        }
         if (Files.isDirectory(target)) {
             throw StorageException.conflict("目标是目录，无法按文件下载: " + normalized, normalized);
         }

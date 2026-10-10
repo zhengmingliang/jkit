@@ -127,14 +127,26 @@ public class S3FileStorage implements FileStorage {
         if (exists(normalized)) {
             return;
         }
-        closeQuietly(request("PUT", objectKey(normalized) + "/", null, null, new byte[0], -1L, null));
+        HttpCore.Response response = request("PUT", objectKey(normalized) + "/", null, null,
+                new byte[0], -1L, null);
+        try {
+            ensureSuccess(response, normalized);
+        } finally {
+            response.close();
+        }
     }
 
     @Override
     public void upload(String path, InputStream in, long size) {
         String normalized = requireFile(path);
         String contentType = MimeTypes.of(normalized);
-        closeQuietly(request("PUT", objectKey(normalized), null, contentType, null, size, null, in));
+        HttpCore.Response response = request("PUT", objectKey(normalized), null, contentType,
+                null, size, null, in);
+        try {
+            ensureSuccess(response, normalized);
+        } finally {
+            response.close();
+        }
     }
 
     @Override
@@ -219,7 +231,13 @@ public class S3FileStorage implements FileStorage {
     }
 
     private void copyObject(String srcKey, String dstKey) {
-        closeQuietly(request("PUT", dstKey, null, MimeTypes.of(dstKey), new byte[0], -1L, srcKey));
+        HttpCore.Response response = request("PUT", dstKey, null, MimeTypes.of(dstKey),
+                new byte[0], -1L, srcKey);
+        try {
+            ensureSuccess(response, dstKey);
+        } finally {
+            response.close();
+        }
     }
 
     private void deleteQuietly(String key) {

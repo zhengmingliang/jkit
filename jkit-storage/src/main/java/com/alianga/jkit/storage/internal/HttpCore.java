@@ -128,7 +128,8 @@ public final class HttpCore {
             this.status = status;
             this.message = message;
             this.headers = headers;
-            this.body = body;
+            this.body = body == null ? new ByteArrayInputStream(new byte[0])
+                    : new CompleteTrackingInputStream(body);
             this.connection = connection;
         }
 
@@ -192,16 +193,60 @@ public final class HttpCore {
 
         @Override
         public void close() {
+            boolean complete = false;
             try {
-                if (body != null) {
-                    body.close();
+                if (body instanceof CompleteTrackingInputStream) {
+                    complete = ((CompleteTrackingInputStream) body).isComplete();
                 }
+                body.close();
             } catch (IOException ignore) {
                 // 关闭失败不影响结果
             }
-            if (connection != null) {
+            if (connection != null && !complete) {
+                // 响应体未读尽（提前放弃下载等）：连接不能归还池，直接断开，
+                // 否则 JDK keep-alive 池会把这个半截连接发给下一个请求
                 connection.disconnect();
             }
+        }
+    }
+
+    /** 跟踪响应体是否被读尽，用于决定连接是归还 keep-alive 池还是直接断开。 */
+    private static final class CompleteTrackingInputStream extends java.io.FilterInputStream {
+        private volatile boolean complete;
+
+        private CompleteTrackingInputStream(InputStream in) {
+            super(in);
+        }
+
+        boolean isComplete() {
+            return complete;
+        }
+
+        @Override
+        public int read() throws IOException {
+            int value = super.read();
+            if (value < 0) {
+                complete = true;
+            }
+            return value;
+        }
+
+        @Override
+        public int read(byte[] buffer) throws IOException {
+            int read = super.read(buffer);
+            if (read < 0) {
+                complete = true;
+            }
+            return read;
+        }
+
+        @Override
+        public int read(byte[] buffer, int offset, int length) throws IOException {
+            int read = super.read(buffer, offset, length);
+            if (read < 0) {
+                complete = true;
+            }
+            return read;
         }
     }
 
@@ -214,6 +259,46 @@ public final class HttpCore {
      * @return 响应（调用方负责 close）
      */
     public static Response execute(Request request) {
+        try {
+            return executeOnce(request);
+        } catch (StorageException e) {
+            if (isRetryableFailure(e, request)) {
+                flushDeadConnection(request.url);
+                return executeOnce(request);
+            }
+            throw e;
+        }
+    }
+
+    /**
+     * 重试前把 JDK keep-alive 池里可能残留的死连接消费掉：发一个一次性探测请求，
+     * 读到 EOF 或正常响应都算完成任务。探测失败完全在预期内，忽略。
+     */
+    private static void flushDeadConnection(String url) {
+        try {
+            java.net.URL target = new java.net.URL(url);
+            java.net.URL probeUrl = new java.net.URL(
+                    target.getProtocol() + "://" + target.getAuthority() + "/");
+            HttpURLConnection connection = (HttpURLConnection) probeUrl.openConnection();
+            connection.setConnectTimeout(3_000);
+            connection.setReadTimeout(3_000);
+            connection.setInstanceFollowRedirects(false);
+            connection.setUseCaches(false);
+            int status = connection.getResponseCode();
+            InputStream in = status < 400 ? connection.getInputStream() : connection.getErrorStream();
+            if (in != null) {
+                byte[] chunk = new byte[512];
+                while (in.read(chunk) >= 0) {
+                    // 读尽以归还或终结该连接
+                }
+                in.close();
+            }
+        } catch (IOException ignore) {
+            // 探测 EOF 也是目的之一（消费死连接）
+        }
+    }
+
+    private static Response executeOnce(Request request) {
         HttpURLConnection connection = null;
         try {
             connection = open(request);
@@ -222,9 +307,6 @@ public final class HttpCore {
             Map<String, List<String>> headers =
                     new LinkedHashMap<String, List<String>>(connection.getHeaderFields());
             InputStream body = status >= 400 ? connection.getErrorStream() : connection.getInputStream();
-            if (body == null) {
-                body = new ByteArrayInputStream(new byte[0]);
-            }
             return new Response(status, connection.getResponseMessage(), headers, body, connection);
         } catch (SocketTimeoutException e) {
             closeQuietly(connection);
@@ -236,6 +318,28 @@ public final class HttpCore {
             closeQuietly(connection);
             throw mapIoException(e);
         }
+    }
+
+    /**
+     * 连接级失败且请求可安全重放（幂等方法 + 可重放请求体）时，换新连接重试一次。
+     * 覆盖三类真实场景：JDK keep-alive 池给出已关闭的连接、服务端在读满请求体前
+     * 提前响应（鉴权失败的大上传）、对端在写体过程中重置连接。
+     */
+    private static boolean isRetryableFailure(StorageException e, Request request) {
+        if (e.code() != StorageErrorCode.CONNECT_FAILED && e.code() != StorageErrorCode.IO_ERROR) {
+            return false;
+        }
+        if (!isIdempotent(request.method) || request.bodyStream != null) {
+            return false;
+        }
+        String message = String.valueOf(e.getMessage());
+        return message.contains("Unexpected end of file") || message.contains("Connection reset")
+                || message.contains("insufficient data") || message.contains("Broken pipe");
+    }
+
+    private static boolean isIdempotent(String method) {
+        return "GET".equals(method) || "HEAD".equals(method) || "PUT".equals(method)
+                || "DELETE".equals(method) || "PROPFIND".equals(method);
     }
 
     private static HttpURLConnection open(Request request) throws IOException {
