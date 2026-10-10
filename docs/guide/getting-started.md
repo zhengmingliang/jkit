@@ -30,6 +30,7 @@ jkit 是**纯 JDK、零第三方依赖**的 Java 通用工具库，由 [ZmlTools
 | `jkit-notify` | `com.alianga:jkit-notify` | 消息通知：钉钉 / 企微 / 飞书 / Server酱 / Bark / Webhook / SMTP |
 | `jkit-notify-extra` | `com.alianga:jkit-notify-extra` | 可选渠道：Slack / Telegram / ntfy / 短信（阿里云、腾讯云、云片、华为云） |
 | `jkit-curl-codegen` | `com.alianga:jkit-curl-codegen` | 把 curl 转成 OkHttp / fetch / requests 等其它语言源码 |
+| `jkit-storage` | `com.alianga:jkit-storage` | 统一多存储平台文件管理：本地 / FTP / SFTP / WebDAV / S3 及 30+ 兼容云，跨存储同步与迁移 |
 
 ## 引入依赖
 

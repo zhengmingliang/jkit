@@ -125,6 +125,7 @@ const zhSidebar: DefaultTheme.Sidebar = [
       { text: 'SQL 解析', link: '/sql' },
       { text: '自动建表', link: '/sql-auto' },
       { text: '消息通知', link: '/notify' },
+      { text: '文件存储', link: '/storage' },
     ],
   },
   {
@@ -191,6 +192,7 @@ const enSidebar: DefaultTheme.Sidebar = [
       { text: 'SQL Parsing', link: '/en/sql' },
       { text: 'Auto Schema', link: '/en/sql-auto' },
       { text: 'Notification', link: '/en/notify' },
+      { text: 'File Storage', link: '/en/storage' },
     ],
   },
   {

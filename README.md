@@ -121,6 +121,7 @@ YamlDocument doc = YamlDocument.parse(yamlText);
 | `jkit-notify`（独立模块） | **消息通知**：钉钉/企微/飞书/Server酱/Bark/SMTP/Webhook，可选 Slack/Telegram/短信，[文档](docs/notify.md) |
 | `jkit-curl-codegen`（独立模块） | **curl 转源码**：一键生成 OkHttp / requests / fetch / Go 等 10+ 语言调用代码，[README](jkit-curl-codegen/README.md) |
 | `jkit-mock`（独立模块） | **Mock 数据生成 + 本地 Mock 服务**：字段模式（30 种字段类型、5 个快速模板、自定义字段）+ 模板模式（完整 Mock.js 规范：DTD 规则、58 个占位符、正则反向生成、Schema 推导），一键导出 JSON / CSV / SQL INSERT / XML；`MockHttpServer` 提供零依赖本地 Mock HTTP 服务（路径模板 / 延迟 / 动态 Schema / 回显 / 热更新），[README](jkit-mock/README.md) |
+| `jkit-storage`（独立模块） | **统一多存储平台文件管理**：一套 `FileStorage` 接口读写本地 / FTP / SFTP / WebDAV / S3 与三十余个兼容云（阿里 OSS、腾讯 COS、七牛 Kodo、MinIO、R2 等），统一错误模型，内置跨存储对比、增量同步与全量迁移，[README](jkit-storage/README.md) |
 | `com.alianga.jkit.crypto` 等 | AES-GCM/DES/RSA-OAEP/摘要、图片验证码、线程池、反射、校验等，[文档](docs/toolkit.md) |
 
 完整 API 文档（中文 12,000+ 行，另有英文版）：**[jkit.alianga.com](https://jkit.alianga.com)** · [English docs](https://jkit.alianga.com/en/)
@@ -143,6 +144,7 @@ YamlDocument doc = YamlDocument.parse(yamlText);
 | 通知扩展渠道 | `com.alianga:jkit-notify-extra:2.0.4` | Slack/Telegram/ntfy/阿里云等短信 |
 | SQL 解析与改写 | `com.alianga:jkit-sql:2.0.4` | 多方言解析、分页改写、注入与脱敏 |
 | Mock 数据生成 | `com.alianga:jkit-mock:2.0.4` | 字段模式 30 种字段类型 + 模板模式完整 Mock.js 规范 + 本地 Mock HTTP 服务，JSON / CSV / SQL / XML 输出 |
+| 统一文件存储 | `com.alianga:jkit-storage:2.0.5` | 本地 / FTP / SFTP / WebDAV / S3 及 30+ 兼容云统一读写，跨存储对比、增量同步与全量迁移 |
 | 自动建表 | `com.alianga:jkit-sql-auto:2.0.4` | 按实体对照库表执行 CREATE/ALTER |
 | 自动建表 Starter | `com.alianga:jkit-sql-auto-spring-boot-2` / `-3` | Spring Boot 2 / 3 自动配置 |
 
