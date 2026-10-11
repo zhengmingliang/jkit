@@ -32,6 +32,11 @@ import java.util.Vector;
  * 开启后按 yes 交给 JSch 校验 known_hosts。Method / Field 反射句柄按名称缓存在
  * HashMap 中，列表条目逐个取 getFilename / getAttrs 时不再做反射查找。</p>
  *
+ * <p>并发：单 Session 上维护一个按需扩展的 ChannelSftp 池（{@code channelPool}
+ * 配置，默认 4），引擎操作各自借还通道，互不排队；JSch 连接级异常会把当前
+ * 通道标记为损坏并弃用（下次借时新建），协议级 SftpException 不影响通道。
+ * {@code channelPool=1} 即退化为旧行为（实例级串行）。</p>
+ *
  * <p>错误映射：SftpException id 2 → NOT_FOUND，4 / 11 → CONFLICT，
  * permission denied（id 3 / 13）→ AUTH_FAILED，其余 → IO_ERROR；JSchException 按消息
  * 关键字映射（auth → AUTH_FAILED、timeout → TIMEOUT、reject / 其余 → CONNECT_FAILED）。</p>
@@ -61,13 +66,16 @@ public class SftpFileStorage implements FileStorage {
     /** 服务器端绝对根目录：basePath 为空 / {@code /} 时为 {@code /}，否则强制绝对化。 */
     private final String root;
     private final boolean strictHostKeyChecking;
+    /** SFTP 通道池上限（默认 4；1 = 实例级串行）。 */
+    private final int poolSize;
     /** 懒建立的 SFTP 通道：构造不连接，首次操作才建立（缺 jsch 依赖时在此暴露）。 */
     private volatile JschBridge bridge;
 
     /**
      * 由配置创建（配置键：host / port / user / password / privateKey /
-     * privateKeyPassphrase / basePath / strictHostKeyChecking）。缺 host / user 直接抛
-     * {@link StorageErrorCode#INVALID_CONFIG}；缺 jsch 依赖不会在这里暴露。
+     * privateKeyPassphrase / basePath / strictHostKeyChecking / channelPool）。
+     * 缺 host / user 直接抛 {@link StorageErrorCode#INVALID_CONFIG}；
+     * 缺 jsch 依赖不会在这里暴露。
      *
      * @param config 连接配置
      */
@@ -80,6 +88,7 @@ public class SftpFileStorage implements FileStorage {
         this.privateKeyPassphrase = blankToNull(config.get("privateKeyPassphrase"));
         this.root = rootOf(config.getOr("basePath", "/"));
         this.strictHostKeyChecking = config.boolOr("strictHostKeyChecking", false);
+        this.poolSize = Math.max(1, Math.min(16, config.intOr("channelPool", 4)));
     }
 
     @Override
@@ -93,7 +102,7 @@ public class SftpFileStorage implements FileStorage {
     }
 
     @Override
-    public synchronized boolean exists(String path) {
+    public boolean exists(String path) {
         String normalized = StoragePaths.normalize(path);
         if (normalized.isEmpty()) {
             return true;
@@ -110,7 +119,7 @@ public class SftpFileStorage implements FileStorage {
     }
 
     @Override
-    public synchronized StorageEntry stat(String path) {
+    public StorageEntry stat(String path) {
         String normalized = StoragePaths.normalize(path);
         if (normalized.isEmpty()) {
             return StorageEntry.dir("", 0L);
@@ -123,7 +132,7 @@ public class SftpFileStorage implements FileStorage {
     }
 
     @Override
-    public synchronized List<StorageEntry> list(String dir) {
+    public List<StorageEntry> list(String dir) {
         String normalized = StoragePaths.normalize(dir);
         List<StorageEntry> entries = new ArrayList<StorageEntry>();
         for (JschBridge.Entry entry : bridge().list(remoteOf(normalized))) {
@@ -138,7 +147,7 @@ public class SftpFileStorage implements FileStorage {
     }
 
     @Override
-    public synchronized void mkdir(String dir) {
+    public void mkdir(String dir) {
         String normalized = StoragePaths.normalize(dir);
         if (normalized.isEmpty()) {
             return;
@@ -161,7 +170,7 @@ public class SftpFileStorage implements FileStorage {
     }
 
     @Override
-    public synchronized void upload(String path, InputStream in, long size) {
+    public void upload(String path, InputStream in, long size) {
         String normalized = requireFile(path);
         String parent = StoragePaths.parent(normalized);
         if (!parent.isEmpty()) {
@@ -171,13 +180,13 @@ public class SftpFileStorage implements FileStorage {
     }
 
     @Override
-    public synchronized void download(String path, OutputStream out) {
+    public void download(String path, OutputStream out) {
         String normalized = requireFile(path);
         bridge().get(remoteOf(normalized), out);
     }
 
     @Override
-    public synchronized void delete(String path) {
+    public void delete(String path) {
         String normalized = StoragePaths.normalize(path);
         if (normalized.isEmpty()) {
             throw StorageException.invalidConfig("拒绝删除存储根目录");
@@ -200,7 +209,7 @@ public class SftpFileStorage implements FileStorage {
     }
 
     @Override
-    public synchronized void copy(String src, String dst) {
+    public void copy(String src, String dst) {
         String source = requireFile(src);
         String target = requireFile(dst);
         if (isDirectory(source)) {
@@ -211,7 +220,7 @@ public class SftpFileStorage implements FileStorage {
     }
 
     @Override
-    public synchronized void rename(String src, String dst) {
+    public void rename(String src, String dst) {
         String source = requireFile(src);
         String target = requireFile(dst);
         if (isDirectory(source) && exists(target)) {
@@ -248,7 +257,7 @@ public class SftpFileStorage implements FileStorage {
         synchronized (this) {
             if (bridge == null) {
                 bridge = JschBridge.open(host, port, user, password, privateKey,
-                        privateKeyPassphrase, strictHostKeyChecking);
+                        privateKeyPassphrase, strictHostKeyChecking, poolSize);
             }
             return bridge;
         }
@@ -336,8 +345,11 @@ public class SftpFileStorage implements FileStorage {
     // ------------------------------------------------------------------ JSch 反射桥
 
     /**
-     * JSch 反射桥：持有 Session / ChannelSftp 实例，全部方法调用走反射，
-     * Method / Field 句柄按「类名#方法名」缓存避免每条目重复查找。
+     * JSch 反射桥：持有单条 Session 与一个按需扩展的 ChannelSftp 池，
+     * 全部方法调用走反射；Method / Field 句柄按「类名#方法名」缓存避免
+     * 每条目重复查找。每个操作从池里借一条通道、用完归还；JSch 连接级
+     * 异常会把通道标记为损坏并弃用（下次借时新建），SftpException 属于
+     * 协议级应答，通道仍可用。
      */
     private static final class JschBridge {
         /** Method 句柄缓存（类名#方法名 → Method），避免列表逐条目重复反射查找。 */
@@ -346,19 +358,72 @@ public class SftpFileStorage implements FileStorage {
         private static final Map<String, Field> FIELDS = new HashMap<String, Field>();
 
         private final Object session;
-        private final Object channel;
+        private final int poolSize;
         private final int overwrite;
+        /** 空闲通道队列；借空且未达上限时新建，达上限后阻塞等待归还。 */
+        private final java.util.concurrent.BlockingQueue<Object> idle;
+        private final java.util.concurrent.atomic.AtomicInteger created =
+                new java.util.concurrent.atomic.AtomicInteger();
+        private volatile boolean closed;
 
-        private JschBridge(Object session, Object channel, int overwrite) {
+        private JschBridge(Object session, int poolSize, int overwrite) {
             this.session = session;
-            this.channel = channel;
+            this.poolSize = poolSize;
             this.overwrite = overwrite;
+            this.idle = new java.util.concurrent.LinkedBlockingQueue<Object>();
         }
 
-        /** 建立 SFTP 连接并打开 sftp 通道；classpath 缺 jsch 时抛 UNSUPPORTED。 */
+        /** 从池里借一条通道；借空且未达上限时新建，否则阻塞等待归还。 */
+        private Object borrow() {
+            if (closed) {
+                throw StorageException.connectFailed("SFTP 通道池已关闭");
+            }
+            Object channel = idle.poll();
+            if (channel != null) {
+                return channel;
+            }
+            if (created.incrementAndGet() <= poolSize) {
+                try {
+                    return openChannel(session);
+                } catch (ReflectiveOperationException e) {
+                    created.decrementAndGet();
+                    throw StorageException.io("JSch 反射调用失败: " + e.getMessage(), "-", e);
+                } catch (RuntimeException e) {
+                    created.decrementAndGet();
+                    throw e;
+                }
+            }
+            created.decrementAndGet();
+            try {
+                return idle.take();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw StorageException.io("SFTP 通道借取被中断", "-", e);
+            }
+        }
+
+        /** 归还通道；broken 时断开丢弃（下次借时新建）。 */
+        private void release(Object channel, boolean broken) {
+            if (broken || closed) {
+                closeChannel(channel);
+                created.decrementAndGet();
+                return;
+            }
+            idle.offer(channel);
+        }
+
+        private void closeChannel(Object channel) {
+            try {
+                method(channel.getClass(), "disconnect").invoke(channel);
+            } catch (ReflectiveOperationException | RuntimeException ignore) {
+                // 通道断开失败不影响整体关闭
+            }
+        }
+
+        /** 建立 SFTP 连接（单 Session）；classpath 缺 jsch 时抛 UNSUPPORTED。 */
         static JschBridge open(String host, int port, String user, String password,
                                String privateKey, String privateKeyPassphrase,
-                               boolean strictHostKeyChecking) {
+                               boolean strictHostKeyChecking, int poolSize) {
             Class<?> jschClass;
             try {
                 jschClass = Class.forName("com.jcraft.jsch.JSch");
@@ -381,10 +446,7 @@ public class SftpFileStorage implements FileStorage {
                         .invoke(session, "StrictHostKeyChecking", strictHostKeyChecking ? "yes" : "no");
                 method(session.getClass(), "setTimeout", int.class).invoke(session, CONNECT_TIMEOUT_MS);
                 method(session.getClass(), "connect", int.class).invoke(session, CONNECT_TIMEOUT_MS);
-                Object channel = method(session.getClass(), "openChannel", String.class)
-                        .invoke(session, "sftp");
-                method(channel.getClass(), "connect").invoke(channel);
-                return new JschBridge(session, channel, field(channel.getClass(), "OVERWRITE").getInt(null));
+                return new JschBridge(session, poolSize, overwriteOf(session));
             } catch (InvocationTargetException e) {
                 throw mapThrowable(e.getCause(), "-", "连接");
             } catch (ReflectiveOperationException e) {
@@ -392,8 +454,29 @@ public class SftpFileStorage implements FileStorage {
             }
         }
 
+        /** 借一条临时通道取 OVERWRITE 常量（Put 用），取完即还。 */
+        private static int overwriteOf(Object session) throws ReflectiveOperationException,
+                InvocationTargetException {
+            Object channel = openChannel(session);
+            try {
+                return field(channel.getClass(), "OVERWRITE").getInt(null);
+            } finally {
+                method(channel.getClass(), "disconnect").invoke(channel);
+            }
+        }
+
+        /** 在 Session 上打开并连接一条新的 SFTP 通道。 */
+        private static Object openChannel(Object session) throws ReflectiveOperationException,
+                InvocationTargetException {
+            Object channel = method(session.getClass(), "openChannel", String.class)
+                    .invoke(session, "sftp");
+            method(channel.getClass(), "connect").invoke(channel);
+            return channel;
+        }
+
         /** ls：返回去掉 "." / ".." 之后的条目列表。 */
         List<Entry> list(String remotePath) {
+            Object channel = borrow();
             try {
                 Object vector = method(channel.getClass(), "ls", String.class).invoke(channel, remotePath);
                 List<Entry> entries = new ArrayList<Entry>();
@@ -408,48 +491,80 @@ public class SftpFileStorage implements FileStorage {
                             (Long) method(attrs.getClass(), "getSize").invoke(attrs),
                             (Integer) method(attrs.getClass(), "getMTime").invoke(attrs)));
                 }
+                release(channel, false);
                 return entries;
             } catch (InvocationTargetException e) {
+                release(channel, isConnectionLevel(e.getCause()));
                 throw mapThrowable(e.getCause(), remotePath, "列出目录");
             } catch (ReflectiveOperationException | ClassCastException e) {
+                release(channel, false);
                 throw StorageException.io("JSch 反射调用失败: " + e.getMessage(), remotePath, e);
+            } catch (RuntimeException e) {
+                release(channel, true);
+                throw e;
             }
+        }
+
+        /** 连接级异常（通道可能已坏）才弃用通道；SftpException 属协议应答，通道无恙。 */
+        private static boolean isConnectionLevel(Throwable cause) {
+            return cause != null && "com.jcraft.jsch.JSchException".equals(cause.getClass().getName());
         }
 
         /** lstat：目标不存在时抛 NOT_FOUND。 */
         Attrs lstat(String remotePath) {
+            Object channel = borrow();
             try {
                 Object attrs = method(channel.getClass(), "lstat", String.class)
                         .invoke(channel, remotePath);
+                release(channel, false);
                 return new Attrs((Boolean) method(attrs.getClass(), "isDir").invoke(attrs),
                         (Long) method(attrs.getClass(), "getSize").invoke(attrs),
                         (Integer) method(attrs.getClass(), "getMTime").invoke(attrs));
             } catch (InvocationTargetException e) {
+                release(channel, isConnectionLevel(e.getCause()));
                 throw mapThrowable(e.getCause(), remotePath, "读取元数据");
             } catch (ReflectiveOperationException e) {
+                release(channel, false);
                 throw StorageException.io("JSch 反射调用失败: " + e.getMessage(), remotePath, e);
+            } catch (RuntimeException e) {
+                release(channel, true);
+                throw e;
             }
         }
 
         void get(String remotePath, OutputStream out) {
+            Object channel = borrow();
             try {
                 method(channel.getClass(), "get", String.class, OutputStream.class)
                         .invoke(channel, remotePath, out);
+                release(channel, false);
             } catch (InvocationTargetException e) {
+                release(channel, isConnectionLevel(e.getCause()));
                 throw mapThrowable(e.getCause(), remotePath, "下载");
             } catch (ReflectiveOperationException e) {
+                release(channel, false);
                 throw StorageException.io("JSch 反射调用失败: " + e.getMessage(), remotePath, e);
+            } catch (RuntimeException e) {
+                release(channel, true);
+                throw e;
             }
         }
 
         void put(InputStream in, String remotePath) {
+            Object channel = borrow();
             try {
                 method(channel.getClass(), "put", InputStream.class, String.class, int.class)
                         .invoke(channel, in, remotePath, overwrite);
+                release(channel, false);
             } catch (InvocationTargetException e) {
+                release(channel, isConnectionLevel(e.getCause()));
                 throw mapThrowable(e.getCause(), remotePath, "上传");
             } catch (ReflectiveOperationException e) {
+                release(channel, false);
                 throw StorageException.io("JSch 反射调用失败: " + e.getMessage(), remotePath, e);
+            } catch (RuntimeException e) {
+                release(channel, true);
+                throw e;
             }
         }
 
@@ -466,32 +581,46 @@ public class SftpFileStorage implements FileStorage {
         }
 
         void rename(String fromPath, String toPath) {
+            Object channel = borrow();
             try {
                 method(channel.getClass(), "rename", String.class, String.class)
                         .invoke(channel, fromPath, toPath);
+                release(channel, false);
             } catch (InvocationTargetException e) {
+                release(channel, isConnectionLevel(e.getCause()));
                 throw mapThrowable(e.getCause(), toPath, "重命名");
             } catch (ReflectiveOperationException e) {
+                release(channel, false);
                 throw StorageException.io("JSch 反射调用失败: " + e.getMessage(), toPath, e);
+            } catch (RuntimeException e) {
+                release(channel, true);
+                throw e;
             }
         }
 
         private void invoke(String name, String remotePath, String action) {
+            Object channel = borrow();
             try {
                 method(channel.getClass(), name, String.class).invoke(channel, remotePath);
+                release(channel, false);
             } catch (InvocationTargetException e) {
+                release(channel, isConnectionLevel(e.getCause()));
                 throw mapThrowable(e.getCause(), remotePath, action);
             } catch (ReflectiveOperationException e) {
+                release(channel, false);
                 throw StorageException.io("JSch 反射调用失败: " + e.getMessage(), remotePath, e);
+            } catch (RuntimeException e) {
+                release(channel, true);
+                throw e;
             }
         }
 
         void close() {
-            try {
-                method(channel.getClass(), "disconnect").invoke(channel);
-            } catch (ReflectiveOperationException ignore) {
-                // 通道关闭失败不影响会话关闭
+            closed = true;
+            for (Object channel : idle) {
+                closeChannel(channel);
             }
+            idle.clear();
             try {
                 method(session.getClass(), "disconnect").invoke(session);
             } catch (ReflectiveOperationException ignore) {
