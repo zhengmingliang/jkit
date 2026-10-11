@@ -51,7 +51,8 @@ public final class StoragePresets {
                 StorageField.optional("privateKey", "私钥文件路径", null, "密码与私钥二选一"),
                 StorageField.secret("privateKeyPassphrase", "私钥口令", false),
                 StorageField.optional("basePath", "起始目录", "/", null),
-                StorageField.optional("strictHostKeyChecking", "严格主机指纹校验", "false", null)));
+                StorageField.optional("strictHostKeyChecking", "严格主机指纹校验", "false", null),
+                StorageField.optional("channelPool", "并发通道数", "4", "SFTP 通道池上限，1 为串行")));
         platforms.add(new StoragePlatform("webdav", "WebDAV", "webdav", "协议",
                 StorageField.required("endpoint", "服务地址", "如 https://dav.example.com/dav"),
                 StorageField.optional("user", "用户名", null, null),
