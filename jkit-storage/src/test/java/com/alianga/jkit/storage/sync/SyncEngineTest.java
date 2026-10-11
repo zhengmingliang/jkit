@@ -109,6 +109,22 @@ public class SyncEngineTest {
     }
 
     @Test
+    public void mirrorDeletesExtraDirs() {
+        source.upload("keep/a.txt", "A".getBytes(StandardCharsets.UTF_8));
+        target.upload("keep/stale.txt", "S".getBytes(StandardCharsets.UTF_8));
+        target.mkdir("keep/empty-dir");
+        target.mkdir("keep/gone/deep");
+        SyncResult result = SyncEngine.sync(source, "", target, "", SyncOptions.mirror(), null);
+        assertEquals(1L, result.copied());
+        assertEquals("多余文件 + 空目录 + 深层目录", 4L, result.deleted());
+        assertFalse(target.exists("keep/stale.txt"));
+        assertFalse(target.exists("keep/empty-dir"));
+        assertFalse(target.exists("keep/gone"));
+        assertTrue(target.exists("keep/a.txt"));
+        assertEquals(0L, result.failed());
+    }
+
+    @Test
     public void dryRunDoesNotTouchTarget() {
         source.upload("a.txt", "A".getBytes(StandardCharsets.UTF_8));
         target.upload("b.txt", "B".getBytes(StandardCharsets.UTF_8));
@@ -249,6 +265,8 @@ public class SyncEngineTest {
                 SyncOptions.incremental().maxErrors(1L), null);
         assertEquals(2L, result.failed());
         assertTrue(result.aborted());
+        assertEquals("失败明细应与 failed 计数一致", 2, result.errors().size());
+        assertTrue("明细应含相对路径: " + result.errors(), result.errors().get(0).startsWith("a.txt: "));
     }
 
     private static void deleteRecursively(Path root) throws Exception {

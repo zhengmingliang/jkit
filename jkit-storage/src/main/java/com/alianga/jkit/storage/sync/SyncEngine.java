@@ -28,8 +28,9 @@ import java.util.concurrent.atomic.AtomicLong;
  * }</pre>
  *
  * <p>语义：以「相对路径」对齐两侧；复制前自动在目标端创建缺失的父目录；
- * 镜像模式只删除目标端多余的<b>文件</b>（不动目录占位）。对比策略见
- * {@link CompareMode}；执行并发可配，回调见 {@link SyncProgress}。</p>
+ * 镜像模式删除目标端多余文件与多余目录（目录在全部文件处理完后按深路径
+ * 在前删除）。对比策略见 {@link CompareMode}；执行并发可配，回调见
+ * {@link SyncProgress}。</p>
  *
  * @author 郑明亮
  */
@@ -91,6 +92,7 @@ public final class SyncEngine {
 
         List<String> toCopy = new ArrayList<String>();
         List<String> toDelete = new ArrayList<String>();
+        List<String> toDeleteDirs = new ArrayList<String>();
         long totalBytes = 0L;
         long skipped = 0L;
         for (Map.Entry<String, StorageEntry> entry : sourceFiles.entrySet()) {
@@ -111,13 +113,29 @@ public final class SyncEngine {
                     toDelete.add(relative);
                 }
             }
+            // 镜像时目标端多余的目录也删（先文件后目录、深路径在前，
+            // 否则对非空目录 delete 会 CONFLICT）
+            Map<String, StorageEntry> sourceDirs = dirsOf(source, sourceDir);
+            List<String> extraDirs = new ArrayList<String>();
+            for (String relative : dirsOf(target, targetDir).keySet()) {
+                if (!sourceDirs.containsKey(relative) && opts.accepts(relative)) {
+                    extraDirs.add(relative);
+                }
+            }
+            extraDirs.sort((a, b) -> {
+                int depthA = a.split("/").length;
+                int depthB = b.split("/").length;
+                return depthA == depthB ? b.compareTo(a) : depthB - depthA;
+            });
+            toDeleteDirs.addAll(extraDirs);
         }
-        long totalActions = toCopy.size() + toDelete.size();
+        long totalActions = toCopy.size() + toDelete.size() + toDeleteDirs.size();
         if (progress != null) {
             progress.onStart(totalActions, totalBytes);
         }
         if (opts.isDryRun()) {
-            return new SyncResult(toCopy.size(), skipped, toDelete.size(), 0L, totalBytes, false);
+            return new SyncResult(toCopy.size(), skipped, toDelete.size() + toDeleteDirs.size(),
+                    0L, totalBytes, false, new ArrayList<String>());
         }
 
         prepareDirs(source, sourceDir, target, targetDir, opts, progress);
@@ -143,13 +161,19 @@ public final class SyncEngine {
                 }
                 deleteOne(target, targetDir, relative, opts, progress, deleted, failed, errors, aborted);
             }
+            for (String relative : toDeleteDirs) {
+                if (aborted.get() || cancelled(opts)) {
+                    break;
+                }
+                deleteOne(target, targetDir, relative, opts, progress, deleted, failed, errors, aborted);
+            }
         } else {
-            runParallel(opts, source, sourceDir, target, targetDir, toCopy, toDelete, progress,
-                    copied, deleted, failed, bytes, errors, aborted);
+            runParallel(opts, source, sourceDir, target, targetDir, toCopy, toDelete, toDeleteDirs,
+                    progress, copied, deleted, failed, bytes, errors, aborted);
         }
         boolean abortedFinal = aborted.get() || cancelled(opts);
         return new SyncResult(copied.get(), skipped, deleted.get(), failed.get(), bytes.get(),
-                abortedFinal);
+                abortedFinal, errors);
     }
 
     private static boolean cancelled(SyncOptions opts) {
@@ -158,7 +182,8 @@ public final class SyncEngine {
 
     private static void runParallel(SyncOptions opts, FileStorage source, String sourceDir,
                                     FileStorage target, String targetDir, List<String> toCopy,
-                                    List<String> toDelete, SyncProgress progress, AtomicLong copied,
+                                    List<String> toDelete, List<String> toDeleteDirs,
+                                    SyncProgress progress, AtomicLong copied,
                                     AtomicLong deleted, AtomicLong failed, AtomicLong bytes,
                                     List<String> errors, AtomicBoolean aborted) {
         ExecutorService pool = Executors.newFixedThreadPool(opts.concurrency(),
@@ -188,18 +213,36 @@ public final class SyncEngine {
                     }
                 }));
             }
-            for (Future<?> future : futures) {
-                try {
-                    future.get();
-                } catch (java.lang.InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    aborted.set(true);
-                } catch (java.util.concurrent.ExecutionException ignore) {
-                    // 任务内部已把异常计入 failed / errors
-                }
+            awaitAll(futures, opts, aborted);
+            // 目录删除放第二批：等全部文件动作完成后按深路径在前删，避免目录非空 CONFLICT
+            List<Future<?>> dirFutures = new ArrayList<Future<?>>();
+            for (final String relative : toDeleteDirs) {
+                dirFutures.add(pool.submit(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (aborted.get() || cancelled(opts)) {
+                            return;
+                        }
+                        deleteOne(target, targetDir, relative, opts, progress, deleted, failed, errors, aborted);
+                    }
+                }));
             }
+            awaitAll(dirFutures, opts, aborted);
         } finally {
             pool.shutdownNow();
+        }
+    }
+
+    private static void awaitAll(List<Future<?>> futures, SyncOptions opts, AtomicBoolean aborted) {
+        for (Future<?> future : futures) {
+            try {
+                future.get();
+            } catch (java.lang.InterruptedException e) {
+                Thread.currentThread().interrupt();
+                aborted.set(true);
+            } catch (java.util.concurrent.ExecutionException ignore) {
+                // 任务内部已把异常计入 failed / errors
+            }
         }
     }
 
@@ -345,6 +388,31 @@ public final class SyncEngine {
             }
         }
         return files;
+    }
+
+    /** 目录集合（相对路径 → 条目），目录不存在时按空处理（镜像删除目标端多余目录用）。 */
+    private static Map<String, StorageEntry> dirsOf(FileStorage storage, String dir) {
+        Map<String, StorageEntry> dirs = new LinkedHashMap<String, StorageEntry>();
+        String normalized = StoragePaths.normalize(dir);
+        List<StorageEntry> walked;
+        try {
+            walked = storage.walk(normalized);
+        } catch (StorageException e) {
+            if (e.code() == StorageErrorCode.NOT_FOUND) {
+                return dirs;
+            }
+            throw e;
+        }
+        for (StorageEntry entry : walked) {
+            if (!entry.isDirectory()) {
+                continue;
+            }
+            String relative = StoragePaths.relativize(normalized, entry.path());
+            if (relative != null && !relative.isEmpty()) {
+                dirs.put(relative, entry);
+            }
+        }
+        return dirs;
     }
 
     private static boolean isSame(StorageEntry left, StorageEntry right, CompareMode mode) {
