@@ -128,6 +128,7 @@ public class CaptchaRecognitionTest {
         assertGroup(trials, "outline", 0.75);
         double mean = meanMillis(trials, false);
         Assert.assertTrue("单张平均耗时应低于 50ms，实际 " + mean, mean < 50);
+        assertOverall(trials, 0.80);
     }
 
     private static void runSamples(CaptchaRecognizer recognizer, List<Trial> trials) throws IOException {
@@ -406,6 +407,18 @@ public class CaptchaRecognitionTest {
         return result.getText() + " => " + result.getValue();
     }
 
+    private static void assertOverall(List<Trial> trials, double minimum) {
+        int correct = 0;
+        for (int i = 0; i < trials.size(); i++) {
+            if (trials.get(i).correct) {
+                correct++;
+            }
+        }
+        double accuracy = trials.isEmpty() ? 0 : correct / (double) trials.size();
+        Assert.assertTrue("整体准确率 " + correct + "/" + trials.size() + " = " + accuracy
+                + "，期望不低于 " + minimum, accuracy + 1e-9 >= minimum);
+    }
+
     private static void assertGroup(List<Trial> trials, String group, double minimum) {
         int total = 0;
         int correct = 0;
@@ -439,6 +452,15 @@ public class CaptchaRecognitionTest {
     }
 
     private static void printSummary(List<Trial> trials, double coldMillis) {
+        int correct = 0;
+        for (int i = 0; i < trials.size(); i++) {
+            if (trials.get(i).correct) {
+                correct++;
+            }
+        }
+        double overall = trials.isEmpty() ? 0 : correct / (double) trials.size();
+        System.out.println("overall=" + correct + "/" + trials.size()
+                + " = " + String.format("%.3f", Double.valueOf(overall)));
         System.out.println("coldStartMs=" + String.format("%.1f", Double.valueOf(coldMillis)));
         String[] groups = {"sample-arithmetic", "sample-9050", "sample-outline", "halo",
                 "online-pony", "online-miit", "online-shandong", "online-jszwfw",
