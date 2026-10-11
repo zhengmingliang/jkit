@@ -19,7 +19,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * 同步引擎：跨任意两个存储平台做内容对比、增量同步、镜像同步与全量迁移，
- * 并支持双向同步（两侧互为补充 + 冲突策略）。
+ * 并支持双向同步（两侧互为补充 + 冲突策略；双方都有基线清单后传播删除）。
  *
  * <pre>{@code
  * FileStorage source = FileStorages.of("local", ...);
@@ -191,18 +191,26 @@ public final class SyncEngine {
 
     /**
      * 双向同步：两侧互为补充。仅一侧存在的文件复制到对侧；两侧都在但判定不同
-     * （复用 {@link #isSame}）的文件按冲突策略处理。双向模式不执行镜像删除：
-     * 补齐阶段本来就会把两侧独有文件互拷，无法区分「新增」与「对端已删除」，
-     * 删除语义需要墓碑状态才安全，暂不实现（{@code mirror(true)} 被忽略）。
+     * （复用 {@link #isSame}）的文件按冲突策略处理。
+     *
+     * <p>删除只在两侧都有合法的 {@link SyncManifest} 时发生：路径上次两边都有，
+     * 这次只剩一边，且剩下的文件没有比清单更新，就删掉剩下的那一边。
+     * 清单缺失、损坏，或剩下的文件更新过，都不删除（更新过的文件复制回去）。
+     * {@code mirror(true)} 在双向模式下仍然忽略。</p>
      */
     private static SyncResult syncBidirectional(FileStorage left, String leftDir,
                                                 FileStorage right, String rightDir,
                                                 SyncOptions opts, SyncProgress progress) {
         Map<String, StorageEntry> leftFiles = filesOf(left, leftDir);
         Map<String, StorageEntry> rightFiles = filesOf(right, rightDir);
+        Map<String, Long> leftManifest = SyncManifest.read(left, leftDir);
+        Map<String, Long> rightManifest = SyncManifest.read(right, rightDir);
+        boolean trackDeletes = leftManifest != null && rightManifest != null;
 
         List<String> leftToRight = new ArrayList<String>();
         List<String> rightToLeft = new ArrayList<String>();
+        List<String> deleteOnLeft = new ArrayList<String>();
+        List<String> deleteOnRight = new ArrayList<String>();
         List<String> conflictPaths = new ArrayList<String>();
         long skipped = 0L;
         long totalBytes = 0L;
@@ -212,8 +220,12 @@ public final class SyncEngine {
             }
             StorageEntry rightEntry = rightFiles.get(entry.getKey());
             if (rightEntry == null) {
-                leftToRight.add(entry.getKey());
-                totalBytes += sizeOrZero(entry.getValue());
+                if (deletionWins(entry.getKey(), entry.getValue(), leftManifest, rightManifest, trackDeletes)) {
+                    deleteOnLeft.add(entry.getKey());
+                } else {
+                    leftToRight.add(entry.getKey());
+                    totalBytes += sizeOrZero(entry.getValue());
+                }
             } else if (isSame(entry.getValue(), rightEntry, opts.compareMode())) {
                 skipped++;
             } else {
@@ -224,16 +236,22 @@ public final class SyncEngine {
             if (!opts.accepts(entry.getKey()) || leftFiles.containsKey(entry.getKey())) {
                 continue;
             }
-            rightToLeft.add(entry.getKey());
-            totalBytes += sizeOrZero(entry.getValue());
+            if (deletionWins(entry.getKey(), entry.getValue(), rightManifest, leftManifest, trackDeletes)) {
+                deleteOnRight.add(entry.getKey());
+            } else {
+                rightToLeft.add(entry.getKey());
+                totalBytes += sizeOrZero(entry.getValue());
+            }
         }
 
-        long totalActions = leftToRight.size() + rightToLeft.size() + conflictPaths.size();
+        long totalActions = leftToRight.size() + rightToLeft.size() + conflictPaths.size()
+                + deleteOnLeft.size() + deleteOnRight.size();
         if (progress != null) {
             progress.onStart(totalActions, totalBytes);
         }
         if (opts.isDryRun()) {
-            return new SyncResult(leftToRight.size() + rightToLeft.size(), skipped, 0L, 0L,
+            return new SyncResult(leftToRight.size() + rightToLeft.size(), skipped,
+                    deleteOnLeft.size() + deleteOnRight.size(), 0L,
                     totalBytes, false, new ArrayList<String>(), conflictPaths.size());
         }
 
@@ -253,6 +271,19 @@ public final class SyncEngine {
         AtomicBoolean aborted = new AtomicBoolean();
         List<String> errors = java.util.Collections.synchronizedList(new ArrayList<String>());
 
+        for (String relative : deleteOnLeft) {
+            if (aborted.get() || cancelled(opts)) {
+                break;
+            }
+            deleteOne(left, leftDir, relative, opts, progress, deleted, failed, errors, aborted);
+        }
+        for (String relative : deleteOnRight) {
+            if (aborted.get() || cancelled(opts)) {
+                break;
+            }
+            deleteOne(right, rightDir, relative, opts, progress, deleted, failed, errors, aborted);
+        }
+
         List<String> noDeletes = new ArrayList<String>();
         if (!leftToRight.isEmpty()) {
             runParallel(opts, left, leftDir, right, rightDir, leftToRight, noDeletes, noDeletes,
@@ -271,8 +302,74 @@ public final class SyncEngine {
                     copied, failed, bytes, conflicts, errors, aborted);
         }
         boolean abortedFinal = aborted.get() || cancelled(opts);
+        if (!abortedFinal) {
+            // 复制完成后再清空目录，避免把即将写入新文件的父目录先删掉
+            deleteEmptyParents(left, leftDir, deleteOnLeft);
+            deleteEmptyParents(right, rightDir, deleteOnRight);
+            try {
+                SyncManifest.write(left, leftDir, filesOf(left, leftDir));
+                SyncManifest.write(right, rightDir, filesOf(right, rightDir));
+            } catch (RuntimeException e) {
+                errors.add(SyncManifest.FILE + ": " + e.getMessage());
+            }
+        }
         return new SyncResult(copied.get(), skipped, deleted.get(), failed.get(), bytes.get(),
                 abortedFinal, errors, conflicts.get());
+    }
+
+    /**
+     * 剩下的这一侧是不是「对端已经删掉的旧文件」。
+     * 只有上次两边清单都有这条路径，且现存文件不比清单新，删除才赢。
+     */
+    private static boolean deletionWins(String relative, StorageEntry surviving,
+                                        Map<String, Long> survivingManifest,
+                                        Map<String, Long> missingManifest, boolean trackDeletes) {
+        if (!trackDeletes || survivingManifest == null || missingManifest == null) {
+            return false;
+        }
+        if (!survivingManifest.containsKey(relative) || !missingManifest.containsKey(relative)) {
+            return false;
+        }
+        Long recorded = survivingManifest.get(relative);
+        long seen = surviving.lastModified();
+        if (recorded == null || recorded.longValue() == StorageEntry.MTIME_UNKNOWN
+                || seen == StorageEntry.MTIME_UNKNOWN) {
+            return true;
+        }
+        return seen <= recorded.longValue();
+    }
+
+    /**
+     * 文件删掉后清掉已经空了的父目录。先列出子项，非空就不删
+     * （部分平台的 delete 对目录是递归的）。
+     */
+    private static void deleteEmptyParents(FileStorage storage, String root, List<String> files) {
+        List<String> parents = new ArrayList<String>();
+        for (int i = 0; i < files.size(); i++) {
+            String parent = StoragePaths.parent(files.get(i));
+            while (parent != null && !parent.isEmpty()) {
+                if (!parents.contains(parent) && !SyncManifest.isMeta(parent)) {
+                    parents.add(parent);
+                }
+                parent = StoragePaths.parent(parent);
+            }
+        }
+        parents.sort((a, b) -> {
+            int depthA = a.split("/").length;
+            int depthB = b.split("/").length;
+            return depthA == depthB ? b.compareTo(a) : depthB - depthA;
+        });
+        for (int i = 0; i < parents.size(); i++) {
+            String full = StoragePaths.join(root, parents.get(i));
+            try {
+                if (!storage.list(full).isEmpty()) {
+                    continue;
+                }
+                storage.delete(full);
+            } catch (RuntimeException ignore) {
+                // 目录不存在，或平台拒绝删除
+            }
+        }
     }
 
     /**
@@ -416,20 +513,13 @@ public final class SyncEngine {
                 }));
             }
             awaitAll(futures, opts, aborted);
-            // 目录删除放第二批：等全部文件动作完成后按深路径在前删，避免目录非空 CONFLICT
-            List<Future<?>> dirFutures = new ArrayList<Future<?>>();
-            for (final String relative : toDeleteDirs) {
-                dirFutures.add(pool.submit(new Runnable() {
-                    @Override
-                    public void run() {
-                        if (aborted.get() || cancelled(opts)) {
-                            return;
-                        }
-                        deleteOne(target, targetDir, relative, opts, progress, deleted, failed, errors, aborted);
-                    }
-                }));
+            // 目录必须按深路径在前串行删。并行时父目录可能先被删掉，子目录随后失败。
+            for (String relative : toDeleteDirs) {
+                if (aborted.get() || cancelled(opts)) {
+                    break;
+                }
+                deleteOne(target, targetDir, relative, opts, progress, deleted, failed, errors, aborted);
             }
-            awaitAll(dirFutures, opts, aborted);
         } finally {
             pool.shutdownNow();
         }
@@ -546,7 +636,8 @@ public final class SyncEngine {
                 continue;
             }
             String relative = StoragePaths.relativize(sourceDir, entry.path());
-            if (relative == null || relative.isEmpty() || !opts.accepts(relative)) {
+            if (relative == null || relative.isEmpty() || SyncManifest.isMeta(relative)
+                    || !opts.accepts(relative)) {
                 continue;
             }
             dirs.add(relative);
@@ -586,7 +677,7 @@ public final class SyncEngine {
                 continue;
             }
             String relative = StoragePaths.relativize(normalized, entry.path());
-            if (relative != null && !relative.isEmpty()) {
+            if (relative != null && !relative.isEmpty() && !SyncManifest.isMeta(relative)) {
                 files.put(relative, entry);
             }
         }
@@ -611,7 +702,7 @@ public final class SyncEngine {
                 continue;
             }
             String relative = StoragePaths.relativize(normalized, entry.path());
-            if (relative != null && !relative.isEmpty()) {
+            if (relative != null && !relative.isEmpty() && !SyncManifest.isMeta(relative)) {
                 dirs.put(relative, entry);
             }
         }

@@ -4,11 +4,15 @@ import com.alianga.jkit.storage.FileStorage;
 import com.alianga.jkit.storage.FileStorages;
 import com.alianga.jkit.storage.StorageConfig;
 import com.alianga.jkit.storage.StorageEntry;
+import com.alianga.jkit.storage.StorageException;
+import com.alianga.jkit.storage.StoragePaths;
 
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -17,6 +21,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 /**
@@ -304,6 +309,122 @@ public class SyncEngineTest {
                 Files.getLastModifiedTime(targetRoot.resolve("b.txt")).toMillis());
     }
 
+    @Test
+    public void bidirectionalDeletePropagatesAfterBaseline() throws Exception {
+        source.upload("keep.txt", "K".getBytes(StandardCharsets.UTF_8));
+        source.upload("dir/gone.txt", "G".getBytes(StandardCharsets.UTF_8));
+        SyncResult first = SyncEngine.sync(source, "", target, "",
+                SyncOptions.incremental().direction(Direction.BIDIRECTIONAL), null);
+        assertEquals(0L, first.deleted());
+        assertTrue(target.exists("dir/gone.txt"));
+        assertTrue(source.exists(SyncManifest.FILE));
+
+        Files.delete(sourceRoot.resolve("dir/gone.txt"));
+        SyncResult second = SyncEngine.sync(source, "", target, "",
+                SyncOptions.incremental().direction(Direction.BIDIRECTIONAL), null);
+        assertTrue("应删掉对端文件，deleted=" + second.deleted(), second.deleted() >= 1L);
+        assertFalse(source.exists("dir/gone.txt"));
+        assertFalse(target.exists("dir/gone.txt"));
+        assertFalse("对端空目录应清掉", target.exists("dir"));
+        assertTrue(source.exists("keep.txt"));
+        assertTrue(target.exists("keep.txt"));
+        assertEquals("第二次没有新文件要复制", 0L, second.copied());
+    }
+
+    @Test
+    public void bidirectionalDeleteKeepsDirectoryNeededByIncomingFile() throws Exception {
+        source.upload("dir/gone.txt", "G".getBytes(StandardCharsets.UTF_8));
+        SyncEngine.sync(source, "", target, "",
+                SyncOptions.incremental().direction(Direction.BIDIRECTIONAL), null);
+        Files.delete(sourceRoot.resolve("dir/gone.txt"));
+        source.upload("dir/new.txt", "N".getBytes(StandardCharsets.UTF_8));
+        FileStorage strictSource = new ParentRequiredStorage(source);
+        FileStorage strictTarget = new ParentRequiredStorage(target);
+        SyncResult second = SyncEngine.sync(strictSource, "", strictTarget, "",
+                SyncOptions.incremental().direction(Direction.BIDIRECTIONAL), null);
+        assertEquals(second.errors().toString(), 0L, second.failed());
+        assertEquals("N", target.readString("dir/new.txt"));
+        assertFalse(target.exists("dir/gone.txt"));
+        assertFalse(source.exists("dir/gone.txt"));
+    }
+
+    @Test
+    public void bidirectionalDryRunPlansDeleteWithoutTouchingFiles() throws Exception {
+        source.upload("a.txt", "A".getBytes(StandardCharsets.UTF_8));
+        SyncEngine.sync(source, "", target, "",
+                SyncOptions.incremental().direction(Direction.BIDIRECTIONAL), null);
+        Files.delete(sourceRoot.resolve("a.txt"));
+        SyncResult dry = SyncEngine.sync(source, "", target, "",
+                SyncOptions.incremental().direction(Direction.BIDIRECTIONAL).dryRun(true), null);
+        assertEquals(1L, dry.deleted());
+        assertTrue("试运行不删除对端文件", target.exists("a.txt"));
+        assertTrue("试运行不改清单", source.exists(SyncManifest.FILE));
+    }
+
+    @Test
+    public void bidirectionalFirstSyncDoesNotTreatMissingAsDelete() {
+        target.upload("only-right.txt", "R".getBytes(StandardCharsets.UTF_8));
+        SyncResult result = SyncEngine.sync(source, "", target, "",
+                SyncOptions.incremental().direction(Direction.BIDIRECTIONAL), null);
+        assertEquals(0L, result.deleted());
+        assertEquals("R", source.readString("only-right.txt"));
+        assertTrue(target.exists("only-right.txt"));
+    }
+
+    @Test
+    public void bidirectionalNewerEditBeatsRemoteDelete() throws Exception {
+        source.upload("doc.txt", "v1".getBytes(StandardCharsets.UTF_8));
+        SyncEngine.sync(source, "", target, "",
+                SyncOptions.incremental().direction(Direction.BIDIRECTIONAL), null);
+        Files.delete(targetRoot.resolve("doc.txt"));
+        Thread.sleep(5L);
+        source.upload("doc.txt", "v2".getBytes(StandardCharsets.UTF_8));
+        SyncResult result = SyncEngine.sync(source, "", target, "",
+                SyncOptions.incremental().direction(Direction.BIDIRECTIONAL), null);
+        assertEquals("编辑比删除新，应复制回去", "v2", target.readString("doc.txt"));
+        assertEquals("v2", source.readString("doc.txt"));
+        assertEquals(0L, result.deleted());
+    }
+
+    @Test
+    public void corruptManifestDoesNotDelete() throws Exception {
+        source.upload("a.txt", "A".getBytes(StandardCharsets.UTF_8));
+        SyncEngine.sync(source, "", target, "",
+                SyncOptions.incremental().direction(Direction.BIDIRECTIONAL), null);
+        source.writeString(SyncManifest.FILE, "garbage");
+        target.writeString(SyncManifest.FILE, "garbage");
+        Files.delete(sourceRoot.resolve("a.txt"));
+        SyncResult result = SyncEngine.sync(source, "", target, "",
+                SyncOptions.incremental().direction(Direction.BIDIRECTIONAL), null);
+        assertEquals(0L, result.deleted());
+        assertEquals("清单损坏时把缺失文件补回来", "A", source.readString("a.txt"));
+        assertTrue(target.exists("a.txt"));
+    }
+
+    @Test
+    public void mirrorKeepsSyncMeta() throws Exception {
+        source.upload("a.txt", "A".getBytes(StandardCharsets.UTF_8));
+        SyncEngine.sync(source, "", target, "",
+                SyncOptions.incremental().direction(Direction.BIDIRECTIONAL), null);
+        Files.delete(sourceRoot.resolve(SyncManifest.FILE));
+        Files.delete(sourceRoot.resolve(SyncManifest.DIR));
+        SyncEngine.sync(source, "", target, "", SyncOptions.mirror(), null);
+        assertTrue("镜像不应删掉对端的同步清单", target.exists(SyncManifest.FILE));
+        assertTrue(target.exists("a.txt"));
+    }
+
+    @Test
+    public void manifestParseRejectsGarbage() {
+        assertNull(SyncManifest.parse(null));
+        assertNull(SyncManifest.parse("nope"));
+        assertNull(SyncManifest.parse("jkit-sync-manifest-1\nbad-line\n"));
+        java.util.Map<String, Long> parsed = SyncManifest.parse("jkit-sync-manifest-1\na.txt\t12\n");
+        assertEquals(Long.valueOf(12L), parsed.get("a.txt"));
+        assertTrue(SyncManifest.isMeta(".jkit-sync"));
+        assertTrue(SyncManifest.isMeta(".jkit-sync/manifest.txt"));
+        assertFalse(SyncManifest.isMeta(".jkit-sync-old/a.txt"));
+    }
+
     /** 在 side 根目录找以 prefix 开头的冲突副本并读出内容（恰好一个）。 */
     private static String conflictCopy(FileStorage side, String original, String prefix) {
         List<StorageEntry> matches = new java.util.ArrayList<StorageEntry>();
@@ -374,7 +495,73 @@ public class SyncEngineTest {
         assertEquals(2L, result.failed());
         assertTrue(result.aborted());
         assertEquals("失败明细应与 failed 计数一致", 2, result.errors().size());
-        assertTrue("明细应含相对路径: " + result.errors(), result.errors().get(0).startsWith("a.txt: "));
+        String detail = result.errors().toString();
+        assertTrue("明细应含相对路径: " + detail, detail.contains("a.txt: ") && detail.contains("b.txt: "));
+    }
+
+    /**
+     * 父目录不存在时拒绝上传。用来确认删除传播不会先拆掉还要接收新文件的目录。
+     */
+    private static final class ParentRequiredStorage implements FileStorage {
+        private final FileStorage delegate;
+
+        private ParentRequiredStorage(FileStorage delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public String platform() {
+            return delegate.platform();
+        }
+
+        @Override
+        public boolean exists(String path) {
+            return delegate.exists(path);
+        }
+
+        @Override
+        public StorageEntry stat(String path) {
+            return delegate.stat(path);
+        }
+
+        @Override
+        public List<StorageEntry> list(String dir) {
+            return delegate.list(dir);
+        }
+
+        @Override
+        public void mkdir(String dir) {
+            delegate.mkdir(dir);
+        }
+
+        @Override
+        public void upload(String path, InputStream in, long size) {
+            String parent = StoragePaths.parent(path);
+            if (!parent.isEmpty() && !delegate.exists(parent)) {
+                throw StorageException.io("父目录不存在: " + parent, path, null);
+            }
+            delegate.upload(path, in, size);
+        }
+
+        @Override
+        public void download(String path, OutputStream out) {
+            delegate.download(path, out);
+        }
+
+        @Override
+        public void delete(String path) {
+            delegate.delete(path);
+        }
+
+        @Override
+        public void copy(String src, String dst) {
+            delegate.copy(src, dst);
+        }
+
+        @Override
+        public void rename(String src, String dst) {
+            delegate.rename(src, dst);
+        }
     }
 
     private static void deleteRecursively(Path root) throws Exception {
