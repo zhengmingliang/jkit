@@ -41,7 +41,10 @@ import java.util.Vector;
  * 走递归（copyDir / renameDir）。delete 只删文件或空目录（rmdir 非空由服务端拒绝）。</p>
  *
  * <p>配置键：host（必填）、port（默认 22）、user（必填）、password、privateKey、
- * privateKeyPassphrase、basePath（默认 {@code /}）、strictHostKeyChecking（默认 false）。</p>
+ * privateKeyPassphrase、basePath（起始目录，默认 {@code /} 即服务器根目录；
+ * 留空同样从 {@code /} 开始，登录家目录请填 {@code /home/用户名}）、
+ * strictHostKeyChecking（默认 false）。存储内相对路径统一映射到该根之下的
+ * <b>服务器绝对路径</b>，{@link #absolutePathOf} 可直接取到。</p>
  *
  * @author 郑明亮
  */
@@ -55,7 +58,8 @@ public class SftpFileStorage implements FileStorage {
     private final String password;
     private final String privateKey;
     private final String privateKeyPassphrase;
-    private final String basePath;
+    /** 服务器端绝对根目录：basePath 为空 / {@code /} 时为 {@code /}，否则强制绝对化。 */
+    private final String root;
     private final boolean strictHostKeyChecking;
     /** 懒建立的 SFTP 通道：构造不连接，首次操作才建立（缺 jsch 依赖时在此暴露）。 */
     private volatile JschBridge bridge;
@@ -74,13 +78,18 @@ public class SftpFileStorage implements FileStorage {
         this.password = blankToNull(config.get("password"));
         this.privateKey = blankToNull(config.get("privateKey"));
         this.privateKeyPassphrase = blankToNull(config.get("privateKeyPassphrase"));
-        this.basePath = StoragePaths.normalize(config.getOr("basePath", "/"));
+        this.root = rootOf(config.getOr("basePath", "/"));
         this.strictHostKeyChecking = config.boolOr("strictHostKeyChecking", false);
     }
 
     @Override
     public String platform() {
         return "sftp";
+    }
+
+    @Override
+    public String absolutePathOf(String path) {
+        return remoteOf(StoragePaths.normalize(path));
     }
 
     @Override
@@ -292,11 +301,24 @@ public class SftpFileStorage implements FileStorage {
         }
     }
 
+    /** 存储内相对路径 → 服务器绝对路径；根目录即 {@code /}。 */
     private String remoteOf(String normalized) {
-        if (basePath.isEmpty()) {
-            return normalized.isEmpty() ? "." : normalized;
+        if (normalized.isEmpty()) {
+            return root;
         }
-        return normalized.isEmpty() ? basePath : basePath + "/" + normalized;
+        return root.endsWith("/") ? root + normalized : root + "/" + normalized;
+    }
+
+    /**
+     * 计算服务器端绝对根：空 / {@code /} → {@code /}；其余值折叠冗余分隔符后
+     * 强制补前导 {@code /}（此前裸相对值会被 JSch 解析到家目录之下，语义含糊）。
+     */
+    private static String rootOf(String configured) {
+        String trimmed = configured == null ? "" : configured.trim();
+        if (trimmed.isEmpty()) {
+            return "/";
+        }
+        return "/" + StoragePaths.normalize(trimmed);
     }
 
     private String requireFile(String path) {

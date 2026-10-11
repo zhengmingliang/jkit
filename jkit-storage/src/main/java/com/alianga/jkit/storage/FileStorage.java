@@ -173,6 +173,18 @@ public interface FileStorage extends AutoCloseable {
     }
 
     /**
+     * 取对象在平台侧的绝对路径（「复制路径」等展示用）：纯字符串计算，
+     * 不发起网络请求。默认返回存储内相对路径；文件服务器类引擎
+     * （本地 / SFTP / FTP）覆盖为服务器端绝对路径。
+     *
+     * @param path 对象路径
+     * @return 平台侧绝对路径
+     */
+    default String absolutePathOf(String path) {
+        return StoragePaths.normalize(path);
+    }
+
+    /**
      * 递归删除目录及其全部内容。根目录路径或空串会抛
      * {@link StorageErrorCode#INVALID_CONFIG}（拒绝清空整个存储根）。
      *

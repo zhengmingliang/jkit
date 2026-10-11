@@ -50,6 +50,18 @@ public class LocalFileStorageTest {
     }
 
     @Test
+    public void absolutePathJoinsBasePath() throws Exception {
+        Path root = Files.createTempDirectory("jkit-local-test");
+        try {
+            FileStorage local = newStorage(root);
+            assertEquals(root.toString() + "/demo/a.txt", local.absolutePathOf("demo/a.txt"));
+            assertEquals(root.toString(), local.absolutePathOf(""));
+        } finally {
+            deleteRecursively(root);
+        }
+    }
+
+    @Test
     public void mkdirRenameCopyWalkAndDeleteDir() throws Exception {
         Path root = Files.createTempDirectory("jkit-local-test");
         try {

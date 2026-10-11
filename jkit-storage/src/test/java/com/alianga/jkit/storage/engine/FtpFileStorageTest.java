@@ -104,6 +104,32 @@ public class FtpFileStorageTest {
     }
 
     @Test
+    public void absolutePathMapsToServerRootWhenBasePathMissing() {
+        FileStorage storage = new FtpFileStorage(StorageConfig.empty()
+                .set("host", "127.0.0.1")
+                .set("port", String.valueOf(server.port()))
+                .set("user", "test")
+                .set("password", "secret"));
+        try {
+            assertEquals("basePath 未配置时存储根即服务器根 /",
+                    "/docs/a.txt", storage.absolutePathOf("docs/a.txt"));
+            assertEquals("/", storage.absolutePathOf(""));
+        } finally {
+            storage.close();
+        }
+    }
+
+    @Test
+    public void absolutePathHonorsConfiguredBasePath() {
+        FileStorage storage = new FtpFileStorage(config("case-abspath"));
+        try {
+            assertEquals("/case-abspath/files/blob", storage.absolutePathOf("files/blob"));
+        } finally {
+            storage.close();
+        }
+    }
+
+    @Test
     public void uploadAndDownloadKeepsBytesConsistent() {
         FileStorage storage = newStorage("case-transfer");
         byte[] data = patternBytes(512 * 1024);

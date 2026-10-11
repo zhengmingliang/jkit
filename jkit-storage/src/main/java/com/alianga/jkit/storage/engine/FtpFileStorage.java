@@ -34,7 +34,9 @@ import java.util.regex.Pattern;
  * 连接复用（连接异常后自动重建并重新登录）、MLSD 机器格式列表（服务器不支持时
  * 回退 {@code LIST -la}，兼容 Unix {@code ls -l} 与 Windows IIS 两种文本格式）、
  * SIZE/MDTM 元数据、RNFR/RNTO 原生重命名（对目录同样有效）。所有对象路径统一
- * 挂在 basePath（登录主目录之下）读写。</p>
+ * 映射到服务器端<b>绝对路径</b>：basePath 为空或 {@code /} 时挂服务器根目录
+ * {@code /}（登录家目录请显式填 {@code /home/用户名} 或类似路径），配置了
+ * basePath 则强制绝对化后挂其下。</p>
  *
  * <p>限制：不支持 FTPS/TLS；单实例共用一条控制连接，并发安全由内部锁保证；
  * copy 以「下载到内存 + 重新上传」实现，超大文件请注意内存占用。</p>
@@ -53,7 +55,8 @@ public class FtpFileStorage implements FileStorage {
     private final String password;
     private final boolean passive;
     private final Charset charset;
-    private final String basePath;
+    /** 服务器端绝对根目录：basePath 为空 / {@code /} 时为 {@code /}，否则强制绝对化。 */
+    private final String root;
     private final Object lock = new Object();
     private FtpClient client;
 
@@ -68,7 +71,7 @@ public class FtpFileStorage implements FileStorage {
         this.user = config.getOr("user", "");
         this.password = config.getOr("password", "");
         this.passive = config.boolOr("passive", true);
-        this.basePath = StoragePaths.normalize(config.getOr("basePath", "/"));
+        this.root = rootOf(config.getOr("basePath", "/"));
         this.charset = resolveCharset(config.getOr("encoding", "UTF-8"));
     }
 
@@ -148,7 +151,7 @@ public class FtpFileStorage implements FileStorage {
         String source = requireFile(src);
         String target = requireFile(dst);
         execute(target, ftp -> {
-            if (ftp.command("CWD " + remoteOf(ftp, source)).code() == 250) {
+            if (ftp.command("CWD " + remoteOf(source)).code() == 250) {
                 copyDir(ftp, source, target);
             } else {
                 copyFile(ftp, source, target);
@@ -175,14 +178,14 @@ public class FtpFileStorage implements FileStorage {
     }
 
     private boolean existsInternal(FtpClient ftp, String normalized) throws IOException {
-        if (ftp.command("CWD " + remoteOf(ftp, normalized)).code() == 250) {
+        if (ftp.command("CWD " + remoteOf(normalized)).code() == 250) {
             return true;
         }
-        return ftp.command("SIZE " + remoteOf(ftp, normalized)).code() == 213;
+        return ftp.command("SIZE " + remoteOf(normalized)).code() == 213;
     }
 
     private StorageEntry statInternal(FtpClient ftp, String normalized) throws IOException {
-        String remote = remoteOf(ftp, normalized);
+        String remote = remoteOf(normalized);
         FtpClient.Reply sizeReply = ftp.command("SIZE " + remote);
         if (sizeReply.code() == 213) {
             long size = parseLongSafely(sizeReply.text().trim(), StorageEntry.SIZE_UNKNOWN);
@@ -197,10 +200,10 @@ public class FtpFileStorage implements FileStorage {
     private List<StorageEntry> listInternal(FtpClient ftp, String normalized) throws IOException {
         List<StorageEntry> entries = null;
         if (ftp.isMlsdSupported()) {
-            entries = transferListing(ftp, "MLSD " + remoteOf(ftp, normalized), normalized, true);
+            entries = transferListing(ftp, "MLSD " + remoteOf(normalized), normalized, true);
         }
         if (entries == null) {
-            entries = transferListing(ftp, "LIST -la " + remoteOf(ftp, normalized), normalized, false);
+            entries = transferListing(ftp, "LIST -la " + remoteOf(normalized), normalized, false);
         }
         return entries;
     }
@@ -240,21 +243,21 @@ public class FtpFileStorage implements FileStorage {
         if (normalized.isEmpty()) {
             return;
         }
-        FtpClient.Reply reply = ftp.command("MKD " + remoteOf(ftp, normalized));
+        FtpClient.Reply reply = ftp.command("MKD " + remoteOf(normalized));
         if (reply.isPositive()) {
             return;
         }
-        if (ftp.command("CWD " + remoteOf(ftp, normalized)).code() == 250) {
+        if (ftp.command("CWD " + remoteOf(normalized)).code() == 250) {
             return;
         }
         String parent = StoragePaths.parent(normalized);
-        if (!parent.isEmpty() && ftp.command("CWD " + remoteOf(ftp, parent)).code() != 250) {
+        if (!parent.isEmpty() && ftp.command("CWD " + remoteOf(parent)).code() != 250) {
             mkdirInternal(ftp, parent);
-            if (ftp.command("MKD " + remoteOf(ftp, normalized)).isPositive()) {
+            if (ftp.command("MKD " + remoteOf(normalized)).isPositive()) {
                 return;
             }
         }
-        if (ftp.command("SIZE " + remoteOf(ftp, normalized)).code() == 213) {
+        if (ftp.command("SIZE " + remoteOf(normalized)).code() == 213) {
             throw StorageException.conflict("同名文件已存在，无法创建目录: " + normalized, normalized);
         }
         throw StorageException.conflict(
@@ -263,10 +266,10 @@ public class FtpFileStorage implements FileStorage {
 
     private void storeInternal(FtpClient ftp, String normalized, InputStream in) throws IOException {
         String parent = StoragePaths.parent(normalized);
-        if (!parent.isEmpty() && ftp.command("CWD " + remoteOf(ftp, parent)).code() != 250) {
+        if (!parent.isEmpty() && ftp.command("CWD " + remoteOf(parent)).code() != 250) {
             mkdirInternal(ftp, parent);
         }
-        Socket data = ftp.startTransfer("STOR " + remoteOf(ftp, normalized));
+        Socket data = ftp.startTransfer("STOR " + remoteOf(normalized));
         if (data == null) {
             throw mapReply(ftp.lastReply(), normalized, "上传");
         }
@@ -281,7 +284,7 @@ public class FtpFileStorage implements FileStorage {
     }
 
     private void retrieveInternal(FtpClient ftp, String normalized, OutputStream out) throws IOException {
-        Socket data = ftp.startTransfer("RETR " + remoteOf(ftp, normalized));
+        Socket data = ftp.startTransfer("RETR " + remoteOf(normalized));
         if (data == null) {
             throw mapReply(ftp.lastReply(), normalized, "下载");
         }
@@ -299,7 +302,7 @@ public class FtpFileStorage implements FileStorage {
      * 目标不存在则幂等返回。
      */
     private void deleteInternal(FtpClient ftp, String normalized) throws IOException {
-        String remote = remoteOf(ftp, normalized);
+        String remote = remoteOf(normalized);
         FtpClient.Reply reply = ftp.command("DELE " + remote);
         if (reply.isPositive()) {
             return;
@@ -318,15 +321,15 @@ public class FtpFileStorage implements FileStorage {
     }
 
     private void renameInternal(FtpClient ftp, String source, String target) throws IOException {
-        FtpClient.Reply from = ftp.command("RNFR " + remoteOf(ftp, source));
+        FtpClient.Reply from = ftp.command("RNFR " + remoteOf(source));
         if (from.code() != 350) {
             throw mapReply(from, source, "重命名源");
         }
-        FtpClient.Reply to = ftp.command("RNTO " + remoteOf(ftp, target));
+        FtpClient.Reply to = ftp.command("RNTO " + remoteOf(target));
         if (to.isPositive()) {
             return;
         }
-        String targetRemote = remoteOf(ftp, target);
+        String targetRemote = remoteOf(target);
         if (ftp.command("SIZE " + targetRemote).code() == 213
                 || ftp.command("CWD " + targetRemote).code() == 250) {
             throw StorageException.conflict("目标已存在且无法覆盖: " + target, target);
@@ -362,23 +365,29 @@ public class FtpFileStorage implements FileStorage {
         return parseFtpTimestamp(reply.text());
     }
 
+    @Override
+    public String absolutePathOf(String path) {
+        return remoteOf(StoragePaths.normalize(path));
+    }
+
+    /** 存储内相对路径 → 服务器绝对路径；根目录即 {@code /}。 */
+    private String remoteOf(String normalized) {
+        if (normalized.isEmpty()) {
+            return root;
+        }
+        return root.endsWith("/") ? root + normalized : root + "/" + normalized;
+    }
+
     /**
-     * 拼出远端绝对路径：登录主目录 + basePath + 相对路径；basePath 为空时
-     * 直接挂在主目录下，主目录未知时退化为相对路径。
+     * 计算服务器端绝对根：空 / {@code /} → {@code /}；其余值折叠冗余分隔符后
+     * 强制补前导 {@code /}，与 SFTP 引擎保持同一套根目录语义。
      */
-    private String remoteOf(FtpClient ftp, String normalized) {
-        String joined = StoragePaths.join(basePath, normalized);
-        String home = ftp.home();
-        if (joined.isEmpty()) {
-            return home.isEmpty() ? "." : home;
+    private static String rootOf(String configured) {
+        String trimmed = configured == null ? "" : configured.trim();
+        if (trimmed.isEmpty()) {
+            return "/";
         }
-        if (home.isEmpty()) {
-            return joined;
-        }
-        if ("/".equals(home)) {
-            return "/" + joined;
-        }
-        return home.endsWith("/") ? home + joined : home + "/" + joined;
+        return "/" + StoragePaths.normalize(trimmed);
     }
 
     private FtpClient ensureConnected() throws IOException {

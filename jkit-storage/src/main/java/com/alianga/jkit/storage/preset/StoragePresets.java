@@ -40,7 +40,7 @@ public final class StoragePresets {
                 StorageField.optional("port", "端口", "21", null),
                 StorageField.optional("user", "用户名", null, "匿名登录留空"),
                 StorageField.secret("password", "密码", false),
-                StorageField.optional("basePath", "起始目录", "/", "相对该目录读写"),
+                StorageField.optional("basePath", "起始目录", "/", "留空或 / 从服务器根目录开始；填 /home/xxx 从家目录开始"),
                 StorageField.optional("passive", "被动模式", "true", "内网 / 防火墙环境建议开启"),
                 StorageField.optional("encoding", "控制连接编码", "UTF-8", "部分老服务器需 GBK")));
         platforms.add(new StoragePlatform("sftp", "SFTP", "sftp", "协议",
@@ -56,7 +56,7 @@ public final class StoragePresets {
                 StorageField.required("endpoint", "服务地址", "如 https://dav.example.com/dav"),
                 StorageField.optional("user", "用户名", null, null),
                 StorageField.secret("password", "密码", false),
-                StorageField.optional("basePath", "起始目录", "/", null)));
+                StorageField.optional("basePath", "起始目录", "/", "留空或 / 从服务器根目录开始；填 /home/xxx 从家目录开始")));
         platforms.add(s3("amazon-s3", "Amazon S3", "https://s3.us-east-1.amazonaws.com",
                 "公有云", "1"));
         platforms.add(s3("amazon-s3-v2", "Amazon S3（V2 列表）", "https://s3.us-east-1.amazonaws.com",

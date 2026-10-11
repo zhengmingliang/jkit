@@ -55,6 +55,12 @@ public class LocalFileStorage implements FileStorage {
     }
 
     @Override
+    public String absolutePathOf(String path) {
+        String normalized = StoragePaths.normalize(path);
+        return normalized.isEmpty() ? base.toString() : base.resolve(normalized).toString();
+    }
+
+    @Override
     public boolean exists(String path) {
         return Files.exists(resolve(path));
     }

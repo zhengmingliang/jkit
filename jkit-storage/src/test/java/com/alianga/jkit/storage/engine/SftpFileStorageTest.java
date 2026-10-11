@@ -48,6 +48,38 @@ public class SftpFileStorageTest {
     }
 
     @Test
+    public void absolutePathMapsToServerRootWhenBasePathMissing() throws IOException {
+        SftpFileStorage storage = new SftpFileStorage(StorageConfig.empty()
+                .set("host", "127.0.0.1").set("user", "test"));
+        try {
+            assertEquals("basePath 未配置时存储根即服务器根 /",
+                    "/docs/a.txt", storage.absolutePathOf("docs/a.txt"));
+            assertEquals("/", storage.absolutePathOf(""));
+            assertEquals("/", storage.absolutePathOf("/"));
+        } finally {
+            storage.close();
+        }
+    }
+
+    @Test
+    public void absolutePathHonorsConfiguredBasePath() throws IOException {
+        SftpFileStorage storage = new SftpFileStorage(StorageConfig.empty()
+                .set("host", "127.0.0.1").set("user", "test")
+                .set("basePath", "/data/backup"));
+        SftpFileStorage messy = new SftpFileStorage(StorageConfig.empty()
+                .set("host", "127.0.0.1").set("user", "test")
+                .set("basePath", "/data//tmp/"));
+        try {
+            assertEquals("/data/backup/docs", storage.absolutePathOf("docs"));
+            assertEquals("/data/backup", storage.absolutePathOf(""));
+            assertEquals("冗余分隔符与尾随 / 折叠后强制绝对", "/data/tmp/a", messy.absolutePathOf("a"));
+        } finally {
+            storage.close();
+            messy.close();
+        }
+    }
+
+    @Test
     public void firstOperationFailsWithoutServer() throws IOException {
         SftpFileStorage storage = new SftpFileStorage(config());
         try {
