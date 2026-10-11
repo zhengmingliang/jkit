@@ -28,6 +28,9 @@ public final class SyncOptions {
     private Predicate<String> filter;
     private SyncCancel cancelToken;
     private boolean preserveMtime = true;
+    private Direction direction = Direction.ONE_WAY;
+    private ConflictPolicy conflictPolicy = ConflictPolicy.NEWER_WINS;
+    private SyncConflictListener conflictListener;
 
     private SyncOptions() {
     }
@@ -153,6 +156,66 @@ public final class SyncOptions {
     }
 
     /**
+     * 设置同步方向（默认单向）。
+     *
+     * @param direction 方向
+     * @return 自身
+     */
+    public SyncOptions direction(Direction direction) {
+        this.direction = direction == null ? Direction.ONE_WAY : direction;
+        return this;
+    }
+
+    /**
+     * 设置双向同步的冲突策略（默认新者胜，单向同步不使用）。
+     *
+     * @param policy 冲突策略
+     * @return 自身
+     */
+    public SyncOptions conflictPolicy(ConflictPolicy policy) {
+        this.conflictPolicy = policy == null ? ConflictPolicy.NEWER_WINS : policy;
+        return this;
+    }
+
+    /**
+     * 设置冲突回调（可为 null）：双向同步中每个冲突文件被处理时触发，UI 日志用。
+     *
+     * @param listener 冲突回调
+     * @return 自身
+     */
+    public SyncOptions conflictListener(SyncConflictListener listener) {
+        this.conflictListener = listener;
+        return this;
+    }
+
+    /**
+     * 当前同步方向。
+     *
+     * @return 方向
+     */
+    public Direction direction() {
+        return direction;
+    }
+
+    /**
+     * 当前冲突策略。
+     *
+     * @return 策略
+     */
+    public ConflictPolicy conflictPolicy() {
+        return conflictPolicy;
+    }
+
+    /**
+     * 当前冲突回调。
+     *
+     * @return 回调，可能为 null
+     */
+    public SyncConflictListener conflictListener() {
+        return conflictListener;
+    }
+
+    /**
      * 当前取消令牌。
      *
      * @return 令牌，可能为 null
@@ -209,6 +272,10 @@ public final class SyncOptions {
     public String toString() {
         List<String> parts = new ArrayList<String>();
         parts.add("mode=" + compareMode);
+        if (direction == Direction.BIDIRECTIONAL) {
+            parts.add("bidirectional");
+            parts.add("conflict=" + conflictPolicy);
+        }
         if (mirror) {
             parts.add("mirror");
         }

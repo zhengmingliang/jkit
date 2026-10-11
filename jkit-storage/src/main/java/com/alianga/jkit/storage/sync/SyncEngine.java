@@ -18,7 +18,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * 同步引擎：跨任意两个存储平台做内容对比、增量同步、镜像同步与全量迁移。
+ * 同步引擎：跨任意两个存储平台做内容对比、增量同步、镜像同步与全量迁移，
+ * 并支持双向同步（两侧互为补充 + 冲突策略）。
  *
  * <pre>{@code
  * FileStorage source = FileStorages.of("local", ...);
@@ -27,10 +28,12 @@ import java.util.concurrent.atomic.AtomicLong;
  *         SyncOptions.incremental(), progressListener);
  * }</pre>
  *
- * <p>语义：以「相对路径」对齐两侧；复制前自动在目标端创建缺失的父目录；
+ * <p>单向语义：以「相对路径」对齐两侧；复制前自动在目标端创建缺失的父目录；
  * 镜像模式删除目标端多余文件与多余目录（目录在全部文件处理完后按深路径
  * 在前删除）。对比策略见 {@link CompareMode}；执行并发可配，回调见
  * {@link SyncProgress}。</p>
+ *
+ * <p>双向语义见 {@link #syncBidirectional}。</p>
  *
  * @author 郑明亮
  */
@@ -76,6 +79,9 @@ public final class SyncEngine {
     /**
      * 执行同步：把 source/sourceDir 增量或全量同步到 target/targetDir。
      *
+     * <p>options 指定 {@link Direction#BIDIRECTIONAL} 时走双向同步：两侧互为补充，
+     * 缺失侧补齐，同名且不一致的文件按 {@link SyncOptions#conflictPolicy()} 处理。</p>
+     *
      * @param source    源存储
      * @param sourceDir 源目录
      * @param target    目标存储
@@ -87,6 +93,9 @@ public final class SyncEngine {
     public static SyncResult sync(FileStorage source, String sourceDir, FileStorage target,
                                   String targetDir, SyncOptions options, SyncProgress progress) {
         SyncOptions opts = options == null ? SyncOptions.incremental() : options;
+        if (opts.direction() == Direction.BIDIRECTIONAL) {
+            return syncBidirectional(source, sourceDir, target, targetDir, opts, progress);
+        }
         Map<String, StorageEntry> sourceFiles = filesOf(source, sourceDir);
         Map<String, StorageEntry> targetFiles = filesOf(target, targetDir);
 
@@ -152,7 +161,7 @@ public final class SyncEngine {
                 if (aborted.get() || cancelled(opts)) {
                     break;
                 }
-                copyOne(source, sourceDir, target, targetDir, relative, opts, progress,
+                copyOne(source, sourceDir, target, targetDir, relative, relative, opts, progress,
                         copied, failed, bytes, errors, aborted);
             }
             for (String relative : toDelete) {
@@ -180,6 +189,199 @@ public final class SyncEngine {
         return opts.cancelToken() != null && opts.cancelToken().isCancelled();
     }
 
+    /**
+     * 双向同步：两侧互为补充。仅一侧存在的文件复制到对侧；两侧都在但判定不同
+     * （复用 {@link #isSame}）的文件按冲突策略处理。双向模式不执行镜像删除：
+     * 补齐阶段本来就会把两侧独有文件互拷，无法区分「新增」与「对端已删除」，
+     * 删除语义需要墓碑状态才安全，暂不实现（{@code mirror(true)} 被忽略）。
+     */
+    private static SyncResult syncBidirectional(FileStorage left, String leftDir,
+                                                FileStorage right, String rightDir,
+                                                SyncOptions opts, SyncProgress progress) {
+        Map<String, StorageEntry> leftFiles = filesOf(left, leftDir);
+        Map<String, StorageEntry> rightFiles = filesOf(right, rightDir);
+
+        List<String> leftToRight = new ArrayList<String>();
+        List<String> rightToLeft = new ArrayList<String>();
+        List<String> conflictPaths = new ArrayList<String>();
+        long skipped = 0L;
+        long totalBytes = 0L;
+        for (Map.Entry<String, StorageEntry> entry : leftFiles.entrySet()) {
+            if (!opts.accepts(entry.getKey())) {
+                continue;
+            }
+            StorageEntry rightEntry = rightFiles.get(entry.getKey());
+            if (rightEntry == null) {
+                leftToRight.add(entry.getKey());
+                totalBytes += sizeOrZero(entry.getValue());
+            } else if (isSame(entry.getValue(), rightEntry, opts.compareMode())) {
+                skipped++;
+            } else {
+                conflictPaths.add(entry.getKey());
+            }
+        }
+        for (Map.Entry<String, StorageEntry> entry : rightFiles.entrySet()) {
+            if (!opts.accepts(entry.getKey()) || leftFiles.containsKey(entry.getKey())) {
+                continue;
+            }
+            rightToLeft.add(entry.getKey());
+            totalBytes += sizeOrZero(entry.getValue());
+        }
+
+        long totalActions = leftToRight.size() + rightToLeft.size() + conflictPaths.size();
+        if (progress != null) {
+            progress.onStart(totalActions, totalBytes);
+        }
+        if (opts.isDryRun()) {
+            return new SyncResult(leftToRight.size() + rightToLeft.size(), skipped, 0L, 0L,
+                    totalBytes, false, new ArrayList<String>(), conflictPaths.size());
+        }
+
+        // 双侧都要能接收对方的文件（含冲突副本名），先把缺失的父目录补齐
+        if (!leftToRight.isEmpty() || !conflictPaths.isEmpty()) {
+            prepareDirs(left, leftDir, right, rightDir, opts, progress);
+        }
+        if (!rightToLeft.isEmpty() || !conflictPaths.isEmpty()) {
+            prepareDirs(right, rightDir, left, leftDir, opts, progress);
+        }
+
+        AtomicLong copied = new AtomicLong();
+        AtomicLong deleted = new AtomicLong();
+        AtomicLong failed = new AtomicLong();
+        AtomicLong bytes = new AtomicLong();
+        AtomicLong conflicts = new AtomicLong();
+        AtomicBoolean aborted = new AtomicBoolean();
+        List<String> errors = java.util.Collections.synchronizedList(new ArrayList<String>());
+
+        List<String> noDeletes = new ArrayList<String>();
+        if (!leftToRight.isEmpty()) {
+            runParallel(opts, left, leftDir, right, rightDir, leftToRight, noDeletes, noDeletes,
+                    progress, copied, deleted, failed, bytes, errors, aborted);
+        }
+        if (!rightToLeft.isEmpty()) {
+            runParallel(opts, right, rightDir, left, leftDir, rightToLeft, noDeletes, noDeletes,
+                    progress, copied, deleted, failed, bytes, errors, aborted);
+        }
+        for (String relative : conflictPaths) {
+            if (aborted.get() || cancelled(opts)) {
+                break;
+            }
+            resolveConflict(left, leftDir, right, rightDir, relative,
+                    leftFiles.get(relative), rightFiles.get(relative), opts, progress,
+                    copied, failed, bytes, conflicts, errors, aborted);
+        }
+        boolean abortedFinal = aborted.get() || cancelled(opts);
+        return new SyncResult(copied.get(), skipped, deleted.get(), failed.get(), bytes.get(),
+                abortedFinal, errors, conflicts.get());
+    }
+
+    /**
+     * 处理单个冲突文件：按策略覆盖或保留双份，冲突计数与回调在成功处理后触发。
+     */
+    private static void resolveConflict(FileStorage left, String leftDir, FileStorage right,
+                                        String rightDir, String relative, StorageEntry leftEntry,
+                                        StorageEntry rightEntry, SyncOptions opts,
+                                        SyncProgress progress, AtomicLong copied, AtomicLong failed,
+                                        AtomicLong bytes, AtomicLong conflicts, List<String> errors,
+                                        AtomicBoolean aborted) {
+        try {
+            ConflictPolicy policy = opts.conflictPolicy();
+            String action;
+            String detail;
+            if (policy == ConflictPolicy.LEFT_WINS) {
+                copyOne(left, leftDir, right, rightDir, relative, relative, opts, progress,
+                        copied, failed, bytes, errors, aborted);
+                action = "left-wins";
+                detail = "以左侧为准";
+            } else if (policy == ConflictPolicy.RIGHT_WINS) {
+                copyOne(right, rightDir, left, leftDir, relative, relative, opts, progress,
+                        copied, failed, bytes, errors, aborted);
+                action = "right-wins";
+                detail = "以右侧为准";
+            } else if (policy == ConflictPolicy.KEEP_BOTH) {
+                String stamp = conflictTimestamp();
+                keepBoth(left, leftDir, right, rightDir, relative,
+                        "conflict-left-" + stamp, "conflict-right-" + stamp,
+                        opts, progress, copied, failed, bytes, errors, aborted);
+                action = "keep-both";
+                detail = "双方版本各自保留，对方版本以 conflict 副本名存放";
+            } else {
+                long leftMtime = leftEntry.lastModified();
+                long rightMtime = rightEntry.lastModified();
+                if (leftMtime != StorageEntry.MTIME_UNKNOWN
+                        && rightMtime != StorageEntry.MTIME_UNKNOWN
+                        && leftMtime != rightMtime) {
+                    boolean leftNewer = leftMtime > rightMtime;
+                    if (leftNewer) {
+                        copyOne(left, leftDir, right, rightDir, relative, relative, opts, progress,
+                                copied, failed, bytes, errors, aborted);
+                    } else {
+                        copyOne(right, rightDir, left, leftDir, relative, relative, opts, progress,
+                                copied, failed, bytes, errors, aborted);
+                    }
+                    action = leftNewer ? "left-wins" : "right-wins";
+                    detail = "新者胜：左 " + leftMtime + " / 右 " + rightMtime;
+                } else {
+                    String stamp = conflictTimestamp();
+                    keepBoth(left, leftDir, right, rightDir, relative,
+                            "conflict-" + stamp, "conflict-" + stamp,
+                            opts, progress, copied, failed, bytes, errors, aborted);
+                    action = "keep-both";
+                    detail = "修改时间未知或相等，无法判定新旧，保留双份";
+                }
+            }
+            conflicts.incrementAndGet();
+            SyncConflictListener listener = opts.conflictListener();
+            if (listener != null) {
+                listener.onConflict(relative, action, detail);
+            }
+            if (progress != null) {
+                progress.onFileDone(relative, 0L, "conflict");
+            }
+        } catch (Exception e) {
+            failed.incrementAndGet();
+            errors.add(relative + ": " + e.getMessage());
+            if (progress != null) {
+                progress.onFileError(relative, e);
+            }
+            if (failed.get() >= opts.maxErrors()) {
+                aborted.set(true);
+            }
+        }
+    }
+
+    /** 保留双份：对方版本以 conflict 副本名复制过来，本侧原文件原地不动。 */
+    private static void keepBoth(FileStorage left, String leftDir, FileStorage right,
+                                 String rightDir, String relative, String leftSuffix,
+                                 String rightSuffix, SyncOptions opts, SyncProgress progress,
+                                 AtomicLong copied, AtomicLong failed, AtomicLong bytes,
+                                 List<String> errors, AtomicBoolean aborted) {
+        copyOne(left, leftDir, right, rightDir, relative, conflictedName(relative, leftSuffix),
+                opts, progress, copied, failed, bytes, errors, aborted);
+        copyOne(right, rightDir, left, leftDir, relative, conflictedName(relative, rightSuffix),
+                opts, progress, copied, failed, bytes, errors, aborted);
+    }
+
+    /** 冲突副本名：xxx.txt → xxx.<suffix>.txt（无扩展名的原样追加）。 */
+    private static String conflictedName(String relative, String suffix) {
+        int slash = relative.lastIndexOf('/');
+        String dir = slash < 0 ? "" : relative.substring(0, slash + 1);
+        String name = slash < 0 ? relative : relative.substring(slash + 1);
+        int dot = name.lastIndexOf('.');
+        String stem = dot > 0 ? name.substring(0, dot) : name;
+        String ext = dot > 0 ? name.substring(dot) : "";
+        return dir + stem + "." + suffix + ext;
+    }
+
+    private static String conflictTimestamp() {
+        return new java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US)
+                .format(new java.util.Date());
+    }
+
+    private static long sizeOrZero(StorageEntry entry) {
+        return entry.size() < 0 ? 0L : entry.size();
+    }
+
     private static void runParallel(SyncOptions opts, FileStorage source, String sourceDir,
                                     FileStorage target, String targetDir, List<String> toCopy,
                                     List<String> toDelete, List<String> toDeleteDirs,
@@ -197,8 +399,8 @@ public final class SyncEngine {
                         if (aborted.get() || cancelled(opts)) {
                             return;
                         }
-                        copyOne(source, sourceDir, target, targetDir, relative, opts, progress,
-                                copied, failed, bytes, errors, aborted);
+                        copyOne(source, sourceDir, target, targetDir, relative, relative, opts,
+                                progress, copied, failed, bytes, errors, aborted);
                     }
                 }));
             }
@@ -250,9 +452,10 @@ public final class SyncEngine {
     private static final long MEMORY_LIMIT = 32L * 1024L * 1024L;
 
     private static void copyOne(FileStorage source, String sourceDir, FileStorage target,
-                                String targetDir, String relative, SyncOptions opts,
-                                SyncProgress progress, AtomicLong copied, AtomicLong failed,
-                                AtomicLong bytes, List<String> errors, AtomicBoolean aborted) {
+                                String targetDir, String relative, String targetRelative,
+                                SyncOptions opts, SyncProgress progress, AtomicLong copied,
+                                AtomicLong failed, AtomicLong bytes, List<String> errors,
+                                AtomicBoolean aborted) {
         java.nio.file.Path temp = null;
         try {
             StorageEntry entry = source.stat(StoragePaths.join(sourceDir, relative));
@@ -264,11 +467,11 @@ public final class SyncEngine {
                 }
                 try (java.io.InputStream fileIn = java.nio.file.Files.newInputStream(temp)) {
                     if (opts.isPreserveMtime() && entry.lastModified() != StorageEntry.MTIME_UNKNOWN) {
-                        target.upload(StoragePaths.join(targetDir, relative), fileIn,
+                        target.upload(StoragePaths.join(targetDir, targetRelative), fileIn,
                                 java.nio.file.Files.size(temp),
                                 com.alianga.jkit.storage.UploadMetadata.mtime(entry.lastModified()));
                     } else {
-                        target.upload(StoragePaths.join(targetDir, relative), fileIn,
+                        target.upload(StoragePaths.join(targetDir, targetRelative), fileIn,
                                 java.nio.file.Files.size(temp));
                     }
                 }
@@ -279,10 +482,10 @@ public final class SyncEngine {
                 source.download(StoragePaths.join(sourceDir, relative), buffer);
                 byte[] data = buffer.toByteArray();
                 if (opts.isPreserveMtime() && entry.lastModified() != StorageEntry.MTIME_UNKNOWN) {
-                    target.upload(StoragePaths.join(targetDir, relative), data,
+                    target.upload(StoragePaths.join(targetDir, targetRelative), data,
                             com.alianga.jkit.storage.UploadMetadata.mtime(entry.lastModified()));
                 } else {
-                    target.upload(StoragePaths.join(targetDir, relative), data);
+                    target.upload(StoragePaths.join(targetDir, targetRelative), data);
                 }
                 bytes.addAndGet(data.length);
             }

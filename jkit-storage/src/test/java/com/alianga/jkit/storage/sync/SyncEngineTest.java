@@ -3,6 +3,7 @@ package com.alianga.jkit.storage.sync;
 import com.alianga.jkit.storage.FileStorage;
 import com.alianga.jkit.storage.FileStorages;
 import com.alianga.jkit.storage.StorageConfig;
+import com.alianga.jkit.storage.StorageEntry;
 
 import org.junit.After;
 import org.junit.Before;
@@ -208,6 +209,113 @@ public class SyncEngineTest {
                 SyncOptions.incremental().preserveMtime(false), null);
         assertTrue(Files.getLastModifiedTime(targetRoot.resolve("now.txt")).toMillis()
                 > System.currentTimeMillis() - 60_000L);
+    }
+
+    @Test
+    public void bidirectionalFillsMissingSides() {
+        source.upload("only-left.txt", "L".getBytes(StandardCharsets.UTF_8));
+        target.upload("only-right.txt", "R".getBytes(StandardCharsets.UTF_8));
+        SyncResult dry = SyncEngine.sync(source, "", target, "",
+                SyncOptions.incremental().direction(Direction.BIDIRECTIONAL).dryRun(true), null);
+        assertEquals(2L, dry.copied());
+        assertEquals(0L, dry.conflicts());
+        assertFalse(target.exists("only-left.txt"));
+        assertFalse(source.exists("only-right.txt"));
+
+        SyncResult result = SyncEngine.sync(source, "", target, "",
+                SyncOptions.incremental().direction(Direction.BIDIRECTIONAL), null);
+        assertEquals(2L, result.copied());
+        assertEquals(0L, result.conflicts());
+        assertEquals("L", target.readString("only-left.txt"));
+        assertEquals("R", source.readString("only-right.txt"));
+    }
+
+    @Test
+    public void bidirectionalNewerWins() throws Exception {
+        source.upload("doc.txt", "old".getBytes(StandardCharsets.UTF_8));
+        target.upload("doc.txt", "new-content".getBytes(StandardCharsets.UTF_8));
+        java.nio.file.attribute.FileTime older =
+                java.nio.file.attribute.FileTime.fromMillis(1_000_000_000_000L);
+        java.nio.file.attribute.FileTime newer =
+                java.nio.file.attribute.FileTime.fromMillis(2_000_000_000_000L);
+        Files.setLastModifiedTime(sourceRoot.resolve("doc.txt"), older);
+        Files.setLastModifiedTime(targetRoot.resolve("doc.txt"), newer);
+        final List<String> actions = new java.util.ArrayList<String>();
+        SyncResult result = SyncEngine.sync(source, "", target, "",
+                SyncOptions.incremental().direction(Direction.BIDIRECTIONAL)
+                        .conflictListener((path, action, detail) -> actions.add(action)), null);
+        assertEquals(1L, result.conflicts());
+        assertEquals(1, actions.size());
+        assertEquals("right-wins", actions.get(0));
+        assertEquals("新者覆盖旧者", "new-content", source.readString("doc.txt"));
+        assertEquals("new-content", target.readString("doc.txt"));
+        assertEquals("胜者 mtime 保留到败方", newer.toMillis(),
+                Files.getLastModifiedTime(sourceRoot.resolve("doc.txt")).toMillis());
+    }
+
+    @Test
+    public void bidirectionalEqualMtimeFallsBackToKeepBoth() throws Exception {
+        source.upload("doc.txt", "left-version".getBytes(StandardCharsets.UTF_8));
+        target.upload("doc.txt", "right-version-long".getBytes(StandardCharsets.UTF_8));
+        java.nio.file.attribute.FileTime same =
+                java.nio.file.attribute.FileTime.fromMillis(1_500_000_000_000L);
+        Files.setLastModifiedTime(sourceRoot.resolve("doc.txt"), same);
+        Files.setLastModifiedTime(targetRoot.resolve("doc.txt"), same);
+        SyncResult result = SyncEngine.sync(source, "", target, "",
+                SyncOptions.incremental().direction(Direction.BIDIRECTIONAL), null);
+        assertEquals(1L, result.conflicts());
+        assertEquals("无法判定新旧，各自原文件不动", "left-version", source.readString("doc.txt"));
+        assertEquals("right-version-long", target.readString("doc.txt"));
+        assertEquals("对端版本以冲突副本名保留", "right-version-long",
+                conflictCopy(source, "doc.txt", "doc.conflict-"));
+        assertEquals("left-version", conflictCopy(target, "doc.txt", "doc.conflict-"));
+    }
+
+    @Test
+    public void bidirectionalKeepBothRenames() {
+        source.upload("a.txt", "LEFT".getBytes(StandardCharsets.UTF_8));
+        target.upload("a.txt", "RIGHT-VERSION".getBytes(StandardCharsets.UTF_8));
+        SyncResult result = SyncEngine.sync(source, "", target, "",
+                SyncOptions.incremental().direction(Direction.BIDIRECTIONAL)
+                        .conflictPolicy(ConflictPolicy.KEEP_BOTH), null);
+        assertEquals(1L, result.conflicts());
+        assertEquals("LEFT", source.readString("a.txt"));
+        assertEquals("RIGHT-VERSION", target.readString("a.txt"));
+        assertEquals("左侧版本以 conflict-left 副本名存到右端", "LEFT",
+                conflictCopy(target, "a.txt", "a.conflict-left-"));
+        assertEquals("右侧版本以 conflict-right 副本名存到左端", "RIGHT-VERSION",
+                conflictCopy(source, "a.txt", "a.conflict-right-"));
+    }
+
+    @Test
+    public void bidirectionalLeftWinsOverwrites() throws Exception {
+        source.upload("b.txt", "FROM-LEFT".getBytes(StandardCharsets.UTF_8));
+        target.upload("b.txt", "x-longer-right".getBytes(StandardCharsets.UTF_8));
+        java.nio.file.attribute.FileTime mtime =
+                java.nio.file.attribute.FileTime.fromMillis(1_000_000_000_000L);
+        Files.setLastModifiedTime(sourceRoot.resolve("b.txt"), mtime);
+        SyncResult result = SyncEngine.sync(source, "", target, "",
+                SyncOptions.incremental().direction(Direction.BIDIRECTIONAL)
+                        .conflictPolicy(ConflictPolicy.LEFT_WINS), null);
+        assertEquals(1L, result.conflicts());
+        assertEquals("FROM-LEFT", source.readString("b.txt"));
+        assertEquals("FROM-LEFT", target.readString("b.txt"));
+        assertEquals("目标 meta 保留胜者 mtime", mtime.toMillis(),
+                Files.getLastModifiedTime(targetRoot.resolve("b.txt")).toMillis());
+    }
+
+    /** 在 side 根目录找以 prefix 开头的冲突副本并读出内容（恰好一个）。 */
+    private static String conflictCopy(FileStorage side, String original, String prefix) {
+        List<StorageEntry> matches = new java.util.ArrayList<StorageEntry>();
+        for (StorageEntry entry : side.list("")) {
+            String name = entry.name();
+            if (name.startsWith(prefix) && name.endsWith(
+                    original.substring(original.lastIndexOf('.') + 1))) {
+                matches.add(entry);
+            }
+        }
+        assertEquals("应恰好一个冲突副本 " + prefix, 1, matches.size());
+        return side.readString(matches.get(0).path());
     }
 
     @Test
