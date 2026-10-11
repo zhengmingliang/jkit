@@ -592,9 +592,9 @@ public class S3FileStorage implements FileStorage {
                     ? AwsSigners.sha256Hex(body) : AwsSigners.UNSIGNED_PAYLOAD;
             headers.put("x-amz-date", amzDate);
             headers.put("x-amz-content-sha256", payloadHash);
-            String canonicalPath = Urls.encodePath(pathStyle ? bucket + "/" + key
-                    : (key.isEmpty() ? "" : key));
-            String authorization = AwsSigners.sigV4(method, host, "/" + canonicalPath, query,
+            // 规范 URI 必须与实际请求的路径逐字节一致（不能多出尾斜杠），
+            // 否则真实 S3 服务端按收到的 URI 重算签名必然不匹配
+            String authorization = AwsSigners.sigV4(method, host, urlPath, query,
                     headers, payloadHash, accessKey, secretKey, region, amzDate);
             headers.put("Authorization", authorization);
         } else {

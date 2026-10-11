@@ -60,10 +60,12 @@ public final class AwsSigners {
         for (Map.Entry<String, String> entry : canonicalHeaders.entrySet()) {
             if (signedHeadersBuilder.length() > 0) {
                 signedHeadersBuilder.append(';');
-                canonicalHeaderLines.append('\n');
             }
             signedHeadersBuilder.append(entry.getKey());
-            canonicalHeaderLines.append(entry.getKey()).append(':').append(entry.getValue());
+            // 每行规范头必须以换行结尾：规范请求里最后一个头与 SignedHeaders
+            // 之间要隔一个空行，真实 S3 服务端（AWS/MinIO/RustFS）按此校验签名
+            canonicalHeaderLines.append(entry.getKey()).append(':')
+                    .append(entry.getValue()).append('\n');
         }
         String signedHeaders = signedHeadersBuilder.toString();
 
