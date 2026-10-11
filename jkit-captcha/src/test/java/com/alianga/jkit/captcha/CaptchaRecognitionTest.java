@@ -100,6 +100,114 @@ public class CaptchaRecognitionTest {
     }
 
     @Test
+    public void testAlphaNumberStaysAlphanumeric() throws IOException {
+        File dir = new File("src/test/resources/samples/alpha-number");
+        File[] files = dir.listFiles();
+        Assert.assertNotNull(files);
+        CaptchaRecognizer recognizer = CaptchaRecognizer.createDefault();
+        int seen = 0;
+        for (int i = 0; i < files.length; i++) {
+            if (!files[i].isFile() || !files[i].getName().endsWith(".png")) {
+                continue;
+            }
+            seen++;
+            BufferedImage image = ImageIO.read(files[i]);
+            RecognizeResult result = recognizer.recognize(image, CaptchaType.ALPHANUMERIC);
+            Assert.assertEquals(files[i].getName(), CaptchaType.ALPHANUMERIC, result.getType());
+            String text = result.getText();
+            for (int c = 0; c < text.length(); c++) {
+                char ch = text.charAt(c);
+                Assert.assertTrue(files[i].getName() + " -> " + text,
+                        TemplateBank.ALPHANUMERIC.indexOf(ch) >= 0);
+            }
+        }
+        Assert.assertTrue(seen >= 11);
+    }
+
+    @Test
+    public void testMathSamples() throws IOException {
+        String[] files = {"21+0.jpeg", "22-10.jpeg", "46+33.jpeg", "48+8.jpeg", "48-36.jpeg"};
+        CaptchaRecognizer recognizer = CaptchaRecognizer.createDefault();
+        for (int i = 0; i < files.length; i++) {
+            String stem = files[i].substring(0, files[i].indexOf('.'));
+            int expected = ArithmeticEvaluator.evaluate(stem).result;
+            BufferedImage image = ImageIO.read(new File("src/test/resources/samples/math", files[i]));
+            assertMath(stem, expected, recognizer.recognize(image));
+            assertMath(stem, expected, recognizer.recognize(image, CaptchaType.ARITHMETIC));
+        }
+    }
+
+    private static void assertMath(String stem, int expected, RecognizeResult result) {
+        Assert.assertEquals(result.getText(), stem, result.getExpression());
+        Assert.assertEquals(stem, Integer.valueOf(expected), result.getValue());
+    }
+
+    /**
+     * 未纳入版本库的 easy-captcha 样例。字母图所用字体大小写是同一个字形，按忽略大小写计整串。
+     */
+    @Test
+    public void testUntrackedSamples() throws IOException {
+        CaptchaRecognizer recognizer = CaptchaRecognizer.createDefault();
+        assertPlain(recognizer, "arithmetic", true, false);
+        assertPlain(recognizer, "chinese", false, false);
+        assertPlain(recognizer, "spec", false, true);
+        assertPlain(recognizer, "chinese-gif", false, false);
+        assertPlain(recognizer, "gif", false, true);
+    }
+
+    private static void assertPlain(CaptchaRecognizer recognizer, String group, boolean arithmetic,
+                                    boolean ignoreCase) throws IOException {
+        File dir = new File("src/test/resources/samples", group);
+        File[] files = dir.listFiles();
+        Assert.assertNotNull(dir.getPath(), files);
+        Arrays.sort(files);
+        int seen = 0;
+        int hit = 0;
+        int exact = 0;
+        StringBuilder misses = new StringBuilder();
+        for (int i = 0; i < files.length; i++) {
+            if (!files[i].isFile()) {
+                continue;
+            }
+            String name = files[i].getName();
+            int dot = name.lastIndexOf('.');
+            if (dot <= 0) {
+                continue;
+            }
+            String stem = name.substring(0, dot);
+            String label = stem;
+            if (arithmetic) {
+                int mark = stem.indexOf('=');
+                Assert.assertTrue(name, mark > 0);
+                label = stem.substring(0, mark);
+            }
+            RecognizeResult result = recognizer.recognize(files[i]);
+            boolean correct;
+            if (arithmetic) {
+                ArithmeticEvaluator.Value expected = ArithmeticEvaluator.evaluate(label);
+                correct = expected != null && expected.expression.equals(result.getExpression())
+                        && result.getValue() != null && result.getValue().intValue() == expected.result;
+            } else if (ignoreCase) {
+                correct = label.equalsIgnoreCase(result.getText());
+            } else {
+                correct = label.equals(result.getText());
+            }
+            seen++;
+            if (label.equals(result.getText()) || (arithmetic && label.equals(result.getExpression()))) {
+                exact++;
+            }
+            if (correct) {
+                hit++;
+            } else if (misses.length() < 240) {
+                misses.append(label).append("=>").append(result.getText()).append(' ');
+            }
+        }
+        System.out.println("plain " + group + " " + hit + "/" + seen + " exact " + exact);
+        Assert.assertTrue(group + " files", seen >= 100);
+        Assert.assertTrue(group + " " + hit + "/" + seen + " " + misses, hit * 100 >= seen * 80);
+    }
+
+    @Test
     public void testAccuracy() throws Exception {
         CaptchaRecognizer recognizer = CaptchaRecognizer.createDefault();
         List<Trial> trials = new ArrayList<Trial>();
