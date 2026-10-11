@@ -40,12 +40,13 @@ final class DefaultCaptchaSolver implements CaptchaSolver {
         String alphabet = alphabetFor(type, options, segmented.narrow);
         List<GlyphHit> hits = segmented.halo
                 ? classifyHalo(segmented.glyphs, alphabet)
-                : classify(segmented.glyphs, alphabet, segmented.stroke);
+                : classify(segmented.glyphs, alphabet, segmented.stroke, segmented.narrow);
         String text = textOf(hits);
         if (!segmented.halo && options.getType() == CaptchaType.AUTO && type == CaptchaType.ARITHMETIC
                 && options.getAlphabet() == null && ArithmeticEvaluator.evaluate(text) == null) {
             type = CaptchaType.ALPHANUMERIC;
-            hits = classify(segmented.glyphs, alphabetFor(type, options, segmented.narrow), segmented.stroke);
+            hits = classify(segmented.glyphs, alphabetFor(type, options, segmented.narrow), segmented.stroke,
+                    segmented.narrow);
             text = textOf(hits);
         }
         ArithmeticEvaluator.Value value = ArithmeticEvaluator.evaluate(text);
@@ -136,7 +137,7 @@ final class DefaultCaptchaSolver implements CaptchaSolver {
         return mean;
     }
 
-    private List<GlyphHit> classify(List<RawGlyph> glyphs, String alphabet, boolean stroke) {
+    private List<GlyphHit> classify(List<RawGlyph> glyphs, String alphabet, boolean stroke, boolean specCase) {
         List<RawGlyph> kept = suppressOverlaps(glyphs);
         List<Pick> picks = new ArrayList<Pick>();
         for (int i = 0; i < kept.size(); i++) {
@@ -147,6 +148,9 @@ final class DefaultCaptchaSolver implements CaptchaSolver {
             picks.add(pick);
         }
         adjustCase(picks);
+        if (specCase) {
+            adjustSpecCase(picks);
+        }
         List<GlyphHit> hits = new ArrayList<GlyphHit>();
         for (int i = 0; i < picks.size(); i++) {
             Pick pick = picks.get(i);
@@ -262,6 +266,33 @@ final class DefaultCaptchaSolver implements CaptchaSolver {
                 pick.score = pick.rivalScore;
             }
         }
+    }
+
+    /**
+     * SpecCaptcha 字高约 28，大写顶在 9、高 21，x 高度的小写顶在 14、高 16。
+     * 顶到不了大写线的字母改成小写；x 高度字母的盒子却顶到大写线时改成大写。
+     */
+    private static void adjustSpecCase(List<Pick> picks) {
+        for (int i = 0; i < picks.size(); i++) {
+            Pick pick = picks.get(i);
+            char label = pick.label;
+            int top = pick.glyph.y;
+            int height = pick.glyph.height;
+            if (label >= 'A' && label <= 'Z' && top >= 10) {
+                pick.label = (char) (label + 32);
+                continue;
+            }
+            int bottom = top + height;
+            if (label >= 'a' && label <= 'z' && specShortBody(label) && top <= 9 && height >= 20 && bottom <= 33) {
+                pick.label = (char) (label - 32);
+            }
+        }
+    }
+
+    private static boolean specShortBody(char label) {
+        return label == 'a' || label == 'c' || label == 'e' || label == 'm' || label == 'n'
+                || label == 'r' || label == 's' || label == 'u' || label == 'v' || label == 'w'
+                || label == 'x' || label == 'z';
     }
 
     private static boolean isShortBody(char label) {
