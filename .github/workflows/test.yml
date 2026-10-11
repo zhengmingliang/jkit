@@ -1,0 +1,56 @@
+name: test
+
+# 全模块测试 + 真实服务器集成测试：push 到主干与所有 PR 都跑。
+# 真实用例默认按 Assume 跳过（本机没装对应服务就是跳过），CI 里装了就真跑：
+#   - copyparty 单进程提供 FTP / SFTP / WebDAV 三个真实协议实现（CopypartyRealStorageTest）；
+#   - MinIO 单二进制提供真实 S3 服务（MinioRealStorageTest，SigV4 / 列表语义 /
+#     Multipart 只有真服务器能抓出差异）。
+# 无 secrets，无需数据库。
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+
+jobs:
+  test:
+    name: mvn test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17 (corretto)
+        uses: actions/setup-java@v4
+        with:
+          distribution: corretto
+          java-version: '17'
+          cache: maven
+
+      # copyparty / pyftpdlib / paramiko：真实 FTP / SFTP / WebDAV 服务端。
+      # 用 venv 安装并挂到 PATH——ubuntu 24.04 runner 的系统 Python 启用 PEP 668
+      # （externally-managed-environment），直接 pip install 会被拒。
+      - name: Install copyparty (FTP/SFTP/WebDAV real server)
+        run: |
+          python3 -m venv /opt/copyparty-venv
+          /opt/copyparty-venv/bin/pip install --quiet copyparty pyftpdlib paramiko
+          echo "/opt/copyparty-venv/bin" >> "$GITHUB_PATH"
+
+      # MinIO：真实 S3 服务端。下载失败只告警不阻断——对应用例会自动跳过。
+      - name: Install MinIO (real S3 server)
+        run: |
+          curl -fsSL -o /usr/local/bin/minio \
+            https://dl.min.io/server/minio/release/linux-amd64/minio \
+            && chmod +x /usr/local/bin/minio \
+            || echo "::warning::MinIO 下载失败，真实 S3 用例将自动跳过"
+
+      - name: Run all module tests
+        run: mvn -B test
+
+      - name: Upload surefire reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports
+          path: '**/target/surefire-reports/**'
+          if-no-files-found: ignore
+          retention-days: 14
