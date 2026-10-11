@@ -207,6 +207,94 @@ public class CaptchaRecognitionTest {
         Assert.assertTrue(group + " " + hit + "/" + seen + " " + misses, hit * 100 >= seen * 80);
     }
 
+    /**
+     * easy-captcha 另外九套字体。fresnel、lexo、scandal 的大小写是同一个字形，按忽略大小写计整串。
+     * ransom 的加号和减号没有轮廓，画面上看不见运算符，只要求两个数字正确；乘号仍要求整式正确。
+     */
+    @Test
+    public void testFontSamples() throws IOException {
+        CaptchaRecognizer recognizer = CaptchaRecognizer.createDefault();
+        File root = new File("src/test/resources/samples/font");
+        File[] fonts = root.listFiles();
+        Assert.assertNotNull(root.getPath(), fonts);
+        Arrays.sort(fonts);
+        int groups = 0;
+        for (int i = 0; i < fonts.length; i++) {
+            if (!fonts[i].isDirectory()) {
+                continue;
+            }
+            String font = fonts[i].getName();
+            boolean sameCase = "fresnel".equals(font) || "lexo".equals(font) || "scandal".equals(font);
+            assertFont(recognizer, font, "spec", false, sameCase);
+            assertFont(recognizer, font, "gif", false, sameCase);
+            if (new File(fonts[i], "arithmetic").isDirectory()) {
+                assertFont(recognizer, font, "arithmetic", true, false);
+            }
+            groups++;
+        }
+        Assert.assertEquals("font groups", 9, groups);
+    }
+
+    private static void assertFont(CaptchaRecognizer recognizer, String font, String kind,
+                                   boolean arithmetic, boolean ignoreCase) throws IOException {
+        File dir = new File(new File("src/test/resources/samples/font", font), kind);
+        File[] files = dir.listFiles();
+        Assert.assertNotNull(dir.getPath(), files);
+        Arrays.sort(files);
+        int seen = 0;
+        int hit = 0;
+        int digits = 0;
+        StringBuilder misses = new StringBuilder();
+        for (int i = 0; i < files.length; i++) {
+            if (!files[i].isFile()) {
+                continue;
+            }
+            String name = files[i].getName();
+            int dot = name.lastIndexOf('.');
+            if (dot <= 0) {
+                continue;
+            }
+            String stem = name.substring(0, dot);
+            String label = stem;
+            if (arithmetic) {
+                int mark = stem.indexOf('=');
+                Assert.assertTrue(name, mark > 0);
+                label = stem.substring(0, mark);
+            }
+            RecognizeResult result = recognizer.recognize(files[i]);
+            String actual = arithmetic ? result.getExpression() : result.getText();
+            boolean correct;
+            if (arithmetic) {
+                ArithmeticEvaluator.Value expected = ArithmeticEvaluator.evaluate(label);
+                correct = expected != null && expected.expression.equals(result.getExpression())
+                        && result.getValue() != null && result.getValue().intValue() == expected.result;
+                if (actual != null && actual.length() == 3 && label.length() == 3
+                        && actual.charAt(0) == label.charAt(0) && actual.charAt(2) == label.charAt(2)) {
+                    digits++;
+                }
+            } else if (ignoreCase) {
+                correct = label.equalsIgnoreCase(actual);
+            } else {
+                correct = label.equals(actual);
+            }
+            seen++;
+            if (correct) {
+                hit++;
+            } else if (misses.length() < 180) {
+                misses.append(label).append("=>").append(actual).append(' ');
+            }
+        }
+        System.out.println("font " + font + "/" + kind + " " + hit + "/" + seen
+                + (arithmetic ? " digits " + digits : ""));
+        Assert.assertTrue(font + "/" + kind + " files", seen >= 100);
+        if (arithmetic && "ransom".equals(font)) {
+            Assert.assertEquals(font + " digits " + misses, seen, digits);
+            Assert.assertTrue(font + " " + hit + "/" + seen + " " + misses, hit * 100 >= seen * 35);
+            return;
+        }
+        Assert.assertTrue(font + "/" + kind + " " + hit + "/" + seen + " " + misses, hit * 100 >= seen * 80);
+    }
+
     @Test
     public void testAccuracy() throws Exception {
         CaptchaRecognizer recognizer = CaptchaRecognizer.createDefault();
