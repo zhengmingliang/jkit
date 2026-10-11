@@ -44,6 +44,9 @@ public final class SyncEngine {
     /**
      * 对比两个存储目录：按相对路径对齐，返回全部文件的差异清单（含 SAME）。
      *
+     * <p>任一侧目录不存在时抛 {@link StorageErrorCode#NOT_FOUND}——静默返回
+     * 空清单会让路径拼写错误看起来像「没有差异」。</p>
+     *
      * @param left     左侧存储
      * @param leftDir  左侧目录，根目录传空串或 null
      * @param right    右侧存储
@@ -54,6 +57,8 @@ public final class SyncEngine {
     public static List<StorageDiff> diff(FileStorage left, String leftDir,
                                          FileStorage right, String rightDir, CompareMode mode) {
         CompareMode compareMode = mode == null ? CompareMode.SIZE : mode;
+        requireDir(left, leftDir, "左侧目录");
+        requireDir(right, rightDir, "右侧目录");
         Map<String, StorageEntry> leftFiles = filesOf(left, leftDir);
         Map<String, StorageEntry> rightFiles = filesOf(right, rightDir);
         List<StorageDiff> diffs = new ArrayList<StorageDiff>();
@@ -96,6 +101,8 @@ public final class SyncEngine {
         if (opts.direction() == Direction.BIDIRECTIONAL) {
             return syncBidirectional(source, sourceDir, target, targetDir, opts, progress);
         }
+        // 源目录必须存在：镜像模式下源路径写错会把目标端全部当成「多余」删光
+        requireDir(source, sourceDir, "源目录");
         Map<String, StorageEntry> sourceFiles = filesOf(source, sourceDir);
         Map<String, StorageEntry> targetFiles = filesOf(target, targetDir);
 
@@ -658,6 +665,20 @@ public final class SyncEngine {
                         + "（" + e.getMessage() + "）", targetPath, e);
             }
         }
+    }
+
+    /**
+     * 目录存在性校验：目录缺失在对比里表现为「0 个文件」的假象、在单向同步里
+     * 会让镜像模式把目标端全部清掉——都不允许静默通过。根目录（空串）跳过。
+     */
+    private static void requireDir(FileStorage storage, String dir, String role) {
+        String normalized = StoragePaths.normalize(dir);
+        if (normalized.isEmpty() || storage.exists(normalized)) {
+            return;
+        }
+        throw new StorageException(StorageErrorCode.NOT_FOUND,
+                role + "不存在: " + normalized + "（请检查路径拼写；SFTP/FTP 的路径从服务器根目录 / 起）",
+                normalized);
     }
 
     private static Map<String, StorageEntry> filesOf(FileStorage storage, String dir) {

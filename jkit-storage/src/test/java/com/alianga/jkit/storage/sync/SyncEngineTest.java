@@ -4,6 +4,7 @@ import com.alianga.jkit.storage.FileStorage;
 import com.alianga.jkit.storage.FileStorages;
 import com.alianga.jkit.storage.StorageConfig;
 import com.alianga.jkit.storage.StorageEntry;
+import com.alianga.jkit.storage.StorageErrorCode;
 import com.alianga.jkit.storage.StorageException;
 import com.alianga.jkit.storage.StoragePaths;
 
@@ -562,6 +563,51 @@ public class SyncEngineTest {
         public void rename(String src, String dst) {
             delegate.rename(src, dst);
         }
+    }
+
+    @Test
+    public void oneWaySyncRejectsMissingSourceDir() {
+        target.upload("keep.txt", "K".getBytes(StandardCharsets.UTF_8));
+        try {
+            SyncEngine.sync(source, "no-such-dir", target, "",
+                    SyncOptions.mirror(), null);
+            throw new AssertionError("源目录不存在应抛 NOT_FOUND");
+        } catch (StorageException e) {
+            assertEquals(StorageErrorCode.NOT_FOUND, e.code());
+            assertTrue("错误应指明源目录: " + e.getMessage(),
+                    e.getMessage().contains("源目录不存在"));
+        }
+        assertTrue("镜像同步不得因源路径写错清空目标端", target.exists("keep.txt"));
+    }
+
+    @Test
+    public void diffRejectsMissingSideDir() {
+        source.upload("a.txt", "A".getBytes(StandardCharsets.UTF_8));
+        try {
+            SyncEngine.diff(source, "no-such-dir", target, "", CompareMode.SIZE);
+            throw new AssertionError("左侧目录不存在应抛 NOT_FOUND");
+        } catch (StorageException e) {
+            assertEquals(StorageErrorCode.NOT_FOUND, e.code());
+            assertTrue("错误应指明左侧目录: " + e.getMessage(),
+                    e.getMessage().contains("左侧目录不存在"));
+        }
+        try {
+            SyncEngine.diff(source, "", target, "no-such-dir", CompareMode.SIZE);
+            throw new AssertionError("右侧目录不存在应抛 NOT_FOUND");
+        } catch (StorageException e) {
+            assertEquals(StorageErrorCode.NOT_FOUND, e.code());
+            assertTrue("错误应指明右侧目录: " + e.getMessage(),
+                    e.getMessage().contains("右侧目录不存在"));
+        }
+    }
+
+    @Test
+    public void bidirectionalFillsIntoMissingSide() {
+        target.upload("only-right.txt", "R".getBytes(StandardCharsets.UTF_8));
+        SyncResult result = SyncEngine.sync(source, "fresh-left", target, "",
+                SyncOptions.incremental().direction(Direction.BIDIRECTIONAL), null);
+        assertEquals(1L, result.copied());
+        assertEquals("R", source.readString("fresh-left/only-right.txt"));
     }
 
     private static void deleteRecursively(Path root) throws Exception {
