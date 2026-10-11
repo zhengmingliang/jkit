@@ -185,6 +185,7 @@ public class S3FileStorage implements FileStorage {
         } finally {
             response.close();
         }
+        verifyUploadedSize(normalized, size);
     }
 
     private void putObjectBytes(String normalized, String contentType, byte[] data,
@@ -196,6 +197,7 @@ public class S3FileStorage implements FileStorage {
         } finally {
             response.close();
         }
+        verifyUploadedSize(normalized, data.length);
     }
 
     /** mtime 保留：S3 用户元数据 x-amz-meta-mtime。 */
@@ -260,9 +262,26 @@ public class S3FileStorage implements FileStorage {
                 }
             }
             completeMultipart(normalized, key, uploadId, etags);
+            // 未知长度时 uploaded 即实际读到的字节数；已知长度时为 totalSize
+            verifyUploadedSize(normalized, totalSize == null ? uploaded : totalSize);
         } catch (RuntimeException e) {
             abortMultipart(key, uploadId);
             throw e;
+        }
+    }
+
+    /**
+     * 上传后大小校验：HEAD 服务端对象长度与预期不符说明传输被截断或服务端
+     * 落盘异常，宁可报错也不静默留下损坏对象（预期未知传 -1 跳过）。
+     */
+    private void verifyUploadedSize(String normalized, long expected) {
+        if (expected < 0L) {
+            return;
+        }
+        long actual = stat(normalized).size();
+        if (actual != expected) {
+            throw StorageException.io("上传大小校验失败: 期望 " + expected + " 字节，服务端 "
+                    + actual + " 字节", normalized, null);
         }
     }
 
