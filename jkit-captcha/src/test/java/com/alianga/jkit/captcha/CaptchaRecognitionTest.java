@@ -143,6 +143,37 @@ public class CaptchaRecognitionTest {
     }
 
     /**
+     * 单独送进来的六张图，不计入 142 张。{@code 7x8} 的乘号按产品约定写成 {@code x}。
+     */
+    @Test
+    public void testReportedSamples() throws IOException {
+        CaptchaRecognizer recognizer = CaptchaRecognizer.createDefault();
+        assertReportedText(recognizer, "Q8UC.png", "Q8UC");
+        assertReportedText(recognizer, "FGIP.png", "FGIP");
+        assertReportedText(recognizer, "AEZUT.png", "AEZUT");
+        assertReportedMath(recognizer, "8+6-1=.png", "8+6-1", 13);
+        assertReportedMath(recognizer, "6+8=.png", "6+8", 14);
+        assertReportedMath(recognizer, "7x8=.png", "7x8", 56);
+    }
+
+    private static void assertReportedText(CaptchaRecognizer recognizer, String name, String expected)
+            throws IOException {
+        RecognizeResult result = recognizer.recognize(new File("src/test/resources/samples/reported", name));
+        Assert.assertEquals(name, expected, result.getText());
+    }
+
+    private static void assertReportedMath(CaptchaRecognizer recognizer, String name, String expression,
+                                           int value) throws IOException {
+        File file = new File("src/test/resources/samples/reported", name);
+        RecognizeResult auto = recognizer.recognize(file);
+        Assert.assertEquals(name, expression, auto.getExpression());
+        Assert.assertEquals(name, Integer.valueOf(value), auto.getValue());
+        RecognizeResult forced = recognizer.recognize(ImageIO.read(file), CaptchaType.ARITHMETIC);
+        Assert.assertEquals(name, expression, forced.getExpression());
+        Assert.assertEquals(name, Integer.valueOf(value), forced.getValue());
+    }
+
+    /**
      * 未纳入版本库的 easy-captcha 样例。字母图所用字体大小写是同一个字形，按忽略大小写计整串。
      */
     @Test

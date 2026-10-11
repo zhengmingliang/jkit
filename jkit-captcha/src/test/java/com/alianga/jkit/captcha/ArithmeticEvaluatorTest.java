@@ -28,6 +28,18 @@ public class ArithmeticEvaluatorTest {
     }
 
     @Test
+    public void testChainsMultiplyBeforeAdd() {
+        Assert.assertEquals(13, ArithmeticEvaluator.evaluate("8+6-1=?").result);
+        Assert.assertEquals("8+6-1", ArithmeticEvaluator.evaluate("8+6-1=?").expression);
+        Assert.assertEquals(14, ArithmeticEvaluator.evaluate("2+3x4").result);
+        Assert.assertEquals("2+3x4", ArithmeticEvaluator.evaluate("2+3x4").expression);
+        Assert.assertEquals(2, ArithmeticEvaluator.evaluate("8-2x3").result);
+        Assert.assertNull(ArithmeticEvaluator.evaluate("29t187"));
+        Assert.assertNull(ArithmeticEvaluator.evaluate("30t47"));
+        Assert.assertNull(ArithmeticEvaluator.evaluate("5t4e2"));
+    }
+
+    @Test
     public void testRejectsIncompleteExpressions() {
         Assert.assertNull(ArithmeticEvaluator.evaluate(null));
         Assert.assertNull(ArithmeticEvaluator.evaluate(""));
