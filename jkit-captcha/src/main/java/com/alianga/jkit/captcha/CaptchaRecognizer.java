@@ -14,8 +14,8 @@ import java.util.List;
  *
  * <p>模板匹配处理算术、多帧 GIF 和大小写。单帧图再用 ddddocr 的 {@code common_old.onnx}
  * 补字符，候选收在当前类型或 {@link RecognizeOptions#withAlphabet(String)} 给出的字符集里。
- * 算术已经算出结果时不再交给模型。宽约 130、高约 48 的白底彩色字改用 {@code common.onnx}：
- * 四帧按字位投票读常用汉字，其余多帧读字母和数字，算式先盖住右侧再计算。
+ * 算术已经算出结果时不再交给模型。宽 130、高 48 的白底彩色字先按 easy-captcha 的十套字体比对，
+ * 对不上再用 {@code common.onnx}：四帧按字位投票读常用汉字，五帧读字母和数字，算式先盖住右侧再计算。
  * 需要替换整条链路时，实现 {@link CaptchaSolver} 并 {@link #register(CaptchaSolver)}。
  */
 public final class CaptchaRecognizer {

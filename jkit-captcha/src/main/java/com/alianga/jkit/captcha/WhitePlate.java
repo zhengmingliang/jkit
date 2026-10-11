@@ -12,9 +12,9 @@ import java.util.List;
 
 /**
  * 白底、大约 130×48 的彩色字符图。笔画和干扰线连在一起，模板分割会整块丢掉。
- * 这类图用 {@code common.onnx} 直接读。算术图右侧是 {@code =?}，先盖住再计算，避免问号被当成数字。
- * 四帧图按 easy-captcha 的透明度节奏，每帧只有一个字完全不透明，按时间步把最高分投到对应字位。
- * 五帧图用同一套投票读字母和数字。这种字体的大小写是同一个字形，结果保留模型给出的字母。
+ * 正好 130×48 时，先用 easy-captcha 十套字体的字形比对。对不上再交给 {@code common.onnx}。
+ * 算术图右侧是 {@code =?}，模型路径先盖住再计算，避免问号被当成数字。
+ * 四帧图按字位投票读常用汉字。五帧图先按透明度节奏用字形比对，对不上再投票读字母和数字。
  */
 final class WhitePlate {
     private static final int MIN_WIDTH = 124;
@@ -57,6 +57,10 @@ final class WhitePlate {
     }
 
     static RecognizeResult read(BufferedImage image, TextModel model, RecognizeOptions options) {
+        RecognizeResult fonts = EasyPlate.read(image, options);
+        if (fonts != null) {
+            return fonts;
+        }
         long started = System.nanoTime();
         String user = options.getAlphabet();
         TextModel.Reading reading;
@@ -88,6 +92,10 @@ final class WhitePlate {
     }
 
     static RecognizeResult readFrames(List<BufferedImage> frames, TextModel model, RecognizeOptions options) {
+        RecognizeResult fonts = EasyPlate.readFrames(frames, options);
+        if (fonts != null) {
+            return fonts;
+        }
         String user = options.getAlphabet();
         String alphabet;
         boolean arithmetic = false;
