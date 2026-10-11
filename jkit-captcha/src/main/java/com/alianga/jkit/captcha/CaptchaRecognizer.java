@@ -12,13 +12,14 @@ import java.util.List;
 /**
  * 常规图片验证码识别入口。
  *
- * <p>默认实现只使用 JDK 的 {@code java.awt} 与 {@code ImageIO}：灰度化、二值化、去干扰线、
- * 字符分割、字体模板匹配。字符型、扭曲干扰型和算术型走同一条链路，预处理按背景分开。
- * 需要接 OpenCV 或 Tesseract 时，实现 {@link CaptchaSolver} 并 {@link #register(CaptchaSolver)}。
+ * <p>模板匹配处理算术、多帧 GIF 和大小写。单帧图再用 ddddocr 的 {@code common_old.onnx}
+ * 补字符。算术已经算出结果时不再交给模型。需要替换整条链路时，实现 {@link CaptchaSolver}
+ * 并 {@link #register(CaptchaSolver)}。
  */
 public final class CaptchaRecognizer {
     private final TemplateBank bank;
     private final DefaultCaptchaSolver fallback;
+    private final TextModel textModel = new TextModel();
     private final List<CaptchaSolver> solvers = new ArrayList<CaptchaSolver>();
 
     private CaptchaRecognizer(TemplateBank bank) {
@@ -78,6 +79,10 @@ public final class CaptchaRecognizer {
      * @return 识别结果
      */
     public RecognizeResult recognize(BufferedImage image, RecognizeOptions options) {
+        return recognize(image, options, true);
+    }
+
+    private RecognizeResult recognize(BufferedImage image, RecognizeOptions options, boolean refine) {
         if (image == null) {
             throw new IllegalArgumentException("image");
         }
@@ -90,7 +95,44 @@ public final class CaptchaRecognizer {
                 }
             }
         }
-        return fallback.recognize(image, effective);
+        RecognizeResult result = fallback.recognize(image, effective);
+        // 算式已经算出值时不再改写。深色蓝字里的 X 也会被当成乘号，这种图仍交给模型。
+        if (!refine || (result.getValue() != null && !BluePlate.matches(image))) {
+            return result;
+        }
+        return refine(image, result);
+    }
+
+    /**
+     * 深色蓝字按版式读。其余单帧图用模型补字，大小写仍沿用模板。
+     */
+    private RecognizeResult refine(BufferedImage image, RecognizeResult result) {
+        String plate = BluePlate.read(image, textModel);
+        if (plate != null) {
+            return rewrite(result, plate);
+        }
+        String model = textModel.read(image);
+        if (model.isEmpty()) {
+            return result;
+        }
+        // 单字学习样本要以模板为准。模型把没见过的实心块读成另一个单字时不覆盖。
+        if (result.getText().length() == 1 && model.length() == 1
+                && !result.getText().equalsIgnoreCase(model)) {
+            return result;
+        }
+        String merged = CaseAlign.align(result.getText(), model);
+        if (merged.equals(result.getText())) {
+            return result;
+        }
+        return rewrite(result, merged);
+    }
+
+    private static RecognizeResult rewrite(RecognizeResult result, String text) {
+        ArithmeticEvaluator.Value value = ArithmeticEvaluator.evaluate(text);
+        String expression = value == null ? null : value.expression;
+        Integer number = value == null ? null : Integer.valueOf(value.result);
+        return new RecognizeResult(text, expression, number, result.getConfidence(), result.getType(),
+                result.getElapsedMillis(), result.getGlyphs());
     }
 
     /**
@@ -187,13 +229,13 @@ public final class CaptchaRecognizer {
 
     private RecognizeResult recognizeFrames(List<BufferedImage> frames, RecognizeOptions options) {
         long started = System.nanoTime();
-        RecognizeResult solid = recognize(GifFrames.composite(frames), options);
+        RecognizeResult solid = recognize(GifFrames.composite(frames), options, false);
         if (solid.getText().length() >= 3) {
             return withElapsed(solid, started);
         }
         List<GlyphHit> hits = new ArrayList<GlyphHit>();
         for (int i = 0; i < frames.size(); i++) {
-            hits.addAll(recognize(frames.get(i), options).getGlyphs());
+            hits.addAll(recognize(frames.get(i), options, false).getGlyphs());
         }
         List<GlyphHit> merged = GifFrames.merge(hits, frames.get(0).getHeight());
         String text = textOf(merged);

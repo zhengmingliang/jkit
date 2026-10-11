@@ -15,7 +15,7 @@
     <packaging>jar</packaging>
 
     <name>jkit-captcha</name>
-    <description>常规图片验证码识别：字符型、干扰线/扭曲型、算术型。纯 JDK 图像处理与模板匹配，不引入 OpenCV / Tesseract 原生依赖。</description>
+    <description>常规图片验证码识别：字符型、干扰线/扭曲型、算术型。模板匹配负责算术、GIF 和大小写，通用 ONNX 模型补字符。</description>
 
     <properties>
         <maven.compiler.source>8</maven.compiler.source>
@@ -28,6 +28,11 @@
             <groupId>com.alianga</groupId>
             <artifactId>jkit</artifactId>
             <version>${revision}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.microsoft.onnxruntime</groupId>
+            <artifactId>onnxruntime</artifactId>
+            <version>1.15.1</version>
         </dependency>
         <dependency>
             <groupId>junit</groupId>
