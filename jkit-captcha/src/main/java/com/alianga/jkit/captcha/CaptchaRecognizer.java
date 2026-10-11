@@ -8,6 +8,7 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * 常规图片验证码识别入口。
@@ -15,10 +16,17 @@ import java.util.List;
  * <p>模板匹配处理算术、多帧 GIF 和大小写。单帧图再用 ddddocr 的 {@code common_old.onnx}
  * 补字符，候选收在当前类型或 {@link RecognizeOptions#withAlphabet(String)} 给出的字符集里。
  * 算术已经算出结果时不再交给模型。宽 130、高 48 的白底彩色字先按 easy-captcha 的十套字体比对，
- * 对不上再用 {@code common.onnx}：四帧按字位投票读常用汉字，五帧读字母和数字，算式先盖住右侧再计算。
+ * 四字和三目算式也用这套字形。对不上再用 {@code common.onnx}：四帧按字位投票读常用汉字，五帧读字母和数字，
+ * 算式先盖住右侧再计算。浅色大图先拉开对比度，整串都是字母时按大写输出。
  * 需要替换整条链路时，实现 {@link CaptchaSolver} 并 {@link #register(CaptchaSolver)}。
  */
 public final class CaptchaRecognizer {
+    private static final int PASTEL_MIN_WIDTH = 200;
+    private static final int PASTEL_MIN_HEIGHT = 80;
+    private static final int PASTEL_MIN_INK = 100;
+    private static final int PASTEL_CHANNEL = 80;
+    private static final int PASTEL_INK = 40;
+
     private final TemplateBank bank;
     private final DefaultCaptchaSolver fallback;
     private final TextModel textModel = new TextModel();
@@ -97,6 +105,10 @@ public final class CaptchaRecognizer {
                 }
             }
         }
+        // 浅色大图笔画和背景挤在一起，拉开对比度后再走原来的链路。拉伸后必有暗通道，不会再次进入这里。
+        if (refine && pastel(image)) {
+            return liftLetters(recognize(stretch(image), effective, true), effective);
+        }
         // 白底 130×48 的彩色字走 common.onnx。模板会把粘连的笔画整块丢掉，也会把算式尾巴读成数字。
         if (refine && WhitePlate.matches(image)) {
             RecognizeResult plate = WhitePlate.read(image, textModel, effective);
@@ -142,6 +154,110 @@ public final class CaptchaRecognizer {
      * 只有调用方明确指定算术型时才带运算符。自动判断里的深色图会先被标成算术型，
      * 蓝字车牌仍要输出字母，不能跟着这个临时类型把字母从模型里拿掉。
      */
+    /**
+     * 宽高都够大、墨迹不少于 100、并且没有一个墨迹通道低于 80，才算浅色大图。
+     * 饱和的政务图和 130×48 的彩色字都有深色通道，不会被拉开。
+     */
+    private static boolean pastel(BufferedImage image) {
+        int width = image.getWidth();
+        int height = image.getHeight();
+        if (width < PASTEL_MIN_WIDTH || height < PASTEL_MIN_HEIGHT) {
+            return false;
+        }
+        int ink = 0;
+        int limit = PASTEL_INK * PASTEL_INK;
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int rgb = image.getRGB(x, y);
+                int red = (rgb >> 16) & 255;
+                int green = (rgb >> 8) & 255;
+                int blue = rgb & 255;
+                int dr = 255 - red;
+                int dg = 255 - green;
+                int db = 255 - blue;
+                if (dr * dr + dg * dg + db * db < limit) {
+                    continue;
+                }
+                if (red < PASTEL_CHANNEL || green < PASTEL_CHANNEL || blue < PASTEL_CHANNEL) {
+                    return false;
+                }
+                ink++;
+            }
+        }
+        return ink >= PASTEL_MIN_INK;
+    }
+
+    /** 按亮度的最小最大把每个通道拉开。公式和测过 FGIP 的那次拉伸一致。 */
+    private static BufferedImage stretch(BufferedImage src) {
+        int width = src.getWidth();
+        int height = src.getHeight();
+        BufferedImage out = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+        int min = 255;
+        int max = 0;
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int rgb = src.getRGB(x, y);
+                int luminance = ((rgb >> 16) & 255) * 3 + ((rgb >> 8) & 255) * 6 + (rgb & 255);
+                luminance /= 10;
+                if (luminance < min) {
+                    min = luminance;
+                }
+                if (luminance > max) {
+                    max = luminance;
+                }
+            }
+        }
+        int span = Math.max(1, max - min);
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int rgb = src.getRGB(x, y);
+                int red = scaleChannel((rgb >> 16) & 255, min, span);
+                int green = scaleChannel((rgb >> 8) & 255, min, span);
+                int blue = scaleChannel(rgb & 255, min, span);
+                out.setRGB(x, y, (red << 16) | (green << 8) | blue);
+            }
+        }
+        return out;
+    }
+
+    private static int scaleChannel(int value, int min, int span) {
+        int scaled = (value - min) * 255 / span;
+        if (scaled < 0) {
+            return 0;
+        }
+        if (scaled > 255) {
+            return 255;
+        }
+        return scaled;
+    }
+
+    /** 调用方没有限定字符集、结果又全是字母时，浅色大图按大写输出。 */
+    private static RecognizeResult liftLetters(RecognizeResult result, RecognizeOptions options) {
+        if (result.getValue() != null) {
+            return result;
+        }
+        String alphabet = options.getAlphabet();
+        if (alphabet != null && alphabet.length() > 0) {
+            return result;
+        }
+        String text = result.getText();
+        if (text.isEmpty()) {
+            return result;
+        }
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (ch < 'A' || (ch > 'Z' && ch < 'a') || ch > 'z') {
+                return result;
+            }
+        }
+        String upper = text.toUpperCase(Locale.ROOT);
+        if (upper.equals(text)) {
+            return result;
+        }
+        return new RecognizeResult(upper, null, null, result.getConfidence(), result.getType(),
+                result.getElapsedMillis(), result.getGlyphs());
+    }
+
     private static String modelAlphabet(RecognizeOptions options) {
         String chosen = options.getAlphabet();
         if (chosen != null) {
