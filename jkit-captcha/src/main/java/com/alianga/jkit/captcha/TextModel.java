@@ -12,7 +12,9 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.FloatBuffer;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.List;
 
 /**
  * ddddocr 的两个 ONNX 模型（Apache-2.0）。高度缩到 64，灰度后做 CTC 解码。
@@ -35,17 +37,50 @@ final class TextModel {
     private boolean betaFailed;
 
     String read(BufferedImage image) {
-        return read(image, false);
+        return read(image, null);
+    }
+
+    /**
+     * 用 {@code common_old.onnx} 读图。{@code alphabet} 非空时，每一帧只在该字符集里取概率最大的字。
+     */
+    String read(BufferedImage image, String alphabet) {
+        return read(image, false, alphabet);
     }
 
     /**
      * 用 {@code common.onnx} 读图。加载失败时返回空串。
      */
     String readBeta(BufferedImage image) {
-        return read(image, true);
+        return readBeta(image, null);
     }
 
-    private String read(BufferedImage image, boolean beta) {
+    /**
+     * 用 {@code common.onnx} 读图，并限制在给定字符集内。加载失败时返回空串。
+     */
+    String readBeta(BufferedImage image, String alphabet) {
+        return read(image, true, alphabet);
+    }
+
+    /**
+     * 用 {@code common.onnx} 读图，并保留每个字的时间步和分数。加载失败时文本为空。
+     */
+    Reading readBetaReading(BufferedImage image, String alphabet) {
+        if (image == null || image.getWidth() <= 0 || image.getHeight() <= 0) {
+            return emptyReading();
+        }
+        try {
+            float[][] rows = logits(image, true);
+            if (rows == null) {
+                return emptyReading();
+            }
+            return decodeReading(rows, betaCharset, alphabet);
+        } catch (OrtException ex) {
+            // 模型不可用时退回模板结果，不把异常抛到识别入口。
+            return emptyReading();
+        }
+    }
+
+    private String read(BufferedImage image, boolean beta, String alphabet) {
         if (image == null || image.getWidth() <= 0 || image.getHeight() <= 0) {
             return "";
         }
@@ -54,7 +89,7 @@ final class TextModel {
             if (rows == null) {
                 return "";
             }
-            return decode(rows, beta ? betaCharset : charset);
+            return decode(rows, beta ? betaCharset : charset, alphabet);
         } catch (OrtException ex) {
             // 模型不可用时退回模板结果，不把异常抛到识别入口。
             return "";
@@ -146,17 +181,62 @@ final class TextModel {
         }
     }
 
-    private static String decode(float[][] rows, String[] table) {
+    private static String decode(float[][] rows, String[] table, String alphabet) {
+        return decodeReading(rows, table, alphabet).text;
+    }
+
+    private static Reading decodeReading(float[][] rows, String[] table, String alphabet) {
+        boolean limit = alphabet != null && alphabet.length() > 0;
         StringBuilder builder = new StringBuilder();
+        List<Token> tokens = new ArrayList<Token>();
         int previous = 0;
-        for (int t = 0; t < rows.length; t++) {
-            int best = argmax(rows[t]);
+        for (int time = 0; time < rows.length; time++) {
+            int best = limit ? argmaxAllowed(rows[time], table, alphabet) : argmax(rows[time]);
             if (best != 0 && best != previous && best < table.length) {
                 builder.append(table[best]);
+                tokens.add(new Token(table[best], time, rows[time][best]));
             }
             previous = best;
         }
-        return builder.toString();
+        float confidence = Float.NEGATIVE_INFINITY;
+        if (!tokens.isEmpty()) {
+            float sum = 0f;
+            for (int i = 0; i < tokens.size(); i++) {
+                sum += tokens.get(i).score;
+            }
+            confidence = sum / tokens.size();
+        }
+        return new Reading(builder.toString(), confidence, rows.length, tokens);
+    }
+
+    private static Reading emptyReading() {
+        return new Reading("", Float.NEGATIVE_INFINITY, 0, new ArrayList<Token>());
+    }
+
+    static final class Token {
+        final String text;
+        final int time;
+        final float score;
+
+        Token(String text, int time, float score) {
+            this.text = text;
+            this.time = time;
+            this.score = score;
+        }
+    }
+
+    static final class Reading {
+        final String text;
+        final float confidence;
+        final int steps;
+        final List<Token> tokens;
+
+        Reading(String text, float confidence, int steps, List<Token> tokens) {
+            this.text = text;
+            this.confidence = confidence;
+            this.steps = steps;
+            this.tokens = tokens;
+        }
     }
 
     private static int argmax(float[] row) {
@@ -169,6 +249,33 @@ final class TextModel {
             }
         }
         return best;
+    }
+
+    /** 空白永远保留。其余位置只和字符集里的字比较，汉字和标点不会被选中。 */
+    private static int argmaxAllowed(float[] row, String[] table, String alphabet) {
+        int best = 0;
+        float score = row[0];
+        int limit = row.length < table.length ? row.length : table.length;
+        for (int i = 1; i < limit; i++) {
+            if (!fits(table[i], alphabet) || row[i] <= score) {
+                continue;
+            }
+            score = row[i];
+            best = i;
+        }
+        return best;
+    }
+
+    private static boolean fits(String token, String alphabet) {
+        if (token == null || token.length() == 0) {
+            return false;
+        }
+        for (int i = 0; i < token.length(); i++) {
+            if (alphabet.indexOf(token.charAt(i)) < 0) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static float[][] rows(Object value) {

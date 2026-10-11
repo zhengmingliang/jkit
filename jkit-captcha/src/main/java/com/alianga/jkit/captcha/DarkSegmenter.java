@@ -11,6 +11,8 @@ import java.util.List;
  */
 final class DarkSegmenter {
     private static final int COLOR_DISTANCE = 40 * 40;
+    /** 聚类中心会越吸越偏。和种子差这么远的像素另开一簇，避免加号吃掉旁边的 0。 */
+    private static final int SEED_DISTANCE = 32 * 32;
     private static final int MIN_CLUSTER = 25;
 
     List<RawGlyph> segment(RgbImage image) {
@@ -59,11 +61,12 @@ final class DarkSegmenter {
                     best = c;
                 }
             }
-            if (best >= 0 && bestDistance <= COLOR_DISTANCE) {
+            if (best >= 0 && bestDistance <= COLOR_DISTANCE
+                    && seedDistance(red, green, blue, centers.get(best)) <= SEED_DISTANCE) {
                 absorb(centers.get(best), red, green, blue);
                 labels[i] = best;
             } else {
-                centers.add(new double[] {red, green, blue, 1});
+                centers.add(new double[] {red, green, blue, 1, red, green, blue});
                 labels[i] = centers.size() - 1;
             }
         }
@@ -83,6 +86,13 @@ final class DarkSegmenter {
         double dr = red - center[0];
         double dg = green - center[1];
         double db = blue - center[2];
+        return (int) (dr * dr + dg * dg + db * db);
+    }
+
+    private static int seedDistance(int red, int green, int blue, double[] center) {
+        double dr = red - center[4];
+        double dg = green - center[5];
+        double db = blue - center[6];
         return (int) (dr * dr + dg * dg + db * db);
     }
 
@@ -145,8 +155,28 @@ final class DarkSegmenter {
         return merged;
     }
 
+    private static boolean isBridge(int[] columns, int x) {
+        if (columns[x] > 4) {
+            return false;
+        }
+        int left = 0;
+        int right = 0;
+        for (int i = 0; i < x; i++) {
+            if (columns[i] > left) {
+                left = columns[i];
+            }
+        }
+        for (int i = x + 1; i < columns.length; i++) {
+            if (columns[i] > right) {
+                right = columns[i];
+            }
+        }
+        return left >= 10 && right >= 10;
+    }
+
     /**
-     * 同色的数字和加号挨在一起时会并成一块。中间有空列就切开，等号只有二十多像素宽，不会走到这里。
+     * 同色的两个字挨在一起时会并成一块。中间只剩细线就切开。
+     * 等号只有二十多像素宽，不会走到这里。
      */
     private static List<RawGlyph> splitWide(RawGlyph glyph) {
         List<RawGlyph> single = new ArrayList<RawGlyph>();
@@ -163,9 +193,11 @@ final class DarkSegmenter {
         List<RawGlyph> pieces = new ArrayList<RawGlyph>();
         int start = -1;
         for (int x = 0; x < glyph.width; x++) {
-            if (columns[x] > 1 && start < 0) {
-                start = x;
-            } else if (columns[x] <= 1 && start >= 0) {
+            if (start < 0) {
+                if (columns[x] > 4) {
+                    start = x;
+                }
+            } else if (isBridge(columns, x)) {
                 addSpan(pieces, glyph, start, x - 1);
                 start = -1;
             }
@@ -180,7 +212,8 @@ final class DarkSegmenter {
     }
 
     private static void addSpan(List<RawGlyph> pieces, RawGlyph glyph, int from, int to) {
-        if (to - from + 1 < 8) {
+        // 数字 1 被从旁边的字切开以后，可能只剩六像素宽。
+        if (to - from + 1 < 5) {
             return;
         }
         RawGlyph piece = cropColumns(glyph, from, to);
@@ -222,7 +255,8 @@ final class DarkSegmenter {
     }
 
     private static boolean canMerge(RawGlyph left, RawGlyph right) {
-        if (gap(left.x, left.width, right.x, right.width) > 5) {
+        // 隔开 3 像素就是下一个符号。加号的横笔和后面的数字经常只隔这么宽。
+        if (gap(left.x, left.width, right.x, right.width) > 2) {
             return false;
         }
         if (gap(left.y, left.height, right.y, right.height) > 6) {
@@ -285,7 +319,8 @@ final class DarkSegmenter {
             glyph.forced = '=';
             return glyph;
         }
-        if (glyph.height >= 16 && glyph.width >= 8 && glyph.width <= 40 && density >= 0.2 && glyph.area >= 50) {
+        // 这种字的 1 被干扰线切开后只剩六像素宽。
+        if (glyph.height >= 16 && glyph.width >= 5 && glyph.width <= 40 && density >= 0.2 && glyph.area >= 50) {
             return glyph;
         }
         return null;
@@ -305,7 +340,8 @@ final class DarkSegmenter {
         if (glyph.height < 10 || glyph.height > 17 || glyph.width < 18 || glyph.width > 34) {
             return false;
         }
-        if (density < 0.45) {
+        // 细等号两横之间是空的，整块密度可以低到 0.32。
+        if (density < 0.30) {
             return false;
         }
         return horizontalBands(glyph) >= 2;

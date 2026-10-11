@@ -21,7 +21,7 @@ final class BluePlate {
         return image != null && eligible(image);
     }
 
-    static String read(BufferedImage image, TextModel model) {
+    static String read(BufferedImage image, TextModel model, String alphabet) {
         if (!eligible(image)) {
             return null;
         }
@@ -32,11 +32,11 @@ final class BluePlate {
         BufferedImage plate = blackOnWhite(argb, width, height);
         String text;
         if (wide) {
-            text = model.read(plate);
+            text = model.read(plate, alphabet);
         } else {
-            text = model.readBeta(plate);
+            text = model.readBeta(plate, alphabet);
             if (text.isEmpty()) {
-                text = model.read(plate);
+                text = model.read(plate, alphabet);
             }
         }
         if (text.isEmpty()) {

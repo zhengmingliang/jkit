@@ -13,8 +13,10 @@ import java.util.List;
  * 常规图片验证码识别入口。
  *
  * <p>模板匹配处理算术、多帧 GIF 和大小写。单帧图再用 ddddocr 的 {@code common_old.onnx}
- * 补字符。算术已经算出结果时不再交给模型。需要替换整条链路时，实现 {@link CaptchaSolver}
- * 并 {@link #register(CaptchaSolver)}。
+ * 补字符，候选收在当前类型或 {@link RecognizeOptions#withAlphabet(String)} 给出的字符集里。
+ * 算术已经算出结果时不再交给模型。宽约 130、高约 48 的白底彩色字改用 {@code common.onnx}：
+ * 四帧按字位投票读常用汉字，其余多帧读字母和数字，算式先盖住右侧再计算。
+ * 需要替换整条链路时，实现 {@link CaptchaSolver} 并 {@link #register(CaptchaSolver)}。
  */
 public final class CaptchaRecognizer {
     private final TemplateBank bank;
@@ -95,23 +97,31 @@ public final class CaptchaRecognizer {
                 }
             }
         }
+        // 白底 130×48 的彩色字走 common.onnx。模板会把粘连的笔画整块丢掉，也会把算式尾巴读成数字。
+        if (refine && WhitePlate.matches(image)) {
+            RecognizeResult plate = WhitePlate.read(image, textModel, effective);
+            if (plate != null) {
+                return plate;
+            }
+        }
         RecognizeResult result = fallback.recognize(image, effective);
         // 算式已经算出值时不再改写。深色蓝字里的 X 也会被当成乘号，这种图仍交给模型。
         if (!refine || (result.getValue() != null && !BluePlate.matches(image))) {
             return result;
         }
-        return refine(image, result);
+        return refine(image, result, effective);
     }
 
     /**
-     * 深色蓝字按版式读。其余单帧图用模型补字，大小写仍沿用模板。
+     * 深色蓝字按版式读。其余单帧图用模型补字，大小写仍沿用模板。模型只输出当前字符集里的字。
      */
-    private RecognizeResult refine(BufferedImage image, RecognizeResult result) {
-        String plate = BluePlate.read(image, textModel);
+    private RecognizeResult refine(BufferedImage image, RecognizeResult result, RecognizeOptions options) {
+        String alphabet = modelAlphabet(options);
+        String plate = BluePlate.read(image, textModel, alphabet);
         if (plate != null) {
             return rewrite(result, plate);
         }
-        String model = textModel.read(image);
+        String model = textModel.read(image, alphabet);
         if (model.isEmpty()) {
             return result;
         }
@@ -125,6 +135,22 @@ public final class CaptchaRecognizer {
             return result;
         }
         return rewrite(result, merged);
+    }
+
+    /**
+     * 调用方给了字符集就用它。空串表示不限制。
+     * 只有调用方明确指定算术型时才带运算符。自动判断里的深色图会先被标成算术型，
+     * 蓝字车牌仍要输出字母，不能跟着这个临时类型把字母从模型里拿掉。
+     */
+    private static String modelAlphabet(RecognizeOptions options) {
+        String chosen = options.getAlphabet();
+        if (chosen != null) {
+            return chosen.length() == 0 ? null : chosen;
+        }
+        if (options.getType() == CaptchaType.ARITHMETIC) {
+            return TemplateBank.ALPHANUMERIC + "+-=?*/";
+        }
+        return TemplateBank.ALPHANUMERIC;
     }
 
     private static RecognizeResult rewrite(RecognizeResult result, String text) {
@@ -229,6 +255,12 @@ public final class CaptchaRecognizer {
 
     private RecognizeResult recognizeFrames(List<BufferedImage> frames, RecognizeOptions options) {
         long started = System.nanoTime();
+        if (WhitePlate.matches(frames)) {
+            RecognizeResult plate = WhitePlate.readFrames(frames, textModel, options);
+            if (plate != null) {
+                return withElapsed(plate, started);
+            }
+        }
         RecognizeResult solid = recognize(GifFrames.composite(frames), options, false);
         if (solid.getText().length() >= 3) {
             return withElapsed(solid, started);
