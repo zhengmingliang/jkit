@@ -355,6 +355,27 @@ public class S3FileStorage implements FileStorage {
     }
 
     @Override
+    public String presign(String path, java.time.Duration ttl) {
+        String normalized = requireFile(path);
+        String key = objectKey(normalized);
+        String encodedPath = Urls.encodePath(key);
+        String urlPath = pathStyle ? "/" + bucket + "/" + encodedPath : "/" + encodedPath;
+        String host = hostOf();
+        long seconds = Math.min(7L * 24 * 3600, Math.max(60, ttl.getSeconds()));
+        if (authPrefix == null) {
+            String query = AwsSigners.sigV4PresignQuery("GET", host, urlPath,
+                    accessKey, secretKey, region, seconds, AwsSigners.amzDateNow());
+            return endpoint + urlPath + "?" + query;
+        }
+        // SigV2 家族（金山云等）：path style 的 CanonicalizedResource 恒为 /bucket/key
+        long expires = System.currentTimeMillis() / 1000 + seconds;
+        String keyPath = pathStyle ? bucket + "/" + key : key;
+        String query = AwsSigners.sigV2PresignQuery(accessKey, secretKey, "GET",
+                expires, bucket, keyPath);
+        return endpoint + urlPath + "?" + query;
+    }
+
+    @Override
     public boolean supportsRange() {
         return true;
     }

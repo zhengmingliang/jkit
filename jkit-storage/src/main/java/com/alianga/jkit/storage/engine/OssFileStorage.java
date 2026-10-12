@@ -303,6 +303,25 @@ public class OssFileStorage implements FileStorage {
     }
 
     @Override
+    public String presign(String path, java.time.Duration ttl) {
+        String normalized = requireFile(path);
+        String key = objectKey(normalized);
+        long seconds = Math.max(60, ttl.getSeconds());
+        long expires = System.currentTimeMillis() / 1000 + seconds;
+        // OSS V1 预签名：stringToSign = GET\n\n\nExpires\n/bucket/key
+        String toSign = "GET\n\n\n" + expires + "\n/" + bucket + "/" + key;
+        String signature = AwsSigners.base64(AwsSigners.hmacSha1(
+                secretKey.getBytes(java.nio.charset.StandardCharsets.UTF_8), toSign));
+        String encodedKey = Urls.encodePath(key);
+        String url = pathStyle
+                ? endpoint + "/" + bucket + "/" + encodedKey
+                : endpoint.replace("://", "://" + bucket + ".") + "/" + encodedKey;
+        return url + "?OSSAccessKeyId=" + Urls.encodeQuery(accessKey)
+                + "&Expires=" + expires
+                + "&Signature=" + Urls.encodeQuery(signature);
+    }
+
+    @Override
     public boolean supportsRange() {
         return true;
     }

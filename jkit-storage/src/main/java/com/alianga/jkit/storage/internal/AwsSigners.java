@@ -102,6 +102,77 @@ public final class AwsSigners {
     }
 
     /**
+     * SigV4 预签名（query 认证）：返回拼到 URL 上的查询串（不含 ?），
+     * 调用方按 endpoint + canonicalPath + "?" + 本结果 组成最终链接。
+     * 签名只含 host 头，payload 恒为 UNSIGNED-PAYLOAD。
+     *
+     * @param method         HTTP 方法（分享下载用 GET）
+     * @param host           请求 host（含端口）
+     * @param canonicalPath  规范路径（与实际 URL 路径逐字节一致）
+     * @param accessKey      AccessKeyId
+     * @param secretKey      SecretAccessKey
+     * @param region         区域
+     * @param expiresSeconds 有效期（秒，AWS 上限 604800）
+     * @param amzDate        签名时间（yyyyMMdd'T'HHmmss'Z'）
+     * @return 查询串
+     */
+    public static String sigV4PresignQuery(String method, String host, String canonicalPath,
+                                           String accessKey, String secretKey, String region,
+                                           long expiresSeconds, String amzDate) {
+        String dateStamp = amzDate.substring(0, 8);
+        String scope = dateStamp + "/" + region + "/s3/aws4_request";
+        java.util.TreeMap<String, String> query = new java.util.TreeMap<String, String>();
+        query.put("X-Amz-Algorithm", "AWS4-HMAC-SHA256");
+        query.put("X-Amz-Credential", accessKey + "/" + scope);
+        query.put("X-Amz-Date", amzDate);
+        query.put("X-Amz-Expires", String.valueOf(expiresSeconds));
+        query.put("X-Amz-SignedHeaders", "host");
+        StringBuilder queryBuilder = new StringBuilder();
+        for (java.util.Map.Entry<String, String> entry : query.entrySet()) {
+            if (queryBuilder.length() > 0) {
+                queryBuilder.append('&');
+            }
+            queryBuilder.append(Urls.encodeQuery(entry.getKey())).append('=')
+                    .append(Urls.encodeQuery(entry.getValue()));
+        }
+        String canonicalRequest = method + "\n"
+                + canonicalPath + "\n"
+                + queryBuilder + "\n"
+                + "host:" + host + "\n"
+                + "\n"
+                + "host" + "\n"
+                + UNSIGNED_PAYLOAD;
+        String stringToSign = "AWS4-HMAC-SHA256\n" + amzDate + "\n" + scope + "\n"
+                + sha256Hex(canonicalRequest.getBytes(StandardCharsets.UTF_8));
+        byte[] signingKey = hmacSha256(hmacSha256(hmacSha256(hmacSha256(
+                ("AWS4" + secretKey).getBytes(StandardCharsets.UTF_8), dateStamp),
+                region), "s3"), "aws4_request");
+        String signature = hex(hmacSha256(signingKey, stringToSign));
+        return queryBuilder + "&X-Amz-Signature=" + signature;
+    }
+
+    /**
+     * SigV2 预签名：stringToSign 用 Expires（epoch 秒）替代 Date，
+     * 返回 AWSAccessKeyId / Expires / Signature 查询串。
+     *
+     * @param accessKey      AccessKeyId
+     * @param secretKey      SecretAccessKey
+     * @param method         HTTP 方法
+     * @param expiresEpoch   过期时间（epoch 秒）
+     * @param bucket         bucket
+     * @param keyPath        对象 key（pathStyle 时含 bucket 前缀由调用方拼好）
+     * @return 查询串（不含 ?）
+     */
+    public static String sigV2PresignQuery(String accessKey, String secretKey, String method,
+                                           long expiresEpoch, String bucket, String keyPath) {
+        String toSign = method + "\n\n\n" + expiresEpoch + "\n/" + bucket + "/" + keyPath;
+        String signature = base64(hmacSha1(secretKey.getBytes(StandardCharsets.UTF_8), toSign));
+        return "AWSAccessKeyId=" + Urls.encodeQuery(accessKey)
+                + "&Expires=" + expiresEpoch
+                + "&Signature=" + Urls.encodeQuery(signature);
+    }
+
+    /**
      * 计算 SigV2 签名并返回完整 Authorization 头值。
      *
      * @param prefix      Authorization 前缀（AWS / KSYUN）
