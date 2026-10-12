@@ -188,6 +188,48 @@ public class LocalFileStorage implements FileStorage {
     }
 
     @Override
+    public boolean supportsRange() {
+        return true;
+    }
+
+    @Override
+    public void download(String path, long offset, OutputStream out) {
+        String normalized = requireFile(path);
+        Path target = resolve(normalized);
+        if (!Files.exists(target)) {
+            throw StorageException.notFound(normalized);
+        }
+        if (Files.isDirectory(target)) {
+            throw StorageException.conflict("目标是目录，无法按文件下载: " + normalized, normalized);
+        }
+        if (offset <= 0) {
+            download(path, out);
+            return;
+        }
+        try (java.io.InputStream in = Files.newInputStream(target)) {
+            long remaining = offset;
+            while (remaining > 0) {
+                long skipped = in.skip(remaining);
+                if (skipped <= 0) {
+                    if (in.read() < 0) {
+                        break;
+                    }
+                    skipped = 1;
+                }
+                remaining -= skipped;
+            }
+            byte[] chunk = new byte[8192];
+            int read;
+            while ((read = in.read(chunk)) >= 0) {
+                out.write(chunk, 0, read);
+            }
+        } catch (IOException e) {
+            throw StorageException.io("续传下载失败: " + normalized + "（" + e.getMessage() + "）",
+                    normalized, e);
+        }
+    }
+
+    @Override
     public void delete(String path) {
         String normalized = StoragePaths.normalize(path);
         if (normalized.isEmpty()) {

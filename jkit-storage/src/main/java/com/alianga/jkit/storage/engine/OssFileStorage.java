@@ -299,6 +299,32 @@ public class OssFileStorage implements FileStorage {
     public void download(String path, OutputStream out) {
         String normalized = requireFile(path);
         HttpCore.Response response = request("GET", normalized, null, null, null, -1L, null);
+        streamBody(response, normalized, out);
+    }
+
+    @Override
+    public boolean supportsRange() {
+        return true;
+    }
+
+    @Override
+    public void download(String path, long offset, OutputStream out) {
+        if (offset <= 0) {
+            download(path, out);
+            return;
+        }
+        String normalized = requireFile(path);
+        HttpCore.Response response = request("GET", normalized, null, null, null, -1L, null,
+                java.util.Collections.singletonMap("Range", "bytes=" + offset + "-"));
+        if (response.status() == 416) {
+            response.close();
+            throw StorageException.conflict("续传偏移超出对象大小: " + normalized, normalized);
+        }
+        streamBody(response, normalized, out);
+    }
+
+    /** 把响应体写入输出流（404 映射 notFound，其余 <400 视为成功，含 206）。 */
+    private void streamBody(HttpCore.Response response, String normalized, OutputStream out) {
         if (response.status() == 404) {
             response.close();
             throw StorageException.notFound(normalized);

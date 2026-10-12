@@ -351,11 +351,38 @@ public class S3FileStorage implements FileStorage {
 
     @Override
     public void download(String path, OutputStream out) {
+        downloadInternal(path, out, -1L);
+    }
+
+    @Override
+    public boolean supportsRange() {
+        return true;
+    }
+
+    @Override
+    public void download(String path, long offset, OutputStream out) {
+        if (offset <= 0) {
+            download(path, out);
+            return;
+        }
+        downloadInternal(path, out, offset);
+    }
+
+    /** 统一下载实现：offset > 0 时带 Range 头（期望 206 Partial Content）。 */
+    private void downloadInternal(String path, OutputStream out, long offset) {
         String normalized = requireFile(path);
-        HttpCore.Response response = request("GET", objectKey(normalized), null, null, null, -1L, null);
+        HttpCore.Response response = offset > 0
+                ? request("GET", objectKey(normalized), null, null, null, -1L, null, null,
+                        java.util.Collections.singletonMap("Range", "bytes=" + offset + "-"))
+                : request("GET", objectKey(normalized), null, null, null, -1L, null);
         if (response.status() == 404) {
             response.close();
             throw StorageException.notFound(normalized);
+        }
+        if (offset > 0 && response.status() == 416) {
+            response.close();
+            throw StorageException.conflict(
+                    "续传偏移超出对象大小: " + normalized, normalized);
         }
         ensureSuccess(response, normalized);
         try {

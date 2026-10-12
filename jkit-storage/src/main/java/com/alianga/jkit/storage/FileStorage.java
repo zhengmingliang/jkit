@@ -84,6 +84,29 @@ public interface FileStorage extends AutoCloseable {
     void download(String path, OutputStream out);
 
     /**
+     * 是否支持从指定偏移续传下载（Range 读取）。支持的平台才可调用
+     * {@link #download(String, long, OutputStream)}。
+     *
+     * @return true 支持
+     */
+    default boolean supportsRange() {
+        return false;
+    }
+
+    /**
+     * 从 {@code offset} 字节开始下载（断点续传用）：输出流拿到的是对象
+     * 第 offset 字节起的内容，调用方自行负责拼接（通常以追加方式写入
+     * 已有的 .part 文件）。
+     *
+     * @param path   对象路径
+     * @param offset 起始偏移（0 等价于全量下载）
+     * @param out    目标输出流
+     */
+    default void download(String path, long offset, OutputStream out) {
+        throw StorageException.unsupported("该平台不支持断点续传（Range 读取）");
+    }
+
+    /**
      * 删除文件或空目录。删除不存在的对象视为成功（幂等）。
      *
      * @param path 对象路径

@@ -186,6 +186,21 @@ public class SftpFileStorage implements FileStorage {
     }
 
     @Override
+    public boolean supportsRange() {
+        return true;
+    }
+
+    @Override
+    public void download(String path, long offset, OutputStream out) {
+        String normalized = requireFile(path);
+        if (offset <= 0) {
+            download(normalized, out);
+            return;
+        }
+        bridge().get(remoteOf(normalized), out, offset);
+    }
+
+    @Override
     public void delete(String path) {
         String normalized = StoragePaths.normalize(path);
         if (normalized.isEmpty()) {
@@ -541,6 +556,26 @@ public class SftpFileStorage implements FileStorage {
             } catch (InvocationTargetException e) {
                 release(channel, isConnectionLevel(e.getCause()));
                 throw mapThrowable(e.getCause(), remotePath, "下载");
+            } catch (ReflectiveOperationException e) {
+                release(channel, false);
+                throw StorageException.io("JSch 反射调用失败: " + e.getMessage(), remotePath, e);
+            } catch (RuntimeException e) {
+                release(channel, true);
+                throw e;
+            }
+        }
+
+        /** 续传下载：jsch get(src, out, monitor, skip)，skip 为起始偏移。 */
+        void get(String remotePath, OutputStream out, long offset) {
+            Object channel = borrow();
+            try {
+                Class<?> monitor = Class.forName("com.jcraft.jsch.SftpProgressMonitor");
+                method(channel.getClass(), "get", String.class, OutputStream.class,
+                        monitor, long.class).invoke(channel, remotePath, out, null, offset);
+                release(channel, false);
+            } catch (InvocationTargetException e) {
+                release(channel, isConnectionLevel(e.getCause()));
+                throw mapThrowable(e.getCause(), remotePath, "续传下载");
             } catch (ReflectiveOperationException e) {
                 release(channel, false);
                 throw StorageException.io("JSch 反射调用失败: " + e.getMessage(), remotePath, e);

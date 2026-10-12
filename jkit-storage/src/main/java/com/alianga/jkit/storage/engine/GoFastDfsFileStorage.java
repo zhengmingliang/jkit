@@ -273,6 +273,36 @@ public class GoFastDfsFileStorage implements FileStorage {
         String normalized = requireFile(path);
         HttpCore.Response response = request("GET", objectKey(normalized));
         ensureSuccess(response, normalized);
+        streamTo(response, normalized, out);
+    }
+
+    @Override
+    public boolean supportsRange() {
+        return true;
+    }
+
+    @Override
+    public void download(String path, long offset, OutputStream out) {
+        if (offset <= 0) {
+            download(path, out);
+            return;
+        }
+        String normalized = requireFile(path);
+        HttpCore.Request rangeRequest = new HttpCore.Request("GET",
+                endpoint + "/" + group + "/" + Urls.encodePath(objectKey(normalized)));
+        authorize(rangeRequest);
+        rangeRequest.header("Range", "bytes=" + offset + "-");
+        HttpCore.Response response = HttpCore.execute(HttpCore.configured(rangeRequest, config));
+        if (response.status() == 416) {
+            response.close();
+            throw StorageException.conflict("续传偏移超出对象大小: " + normalized, normalized);
+        }
+        ensureSuccess(response, normalized);
+        streamTo(response, normalized, out);
+    }
+
+    /** 响应体 → 输出流。 */
+    private void streamTo(HttpCore.Response response, String normalized, OutputStream out) {
         try {
             byte[] chunk = new byte[8192];
             int read;

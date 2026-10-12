@@ -135,6 +135,29 @@ public class FtpFileStorage implements FileStorage {
     }
 
     @Override
+    public boolean supportsRange() {
+        return true;
+    }
+
+    @Override
+    public void download(String path, long offset, OutputStream out) {
+        String normalized = requireFile(path);
+        if (offset <= 0) {
+            download(normalized, out);
+            return;
+        }
+        execute(normalized, ftp -> {
+            // REST 指示服务器从指定偏移续传（RFC 3659）；350 表示可以继续
+            int code = ftp.command("REST " + offset).code();
+            if (code != 350) {
+                throw StorageException.unsupported("服务器不支持断点续传（REST 被拒绝: " + code + "）");
+            }
+            retrieveInternal(ftp, normalized, out);
+            return null;
+        });
+    }
+
+    @Override
     public void delete(String path) {
         String normalized = StoragePaths.normalize(path);
         if (normalized.isEmpty()) {
