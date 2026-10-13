@@ -59,6 +59,10 @@ public class FtpFileStorage implements FileStorage {
     private final String root;
     private final Object lock = new Object();
     private FtpClient client;
+    /** 上次操作完成时间（毫秒）：空闲超过 {@link #NOOP_PROBE_IDLE_MS} 复用前先探活。 */
+    private long lastUsedAt;
+    /** 复用控制连接前先发 NOOP 探活的空闲阈值（毫秒）。 */
+    private static final long NOOP_PROBE_IDLE_MS = 30_000L;
 
     /**
      * 由配置创建（配置键：host / port / user / password / basePath / passive / encoding）。
@@ -294,7 +298,17 @@ public class FtpFileStorage implements FileStorage {
         }
         Socket data = ftp.startTransfer("STOR " + remoteOf(normalized));
         if (data == null) {
-            throw mapReply(ftp.lastReply(), normalized, "上传");
+            FtpClient.Reply rejected = ftp.lastReply();
+            // 部分服务器（如 proftpd AllowOverwrite off）拒绝覆盖已存在文件（550/553）：
+            // 目标确实是文件时先 DELE 再重试一次，与「上传即覆盖」的引擎语义保持一致
+            if ((rejected.code() == 550 || rejected.code() == 553)
+                    && ftp.command("SIZE " + remoteOf(normalized)).code() == 213
+                    && ftp.command("DELE " + remoteOf(normalized)).isPositive()) {
+                data = ftp.startTransfer("STOR " + remoteOf(normalized));
+            }
+            if (data == null) {
+                throw mapReply(rejected, normalized, "上传");
+            }
         }
         try {
             OutputStream dout = new BufferedOutputStream(data.getOutputStream());
@@ -415,12 +429,29 @@ public class FtpFileStorage implements FileStorage {
 
     private FtpClient ensureConnected() throws IOException {
         if (client != null && client.isConnected()) {
-            return client;
+            // 服务器会踢掉长时间空闲的控制连接（vsftpd 默认 300s）：socket 侧
+            // 看不出，下一次读写才炸。空闲较久时先花一个 RTT 发 NOOP 探活，
+            // 死了就重建，操作本身不用跟着失败一次
+            if (System.currentTimeMillis() - lastUsedAt > NOOP_PROBE_IDLE_MS) {
+                try {
+                    if (client.command("NOOP").isPositive()) {
+                        lastUsedAt = System.currentTimeMillis();
+                        return client;
+                    }
+                } catch (IOException ignored) {
+                    // 探活失败走重建
+                }
+                closeClientQuietly();
+            } else {
+                lastUsedAt = System.currentTimeMillis();
+                return client;
+            }
         }
         closeClientQuietly();
         FtpClient fresh = new FtpClient(host, port, user, password, passive, charset);
         fresh.connect();
         client = fresh;
+        lastUsedAt = System.currentTimeMillis();
         return client;
     }
 

@@ -220,7 +220,7 @@ final class FtpClient {
      * @return 累计传输字节数
      */
     static long pump(InputStream in, OutputStream out) throws IOException {
-        byte[] chunk = new byte[8192];
+        byte[] chunk = new byte[65536];
         long total = 0L;
         int read;
         while ((read = in.read(chunk)) >= 0) {
