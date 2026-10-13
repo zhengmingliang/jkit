@@ -8,8 +8,8 @@ import com.alianga.jkit.storage.StorageException;
 import com.alianga.jkit.storage.StoragePaths;
 
 import java.io.BufferedOutputStream;
-import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -18,6 +18,7 @@ import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
 import java.nio.charset.Charset;
+import java.nio.file.Files;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -387,11 +388,26 @@ public class FtpFileStorage implements FileStorage {
         }
     }
 
-    /** 文件复制：下载到内存缓冲后重新上传，避免临时文件。 */
+    /**
+     * 文件复制：经本地临时文件中转（下载 → 上传），避免把整文件缓冲进堆。
+     * FTP 无服务端 COPY 命令；大文件整文件进内存会在低堆环境直接 OOM。
+     */
     private void copyFile(FtpClient ftp, String source, String target) throws IOException {
-        ByteArrayOutputStream buffer = new ByteArrayOutputStream(8192);
-        retrieveInternal(ftp, source, buffer);
-        storeInternal(ftp, target, new ByteArrayInputStream(buffer.toByteArray()));
+        File temp = File.createTempFile("jkit-storage-ftp-copy", ".tmp");
+        try {
+            try (OutputStream out = Files.newOutputStream(temp.toPath())) {
+                retrieveInternal(ftp, source, out);
+            }
+            try (InputStream in = Files.newInputStream(temp.toPath())) {
+                storeInternal(ftp, target, in);
+            }
+        } finally {
+            try {
+                Files.deleteIfExists(temp.toPath());
+            } catch (IOException ignore) {
+                // 临时文件清理失败不影响结果
+            }
+        }
     }
 
     private long queryMtime(FtpClient ftp, String remote) throws IOException {

@@ -186,7 +186,8 @@ public interface FileStorage extends AutoCloseable {
     }
 
     /**
-     * 读取整个对象到内存。
+     * 读取整个对象到内存（无大小上限）。大文件请改用 {@link #download} 或
+     * {@link #readBytes(String, long)}，否则低堆环境可能 OOM。
      *
      * @param path 对象路径
      * @return 字节数组
@@ -194,6 +195,47 @@ public interface FileStorage extends AutoCloseable {
     default byte[] readBytes(String path) {
         ByteArrayOutputStream out = new ByteArrayOutputStream(8192);
         download(path, out);
+        return out.toByteArray();
+    }
+
+    /**
+     * 读取对象到内存，超过 {@code maxBytes} 立即中止并抛冲突异常，避免 OOM。
+     *
+     * @param path     对象路径
+     * @param maxBytes 允许读入堆的最大字节数（含）
+     * @return 字节数组（长度 ≤ maxBytes）
+     */
+    default byte[] readBytes(String path, long maxBytes) {
+        if (maxBytes < 0L) {
+            throw new IllegalArgumentException("maxBytes must be >= 0");
+        }
+        final ByteArrayOutputStream out = new ByteArrayOutputStream(
+                (int) Math.min(Math.max(maxBytes, 64L), 8192L));
+        final long[] counted = {0L};
+        download(path, new OutputStream() {
+            @Override
+            public void write(int b) throws java.io.IOException {
+                if (counted[0] + 1L > maxBytes) {
+                    throw StorageException.conflict(
+                            "对象超过允许读取上限 " + maxBytes + " 字节: " + path, path);
+                }
+                counted[0]++;
+                out.write(b);
+            }
+
+            @Override
+            public void write(byte[] b, int off, int len) throws java.io.IOException {
+                if (len < 0) {
+                    throw new IndexOutOfBoundsException();
+                }
+                if (counted[0] + (long) len > maxBytes) {
+                    throw StorageException.conflict(
+                            "对象超过允许读取上限 " + maxBytes + " 字节: " + path, path);
+                }
+                counted[0] += len;
+                out.write(b, off, len);
+            }
+        });
         return out.toByteArray();
     }
 

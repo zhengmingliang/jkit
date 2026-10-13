@@ -545,8 +545,12 @@ public final class SyncEngine {
         }
     }
 
-    /** 内存中转阈值：超过该大小的文件同步走临时文件，避免占满堆。 */
-    private static final long MEMORY_LIMIT = 32L * 1024L * 1024L;
+    /**
+     * 同一次同步里最多 concurrency 路并发缓冲；在 -Xmx256m 下用 8MiB 上限，
+     * 给堆与其他操作留余量。大小未知（{@code size < 0}）一律走临时文件，
+     * 避免「未知大小 → 整文件进 ByteArrayOutputStream → OOM」。
+     */
+    private static final long MEMORY_LIMIT = 8L * 1024L * 1024L;
 
     private static void copyOne(FileStorage source, String sourceDir, FileStorage target,
                                 String targetDir, String relative, String targetRelative,
@@ -556,8 +560,9 @@ public final class SyncEngine {
         java.nio.file.Path temp = null;
         try {
             StorageEntry entry = source.stat(StoragePaths.join(sourceDir, relative));
-            long size = entry.size() < 0 ? 0L : entry.size();
-            if (size > MEMORY_LIMIT) {
+            long size = entry.size();
+            // 未知大小或超过内存上限：落盘中转，不把整文件进堆
+            if (size < 0 || size > MEMORY_LIMIT) {
                 temp = java.nio.file.Files.createTempFile("jkit-storage-sync", ".tmp");
                 try (java.io.OutputStream fileOut = java.nio.file.Files.newOutputStream(temp)) {
                     source.download(StoragePaths.join(sourceDir, relative), fileOut);

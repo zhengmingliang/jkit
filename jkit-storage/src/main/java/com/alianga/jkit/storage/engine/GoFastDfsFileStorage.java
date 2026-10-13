@@ -12,11 +12,13 @@ import com.alianga.jkit.storage.internal.Urls;
 import com.alianga.jkit.storage.internal.Xmls;
 
 import java.io.ByteArrayInputStream;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.SequenceInputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -341,8 +343,34 @@ public class GoFastDfsFileStorage implements FileStorage {
             copyDir(source, target);
             return;
         }
-        // go-fastdfs 无服务端复制 API，走 readBytes + upload（大文件受内存限制）
-        upload(target, readBytes(source));
+        // go-fastdfs 无服务端复制 API：经临时文件中转，避免大文件整文件进堆
+        copyViaTemp(source, target);
+    }
+
+    /** 下载到临时文件再上传，流式中转。 */
+    private void copyViaTemp(String source, String target) {
+        File temp;
+        try {
+            temp = File.createTempFile("jkit-storage-gofs-copy", ".tmp");
+        } catch (IOException e) {
+            throw StorageException.io("创建临时文件失败: " + e.getMessage(), source, e);
+        }
+        try {
+            try (OutputStream out = Files.newOutputStream(temp.toPath())) {
+                download(source, out);
+            }
+            try (InputStream in = Files.newInputStream(temp.toPath())) {
+                upload(target, in, temp.length());
+            }
+        } catch (IOException e) {
+            throw StorageException.io("复制失败: " + source + " -> " + target, target, e);
+        } finally {
+            try {
+                Files.deleteIfExists(temp.toPath());
+            } catch (IOException ignore) {
+                // 临时文件清理失败不影响结果
+            }
+        }
     }
 
     @Override
