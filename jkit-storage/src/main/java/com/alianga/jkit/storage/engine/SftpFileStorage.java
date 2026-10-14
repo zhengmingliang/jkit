@@ -354,6 +354,9 @@ public class SftpFileStorage implements FileStorage {
     /** 等待归还时的轮询间隔：期间可能有通道被作废、名额空出，需要重新尝试新建。 */
     static final long BORROW_POLL_MS = 200L;
 
+    /** 借取通道的总等待上限：池满且一直没有归还 / 空出名额时，超时抛 TIMEOUT 而不是无限等。 */
+    static final long BORROW_TIMEOUT_MS = 30000L;
+
     /**
      * 通道池借取：先取空闲；未达上限则新建；否则带超时轮询空闲队列，每轮醒来都重新检查名额。
      * 作废（broken）的通道只减计数、不回队列，若用 {@code take()} 死等，池满且全部作废时
@@ -371,6 +374,27 @@ public class SftpFileStorage implements FileStorage {
                             java.util.concurrent.atomic.AtomicInteger created, int poolSize,
                             java.util.function.BooleanSupplier closed,
                             java.util.function.Supplier<T> factory) {
+        return borrowFrom(idle, created, poolSize, closed, factory, BORROW_TIMEOUT_MS);
+    }
+
+    /**
+     * 同 {@link #borrowFrom(java.util.concurrent.BlockingQueue, java.util.concurrent.atomic.AtomicInteger,
+     * int, java.util.function.BooleanSupplier, java.util.function.Supplier)}，可指定总等待上限。
+     *
+     * @param idle      空闲队列
+     * @param created   已创建计数
+     * @param poolSize  上限
+     * @param closed    池是否已关闭
+     * @param factory   新建通道
+     * @param timeoutMs 总等待上限毫秒
+     * @param <T>       通道类型
+     * @return 通道
+     */
+    static <T> T borrowFrom(java.util.concurrent.BlockingQueue<T> idle,
+                            java.util.concurrent.atomic.AtomicInteger created, int poolSize,
+                            java.util.function.BooleanSupplier closed,
+                            java.util.function.Supplier<T> factory, long timeoutMs) {
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(timeoutMs);
         while (true) {
             if (closed.getAsBoolean()) {
                 throw StorageException.connectFailed("SFTP 通道池已关闭");
@@ -388,8 +412,12 @@ public class SftpFileStorage implements FileStorage {
                 }
             }
             created.decrementAndGet();
+            long remainingMs = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime());
+            if (remainingMs <= 0L) {
+                throw StorageException.timeout("SFTP 通道池已满，等待空闲通道超过 " + timeoutMs + "ms");
+            }
             try {
-                channel = idle.poll(BORROW_POLL_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
+                channel = idle.poll(Math.min(BORROW_POLL_MS, remainingMs), java.util.concurrent.TimeUnit.MILLISECONDS);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw StorageException.io("SFTP 通道借取被中断", "-", e);

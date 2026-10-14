@@ -34,4 +34,20 @@ public class SftpChannelPoolTest {
         assertEquals("ch3", waiter.get(5, TimeUnit.SECONDS));
         assertEquals(1, created.get());
     }
+
+    @Test(timeout = 10_000)
+    public void borrowTimesOutWhenPoolStaysFull() {
+        LinkedBlockingQueue<String> idle = new LinkedBlockingQueue<>();
+        AtomicInteger created = new AtomicInteger(1);
+        long start = System.nanoTime();
+        try {
+            SftpFileStorage.borrowFrom(idle, created, 1, () -> false, () -> "new", 500L);
+            org.junit.Assert.fail("池一直满应超时");
+        } catch (com.alianga.jkit.storage.StorageException e) {
+            assertEquals(com.alianga.jkit.storage.StorageErrorCode.TIMEOUT, e.code());
+        }
+        long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+        org.junit.Assert.assertTrue("应在超时附近返回，实际 " + elapsedMs, elapsedMs >= 400 && elapsedMs < 3000);
+        assertEquals(1, created.get());
+    }
 }
