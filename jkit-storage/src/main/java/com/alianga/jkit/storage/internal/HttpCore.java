@@ -180,7 +180,13 @@ public final class HttpCore {
             try {
                 byte[] chunk = new byte[8192];
                 int read;
+                long total = 0L;
                 while ((read = body.read(chunk)) >= 0) {
+                    total += read;
+                    if (total > Xmls.MAX_RESPONSE_BYTES) {
+                        throw StorageException.io("响应体超过上限 " + Xmls.MAX_RESPONSE_BYTES
+                                + " 字节，已中止读取", "-", null);
+                    }
                     out.write(chunk, 0, read);
                 }
                 return out.toByteArray();
@@ -424,7 +430,7 @@ public final class HttpCore {
 
     /** 未知长度请求体：全部缓冲到临时文件后按实际长度发送。 */
     private static void spoolUnknownLength(HttpURLConnection connection, Request request) throws IOException {
-        java.io.File temp = java.io.File.createTempFile("jkit-storage-spool", ".tmp");
+        java.io.File temp = TempFiles.create("jkit-storage-spool", -1L, "-");
         try {
             long total;
             try (OutputStream fileOut = Files.newOutputStream(temp.toPath())) {
@@ -439,11 +445,7 @@ public final class HttpCore {
                 fileIn.close();
             }
         } finally {
-            try {
-                Files.deleteIfExists(temp.toPath());
-            } catch (IOException ignore) {
-                // 临时文件清理失败不影响请求结果
-            }
+            TempFiles.deleteQuietly(temp);
         }
     }
 

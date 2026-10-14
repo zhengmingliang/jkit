@@ -290,12 +290,8 @@ public class SftpFileStorage implements FileStorage {
     }
 
     private void copyFile(String source, String target) {
-        File temp;
-        try {
-            temp = File.createTempFile("jkit-storage-sftp-copy", ".tmp");
-        } catch (IOException e) {
-            throw StorageException.io("创建临时文件失败: " + e.getMessage(), source, e);
-        }
+        File temp = com.alianga.jkit.storage.internal.TempFiles.create(
+                "jkit-storage-sftp-copy", stat(source).size(), source);
         try {
             try (OutputStream out = Files.newOutputStream(temp.toPath())) {
                 download(source, out);
@@ -306,11 +302,7 @@ public class SftpFileStorage implements FileStorage {
         } catch (IOException e) {
             throw StorageException.io("复制失败: " + source + " -> " + target, target, e);
         } finally {
-            try {
-                Files.deleteIfExists(temp.toPath());
-            } catch (IOException ignore) {
-                // 临时文件清理失败不影响结果
-            }
+            com.alianga.jkit.storage.internal.TempFiles.deleteQuietly(temp);
         }
     }
 
@@ -520,6 +512,19 @@ public class SftpFileStorage implements FileStorage {
             }
         }
 
+        /** 在异常链里找调用方输出流抛出的 StorageException（jsch 会把它包进 SftpException）。 */
+        private static StorageException abortedByCaller(Throwable cause) {
+            for (Throwable t = cause; t != null; t = t.getCause()) {
+                if (t instanceof StorageException) {
+                    return (StorageException) t;
+                }
+                if (t.getCause() == t) {
+                    break;
+                }
+            }
+            return null;
+        }
+
         /** 连接级异常（通道可能已坏）才弃用通道；SftpException 属协议应答，通道无恙。 */
         private static boolean isConnectionLevel(Throwable cause) {
             return cause != null && "com.jcraft.jsch.JSchException".equals(cause.getClass().getName());
@@ -554,8 +559,14 @@ public class SftpFileStorage implements FileStorage {
                         .invoke(channel, remotePath, out);
                 release(channel, false);
             } catch (InvocationTargetException e) {
-                release(channel, isConnectionLevel(e.getCause()));
-                throw mapThrowable(e.getCause(), remotePath, "下载");
+                Throwable cause = e.getCause();
+                // 调用方输出流中止（如 readBytes 超限）时通道里还有未取完的读请求：作废通道
+                StorageException aborted = abortedByCaller(cause);
+                release(channel, aborted != null || isConnectionLevel(cause));
+                if (aborted != null) {
+                    throw aborted;
+                }
+                throw mapThrowable(cause, remotePath, "下载");
             } catch (ReflectiveOperationException e) {
                 release(channel, false);
                 throw StorageException.io("JSch 反射调用失败: " + e.getMessage(), remotePath, e);
@@ -574,8 +585,14 @@ public class SftpFileStorage implements FileStorage {
                         monitor, long.class).invoke(channel, remotePath, out, null, offset);
                 release(channel, false);
             } catch (InvocationTargetException e) {
-                release(channel, isConnectionLevel(e.getCause()));
-                throw mapThrowable(e.getCause(), remotePath, "续传下载");
+                Throwable cause = e.getCause();
+                // 调用方输出流中止（如 readBytes 超限）时通道里还有未取完的读请求：作废通道
+                StorageException aborted = abortedByCaller(cause);
+                release(channel, aborted != null || isConnectionLevel(cause));
+                if (aborted != null) {
+                    throw aborted;
+                }
+                throw mapThrowable(cause, remotePath, "续传下载");
             } catch (ReflectiveOperationException e) {
                 release(channel, false);
                 throw StorageException.io("JSch 反射调用失败: " + e.getMessage(), remotePath, e);

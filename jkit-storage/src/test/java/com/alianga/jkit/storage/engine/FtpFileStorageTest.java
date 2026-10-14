@@ -224,6 +224,48 @@ public class FtpFileStorageTest {
     }
 
     @Test
+    public void overLimitReadKeepsSessionUsable() {
+        FileStorage storage = newStorage("case-overlimit");
+        byte[] data = new byte[256 * 1024];
+        new Random(7).nextBytes(data);
+        storage.upload("big.bin", data);
+        storage.upload("small.txt", "ok".getBytes(StandardCharsets.UTF_8));
+        // 1) 大小已知：stat 后直接拒绝，不开传输
+        try {
+            storage.readBytes("big.bin", 1024);
+            fail("应因超限拒绝");
+        } catch (StorageException e) {
+            assertEquals(StorageErrorCode.CONFLICT, e.code());
+        }
+        assertEquals(2, storage.list("").size());
+        // 2) 调用方输出流中途中止：连接作废后下一次操作自动重连，list 与读取都正常
+        try {
+            storage.download("big.bin", new OutputStream() {
+                private int count;
+
+                @Override
+                public void write(int b) {
+                    write(new byte[]{(byte) b}, 0, 1);
+                }
+
+                @Override
+                public void write(byte[] b, int off, int len) {
+                    count += len;
+                    if (count > 4096) {
+                        throw StorageException.conflict("中止", "big.bin");
+                    }
+                }
+            });
+            fail("应中止");
+        } catch (StorageException e) {
+            assertEquals(StorageErrorCode.CONFLICT, e.code());
+        }
+        assertEquals(2, storage.list("").size());
+        assertArrayEquals("ok".getBytes(StandardCharsets.UTF_8), storage.readBytes("small.txt", 1024));
+        storage.close();
+    }
+
+    @Test
     public void copyKeepsContent() {
         FileStorage storage = newStorage("case-copy");
         byte[] data = patternBytes(4096);

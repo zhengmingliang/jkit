@@ -200,6 +200,7 @@ public interface FileStorage extends AutoCloseable {
 
     /**
      * 读取对象到内存，超过 {@code maxBytes} 立即中止并抛冲突异常，避免 OOM。
+     * 先 stat，大小已知且超限时不发起下载；大小未知（{@code size < 0}）时按上限做有界读取。
      *
      * @param path     对象路径
      * @param maxBytes 允许读入堆的最大字节数（含）
@@ -208,6 +209,12 @@ public interface FileStorage extends AutoCloseable {
     default byte[] readBytes(String path, long maxBytes) {
         if (maxBytes < 0L) {
             throw new IllegalArgumentException("maxBytes must be >= 0");
+        }
+        // 先 stat：已知超限直接拒绝，不开传输，避免中途中止把 FTP/SFTP 会话弄脏
+        long known = stat(path).size();
+        if (known > maxBytes) {
+            throw StorageException.conflict(
+                    "对象超过允许读取上限 " + maxBytes + " 字节: " + path, path);
         }
         final ByteArrayOutputStream out = new ByteArrayOutputStream(
                 (int) Math.min(Math.max(maxBytes, 64L), 8192L));

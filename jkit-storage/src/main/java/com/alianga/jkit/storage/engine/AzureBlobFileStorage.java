@@ -233,12 +233,7 @@ public class AzureBlobFileStorage implements FileStorage {
             return;
         }
         // 未知长度：先缓冲到临时文件取得精确长度，再定长上传（签名依赖 Content-Length）
-        java.io.File temp;
-        try {
-            temp = java.io.File.createTempFile("jkit-storage-azure-", ".tmp");
-        } catch (IOException e) {
-            throw StorageException.io("创建临时文件失败: " + e.getMessage(), normalized, e);
-        }
+        java.io.File temp = com.alianga.jkit.storage.internal.TempFiles.create("jkit-storage-azure-", -1L, normalized);
         try {
             long buffered;
             try (OutputStream fileOut = Files.newOutputStream(temp.toPath())) {
@@ -250,11 +245,7 @@ public class AzureBlobFileStorage implements FileStorage {
         } catch (IOException e) {
             throw StorageException.io("上传失败: " + normalized + "（" + e.getMessage() + "）", normalized, e);
         } finally {
-            try {
-                Files.deleteIfExists(temp.toPath());
-            } catch (IOException ignore) {
-                // 临时文件清理失败不影响结果
-            }
+            com.alianga.jkit.storage.internal.TempFiles.deleteQuietly(temp);
         }
     }
 

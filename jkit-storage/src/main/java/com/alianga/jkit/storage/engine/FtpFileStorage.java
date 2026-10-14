@@ -8,7 +8,6 @@ import com.alianga.jkit.storage.StorageException;
 import com.alianga.jkit.storage.StoragePaths;
 
 import java.io.BufferedOutputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
@@ -251,16 +250,22 @@ public class FtpFileStorage implements FileStorage {
             }
             throw mapReply(rejected, normalized, "列出目录");
         }
-        ByteArrayOutputStream buffer = new ByteArrayOutputStream(8192);
+        // 逐行流式解析：大目录不把整段列表文本先缓冲进堆再拷贝成 String
+        List<StorageEntry> entries = new ArrayList<StorageEntry>();
         try {
-            FtpClient.pump(data.getInputStream(), buffer);
+            java.io.BufferedReader reader = new java.io.BufferedReader(
+                    new java.io.InputStreamReader(data.getInputStream(), ftp.charset()), 64 * 1024);
+            String line;
+            while ((line = reader.readLine()) != null) {
+                List<StorageEntry> parsed = machineFormat ? parseMlsx(line, normalized) : parseList(line, normalized);
+                entries.addAll(parsed);
+            }
             ftp.finishTransfer(data, "列出目录", normalized);
         } catch (IOException e) {
             FtpClient.closeQuietly(data);
             throw e;
         }
-        String text = new String(buffer.toByteArray(), ftp.charset());
-        return machineFormat ? parseMlsx(text, normalized) : parseList(text, normalized);
+        return entries;
     }
 
     /**
@@ -332,6 +337,12 @@ public class FtpFileStorage implements FileStorage {
         } catch (IOException e) {
             FtpClient.closeQuietly(data);
             throw e;
+        } catch (RuntimeException e) {
+            // 调用方的输出流中止（如 readBytes 超限）：数据连接与控制连接上都残留未读应答，
+            // 整条连接作废，下次操作自动重连
+            FtpClient.closeQuietly(data);
+            closeClientQuietly();
+            throw e;
         }
     }
 
@@ -393,7 +404,8 @@ public class FtpFileStorage implements FileStorage {
      * FTP 无服务端 COPY 命令；大文件整文件进内存会在低堆环境直接 OOM。
      */
     private void copyFile(FtpClient ftp, String source, String target) throws IOException {
-        File temp = File.createTempFile("jkit-storage-ftp-copy", ".tmp");
+        File temp = com.alianga.jkit.storage.internal.TempFiles.create(
+                "jkit-storage-ftp-copy", statInternal(ftp, source).size(), source);
         try {
             try (OutputStream out = Files.newOutputStream(temp.toPath())) {
                 retrieveInternal(ftp, source, out);
@@ -402,11 +414,7 @@ public class FtpFileStorage implements FileStorage {
                 storeInternal(ftp, target, in);
             }
         } finally {
-            try {
-                Files.deleteIfExists(temp.toPath());
-            } catch (IOException ignore) {
-                // 临时文件清理失败不影响结果
-            }
+            com.alianga.jkit.storage.internal.TempFiles.deleteQuietly(temp);
         }
     }
 

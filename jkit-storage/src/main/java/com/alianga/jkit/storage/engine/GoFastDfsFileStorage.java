@@ -349,12 +349,7 @@ public class GoFastDfsFileStorage implements FileStorage {
 
     /** 下载到临时文件再上传，流式中转。 */
     private void copyViaTemp(String source, String target) {
-        File temp;
-        try {
-            temp = File.createTempFile("jkit-storage-gofs-copy", ".tmp");
-        } catch (IOException e) {
-            throw StorageException.io("创建临时文件失败: " + e.getMessage(), source, e);
-        }
+        File temp = com.alianga.jkit.storage.internal.TempFiles.create("jkit-storage-gofs-copy", -1L, source);
         try {
             try (OutputStream out = Files.newOutputStream(temp.toPath())) {
                 download(source, out);
@@ -365,11 +360,7 @@ public class GoFastDfsFileStorage implements FileStorage {
         } catch (IOException e) {
             throw StorageException.io("复制失败: " + source + " -> " + target, target, e);
         } finally {
-            try {
-                Files.deleteIfExists(temp.toPath());
-            } catch (IOException ignore) {
-                // 临时文件清理失败不影响结果
-            }
+            com.alianga.jkit.storage.internal.TempFiles.deleteQuietly(temp);
         }
     }
 

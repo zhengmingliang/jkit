@@ -162,6 +162,25 @@ public final class Xmls {
      * @return 文本
      */
     public static String readAll(InputStream in) {
+        return readAll(in, MAX_RESPONSE_BYTES);
+    }
+
+    /**
+     * 响应文本读取上限：列表类 XML（WebDAV PROPFIND / S3 ListObjects）几万条目也只有
+     * 十几 MB；超过即判定异常响应，抛错而不是把堆打爆。可用系统属性
+     * {@code jkit.storage.maxResponseBytes} 调整。
+     */
+    public static final long MAX_RESPONSE_BYTES =
+            Long.getLong("jkit.storage.maxResponseBytes", 64L * 1024L * 1024L);
+
+    /**
+     * 把输入流读为字符串（UTF-8），超过 maxBytes 抛 I/O 异常。
+     *
+     * @param in       输入流
+     * @param maxBytes 上限
+     * @return 文本
+     */
+    public static String readAll(InputStream in, long maxBytes) {
         if (in == null) {
             return "";
         }
@@ -169,10 +188,15 @@ public final class Xmls {
             ByteArrayOutputStream out = new ByteArrayOutputStream(4096);
             byte[] buffer = new byte[8192];
             int read;
+            long total = 0L;
             while ((read = in.read(buffer)) >= 0) {
+                total += read;
+                if (total > maxBytes) {
+                    throw StorageException.io("响应体超过上限 " + maxBytes + " 字节，已中止读取", "-", null);
+                }
                 out.write(buffer, 0, read);
             }
-            return new String(out.toByteArray(), StandardCharsets.UTF_8);
+            return out.toString(StandardCharsets.UTF_8.name());
         } catch (java.io.IOException e) {
             throw StorageException.io("读取响应失败: " + e.getMessage(), "-", e);
         }
