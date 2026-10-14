@@ -122,14 +122,15 @@ public final class StoragePresets {
                         StorageField.required("user", "邮箱账号"),
                         StorageField.secret("password", "授权码", true),
                         StorageField.optional("ssl", "SSL", "true", null),
-                        StorageField.optional("basePath", "邮箱文件夹", "INBOX", "IMAP 文件夹名"),
+                        StorageField.optional("basePath", "邮箱文件夹", "jkit-mail-disk",
+                                "IMAP 文件夹名，默认 jkit-mail-disk"),
                         StorageField.optional("maxAttachmentBytes", "单附件上限字节",
                                 String.valueOf(qqMax), "QQ 约 50MB，默认 45MiB")),
                 StorageConfig.empty()
                         .set("host", "imap.qq.com")
                         .set("imapPort", "993")
                         .set("ssl", "true")
-                        .set("basePath", "INBOX")
+                        .set("basePath", "jkit-mail-disk")
                         .set("maxAttachmentBytes", String.valueOf(qqMax))));
         platforms.add(new StoragePlatform("mail", "IMAP 邮箱", "mail", "邮件",
                 Arrays.asList(

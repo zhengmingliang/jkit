@@ -1,23 +1,23 @@
 package com.alianga.jkit.storage.engine;
 
+import com.alianga.jkit.notify.Attachment;
+import com.alianga.jkit.notify.ChannelConfig;
+import com.alianga.jkit.notify.MailMime;
+import com.alianga.jkit.notify.Message;
 import com.alianga.jkit.storage.FileStorage;
 import com.alianga.jkit.storage.StorageConfig;
 import com.alianga.jkit.storage.StorageEntry;
 import com.alianga.jkit.storage.StorageErrorCode;
 import com.alianga.jkit.storage.StorageException;
 import com.alianga.jkit.storage.StoragePaths;
-import com.alianga.jkit.storage.internal.MimeTypes;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.List;
-import java.util.UUID;
 
 /**
  * 邮件（IMAP）存储引擎一期：把邮箱文件夹当成扁平文件盘。
@@ -27,12 +27,9 @@ import java.util.UUID;
  * 一律拒绝（{@code INVALID_CONFIG}）。{@code mkdir / copy / rename} 暂不支持。</p>
  *
  * <p>上传：同名先 {@code delete} 再 {@code APPEND}（APPEND 本身不做隐式覆盖）；
- * MIME 由本类手写组装（不依赖 JavaMail / jkit-notify）。
- * <!-- TODO Phase 2：可与 jkit-notify Attachment 对齐 MIME 组装 -->
- * </p>
+ * MIME 经 jkit-notify {@link Attachment} + {@link MailMime}/{@code SmtpChannel} 组装。</p>
  *
- * <p>真实 IMAP 由 {@link ImapMailSession} / {@link ImapAppendStore}（开发助手4）实现；
- * 本模块一期仅注册引擎与平台，生产构造会连上桩并得到明确的 {@code UNSUPPORTED}。</p>
+ * <p>真实 IMAP 由 {@link ImapMailSession} / {@link ImapAppendStore} 实现。</p>
  *
  * @author 郑明亮
  */
@@ -152,7 +149,7 @@ public class MailFileStorage implements FileStorage {
                 }
             }
         }
-        byte[] mime = buildMimeMessage(name, payload);
+        byte[] mime = buildStoredMime(name, payload);
         gateway.append(folder, new ByteArrayInputStream(mime), mime.length);
     }
 
@@ -259,57 +256,19 @@ public class MailFileStorage implements FileStorage {
     }
 
     /**
-     * 手写最小 multipart/mixed MIME：正文 + 一个附件。
+     * 经 jkit-notify {@link Attachment} + {@link MailMime} 组装存储用 RFC822。
      *
      * @param fileName 附件文件名（同时作 Subject）
      * @param payload  附件字节
      * @return 完整 RFC822 字节
      */
-    static byte[] buildMimeMessage(String fileName, byte[] payload) {
-        String boundary = "----=_JKIT_MAIL_" + UUID.randomUUID().toString().replace("-", "");
-        String contentType = MimeTypes.of(fileName);
-        String safeName = sanitizeHeader(fileName);
-        String encoded = Base64.getMimeEncoder(76, new byte[]{'\r', '\n'})
-                .encodeToString(payload == null ? new byte[0] : payload);
-        StringBuilder sb = new StringBuilder(512 + encoded.length());
-        sb.append("MIME-Version: 1.0\r\n");
-        sb.append("Subject: ").append(safeName).append("\r\n");
-        sb.append("Content-Type: multipart/mixed; boundary=\"").append(boundary).append("\"\r\n");
-        sb.append("\r\n");
-        sb.append("--").append(boundary).append("\r\n");
-        sb.append("Content-Type: text/plain; charset=UTF-8\r\n");
-        sb.append("Content-Transfer-Encoding: 8bit\r\n");
-        sb.append("\r\n");
-        sb.append("Stored by jkit-storage MailFileStorage.\r\n");
-        sb.append("\r\n");
-        sb.append("--").append(boundary).append("\r\n");
-        sb.append("Content-Type: ").append(contentType)
-                .append("; name=\"").append(safeName).append("\"\r\n");
-        sb.append("Content-Transfer-Encoding: base64\r\n");
-        sb.append("Content-Disposition: attachment; filename=\"")
-                .append(safeName).append("\"\r\n");
-        sb.append("\r\n");
-        sb.append(encoded);
-        if (!encoded.isEmpty() && !encoded.endsWith("\r\n")) {
-            sb.append("\r\n");
-        }
-        sb.append("--").append(boundary).append("--\r\n");
-        return sb.toString().getBytes(StandardCharsets.UTF_8);
-    }
-
-    private static String sanitizeHeader(String value) {
-        if (value == null || value.isEmpty()) {
-            return "unnamed";
-        }
-        StringBuilder sb = new StringBuilder(value.length());
-        for (int i = 0; i < value.length(); i++) {
-            char c = value.charAt(i);
-            if (c == '\r' || c == '\n' || c == '"' || c == '\\') {
-                sb.append('_');
-            } else {
-                sb.append(c);
-            }
-        }
-        return sb.toString();
+    static byte[] buildStoredMime(String fileName, byte[] payload) {
+        Attachment attachment = Attachment.of(fileName, payload == null ? new byte[0] : payload);
+        Message message = Message.text(fileName, "Stored by jkit-storage MailFileStorage.")
+                .attachment(attachment);
+        ChannelConfig mimeCfg = ChannelConfig.smtp("127.0.0.1", 25)
+                .from("jkit-storage@localhost")
+                .to("jkit-storage@localhost");
+        return MailMime.render(message, "jkit-storage@localhost", mimeCfg);
     }
 }

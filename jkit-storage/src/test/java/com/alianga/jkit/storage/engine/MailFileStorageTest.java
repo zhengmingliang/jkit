@@ -130,7 +130,7 @@ public class MailFileStorageTest {
         assertEquals("imap.qq.com", qq.defaults().get("host"));
         assertEquals("993", qq.defaults().get("imapPort"));
         assertEquals("true", qq.defaults().get("ssl"));
-        assertEquals("INBOX", qq.defaults().get("basePath"));
+        assertEquals("jkit-mail-disk", qq.defaults().get("basePath"));
         assertEquals(String.valueOf(45L * 1024L * 1024L), qq.defaults().get("maxAttachmentBytes"));
         StoragePlatform generic = FileStorages.platform("mail");
         assertNotNull(generic);
@@ -299,9 +299,11 @@ public class MailFileStorageTest {
             if (subjectAt >= 0) {
                 int end = text.indexOf("\r\n", subjectAt);
                 if (end > subjectAt) {
-                    name = text.substring(subjectAt + "Subject: ".length(), end).trim();
+                    name = decodeMimeWords(
+                            text.substring(subjectAt + "Subject: ".length(), end).trim());
                 }
             }
+            // SmtpChannel 正文与附件均为 base64；取最后一个 base64 part 作为附件载荷
             String marker = "Content-Transfer-Encoding: base64\r\n";
             int encAt = text.lastIndexOf(marker);
             if (encAt < 0) {
@@ -320,6 +322,36 @@ public class MailFileStorageTest {
             byte[] payload = b64.isEmpty() ? new byte[0]
                     : java.util.Base64.getDecoder().decode(b64);
             return new ParsedAttachment(name, payload);
+        }
+
+        /** 解 SmtpChannel Subject 的 RFC2047 encoded-word，与 ImapMailSession 对齐。 */
+        private static String decodeMimeWords(String raw) {
+            if (raw == null || !raw.contains("=?")) {
+                return raw;
+            }
+            try {
+                java.util.regex.Pattern p = java.util.regex.Pattern.compile(
+                        "=\\?([^?]+)\\?([bBqQ])\\?([^?]*)\\?=");
+                java.util.regex.Matcher m = p.matcher(raw);
+                StringBuffer sb = new StringBuffer();
+                while (m.find()) {
+                    String charset = m.group(1);
+                    char enc = Character.toUpperCase(m.group(2).charAt(0));
+                    String data = m.group(3);
+                    String decoded;
+                    if (enc == 'B') {
+                        byte[] bytes = java.util.Base64.getDecoder().decode(data);
+                        decoded = new String(bytes, charset);
+                    } else {
+                        decoded = data.replace("_", " ");
+                    }
+                    m.appendReplacement(sb, java.util.regex.Matcher.quoteReplacement(decoded));
+                }
+                m.appendTail(sb);
+                return sb.toString();
+            } catch (Exception e) {
+                return raw;
+            }
         }
     }
 

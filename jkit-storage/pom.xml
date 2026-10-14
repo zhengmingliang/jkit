@@ -30,6 +30,11 @@
             <version>${revision}</version>
         </dependency>
         <dependency>
+            <groupId>com.alianga</groupId>
+            <artifactId>jkit-notify</artifactId>
+            <version>${revision}</version>
+        </dependency>
+        <dependency>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
             <version>4.13.2</version>
