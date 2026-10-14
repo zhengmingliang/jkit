@@ -53,8 +53,8 @@ public final class SpillBuffer extends OutputStream {
     }
 
     private void spill() throws IOException {
-        // 转写时已知至少要写 memoryLimit 字节；提示大小已知时按提示检查剩余空间
-        file = TempFiles.create("jkit-storage-spill", Math.max(expectedSize, Math.max(size, 1L)), path);
+        // 预计大小已知时按其检查剩余空间；未知时只要求小额预留
+        file = TempFiles.create("jkit-storage-spill", expectedSize > 0L ? Math.max(expectedSize, size) : -1L, path);
         fileOut = new java.io.BufferedOutputStream(Files.newOutputStream(file.toPath()), 64 * 1024);
         memory.writeTo(fileOut);
         memory = null;
