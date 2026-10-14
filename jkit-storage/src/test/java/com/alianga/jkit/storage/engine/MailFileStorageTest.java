@@ -167,16 +167,17 @@ public class MailFileStorageTest {
     }
 
     @Test
-    public void productionCtorHitsStubUnsupported() {
+    public void productionCtorConnectFailureOnUnreachableHost() {
         try {
             new MailFileStorage(StorageConfig.empty()
-                    .set("host", "imap.qq.com")
+                    .set("host", "127.0.0.1")
+                    .set("imapPort", "1")
+                    .set("ssl", "false")
                     .set("user", "u@qq.com")
                     .set("password", "auth"));
-            fail("桩 connect 应 UNSUPPORTED");
+            fail("不可达主机应 CONNECT_FAILED");
         } catch (StorageException e) {
-            assertEquals(StorageErrorCode.UNSUPPORTED, e.code());
-            assertTrue(e.getMessage(), e.getMessage().contains("开发助手4"));
+            assertEquals(StorageErrorCode.CONNECT_FAILED, e.code());
         }
     }
 

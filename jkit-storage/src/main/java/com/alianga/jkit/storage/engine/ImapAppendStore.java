@@ -8,9 +8,7 @@ import java.io.InputStream;
  * IMAP APPEND 写入端：把上层已组好的完整 RFC822 MIME 消息追加到指定文件夹。
  *
  * <p>覆盖语义由上层先 {@link ImapMailSession#delete(String)} 再 append；
- * APPEND 本身不做隐式覆盖。</p>
- *
- * <p>owned by 开发助手4 — Phase 1 仅桩实现。</p>
+ * APPEND 本身不做隐式覆盖。不走 SMTP。</p>
  *
  * @author 郑明亮
  */
@@ -23,6 +21,9 @@ public final class ImapAppendStore {
      * @param session IMAP 会话
      */
     public ImapAppendStore(ImapMailSession session) {
+        if (session == null) {
+            throw StorageException.invalidConfig("ImapMailSession 不能为 null");
+        }
         this.session = session;
     }
 
@@ -34,7 +35,6 @@ public final class ImapAppendStore {
      * @param sizeBytes   已知字节数；未知传 {@code -1}
      */
     public void append(String folder, InputStream mimeMessage, long sizeBytes) {
-        // owned by 开发助手4
-        throw StorageException.unsupported("ImapAppendStore 待开发助手4实现");
+        session.appendMime(folder, mimeMessage, sizeBytes);
     }
 }
