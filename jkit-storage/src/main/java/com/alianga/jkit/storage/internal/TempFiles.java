@@ -31,8 +31,10 @@ public final class TempFiles {
         File dir = new File(System.getProperty("java.io.tmpdir"));
         long usable = dir.getUsableSpace();
         // getUsableSpace 取不到时返回 0，此时不拦截
-        if (usable > 0L && expectedSize > 0L && expectedSize + RESERVE_BYTES > usable) {
-            throw StorageException.io("临时目录空间不足：需要 " + expectedSize + " 字节，剩余 " + usable
+        // 大小未知（-1）时也至少保证预留空间，否则写满临时盘会拖垮整个系统
+        long need = Math.max(expectedSize, 0L) + RESERVE_BYTES;
+        if (usable > 0L && need > usable) {
+            throw StorageException.io("临时目录空间不足：需要 " + need + " 字节（含预留），剩余 " + usable
                     + " 字节（" + dir + "）", path, null);
         }
         try {

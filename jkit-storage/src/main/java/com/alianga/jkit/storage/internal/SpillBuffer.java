@@ -22,6 +22,7 @@ public final class SpillBuffer extends OutputStream {
     private File file;
     private OutputStream fileOut;
     private long size;
+    private long expectedSize = -1L;
 
     /**
      * @param memoryLimit 允许留在堆里的最大字节数；0 表示直接落盘
@@ -52,10 +53,22 @@ public final class SpillBuffer extends OutputStream {
     }
 
     private void spill() throws IOException {
-        file = TempFiles.create("jkit-storage-spill", -1L, path);
+        // 转写时已知至少要写 memoryLimit 字节；提示大小已知时按提示检查剩余空间
+        file = TempFiles.create("jkit-storage-spill", Math.max(expectedSize, Math.max(size, 1L)), path);
         fileOut = new java.io.BufferedOutputStream(Files.newOutputStream(file.toPath()), 64 * 1024);
         memory.writeTo(fileOut);
         memory = null;
+    }
+
+    /**
+     * 设置预计总大小（stat 得到），用于转写临时文件前的剩余空间检查；未知传 -1。
+     *
+     * @param expectedSize 预计字节数
+     * @return this
+     */
+    public SpillBuffer expectSize(long expectedSize) {
+        this.expectedSize = expectedSize;
+        return this;
     }
 
     /** @return 是否已转写到临时文件 */

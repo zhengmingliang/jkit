@@ -588,7 +588,8 @@ public final class SyncEngine {
             }
             // 已知超限直接落盘；未知 / 不可信大小由 SpillBuffer 超限自动转写临时文件
             try (com.alianga.jkit.storage.internal.SpillBuffer buffer =
-                         new com.alianga.jkit.storage.internal.SpillBuffer(size > limit ? 0L : limit, sourcePath)) {
+                         new com.alianga.jkit.storage.internal.SpillBuffer(size > limit ? 0L : limit, sourcePath)
+                                 .expectSize(size)) {
                 source.download(sourcePath, buffer);
                 long length = buffer.size();
                 try (java.io.InputStream in = buffer.openInput()) {
