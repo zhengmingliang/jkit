@@ -351,6 +351,55 @@ public class SftpFileStorage implements FileStorage {
 
     // ------------------------------------------------------------------ JSch 反射桥
 
+    /** 等待归还时的轮询间隔：期间可能有通道被作废、名额空出，需要重新尝试新建。 */
+    static final long BORROW_POLL_MS = 200L;
+
+    /**
+     * 通道池借取：先取空闲；未达上限则新建；否则带超时轮询空闲队列，每轮醒来都重新检查名额。
+     * 作废（broken）的通道只减计数、不回队列，若用 {@code take()} 死等，池满且全部作废时
+     * 等待者会永远挂住。
+     *
+     * @param idle     空闲队列
+     * @param created  已创建计数
+     * @param poolSize 上限
+     * @param closed   池是否已关闭
+     * @param factory  新建通道
+     * @param <T>      通道类型
+     * @return 通道
+     */
+    static <T> T borrowFrom(java.util.concurrent.BlockingQueue<T> idle,
+                            java.util.concurrent.atomic.AtomicInteger created, int poolSize,
+                            java.util.function.BooleanSupplier closed,
+                            java.util.function.Supplier<T> factory) {
+        while (true) {
+            if (closed.getAsBoolean()) {
+                throw StorageException.connectFailed("SFTP 通道池已关闭");
+            }
+            T channel = idle.poll();
+            if (channel != null) {
+                return channel;
+            }
+            if (created.incrementAndGet() <= poolSize) {
+                try {
+                    return factory.get();
+                } catch (RuntimeException e) {
+                    created.decrementAndGet();
+                    throw e;
+                }
+            }
+            created.decrementAndGet();
+            try {
+                channel = idle.poll(BORROW_POLL_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw StorageException.io("SFTP 通道借取被中断", "-", e);
+            }
+            if (channel != null) {
+                return channel;
+            }
+        }
+    }
+
     /**
      * JSch 反射桥：持有单条 Session 与一个按需扩展的 ChannelSftp 池，
      * 全部方法调用走反射；Method / Field 句柄按「类名#方法名」缓存避免
@@ -380,33 +429,15 @@ public class SftpFileStorage implements FileStorage {
             this.idle = new java.util.concurrent.LinkedBlockingQueue<Object>();
         }
 
-        /** 从池里借一条通道；借空且未达上限时新建，否则阻塞等待归还。 */
+        /** 从池里借一条通道；借空且未达上限时新建，否则等待归还或名额空出。 */
         private Object borrow() {
-            if (closed) {
-                throw StorageException.connectFailed("SFTP 通道池已关闭");
-            }
-            Object channel = idle.poll();
-            if (channel != null) {
-                return channel;
-            }
-            if (created.incrementAndGet() <= poolSize) {
+            return borrowFrom(idle, created, poolSize, () -> closed, () -> {
                 try {
                     return openChannel(session);
                 } catch (ReflectiveOperationException e) {
-                    created.decrementAndGet();
                     throw StorageException.io("JSch 反射调用失败: " + e.getMessage(), "-", e);
-                } catch (RuntimeException e) {
-                    created.decrementAndGet();
-                    throw e;
                 }
-            }
-            created.decrementAndGet();
-            try {
-                return idle.take();
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw StorageException.io("SFTP 通道借取被中断", "-", e);
-            }
+            });
         }
 
         /** 归还通道；broken 时断开丢弃（下次借时新建）。 */
