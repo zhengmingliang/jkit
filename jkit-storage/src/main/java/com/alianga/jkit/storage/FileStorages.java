@@ -4,6 +4,7 @@ import com.alianga.jkit.storage.engine.AzureBlobFileStorage;
 import com.alianga.jkit.storage.engine.FtpFileStorage;
 import com.alianga.jkit.storage.engine.GoFastDfsFileStorage;
 import com.alianga.jkit.storage.engine.LocalFileStorage;
+import com.alianga.jkit.storage.engine.MailFileStorage;
 import com.alianga.jkit.storage.engine.OssFileStorage;
 import com.alianga.jkit.storage.engine.S3FileStorage;
 import com.alianga.jkit.storage.engine.SftpFileStorage;
@@ -48,6 +49,7 @@ public final class FileStorages {
 
     static {
         ENGINES.put("local", LocalFileStorage::new);
+        ENGINES.put("mail", MailFileStorage::new);
         ENGINES.put("ftp", FtpFileStorage::new);
         ENGINES.put("sftp", SftpFileStorage::new);
         ENGINES.put("webdav", WebDavFileStorage::new);

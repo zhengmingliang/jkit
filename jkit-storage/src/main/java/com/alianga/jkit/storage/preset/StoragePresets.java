@@ -114,6 +114,39 @@ public final class StoragePresets {
                 "公有云", null, StorageConfig.empty().set("pathStyle", "true")));
         platforms.add(s3("generic-s3", "其它 S3 兼容存储", null, "S3 兼容", null,
                 StorageConfig.empty().set("pathStyle", "true")));
+        long qqMax = 45L * 1024L * 1024L;
+        platforms.add(new StoragePlatform("qq-mail", "QQ 邮箱", "mail", "邮件",
+                Arrays.asList(
+                        StorageField.optional("host", "IMAP 服务器", "imap.qq.com", null),
+                        StorageField.optional("imapPort", "IMAP 端口", "993", null),
+                        StorageField.required("user", "邮箱账号"),
+                        StorageField.secret("password", "授权码", true),
+                        StorageField.optional("ssl", "SSL", "true", null),
+                        StorageField.optional("basePath", "邮箱文件夹", "INBOX", "IMAP 文件夹名"),
+                        StorageField.optional("maxAttachmentBytes", "单附件上限字节",
+                                String.valueOf(qqMax), "QQ 约 50MB，默认 45MiB")),
+                StorageConfig.empty()
+                        .set("host", "imap.qq.com")
+                        .set("imapPort", "993")
+                        .set("ssl", "true")
+                        .set("basePath", "INBOX")
+                        .set("maxAttachmentBytes", String.valueOf(qqMax))));
+        platforms.add(new StoragePlatform("mail", "IMAP 邮箱", "mail", "邮件",
+                Arrays.asList(
+                        StorageField.required("host", "IMAP 服务器"),
+                        StorageField.optional("imapPort", "IMAP 端口", "993", null),
+                        StorageField.required("user", "邮箱账号"),
+                        StorageField.secret("password", "授权码", true),
+                        StorageField.optional("ssl", "SSL", "true", null),
+                        StorageField.optional("basePath", "邮箱文件夹", "jkit-mail-disk",
+                                "IMAP 文件夹名，默认 jkit-mail-disk"),
+                        StorageField.optional("maxAttachmentBytes", "单附件上限字节",
+                                String.valueOf(qqMax), "单附件大小上限")),
+                StorageConfig.empty()
+                        .set("imapPort", "993")
+                        .set("ssl", "true")
+                        .set("basePath", "jkit-mail-disk")
+                        .set("maxAttachmentBytes", String.valueOf(qqMax))));
         return platforms;
     }
 

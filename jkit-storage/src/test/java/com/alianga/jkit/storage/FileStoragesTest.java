@@ -33,6 +33,8 @@ public class FileStoragesTest {
         expect.put("go-fastdfs", "go-fastdfs");
         expect.put("cloudflare-r2", "s3");
         expect.put("minio", "s3");
+        expect.put("qq-mail", "mail");
+        expect.put("mail", "mail");
         for (Map.Entry<String, String> entry : expect.entrySet()) {
             StoragePlatform platform = FileStorages.platform(entry.getKey());
             assertNotNull("缺少平台 " + entry.getKey(), platform);
