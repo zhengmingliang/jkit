@@ -105,8 +105,13 @@ public class WebDavFileStorage implements FileStorage {
             throw StorageException.notFound(normalized);
         }
         ensureSuccess(response, normalized);
-        String xml = Xmls.readAll(response.body());
-        response.close();
+        String xml;
+        try {
+            xml = Xmls.readAll(response.body());
+        } finally {
+            // 响应超限抛异常时也要关闭，避免连接泄漏
+            response.close();
+        }
         List<StorageEntry> entries = parseMultistatus(xml, normalized, true);
         if (entries.isEmpty()) {
             throw StorageException.notFound(normalized);
@@ -123,8 +128,13 @@ public class WebDavFileStorage implements FileStorage {
             throw StorageException.notFound(normalized);
         }
         ensureSuccess(response, normalized);
-        String xml = Xmls.readAll(response.body());
-        response.close();
+        String xml;
+        try {
+            xml = Xmls.readAll(response.body());
+        } finally {
+            // 响应超限抛异常时也要关闭，避免连接泄漏
+            response.close();
+        }
         return parseMultistatus(xml, normalized, false);
     }
 
