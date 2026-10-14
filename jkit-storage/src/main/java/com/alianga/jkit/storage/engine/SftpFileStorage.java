@@ -411,7 +411,7 @@ public class SftpFileStorage implements FileStorage {
      * @param closed            池是否已关闭
      * @param factory           新建通道
      * @param timeoutMs         无进展最长等待毫秒
-     * @param lastActivityNanos 最近一次池进展（I/O / 归还 / 作废）的纳秒时间戳；null 则固定截止
+     * @param lastActivityNanos 最近一次池进展（I/O / 归还 / 作废 / 持通道操作）的纳秒时间戳；null 则固定截止
      * @param <T>               通道类型
      * @return 通道
      */
@@ -488,7 +488,7 @@ public class SftpFileStorage implements FileStorage {
         private final java.util.concurrent.BlockingQueue<Object> idle;
         private final java.util.concurrent.atomic.AtomicInteger created =
                 new java.util.concurrent.atomic.AtomicInteger();
-        /** 最近一次池进展（收发字节 / 借还 / 作废），供等待者按 I/O 活跃度判断超时。 */
+        /** 最近一次池进展（收发字节 / 归还 / 作废 / 持通道操作进展），供等待者按 I/O 活跃度判断超时。 */
         private final java.util.concurrent.atomic.AtomicLong lastIoNanos =
                 new java.util.concurrent.atomic.AtomicLong(System.nanoTime());
         private volatile boolean closed;
@@ -500,23 +500,21 @@ public class SftpFileStorage implements FileStorage {
             this.idle = new java.util.concurrent.LinkedBlockingQueue<Object>();
         }
 
-        /** 刷新最近 I/O / 池进展时间戳。 */
+        /** 刷新最近 I/O / 池进展时间戳（仅收发字节、归还、作废、持通道操作进展；借取入口不刷新）。 */
         private void touchIo() {
             lastIoNanos.set(System.nanoTime());
         }
 
-        /** 从池里借一条通道；借空且未达上限时新建，否则按 I/O 活跃度等待归还或名额空出。 */
+        /** 从池里借一条通道；借空且未达上限时新建，否则按 I/O 活跃度等待归还或名额空出。
+         * 借取本身不刷新活跃时间：持有者已挂死时，外面持续借取不得重置空闲计时。 */
         private Object borrow() {
-            touchIo();
-            Object channel = borrowFrom(idle, created, poolSize, () -> closed, () -> {
+            return borrowFrom(idle, created, poolSize, () -> closed, () -> {
                 try {
                     return openChannel(session);
                 } catch (ReflectiveOperationException e) {
                     throw StorageException.io("JSch 反射调用失败: " + e.getMessage(), "-", e);
                 }
             }, BORROW_TIMEOUT_MS, lastIoNanos);
-            touchIo();
-            return channel;
         }
 
         /** 归还通道；broken 时断开丢弃（下次借时新建）。 */
@@ -633,10 +631,11 @@ public class SftpFileStorage implements FileStorage {
             return channel;
         }
 
-        /** ls：返回去掉 "." / ".." 之后的条目列表。 */
+        /** ls：返回去掉 "." / ".." 之后的条目列表；逐条处理时刷新活跃时间，长 listing 不拖死等待者。 */
         List<Entry> list(String remotePath) {
             Object channel = borrow();
             try {
+                touchIo();
                 Object vector = method(channel.getClass(), "ls", String.class).invoke(channel, remotePath);
                 List<Entry> entries = new ArrayList<Entry>();
                 for (Object item : (Vector<?>) vector) {
@@ -649,6 +648,7 @@ public class SftpFileStorage implements FileStorage {
                             (Boolean) method(attrs.getClass(), "isDir").invoke(attrs),
                             (Long) method(attrs.getClass(), "getSize").invoke(attrs),
                             (Integer) method(attrs.getClass(), "getMTime").invoke(attrs)));
+                    touchIo();
                 }
                 release(channel, false);
                 return entries;
@@ -682,12 +682,14 @@ public class SftpFileStorage implements FileStorage {
             return cause != null && "com.jcraft.jsch.JSchException".equals(cause.getClass().getName());
         }
 
-        /** lstat：目标不存在时抛 NOT_FOUND。 */
+        /** lstat：目标不存在时抛 NOT_FOUND；持通道期间刷新活跃时间。 */
         Attrs lstat(String remotePath) {
             Object channel = borrow();
             try {
+                touchIo();
                 Object attrs = method(channel.getClass(), "lstat", String.class)
                         .invoke(channel, remotePath);
+                touchIo();
                 release(channel, false);
                 return new Attrs((Boolean) method(attrs.getClass(), "isDir").invoke(attrs),
                         (Long) method(attrs.getClass(), "getSize").invoke(attrs),
@@ -787,8 +789,10 @@ public class SftpFileStorage implements FileStorage {
         void rename(String fromPath, String toPath) {
             Object channel = borrow();
             try {
+                touchIo();
                 method(channel.getClass(), "rename", String.class, String.class)
                         .invoke(channel, fromPath, toPath);
+                touchIo();
                 release(channel, false);
             } catch (InvocationTargetException e) {
                 release(channel, isConnectionLevel(e.getCause()));
@@ -805,7 +809,9 @@ public class SftpFileStorage implements FileStorage {
         private void invoke(String name, String remotePath, String action) {
             Object channel = borrow();
             try {
+                touchIo();
                 method(channel.getClass(), name, String.class).invoke(channel, remotePath);
+                touchIo();
                 release(channel, false);
             } catch (InvocationTargetException e) {
                 release(channel, isConnectionLevel(e.getCause()));
