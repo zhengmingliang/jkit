@@ -131,4 +131,25 @@ public class WebDavFileStorageTest {
         return names;
     }
 
+
+    @Test
+    public void overwriteOnCopypartyStyleServerKeepsSinglePath() {
+        server.renameOnConflict = true;
+        FileStorage dav = storage();
+        dav.upload("docs/中文 编辑.txt", "v1".getBytes(StandardCharsets.UTF_8));
+        dav.upload("docs/中文 编辑.txt", "v2".getBytes(StandardCharsets.UTF_8));
+        assertEquals("v2", new String(dav.readBytes("docs/中文 编辑.txt"), StandardCharsets.UTF_8));
+        assertEquals(1, dav.list("docs").size());
+    }
+
+    @Test
+    public void overwriteFallsBackToMoveWhenReplaceHeaderIgnored() {
+        server.renameOnConflict = true;
+        server.honorReplace = false;
+        FileStorage dav = storage();
+        dav.upload("edit.txt", "v1".getBytes(StandardCharsets.UTF_8));
+        dav.upload("edit.txt", "v2".getBytes(StandardCharsets.UTF_8));
+        assertEquals("v2", new String(dav.readBytes("edit.txt"), StandardCharsets.UTF_8));
+        assertEquals(1, dav.list("").size());
+    }
 }

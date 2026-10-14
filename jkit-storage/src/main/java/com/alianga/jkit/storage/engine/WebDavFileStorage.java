@@ -158,11 +158,55 @@ public class WebDavFileStorage implements FileStorage {
         mkdir(StoragePaths.parent(normalized));
         HttpCore.Response response = request("PUT", normalized, null,
                 MimeTypes.of(normalized), null, size, in, null);
+        String location;
         try {
             ensureSuccess(response, normalized);
+            location = response.header("Location");
         } finally {
             response.close();
         }
+        String landed = landedPath(location);
+        if (landed != null && !landed.equals(normalized)) {
+            // 服务器（如 copyparty 未开 daw）遇同名不覆盖而是改名另存：把新文件挪回原路径
+            replaceWithRenamed(landed, normalized);
+        }
+    }
+
+    /**
+     * 解析 PUT 响应 Location 对应的存储相对路径；无法解析或不在 basePath 下时返回 null。
+     */
+    String landedPath(String location) {
+        if (location == null || location.trim().isEmpty()) {
+            return null;
+        }
+        String decoded = decodeHref(location.trim());
+        String relative = toRelative(decoded, serverBasePath);
+        return relative == null ? null : StoragePaths.normalize(relative);
+    }
+
+    private void replaceWithRenamed(String landed, String target) {
+        HttpCore.Response move = request("MOVE", landed, null, null, null, -1L, null, target);
+        int status = move.status();
+        move.close();
+        if (status < 400 && !exists(landed)) {
+            return;
+        }
+        // MOVE 覆盖被拒（多为缺少删除权限）：删除原文件后再挪回；仍失败则清理副本并报错
+        HttpCore.Response delete = request("DELETE", target, null, null, null, -1L, null, null);
+        int deleted = delete.status();
+        delete.close();
+        if (deleted < 400 || deleted == 404) {
+            HttpCore.Response retry = request("MOVE", landed, null, null, null, -1L, null, target);
+            int retried = retry.status();
+            retry.close();
+            if (retried < 400) {
+                return;
+            }
+        }
+        HttpCore.Response cleanup = request("DELETE", landed, null, null, null, -1L, null, null);
+        cleanup.close();
+        throw new StorageException(StorageErrorCode.CONFLICT,
+                "WebDAV 服务器拒绝覆盖同名文件（另存为 " + landed + "），请开启覆盖/删除权限", target);
     }
 
     @Override
@@ -291,6 +335,11 @@ public class WebDavFileStorage implements FileStorage {
         if (destination != null) {
             request.header("Destination", urlOf(destination));
             request.header("Overwrite", "T");
+        }
+        if ("PUT".equals(method)) {
+            // RFC 4918：PUT 覆盖同名资源；copyparty 默认改名另存，需 replace 头（并有删除权限）才覆盖
+            request.header("Overwrite", "T");
+            request.header("replace", "1");
         }
         if ("PROPFIND".equals(method)) {
             request.header("Depth", "1");

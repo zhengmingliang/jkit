@@ -35,6 +35,11 @@ final class FakeDavServer {
 
     final Map<String, Entity> tree = new ConcurrentHashMap<>();
     volatile boolean deny = false;
+    /** 模拟 copyparty：同名 PUT 不覆盖而改名另存（Location 指向新名）。 */
+    volatile boolean renameOnConflict = false;
+    /** 配合 renameOnConflict：带 replace 头时是否照常覆盖。 */
+    volatile boolean honorReplace = true;
+    private int renameSeq = 0;
     private HttpServer server;
     private String user;
     private String password;
@@ -177,8 +182,27 @@ final class FakeDavServer {
                 out.write(chunk, 0, read);
             }
         }
-        tree.put(path, new Entity(false, out.toByteArray()));
+        String stored = path;
+        Entity existing = tree.get(path);
+        boolean replace = honorReplace && exchange.getRequestHeaders().getFirst("replace") != null;
+        if (renameOnConflict && existing != null && !existing.directory && !replace) {
+            stored = path + "-" + (++renameSeq) + "-renamed.txt";
+        }
+        tree.put(stored, new Entity(false, out.toByteArray()));
+        exchange.getResponseHeaders().set("Location", "http://127.0.0.1:"
+                + server.getAddress().getPort() + encodePath(stored));
         respond(exchange, 201, "");
+    }
+
+    private static String encodePath(String path) {
+        StringBuilder sb = new StringBuilder();
+        for (String seg : path.split("/")) {
+            if (seg.isEmpty()) {
+                continue;
+            }
+            sb.append('/').append(java.net.URLEncoder.encode(seg, StandardCharsets.UTF_8).replace("+", "%20"));
+        }
+        return sb.toString();
     }
 
     private void handleGet(HttpExchange exchange, String path) throws IOException {
