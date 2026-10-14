@@ -354,11 +354,14 @@ public class SftpFileStorage implements FileStorage {
     /** 等待归还时的轮询间隔：期间可能有通道被作废、名额空出，需要重新尝试新建。 */
     static final long BORROW_POLL_MS = 200L;
 
-    /** 借取通道的总等待上限：池满且一直没有归还 / 空出名额时，超时抛 TIMEOUT 而不是无限等。 */
+    /**
+     * 借取通道的空闲超时：所有通道连续无 I/O（也无归还 / 新建 / 作废）超过该时长才抛 TIMEOUT。
+     * 正常传大文件时持有者持续收发数据，等待者会一直等到有通道归还，不会误报。
+     */
     static final long BORROW_TIMEOUT_MS = 30000L;
 
     /**
-     * 通道池借取：先取空闲；未达上限则新建；否则带超时轮询空闲队列，每轮醒来都重新检查名额。
+     * 通道池借取：先取空闲；未达上限则新建；否则按 I/O 活跃度等待。
      * 作废（broken）的通道只减计数、不回队列，若用 {@code take()} 死等，池满且全部作废时
      * 等待者会永远挂住。
      *
@@ -374,19 +377,20 @@ public class SftpFileStorage implements FileStorage {
                             java.util.concurrent.atomic.AtomicInteger created, int poolSize,
                             java.util.function.BooleanSupplier closed,
                             java.util.function.Supplier<T> factory) {
-        return borrowFrom(idle, created, poolSize, closed, factory, BORROW_TIMEOUT_MS);
+        return borrowFrom(idle, created, poolSize, closed, factory, BORROW_TIMEOUT_MS, null);
     }
 
     /**
      * 同 {@link #borrowFrom(java.util.concurrent.BlockingQueue, java.util.concurrent.atomic.AtomicInteger,
-     * int, java.util.function.BooleanSupplier, java.util.function.Supplier)}，可指定总等待上限。
+     * int, java.util.function.BooleanSupplier, java.util.function.Supplier)}，可指定空闲超时。
+     * {@code lastActivityNanos == null} 时退化为从开始等待起的固定截止时间（单测用）。
      *
      * @param idle      空闲队列
      * @param created   已创建计数
      * @param poolSize  上限
      * @param closed    池是否已关闭
      * @param factory   新建通道
-     * @param timeoutMs 总等待上限毫秒
+     * @param timeoutMs 无 I/O / 无进展的最长等待毫秒
      * @param <T>       通道类型
      * @return 通道
      */
@@ -394,7 +398,29 @@ public class SftpFileStorage implements FileStorage {
                             java.util.concurrent.atomic.AtomicInteger created, int poolSize,
                             java.util.function.BooleanSupplier closed,
                             java.util.function.Supplier<T> factory, long timeoutMs) {
-        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(timeoutMs);
+        return borrowFrom(idle, created, poolSize, closed, factory, timeoutMs, null);
+    }
+
+    /**
+     * 按 I/O 活跃度借取：只要 {@code lastActivityNanos} 持续被读写 / 归还 / 作废刷新，
+     * 等待者不超时；仅当全部通道连续 {@code timeoutMs} 无进展时抛 TIMEOUT。
+     *
+     * @param idle              空闲队列
+     * @param created           已创建计数
+     * @param poolSize          上限
+     * @param closed            池是否已关闭
+     * @param factory           新建通道
+     * @param timeoutMs         无进展最长等待毫秒
+     * @param lastActivityNanos 最近一次池进展（I/O / 归还 / 作废）的纳秒时间戳；null 则固定截止
+     * @param <T>               通道类型
+     * @return 通道
+     */
+    static <T> T borrowFrom(java.util.concurrent.BlockingQueue<T> idle,
+                            java.util.concurrent.atomic.AtomicInteger created, int poolSize,
+                            java.util.function.BooleanSupplier closed,
+                            java.util.function.Supplier<T> factory, long timeoutMs,
+                            java.util.concurrent.atomic.AtomicLong lastActivityNanos) {
+        long waitStarted = System.nanoTime();
         while (true) {
             if (closed.getAsBoolean()) {
                 throw StorageException.connectFailed("SFTP 通道池已关闭");
@@ -412,12 +438,26 @@ public class SftpFileStorage implements FileStorage {
                 }
             }
             created.decrementAndGet();
-            long remainingMs = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime());
-            if (remainingMs <= 0L) {
-                throw StorageException.timeout("SFTP 通道池已满，等待空闲通道超过 " + timeoutMs + "ms");
+            long now = System.nanoTime();
+            long anchor = lastActivityNanos != null ? lastActivityNanos.get() : waitStarted;
+            if (anchor <= 0L) {
+                anchor = waitStarted;
+            }
+            // 等待开始时若尚无活动记录，以开始等待为静默起点，避免历史时间戳立刻超时
+            if (anchor < waitStarted) {
+                anchor = waitStarted;
+            }
+            long idleMs = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(now - anchor);
+            if (idleMs >= timeoutMs) {
+                throw StorageException.timeout("SFTP 通道池已满，且 "
+                        + timeoutMs + "ms 内无任何通道 I/O 或归还");
+            }
+            long slice = Math.min(BORROW_POLL_MS, timeoutMs - idleMs);
+            if (slice <= 0L) {
+                slice = 1L;
             }
             try {
-                channel = idle.poll(Math.min(BORROW_POLL_MS, remainingMs), java.util.concurrent.TimeUnit.MILLISECONDS);
+                channel = idle.poll(slice, java.util.concurrent.TimeUnit.MILLISECONDS);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw StorageException.io("SFTP 通道借取被中断", "-", e);
@@ -448,6 +488,9 @@ public class SftpFileStorage implements FileStorage {
         private final java.util.concurrent.BlockingQueue<Object> idle;
         private final java.util.concurrent.atomic.AtomicInteger created =
                 new java.util.concurrent.atomic.AtomicInteger();
+        /** 最近一次池进展（收发字节 / 借还 / 作废），供等待者按 I/O 活跃度判断超时。 */
+        private final java.util.concurrent.atomic.AtomicLong lastIoNanos =
+                new java.util.concurrent.atomic.AtomicLong(System.nanoTime());
         private volatile boolean closed;
 
         private JschBridge(Object session, int poolSize, int overwrite) {
@@ -457,15 +500,23 @@ public class SftpFileStorage implements FileStorage {
             this.idle = new java.util.concurrent.LinkedBlockingQueue<Object>();
         }
 
-        /** 从池里借一条通道；借空且未达上限时新建，否则等待归还或名额空出。 */
+        /** 刷新最近 I/O / 池进展时间戳。 */
+        private void touchIo() {
+            lastIoNanos.set(System.nanoTime());
+        }
+
+        /** 从池里借一条通道；借空且未达上限时新建，否则按 I/O 活跃度等待归还或名额空出。 */
         private Object borrow() {
-            return borrowFrom(idle, created, poolSize, () -> closed, () -> {
+            touchIo();
+            Object channel = borrowFrom(idle, created, poolSize, () -> closed, () -> {
                 try {
                     return openChannel(session);
                 } catch (ReflectiveOperationException e) {
                     throw StorageException.io("JSch 反射调用失败: " + e.getMessage(), "-", e);
                 }
-            });
+            }, BORROW_TIMEOUT_MS, lastIoNanos);
+            touchIo();
+            return channel;
         }
 
         /** 归还通道；broken 时断开丢弃（下次借时新建）。 */
@@ -473,9 +524,51 @@ public class SftpFileStorage implements FileStorage {
             if (broken || closed) {
                 closeChannel(channel);
                 created.decrementAndGet();
+                touchIo();
                 return;
             }
             idle.offer(channel);
+            touchIo();
+        }
+
+        /** 下载时包装输出流：每写出一块就刷新池进展时间戳。 */
+        private OutputStream activityOut(OutputStream out) {
+            return new java.io.FilterOutputStream(out) {
+                @Override
+                public void write(int b) throws java.io.IOException {
+                    out.write(b);
+                    touchIo();
+                }
+
+                @Override
+                public void write(byte[] b, int off, int len) throws java.io.IOException {
+                    out.write(b, off, len);
+                    touchIo();
+                }
+            };
+        }
+
+        /** 上传时包装输入流：每读入一块就刷新池进展时间戳。 */
+        private InputStream activityIn(InputStream in) {
+            return new java.io.FilterInputStream(in) {
+                @Override
+                public int read() throws java.io.IOException {
+                    int n = in.read();
+                    if (n >= 0) {
+                        touchIo();
+                    }
+                    return n;
+                }
+
+                @Override
+                public int read(byte[] b, int off, int len) throws java.io.IOException {
+                    int n = in.read(b, off, len);
+                    if (n > 0) {
+                        touchIo();
+                    }
+                    return n;
+                }
+            };
         }
 
         private void closeChannel(Object channel) {
@@ -615,7 +708,7 @@ public class SftpFileStorage implements FileStorage {
             Object channel = borrow();
             try {
                 method(channel.getClass(), "get", String.class, OutputStream.class)
-                        .invoke(channel, remotePath, out);
+                        .invoke(channel, remotePath, activityOut(out));
                 release(channel, false);
             } catch (InvocationTargetException e) {
                 Throwable cause = e.getCause();
@@ -641,7 +734,7 @@ public class SftpFileStorage implements FileStorage {
             try {
                 Class<?> monitor = Class.forName("com.jcraft.jsch.SftpProgressMonitor");
                 method(channel.getClass(), "get", String.class, OutputStream.class,
-                        monitor, long.class).invoke(channel, remotePath, out, null, offset);
+                        monitor, long.class).invoke(channel, remotePath, activityOut(out), null, offset);
                 release(channel, false);
             } catch (InvocationTargetException e) {
                 Throwable cause = e.getCause();
@@ -665,7 +758,7 @@ public class SftpFileStorage implements FileStorage {
             Object channel = borrow();
             try {
                 method(channel.getClass(), "put", InputStream.class, String.class, int.class)
-                        .invoke(channel, in, remotePath, overwrite);
+                        .invoke(channel, activityIn(in), remotePath, overwrite);
                 release(channel, false);
             } catch (InvocationTargetException e) {
                 release(channel, isConnectionLevel(e.getCause()));
