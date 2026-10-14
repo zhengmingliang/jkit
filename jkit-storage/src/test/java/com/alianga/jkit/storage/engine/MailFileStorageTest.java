@@ -34,6 +34,15 @@ import static org.junit.Assert.fail;
  */
 public class MailFileStorageTest {
     @Test
+    public void asciiSubjectPlainInStoredMime() {
+        byte[] mime = MailFileStorage.buildStoredMime("hello.txt",
+                "payload".getBytes(StandardCharsets.UTF_8));
+        String text = new String(mime, StandardCharsets.UTF_8);
+        assertTrue(text, text.contains("Subject: hello.txt\r\n"));
+        assertFalse(text, text.contains("Subject: =?UTF-8?B?"));
+    }
+
+    @Test
     public void uploadDownloadRoundtrip() {
         FakeMailGateway fake = new FakeMailGateway();
         FileStorage fs = open(fake);

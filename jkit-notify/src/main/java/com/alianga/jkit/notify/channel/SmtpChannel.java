@@ -615,7 +615,7 @@ public class SmtpChannel implements NotificationChannel {
         if (config.replyTo() != null && !config.replyTo().trim().isEmpty()) {
             headers.append("Reply-To: <").append(requireSafeMailbox(config.replyTo().trim())).append(">\r\n");
         }
-        headers.append("Subject: ").append(encodedWord(subject)).append("\r\n");
+        headers.append("Subject: ").append(subjectHeader(subject)).append("\r\n");
         headers.append("Date: ").append(date).append("\r\n");
         headers.append("Message-ID: ").append(messageId).append("\r\n");
         headers.append("MIME-Version: 1.0\r\n");
@@ -643,8 +643,11 @@ public class SmtpChannel implements NotificationChannel {
             partHead.append("Content-Type: ").append(attachment.contentType())
                     .append("; name=\"").append(asciiFilename(attachment.filename())).append("\"\r\n");
             partHead.append("Content-Transfer-Encoding: base64\r\n");
+            String filename = attachment.filename();
+            String asciiName = asciiFilename(filename);
+            String dispositionFilename = asciiName.equals(filename) ? asciiName : encodedWord(filename);
             partHead.append("Content-Disposition: attachment; filename=\"")
-                    .append(encodedWord(attachment.filename())).append("\"\r\n");
+                    .append(dispositionFilename).append("\"\r\n");
             partHead.append("\r\n");
             out.write(partHead.toString());
             InputStream in = attachment.openStream();
@@ -694,6 +697,28 @@ public class SmtpChannel implements NotificationChannel {
             out.append('<').append(requireSafeMailbox(addresses.get(i))).append('>');
         }
         return out.toString();
+    }
+
+    /**
+     * Subject 头值：纯可打印 ASCII（0x20–0x7E）原样写入，便于邮件盘按明文文件名查找；
+     * 含非 ASCII 时仍走 RFC2047 encoded-word。CR/LF 先剥离以防头注入。
+     *
+     * @param text 主题原文
+     * @return 可写入 Subject 头的值
+     */
+    private static String subjectHeader(String text) {
+        String cleaned = text == null ? "" : text.replace("\r", "").replace("\n", "");
+        return isPrintableAscii(cleaned) ? cleaned : encodedWord(cleaned);
+    }
+
+    private static boolean isPrintableAscii(String text) {
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c < 0x20 || c > 0x7e) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static String encodedWord(String text) {

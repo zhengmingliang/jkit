@@ -198,6 +198,25 @@ public class SmtpChannelTest {
     }
 
     /**
+     * 纯 ASCII 主题原样写入 Subject，不走 RFC2047；非 ASCII 仍编码。
+     */
+    @Test
+    public void asciiSubjectNotRfc2047Encoded() throws Exception {
+        smtp = new FakeSmtp();
+        smtp.start();
+        try {
+            SendResult result = NotificationManager.send(SmtpChannel.ID,
+                    Message.text("hello.txt", "payload"), config());
+            assertTrue(result.toString(), result.isSuccess());
+            String data = mimeData();
+            assertTrue(data, data.contains("Subject: hello.txt\r\n"));
+            assertFalse(data, data.contains("Subject: =?UTF-8?B?"));
+        } finally {
+            smtp.stop();
+        }
+    }
+
+    /**
      * MARKDOWN 转成 HTML 后按 text/html 发送，不再当纯文本。
      */
     @Test
