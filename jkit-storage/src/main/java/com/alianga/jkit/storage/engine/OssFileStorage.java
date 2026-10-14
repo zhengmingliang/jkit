@@ -432,8 +432,7 @@ public class OssFileStorage implements FileStorage {
             }
             HttpCore.Response response = request("GET", "", query, null, null, -1L, null);
             ensureSuccess(response, prefix);
-            String xml = Xmls.readAll(response.body());
-            response.close();
+            String xml = response.bodyText();
             Element root = Xmls.parse(xml);
             boolean truncated = Boolean.parseBoolean(Xmls.textOr(root, "IsTruncated", "false"));
             for (Element content : Xmls.children(root, "Contents")) {
@@ -609,8 +608,7 @@ public class OssFileStorage implements FileStorage {
             response.close();
             return;
         }
-        String body = Xmls.readAll(response.body());
-        response.close();
+        String body = response.bodyText();
         if (status == 404) {
             return;
         }
@@ -691,8 +689,7 @@ public class OssFileStorage implements FileStorage {
             return;
         }
         int status = response.status();
-        String body = Xmls.readAll(response.body());
-        response.close();
+        String body = response.bodyText();
         throw toException(status, body, path);
     }
 

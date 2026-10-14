@@ -9,7 +9,6 @@ import com.alianga.jkit.storage.StorageException;
 import com.alianga.jkit.storage.StoragePaths;
 import com.alianga.jkit.storage.internal.HttpCore;
 import com.alianga.jkit.storage.internal.Urls;
-import com.alianga.jkit.storage.internal.Xmls;
 
 import java.io.ByteArrayInputStream;
 import java.io.File;
@@ -145,8 +144,7 @@ public class GoFastDfsFileStorage implements FileStorage {
         authorize(request);
         HttpCore.Response response = HttpCore.execute(request);
         ensureSuccess(response, normalized);
-        String body = Xmls.readAll(response.body());
-        response.close();
+        String body = response.bodyText();
         List<StorageEntry> entries = new ArrayList<StorageEntry>();
         Collection<?> rows;
         try {
@@ -210,8 +208,7 @@ public class GoFastDfsFileStorage implements FileStorage {
         authorize(request);
         request.body(body, size >= 0 ? head.length + size + tail.length : -1L);
         HttpCore.Response response = HttpCore.execute(request);
-        String bodyText = Xmls.readAll(response.body());
-        response.close();
+        String bodyText = response.bodyText();
         if (response.status() >= 400) {
             throw toException(response.status(), bodyText, normalized);
         }
@@ -326,8 +323,7 @@ public class GoFastDfsFileStorage implements FileStorage {
         }
         HttpCore.Response response = request("DELETE", objectKey(normalized));
         int status = response.status();
-        String body = Xmls.readAll(response.body());
-        response.close();
+        String body = response.bodyText();
         // 200/204 正常删除；404 幂等；405 目录（go-fastdfs 目录隐式，无实体可删）同样视为成功
         if (status < 300 || status == 404 || status == 405) {
             return;
@@ -415,8 +411,7 @@ public class GoFastDfsFileStorage implements FileStorage {
         if (response.status() < 400) {
             return;
         }
-        String body = Xmls.readAll(response.body());
-        response.close();
+        String body = response.bodyText();
         throw toException(response.status(), body, path);
     }
 

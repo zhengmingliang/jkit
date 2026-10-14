@@ -171,6 +171,20 @@ public final class HttpCore {
         }
 
         /**
+         * 读取响应体为 UTF-8 文本（受 {@link Xmls#MAX_RESPONSE_BYTES} 上限约束），
+         * 无论成功还是超限抛异常都在 finally 中关闭响应。
+         *
+         * @return 响应文本
+         */
+        public String bodyText() {
+            try {
+                return Xmls.readAll(body);
+            } finally {
+                close();
+            }
+        }
+
+        /**
          * 读取整个响应体到内存（用于小对象与错误 XML），读取后自动关闭。
          *
          * @return 响应体字节

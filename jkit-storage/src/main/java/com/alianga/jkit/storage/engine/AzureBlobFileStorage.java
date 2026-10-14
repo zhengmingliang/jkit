@@ -152,8 +152,7 @@ public class AzureBlobFileStorage implements FileStorage {
             query.put("restype", "container");
             HttpCore.Response response = request("GET", "", query, null, null, -1L, null, null);
             ensureSuccess(response, prefix);
-            String xml = Xmls.readAll(response.body());
-            response.close();
+            String xml = response.bodyText();
             Element root = Xmls.parse(xml);
             collectPage(root, prefix, fullPrefix, entries);
             String next = Xmls.textOr(root, "NextMarker", null);
@@ -217,8 +216,7 @@ public class AzureBlobFileStorage implements FileStorage {
             response.close();
             return;
         }
-        String body = Xmls.readAll(response.body());
-        response.close();
+        String body = response.bodyText();
         if (hasErrorCode(body, "BlobAlreadyExists")) {
             return;
         }
@@ -501,8 +499,7 @@ public class AzureBlobFileStorage implements FileStorage {
         if (response.status() < 400) {
             return;
         }
-        String body = Xmls.readAll(response.body());
-        response.close();
+        String body = response.bodyText();
         throw toException(response.status(), body, path);
     }
 

@@ -492,8 +492,7 @@ public class S3FileStorage implements FileStorage {
             response.close();
             return;
         }
-        String body = Xmls.readAll(response.body());
-        response.close();
+        String body = response.bodyText();
         if (status == 404) {
             return;
         }
@@ -535,8 +534,7 @@ public class S3FileStorage implements FileStorage {
             }
             HttpCore.Response response = request("GET", "", query, null, null, -1L, null);
             ensureSuccess(response, prefix);
-            String xml = Xmls.readAll(response.body());
-            response.close();
+            String xml = response.bodyText();
             Element root = Xmls.parse(xml);
             boolean truncated = Boolean.parseBoolean(Xmls.textOr(root, "IsTruncated", "false"));
             for (Element content : Xmls.children(root, "Contents")) {
@@ -728,8 +726,7 @@ public class S3FileStorage implements FileStorage {
         if (response.status() < 400) {
             return;
         }
-        String body = Xmls.readAll(response.body());
-        response.close();
+        String body = response.bodyText();
         throw toException(response.status(), body, path);
     }
 
