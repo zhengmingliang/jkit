@@ -123,7 +123,7 @@ public class SyncEngineTest {
         target.mkdir("keep/gone/deep");
         SyncResult result = SyncEngine.sync(source, "", target, "", SyncOptions.mirror(), null);
         assertEquals(1L, result.copied());
-        assertEquals("多余文件 + 空目录 + 深层目录", 4L, result.deleted());
+        assertEquals("删除数只按文件计（空目录 / 深层目录不计）", 1L, result.deleted());
         assertFalse(target.exists("keep/stale.txt"));
         assertFalse(target.exists("keep/empty-dir"));
         assertFalse(target.exists("keep/gone"));

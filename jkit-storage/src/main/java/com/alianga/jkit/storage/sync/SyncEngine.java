@@ -150,7 +150,7 @@ public final class SyncEngine {
             progress.onStart(totalActions, totalBytes);
         }
         if (opts.isDryRun()) {
-            return new SyncResult(toCopy.size(), skipped, toDelete.size() + toDeleteDirs.size(),
+            return new SyncResult(toCopy.size(), skipped, toDelete.size(),
                     0L, totalBytes, false, new ArrayList<String>());
         }
 
@@ -161,6 +161,8 @@ public final class SyncEngine {
         AtomicLong failed = new AtomicLong();
         AtomicLong bytes = new AtomicLong();
         AtomicBoolean aborted = new AtomicBoolean();
+        // 目录删除单独计数：结果里的「删除」与「跳过」「复制」一样只按文件口径
+        AtomicLong dirsDeleted = new AtomicLong();
         List<String> errors = java.util.Collections.synchronizedList(new ArrayList<String>());
 
         if (opts.concurrency() <= 1) {
@@ -181,7 +183,7 @@ public final class SyncEngine {
                 if (aborted.get() || cancelled(opts)) {
                     break;
                 }
-                deleteOne(target, targetDir, relative, opts, progress, deleted, failed, errors, aborted);
+                deleteOne(target, targetDir, relative, opts, progress, dirsDeleted, failed, errors, aborted);
             }
         } else {
             runParallel(opts, source, sourceDir, target, targetDir, toCopy, toDelete, toDeleteDirs,
@@ -494,6 +496,7 @@ public final class SyncEngine {
                                     List<String> errors, AtomicBoolean aborted) {
         ExecutorService pool = Executors.newFixedThreadPool(opts.concurrency(),
                 ExecutorServiceUtil.getDefaultThreadFactory());
+        AtomicLong dirsDeleted = new AtomicLong();
         try {
             List<Future<?>> futures = new ArrayList<Future<?>>();
             for (final String relative : toCopy) {
@@ -525,7 +528,7 @@ public final class SyncEngine {
                 if (aborted.get() || cancelled(opts)) {
                     break;
                 }
-                deleteOne(target, targetDir, relative, opts, progress, deleted, failed, errors, aborted);
+                deleteOne(target, targetDir, relative, opts, progress, dirsDeleted, failed, errors, aborted);
             }
         } finally {
             pool.shutdownNow();
@@ -545,57 +548,67 @@ public final class SyncEngine {
         }
     }
 
-    /**
-     * 同一次同步里最多 concurrency 路并发缓冲；在 -Xmx256m 下用 8MiB 上限，
-     * 给堆与其他操作留余量。大小未知（{@code size < 0}）一律走临时文件，
-     * 避免「未知大小 → 整文件进 ByteArrayOutputStream → OOM」。
-     */
+    /** 单路内存中转上限（并发为 1 时）。 */
     private static final long MEMORY_LIMIT = 8L * 1024L * 1024L;
+
+    /**
+     * 大文件（超出单路内存上限）并发传输名额：上传端（S3/OSS 分片）每路还会再占一个
+     * 分片缓冲，按堆大小限流（每 64MiB 堆 1 路，至少 2 路），避免并发 16 时叠加 OOM。
+     */
+    private static final java.util.concurrent.Semaphore LARGE_SLOTS = new java.util.concurrent.Semaphore(
+            (int) Math.max(2L, Math.min(16L, Runtime.getRuntime().maxMemory() / (64L * 1024L * 1024L))));
+
+    /**
+     * 单路内存中转上限：总预算取堆的 1/32（且不超过 8MiB），按并发数分摊。
+     * 256MB 堆、并发 16 时每路约 512KiB，超出即落盘。
+     *
+     * @param concurrency 并发数
+     * @return 单路上限
+     */
+    static long memoryLimitPerRoute(int concurrency) {
+        long budget = Math.min(MEMORY_LIMIT, Runtime.getRuntime().maxMemory() / 32L);
+        return Math.max(64L * 1024L, budget / Math.max(1, concurrency));
+    }
 
     private static void copyOne(FileStorage source, String sourceDir, FileStorage target,
                                 String targetDir, String relative, String targetRelative,
                                 SyncOptions opts, SyncProgress progress, AtomicLong copied,
                                 AtomicLong failed, AtomicLong bytes, List<String> errors,
                                 AtomicBoolean aborted) {
-        java.nio.file.Path temp = null;
+        String sourcePath = StoragePaths.join(sourceDir, relative);
+        long limit = memoryLimitPerRoute(opts.concurrency());
+        boolean slot = false;
         try {
-            StorageEntry entry = source.stat(StoragePaths.join(sourceDir, relative));
+            StorageEntry entry = source.stat(sourcePath);
             long size = entry.size();
-            // 未知大小或超过内存上限：落盘中转，不把整文件进堆
-            if (size < 0 || size > MEMORY_LIMIT) {
-                temp = java.nio.file.Files.createTempFile("jkit-storage-sync", ".tmp");
-                try (java.io.OutputStream fileOut = java.nio.file.Files.newOutputStream(temp)) {
-                    source.download(StoragePaths.join(sourceDir, relative), fileOut);
-                }
-                try (java.io.InputStream fileIn = java.nio.file.Files.newInputStream(temp)) {
+            // 已知大文件或大小未知：占大文件名额（限制并发分片缓冲）
+            if (size < 0 || size > limit) {
+                LARGE_SLOTS.acquire();
+                slot = true;
+            }
+            // 已知超限直接落盘；未知 / 不可信大小由 SpillBuffer 超限自动转写临时文件
+            try (com.alianga.jkit.storage.internal.SpillBuffer buffer =
+                         new com.alianga.jkit.storage.internal.SpillBuffer(size > limit ? 0L : limit, sourcePath)) {
+                source.download(sourcePath, buffer);
+                long length = buffer.size();
+                try (java.io.InputStream in = buffer.openInput()) {
                     if (opts.isPreserveMtime() && entry.lastModified() != StorageEntry.MTIME_UNKNOWN) {
-                        target.upload(StoragePaths.join(targetDir, targetRelative), fileIn,
-                                java.nio.file.Files.size(temp),
+                        target.upload(StoragePaths.join(targetDir, targetRelative), in, length,
                                 com.alianga.jkit.storage.UploadMetadata.mtime(entry.lastModified()));
                     } else {
-                        target.upload(StoragePaths.join(targetDir, targetRelative), fileIn,
-                                java.nio.file.Files.size(temp));
+                        target.upload(StoragePaths.join(targetDir, targetRelative), in, length);
                     }
                 }
-                bytes.addAndGet(java.nio.file.Files.size(temp));
-            } else {
-                java.io.ByteArrayOutputStream buffer =
-                        new java.io.ByteArrayOutputStream((int) Math.max(size, 64L));
-                source.download(StoragePaths.join(sourceDir, relative), buffer);
-                byte[] data = buffer.toByteArray();
-                if (opts.isPreserveMtime() && entry.lastModified() != StorageEntry.MTIME_UNKNOWN) {
-                    target.upload(StoragePaths.join(targetDir, targetRelative), data,
-                            com.alianga.jkit.storage.UploadMetadata.mtime(entry.lastModified()));
-                } else {
-                    target.upload(StoragePaths.join(targetDir, targetRelative), data);
-                }
-                bytes.addAndGet(data.length);
+                bytes.addAndGet(length);
             }
             copied.incrementAndGet();
             if (progress != null) {
                 progress.onFileDone(relative, size, "copy");
             }
         } catch (Exception e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
             failed.incrementAndGet();
             errors.add(relative + ": " + e.getMessage());
             if (progress != null) {
@@ -605,12 +618,8 @@ public final class SyncEngine {
                 aborted.set(true);
             }
         } finally {
-            if (temp != null) {
-                try {
-                    java.nio.file.Files.deleteIfExists(temp);
-                } catch (java.io.IOException ignore) {
-                    // 临时文件清理失败不影响结果
-                }
+            if (slot) {
+                LARGE_SLOTS.release();
             }
         }
     }

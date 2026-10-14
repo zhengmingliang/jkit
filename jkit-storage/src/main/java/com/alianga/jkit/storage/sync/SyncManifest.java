@@ -43,7 +43,9 @@ final class SyncManifest {
             if (!storage.exists(path)) {
                 return null;
             }
-            return parse(storage.readString(path));
+            // 清单有上限读取：异常大的清单文件不进堆
+            return parse(new String(storage.readBytes(path, 16L * 1024L * 1024L),
+                    java.nio.charset.StandardCharsets.UTF_8));
         } catch (RuntimeException ignore) {
             return null;
         }
