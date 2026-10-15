@@ -34,11 +34,15 @@ import java.util.regex.Pattern;
  * 真 IMAP 子邮箱层级待协议层；{@link MailGateway#mkdir(String)} 预留 CREATE 接缝。</p>
  *
  * <p><b>约定</b>：一个逻辑文件 ↔ 一封 MIME（单 {@link Attachment}），或分卷时多封
- * {@code name.part1}..{@code name.partN}；二期不做「一封邮件多文件」。</p>
+ * {@code name.part1}..{@code name.partN}（N 从 1 起、连续无缺口）；二期不做「一封邮件多文件」。
+ * 逻辑名本身<strong>不得</strong>以 {@code .part}+数字结尾——该后缀为分卷保留；
+ * 上传此类路径会 {@link StorageErrorCode#INVALID_CONFIG}。若底层已误存为 {@code foo.partN}，
+ * 则按逻辑名 {@code foo} 的分卷片处理，不再当作独立文件名。</p>
  *
  * <p><b>分卷</b>：超过 {@code maxAttachmentBytes} 时用 {@link Attachment#slice} 拆分；
- * {@code list} 隐藏 part、对外逻辑名与合计大小；{@code download} 按序合成；
- * {@code delete} 清掉所有 part。</p>
+ * {@code list} 隐藏 part、对外逻辑名与合计大小；{@code download} 按序合成前先校验
+ * part 从 1 起连续无缺口，缺片/有缺口时 {@link StorageErrorCode#CONFLICT}，不向输出流写入；
+ * {@code delete} 清掉所有已发现的 part（含残缺分卷）。</p>
  *
  * <p><b>连接</b>：{@code channelPool} 配置可登记（默认 1）；二期单会话串行锁，
  * 真多连接池待协议层。</p>
@@ -110,7 +114,12 @@ public class MailFileStorage implements FileStorage {
             return true;
         }
         synchronized (lock) {
-            return resolveLogical(normalized) != null;
+            Resolved resolved = resolveLogical(normalized);
+            if (resolved == null) {
+                return false;
+            }
+            ensureCompleteParts(resolved, normalized);
+            return true;
         }
     }
 
@@ -125,6 +134,7 @@ public class MailFileStorage implements FileStorage {
             if (resolved == null) {
                 throw StorageException.notFound(normalized);
             }
+            ensureCompleteParts(resolved, normalized);
             return resolved.toStorageEntry(normalized);
         }
     }
@@ -208,6 +218,7 @@ public class MailFileStorage implements FileStorage {
             if (resolved.directory) {
                 throw StorageException.conflict("目标是目录，无法按文件下载: " + name, name);
             }
+            ensureCompleteParts(resolved, name);
             try {
                 if (resolved.parts.isEmpty()) {
                     gateway.download(name, out);
@@ -290,6 +301,10 @@ public class MailFileStorage implements FileStorage {
             }
             if (resolved.directory) {
                 dirs.add(logical);
+                continue;
+            }
+            if (resolved.incompleteParts) {
+                // 残缺分卷不出现在 list，避免被当成完整文件；exists/stat/download 抛 CONFLICT
                 continue;
             }
             files.put(logical, resolved.toStorageEntry(logical));
@@ -395,8 +410,10 @@ public class MailFileStorage implements FileStorage {
                 }
                 etag.append(p.entry.uid() == null ? p.name : p.entry.uid());
             }
+            boolean incomplete = !isContiguousPartsFromOne(bag);
             // 若同时存在整文件与分卷，分卷覆盖（upload 会先删）
-            index.byLogical.put(e.getKey(), Resolved.file(total, mtime, etag.toString(), partNames));
+            index.byLogical.put(e.getKey(),
+                    Resolved.file(total, mtime, etag.toString(), partNames, incomplete));
         }
         return index;
     }
@@ -477,10 +494,34 @@ public class MailFileStorage implements FileStorage {
         if (normalized.isEmpty()) {
             throw StorageException.invalidConfig("文件路径不能为空");
         }
+        if (PART_PATTERN.matcher(normalized).matches()) {
+            throw StorageException.invalidConfig(
+                    "逻辑路径不能使用保留后缀 .partN（分卷专用）: " + normalized);
+        }
         if (KEEP_NAME.equals(StoragePaths.name(normalized)) && normalized.indexOf('/') < 0) {
             // 允许路径中的 .keep；根下单独 .keep 也允许（占位）
         }
         return normalized;
+    }
+
+    /** part 号须从 1 起连续无缺口、无重复。 */
+    private static boolean isContiguousPartsFromOne(List<PartPiece> bag) {
+        if (bag == null || bag.isEmpty()) {
+            return false;
+        }
+        for (int i = 0; i < bag.size(); i++) {
+            if (bag.get(i).no != i + 1) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static void ensureCompleteParts(Resolved resolved, String path) {
+        if (resolved != null && resolved.incompleteParts) {
+            throw StorageException.conflict(
+                    "分卷不完整或存在缺口，拒绝读写: " + path, path);
+        }
     }
 
     private static String stripPart(String name) {
@@ -568,13 +609,17 @@ public class MailFileStorage implements FileStorage {
         final long mtime;
         final String etag;
         final List<String> parts;
+        /** 分卷缺片/缺口/非从 1 连续时为 true；exists/stat/download 抛 CONFLICT。 */
+        final boolean incompleteParts;
 
-        private Resolved(boolean directory, long size, long mtime, String etag, List<String> parts) {
+        private Resolved(boolean directory, long size, long mtime, String etag, List<String> parts,
+                         boolean incompleteParts) {
             this.directory = directory;
             this.size = size;
             this.mtime = mtime;
             this.etag = etag;
             this.parts = parts == null ? Collections.<String>emptyList() : parts;
+            this.incompleteParts = incompleteParts;
         }
 
         static Resolved dir() {
@@ -582,11 +627,16 @@ public class MailFileStorage implements FileStorage {
         }
 
         static Resolved dir(long mtime) {
-            return new Resolved(true, 0L, mtime, null, Collections.<String>emptyList());
+            return new Resolved(true, 0L, mtime, null, Collections.<String>emptyList(), false);
         }
 
         static Resolved file(long size, long mtime, String etag, List<String> parts) {
-            return new Resolved(false, size, mtime, etag, parts);
+            return file(size, mtime, etag, parts, false);
+        }
+
+        static Resolved file(long size, long mtime, String etag, List<String> parts,
+                             boolean incompleteParts) {
+            return new Resolved(false, size, mtime, etag, parts, incompleteParts);
         }
 
         StorageEntry toStorageEntry(String path) {

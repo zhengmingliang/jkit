@@ -260,6 +260,70 @@ public class MailFileStorageTest {
     }
 
     @Test
+    public void incompletePartsGapRejectsExistsStatDownload() {
+        FakeMailGateway fake = new FakeMailGateway();
+        FileStorage fs = open(fake);
+        fake.putEntry("big.bin.part1", "aaaa".getBytes(StandardCharsets.UTF_8));
+        fake.putEntry("big.bin.part3", "cccc".getBytes(StandardCharsets.UTF_8));
+        assertIncompleteVolumeConflict(fs, "big.bin");
+        // 不得向输出流写入任何字节
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        try {
+            fs.download("big.bin", out);
+            fail("缺 part 下载应 CONFLICT");
+        } catch (StorageException e) {
+            assertEquals(StorageErrorCode.CONFLICT, e.code());
+        }
+        assertEquals(0, out.size());
+    }
+
+    @Test
+    public void incompletePartsOnlyPart2Rejects() {
+        FakeMailGateway fake = new FakeMailGateway();
+        FileStorage fs = open(fake);
+        fake.putEntry("solo.bin.part2", "bbbb".getBytes(StandardCharsets.UTF_8));
+        assertIncompleteVolumeConflict(fs, "solo.bin");
+    }
+
+    @Test
+    public void uploadReservedPartSuffixRejected() {
+        FileStorage fs = open(new FakeMailGateway());
+        try {
+            fs.upload("foo.part1", "x".getBytes(StandardCharsets.UTF_8));
+            fail("保留后缀 .partN 应 INVALID_CONFIG");
+        } catch (StorageException e) {
+            assertEquals(StorageErrorCode.INVALID_CONFIG, e.code());
+        }
+        try {
+            fs.upload("docs/bar.part12", "y".getBytes(StandardCharsets.UTF_8));
+            fail("嵌套保留后缀也应 INVALID_CONFIG");
+        } catch (StorageException e) {
+            assertEquals(StorageErrorCode.INVALID_CONFIG, e.code());
+        }
+    }
+
+    private static void assertIncompleteVolumeConflict(FileStorage fs, String logical) {
+        try {
+            fs.exists(logical);
+            fail("残缺分卷 exists 应 CONFLICT: " + logical);
+        } catch (StorageException e) {
+            assertEquals(StorageErrorCode.CONFLICT, e.code());
+        }
+        try {
+            fs.stat(logical);
+            fail("残缺分卷 stat 应 CONFLICT: " + logical);
+        } catch (StorageException e) {
+            assertEquals(StorageErrorCode.CONFLICT, e.code());
+        }
+        try {
+            fs.download(logical, new ByteArrayOutputStream());
+            fail("残缺分卷 download 应 CONFLICT: " + logical);
+        } catch (StorageException e) {
+            assertEquals(StorageErrorCode.CONFLICT, e.code());
+        }
+    }
+
+    @Test
     public void listDepthForSyncWalk() {
         FileStorage fs = open(new FakeMailGateway());
         fs.mkdir("a");
@@ -573,6 +637,12 @@ public class MailFileStorageTest {
             String uid = String.valueOf(uidSeq.getAndIncrement());
             String logical = ImapMailSession.decodeMimeWords(encodedSubject);
             store.put(logical, new Stored(encodedSubject, payload, uid, System.currentTimeMillis()));
+        }
+
+        /** 直接塞底层条目（用于残缺分卷等场景，绕过 MailFileStorage.upload）。 */
+        void putEntry(String name, byte[] payload) {
+            String uid = String.valueOf(uidSeq.getAndIncrement());
+            store.put(name, new Stored(name, payload, uid, System.currentTimeMillis()));
         }
 
         private Stored findByLogicalName(String path) {
