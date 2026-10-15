@@ -212,6 +212,24 @@ public class MailFileStorageTest {
     }
 
     @Test
+    public void fullSizePartMimeFitsSessionLimit1Mb() {
+        assertFullPartFits(1024L * 1024L);
+    }
+
+    @Test
+    public void fullSizePartMimeFitsSessionLimitDefault45Mb() {
+        assertFullPartFits(MailFileStorage.DEFAULT_MAX_ATTACHMENT_BYTES);
+    }
+
+    private static void assertFullPartFits(long max) {
+        long raw = MailChunking.partRawBytes(max);
+        assertTrue(raw > 0 && raw < max);
+        byte[] mime = MailFileStorage.buildStoredMime("big.bin.part12", new byte[(int) raw]);
+        assertTrue("mime=" + mime.length + " limit=" + MailChunking.maxMimeBytes(max),
+                mime.length <= MailChunking.maxMimeBytes(max));
+    }
+
+    @Test
     public void mkdirUsesGatewayCreateWithoutKeep() {
         FakeMailGateway fake = new FakeMailGateway();
         FileStorage fs = open(fake);

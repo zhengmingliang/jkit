@@ -181,7 +181,8 @@ public class MailFileStorage implements FileStorage {
                 throw StorageException.conflict("目标是目录，无法上传文件: " + name, name);
             }
             deleteExact(name);
-            if (payload.length <= maxAttachmentBytes) {
+            long partRaw = MailChunking.partRawBytes(maxAttachmentBytes);
+            if (payload.length <= partRaw) {
                 appendMime(name, payload);
                 return;
             }
@@ -189,7 +190,7 @@ public class MailFileStorage implements FileStorage {
             long offset = 0L;
             int partNo = 1;
             while (offset < payload.length) {
-                long chunk = Math.min(maxAttachmentBytes, payload.length - offset);
+                long chunk = Math.min(partRaw, payload.length - offset);
                 String partName = name + ".part" + partNo;
                 Attachment part = whole.slice(offset, chunk, partName);
                 appendMime(partName, part.content());
@@ -590,7 +591,14 @@ public class MailFileStorage implements FileStorage {
         ChannelConfig mimeCfg = ChannelConfig.smtp("127.0.0.1", 25)
                 .from("jkit-storage@localhost")
                 .to("jkit-storage@localhost");
-        return MailMime.render(message, "jkit-storage@localhost", mimeCfg);
+        byte[] rendered = MailMime.render(message, "jkit-storage@localhost", mimeCfg);
+        // 唯一 Message-ID：busy 重试前按它 SEARCH，避免重复 APPEND
+        byte[] header = ("Message-ID: <" + java.util.UUID.randomUUID() + "@jkit-storage>\r\n")
+                .getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+        byte[] out = new byte[header.length + rendered.length];
+        System.arraycopy(header, 0, out, 0, header.length);
+        System.arraycopy(rendered, 0, out, header.length, rendered.length);
+        return out;
     }
 
     private static final class Index {

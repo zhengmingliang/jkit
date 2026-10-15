@@ -83,6 +83,17 @@ public final class ImapMailSession implements AutoCloseable {
     private boolean flatDotHierarchy;
     private long maxAttachmentBytes = DEFAULT_MAX_ATTACHMENT_BYTES;
     private boolean connected;
+    /** NO 且含 busy 时的最大重试次数。 */
+    private int busyMaxRetries = 3;
+    /** busy 重试首个退避（毫秒），之后指数翻倍；配置键 {@code busyRetryDelayMs}。 */
+    private long busyBaseDelayMs = 5000L;
+    /** 可注入的休眠（单测不真睡）。 */
+    private Sleeper sleeper = Thread::sleep;
+
+    /** 退避休眠接口。 */
+    interface Sleeper {
+        void sleep(long millis) throws InterruptedException;
+    }
 
     /**
      * 按配置建立 IMAP 连接并选中文件夹。
@@ -112,6 +123,7 @@ public final class ImapMailSession implements AutoCloseable {
             folder = DEFAULT_FOLDER;
         }
         this.maxAttachmentBytes = parseLong(cfg.get("maxAttachmentBytes"), DEFAULT_MAX_ATTACHMENT_BYTES);
+        this.busyBaseDelayMs = Math.max(0L, parseLong(cfg.get("busyRetryDelayMs"), 5000L));
         synchronized (lock) {
             closeQuietly();
             this.baseFolder = folder;
@@ -363,7 +375,7 @@ public final class ImapMailSession implements AutoCloseable {
                 } else {
                     mime = readAll(mimeMessage);
                 }
-                if (mime.length > maxAttachmentBytes + 256L * 1024L) {
+                if (mime.length > MailChunking.maxMimeBytes(maxAttachmentBytes)) {
                     throw new StorageException(StorageErrorCode.CONFLICT,
                             "MIME 超过可接受大小: " + mime.length, target);
                 }
@@ -371,20 +383,21 @@ public final class ImapMailSession implements AutoCloseable {
                 if (!target.equals(selectedFolder)) {
                     ensureSelected(target);
                 }
-                String tag = nextTag();
-                sendRaw(tag + " APPEND " + quote(target) + " {" + mime.length + "}\r\n");
-                String cont = readLine();
-                if (cont == null || !cont.startsWith("+")) {
-                    throw StorageException.serverError(
-                            "APPEND 未收到续传应答: " + cont, target);
-                }
-                rawOut.write(mime);
-                rawOut.write(new byte[]{'\r', '\n'});
-                rawOut.flush();
-                TaggedResult result = readUntilTagged(tag);
-                if (!result.ok) {
-                    throw StorageException.serverError(
-                            "APPEND 失败: " + result.text, target);
+                String messageId = extractMessageId(mime);
+                for (int attempt = 0; ; attempt++) {
+                    TaggedResult result = appendOnce(target, mime);
+                    if (result.ok) {
+                        return;
+                    }
+                    if (!isBusy(result.text) || attempt >= busyMaxRetries) {
+                        throw StorageException.serverError(
+                                "APPEND 失败: " + result.text, target);
+                    }
+                    backoff(attempt);
+                    // APPEND 非幂等：上次可能已入箱，按 Message-ID 查重
+                    if (messageId != null && messageIdExists(messageId)) {
+                        return;
+                    }
                 }
             } catch (StorageException e) {
                 throw e;
@@ -488,7 +501,7 @@ public final class ImapMailSession implements AutoCloseable {
             selectedFolder = absFolder;
             return;
         }
-        TaggedResult create = tagged("CREATE " + quote(absFolder));
+        TaggedResult create = taggedCreate(absFolder);
         if (!create.ok && !looksLikeAlreadyExists(create.text)) {
             throw StorageException.serverError(
                     "无法创建 IMAP 文件夹 " + absFolder + ": " + create.text, absFolder);
@@ -520,7 +533,7 @@ public final class ImapMailSession implements AutoCloseable {
             }
         }
         for (String mailbox : all) {
-            TaggedResult del = tagged("DELETE " + quote(mailbox));
+            TaggedResult del = taggedDelete(mailbox);
             if (!del.ok && !looksLikeNotFound(del.text)) {
                 // 非空或不支持时尽量继续
                 if (!looksLikeAlreadyExists(del.text)) {
@@ -622,9 +635,9 @@ public final class ImapMailSession implements AutoCloseable {
      */
     private boolean probeSlashHierarchy(String base) throws IOException {
         String probe = base + delimiter + "__jkit_hier_probe__";
-        TaggedResult create = tagged("CREATE " + quote(probe));
+        TaggedResult create = taggedCreate(probe);
         if (create.ok) {
-            tagged("DELETE " + quote(probe));
+            taggedDelete(probe);
             return true;
         }
         return false;
@@ -866,7 +879,7 @@ public final class ImapMailSession implements AutoCloseable {
             selectedFolder = folder;
             return;
         }
-        TaggedResult create = tagged("CREATE " + quote(folder));
+        TaggedResult create = taggedCreate(folder);
         if (!create.ok && !looksLikeAlreadyExists(create.text)) {
             throw StorageException.serverError(
                     "无法创建 IMAP 文件夹 " + folder + ": " + create.text, folder);
@@ -1133,7 +1146,128 @@ public final class ImapMailSession implements AutoCloseable {
         return depth <= 0 && s.toUpperCase(Locale.ROOT).contains("FETCH");
     }
 
+    private TaggedResult appendOnce(String target, byte[] mime) throws IOException {
+        String tag = nextTag();
+        sendRaw(tag + " APPEND " + quote(target) + " {" + mime.length + "}\r\n");
+        String cont = readLine();
+        if (cont != null && cont.startsWith(tag + " ")) {
+            boolean ok = cont.regionMatches(true, tag.length() + 1, "OK", 0, 2);
+            return new TaggedResult(ok, !ok, cont.substring(tag.length() + 1).trim());
+        }
+        if (cont == null || !cont.startsWith("+")) {
+            throw StorageException.serverError("APPEND 未收到续传应答: " + cont, target);
+        }
+        rawOut.write(mime);
+        rawOut.write(new byte[]{'\r', '\n'});
+        rawOut.flush();
+        return readUntilTagged(tag);
+    }
+
+    /** 只读/幂等命令：busy 时直接重试。 */
     private TaggedResult tagged(String command) throws IOException {
+        return taggedRetry(command, null);
+    }
+
+    /** CREATE：busy 后若邮箱已存在则视为成功，不再重复 CREATE。 */
+    private TaggedResult taggedCreate(final String mailbox) throws IOException {
+        return taggedRetry("CREATE " + quote(mailbox), () -> absMailboxListed(mailbox));
+    }
+
+    /** DELETE：busy 后若邮箱已不存在则视为成功。 */
+    private TaggedResult taggedDelete(final String mailbox) throws IOException {
+        return taggedRetry("DELETE " + quote(mailbox), () -> !absMailboxListed(mailbox));
+    }
+
+    /** 重试前检查上次是否其实已生效。 */
+    private interface AppliedCheck {
+        boolean applied() throws IOException;
+    }
+
+    private TaggedResult taggedRetry(String command, AppliedCheck check) throws IOException {
+        TaggedResult r = taggedOnce(command);
+        for (int attempt = 0; !r.ok && isBusy(r.text) && attempt < busyMaxRetries; attempt++) {
+            backoff(attempt);
+            if (check != null && check.applied()) {
+                return new TaggedResult(true, false, "OK (already applied after busy)");
+            }
+            r = taggedOnce(command);
+        }
+        return r;
+    }
+
+    static boolean isBusy(String text) {
+        return text != null && text.toLowerCase(Locale.ROOT).contains("busy");
+    }
+
+    private void backoff(int attempt) {
+        long delay = busyBaseDelayMs << Math.min(attempt, 20);
+        try {
+            sleeper.sleep(delay);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw StorageException.serverError("IMAP busy 重试被中断", selectedFolder);
+        }
+    }
+
+    private boolean absMailboxListed(String mailbox) throws IOException {
+        String tag = nextTag();
+        sendRaw(tag + " LIST \"\" " + quote(mailbox) + "\r\n");
+        boolean found = false;
+        while (true) {
+            String line = readLine();
+            if (line == null) {
+                throw StorageException.serverError("LIST 连接中断", mailbox);
+            }
+            if (line.startsWith(tag + " ")) {
+                return found && line.regionMatches(true, tag.length() + 1, "OK", 0, 2);
+            }
+            if (line.regionMatches(true, 0, "* LIST", 0, 6)) {
+                found = true;
+            }
+            Matcher lit = LITERAL_AT_END.matcher(line);
+            if (lit.find()) {
+                readExact(Integer.parseInt(lit.group(1)));
+            }
+        }
+    }
+
+    private boolean messageIdExists(String messageId) throws IOException {
+        taggedOnce("NOOP");
+        return !uidSearch("HEADER Message-ID " + quote(messageId)).isEmpty();
+    }
+
+    static String extractMessageId(byte[] mime) {
+        int limit = Math.min(mime.length, 64 * 1024);
+        String head = new String(mime, 0, limit, StandardCharsets.ISO_8859_1);
+        int end = head.indexOf("\r\n\r\n");
+        if (end >= 0) {
+            head = head.substring(0, end);
+        }
+        for (String line : head.split("\r\n")) {
+            if (line.regionMatches(true, 0, "Message-ID:", 0, 11)) {
+                String v = line.substring(11).trim();
+                return v.isEmpty() ? null : v;
+            }
+        }
+        return null;
+    }
+
+    /** 单测：直接挂接脚本化流，跳过 socket/LOGIN。 */
+    void attachForTest(InputStream in, OutputStream out, String base, Sleeper testSleeper) {
+        synchronized (lock) {
+            this.rawIn = in;
+            this.rawOut = out;
+            this.socket = new Socket();
+            this.baseFolder = base;
+            this.selectedFolder = null;
+            this.connected = true;
+            if (testSleeper != null) {
+                this.sleeper = testSleeper;
+            }
+        }
+    }
+
+    private TaggedResult taggedOnce(String command) throws IOException {
         String tag = nextTag();
         sendRaw(tag + " " + command + "\r\n");
         return readUntilTagged(tag);
