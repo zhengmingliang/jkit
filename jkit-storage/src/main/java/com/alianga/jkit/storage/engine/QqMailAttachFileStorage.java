@@ -357,9 +357,10 @@ public class QqMailAttachFileStorage implements FileStorage {
             if (key != null) {
                 form.put("key", key);
             }
-            Map<String, Object> resp = call(key != null ? "/attach/search" : "/attach/attach_list", form);
-            Map<String, Object> data = dataOf(resp);
-            List<Map<String, Object>> items = itemsOf(data);
+            String api = key != null ? "/attach/search" : "/attach/attach_list";
+            Map<String, Object> resp = call(api, form);
+            Map<String, Object> attachList = attachListOf(resp, api);
+            List<Map<String, Object>> items = itemsOf(attachList, api);
             for (Map<String, Object> raw : items) {
                 QqMailAttachItem item = new QqMailAttachItem(raw);
                 if (item.shortId == null) {
@@ -371,7 +372,7 @@ public class QqMailAttachFileStorage implements FileStorage {
                 }
                 all.add(item);
             }
-            long total = QqMailAttachItem.num(data.get("total"), -1L);
+            long total = QqMailAttachItem.num(attachList.get("total"), -1L);
             if (items.isEmpty() || items.size() < pageSize || (total >= 0L && (long) (page + 1) * pageSize >= total)) {
                 break;
             }
@@ -389,12 +390,6 @@ public class QqMailAttachFileStorage implements FileStorage {
         throttle();
         Map<String, Object> resp = client.post(path, form);
         long ret = QqMailAttachItem.num(resp.get("ret"), 0L);
-        if (ret == 0L) {
-            Object data = resp.get("data");
-            if (data instanceof Map) {
-                ret = QqMailAttachItem.num(((Map<?, ?>) data).get("ret"), 0L);
-            }
-        }
         if (ret != 0L) {
             throw mapRet(ret, path);
         }
@@ -431,28 +426,39 @@ public class QqMailAttachFileStorage implements FileStorage {
         }
     }
 
-    @SuppressWarnings("unchecked")
-    private static Map<String, Object> dataOf(Map<String, Object> resp) {
-        Object data = resp.get("data");
-        return data instanceof Map ? (Map<String, Object>) data : resp;
+    private static StorageException badFormat(String api) {
+        return StorageException.io("unexpected response format: " + api, null, null);
     }
 
-    /** TODO(待抓包确认字段名)：兼容 list / items / attach_list / attachs。 */
+    /** 实测（HAR）：列表位于 {@code body.attach_list}，ret 在顶层。 */
     @SuppressWarnings("unchecked")
-    private static List<Map<String, Object>> itemsOf(Map<String, Object> data) {
-        for (String k : new String[]{"list", "items", "attach_list", "attachs"}) {
-            Object v = data.get(k);
-            if (v instanceof List) {
-                List<Map<String, Object>> out = new ArrayList<Map<String, Object>>();
-                for (Object o : (List<Object>) v) {
-                    if (o instanceof Map) {
-                        out.add((Map<String, Object>) o);
-                    }
-                }
-                return out;
-            }
+    private static Map<String, Object> attachListOf(Map<String, Object> resp, String api) {
+        Object body = resp.get("body");
+        if (!(body instanceof Map)) {
+            throw badFormat(api);
         }
-        return Collections.emptyList();
+        Object al = ((Map<String, Object>) body).get("attach_list");
+        if (!(al instanceof Map)) {
+            throw badFormat(api);
+        }
+        return (Map<String, Object>) al;
+    }
+
+    /** {@code body.attach_list.attach[]}；缺失或非数组 → IO_ERROR，绝不当作空列表。 */
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> itemsOf(Map<String, Object> attachList, String api) {
+        Object v = attachList.get("attach");
+        if (!(v instanceof List)) {
+            throw badFormat(api);
+        }
+        List<Map<String, Object>> out = new ArrayList<Map<String, Object>>();
+        for (Object o : (List<Object>) v) {
+            if (!(o instanceof Map)) {
+                throw badFormat(api);
+            }
+            out.add((Map<String, Object>) o);
+        }
+        return out;
     }
 
     private StorageEntry toEntry(String dir, QqMailAttachItem item) {

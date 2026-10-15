@@ -150,7 +150,8 @@ public class QqMailAttachFileStorageTest {
     }
 
     static String page(int total, String... items) {
-        return "{\"ret\":0,\"total\":" + total + ",\"list\":[" + String.join(",", items) + "]}";
+        return "{\"ret\":0,\"body\":{\"attach_list\":{\"total\":" + total + ",\"attach\":["
+                + String.join(",", items) + "]}}}";
     }
 
     private static String pathOf(String dir, String name, String mailid, String fileid) {
@@ -195,6 +196,35 @@ public class QqMailAttachFileStorageTest {
         assertEquals("POST", mock.calls.get(0)[0]);
         assertEquals(QqMailWebClient.REFERER, mock.headers.get(0).get("Referer"));
         assertEquals(QqMailWebClient.BASE_URL, mock.headers.get(0).get("Origin"));
+    }
+
+    @Test
+    public void missingAttachListStructureThrowsFormatError() {
+        String[] bad = {
+            "{\"ret\":0}",
+            "{\"ret\":0,\"body\":{}}",
+            "{\"ret\":0,\"body\":{\"attach_list\":{\"total\":1}}}",
+            "{\"ret\":0,\"body\":{\"attach_list\":{\"total\":1,\"attach\":{}}}}",
+            "{\"ret\":0,\"data\":{\"total\":1,\"list\":[]}}"
+        };
+        for (String b : bad) {
+            Mock mock = new Mock().json("/attach/attach_list", b).json("/attach/search", b);
+            QqMailAttachFileStorage fs = open(mock);
+            try {
+                fs.list("/全部");
+                fail("应抛格式错误: " + b);
+            } catch (StorageException e) {
+                assertEquals(StorageErrorCode.IO_ERROR, e.code());
+                assertEquals("unexpected response format: /attach/attach_list", e.getMessage());
+            }
+            try {
+                fs.stat(pathOf("全部", "a.txt", "m1", "f1"));
+                fail("search 也应抛格式错误");
+            } catch (StorageException e) {
+                assertEquals(StorageErrorCode.IO_ERROR, e.code());
+                assertTrue(e.getMessage().contains("/attach/search"));
+            }
+        }
     }
 
     @Test
