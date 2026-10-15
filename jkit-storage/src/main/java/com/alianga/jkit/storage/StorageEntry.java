@@ -1,5 +1,9 @@
 package com.alianga.jkit.storage;
 
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 /**
  * 统一的对象元数据：一次 {@link FileStorage#list} 或 {@link FileStorage#stat}
  * 返回的文件 / 目录条目。路径约定见 {@link StoragePaths}。
@@ -27,8 +31,19 @@ public final class StorageEntry {
     private final long lastModified;
     /** 平台原生的版本标识（S3 ETag 等）；可为 null。 */
     private final String etag;
+    /** 平台扩展属性（只读，可能为空 map，不为 null），如 QQ 邮箱附件的 {@link #ATTR_COLLECTED}。 */
+    private final Map<String, String> attributes;
+
+    /** 扩展属性键：是否已收藏，值 "true"/"false"（目前仅 qqmail-attach 提供）。 */
+    public static final String ATTR_COLLECTED = "collected";
 
     private StorageEntry(String path, boolean directory, long size, long lastModified, String etag) {
+        this(path, directory, size, lastModified, etag, Collections.<String, String>emptyMap());
+    }
+
+    private StorageEntry(String path, boolean directory, long size, long lastModified, String etag,
+                         Map<String, String> attributes) {
+        this.attributes = attributes;
         this.path = StoragePaths.normalize(path);
         this.name = StoragePaths.name(this.path);
         this.directory = directory;
@@ -93,6 +108,32 @@ public final class StorageEntry {
 
     public String etag() {
         return etag;
+    }
+
+    /** @return 扩展属性只读视图（无则空 map） */
+    public Map<String, String> attributes() {
+        return attributes;
+    }
+
+    /**
+     * @param key 属性键
+     * @return 属性值，无则 null
+     */
+    public String attribute(String key) {
+        return attributes.get(key);
+    }
+
+    /**
+     * 返回附加了一个扩展属性的新条目（原条目不变）。
+     *
+     * @param key   属性键
+     * @param value 属性值
+     * @return 新条目
+     */
+    public StorageEntry withAttribute(String key, String value) {
+        Map<String, String> m = new LinkedHashMap<String, String>(attributes);
+        m.put(key, value);
+        return new StorageEntry(path, directory, size, lastModified, etag, Collections.unmodifiableMap(m));
     }
 
     @Override

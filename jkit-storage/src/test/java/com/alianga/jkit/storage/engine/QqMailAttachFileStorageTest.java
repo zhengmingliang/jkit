@@ -368,6 +368,36 @@ public class QqMailAttachFileStorageTest {
         assertTrue(body.contains("is_collect=true"));
         assertTrue(body.contains("filter={\"fileid\":\"f1\",\"name\":\"a\\\"b.txt\",\"mailid\":\"m1\"}"));
         assertTrue(fs.requireItem(path).collect());
+        assertEquals("true", fs.stat(path).attribute(StorageEntry.ATTR_COLLECTED));
+    }
+
+    @Test
+    public void collectedAttributeExposedOnListAndStat() {
+        Mock mock = new Mock().json("/attach/attach_list", page(2,
+                item("f1", "a.txt", 1, "m1", true), item("f2", "b.txt", 2, "m2", false)));
+        QqMailAttachFileStorage fs = open(mock);
+        List<StorageEntry> list = fs.list("/全部");
+        assertEquals("true", list.get(0).attribute(StorageEntry.ATTR_COLLECTED));
+        assertEquals("false", list.get(1).attribute(StorageEntry.ATTR_COLLECTED));
+        assertEquals("false", fs.stat(list.get(1).path()).attribute(StorageEntry.ATTR_COLLECTED));
+        assertNull(fs.list("/").get(0).attribute(StorageEntry.ATTR_COLLECTED));
+    }
+
+    @Test
+    public void presetMarksSidAndCookieSecret() {
+        int seen = 0;
+        for (com.alianga.jkit.storage.StoragePlatform p : com.alianga.jkit.storage.preset.StoragePresets.builtin()) {
+            if (!"qq-mail-attach".equals(p.id())) {
+                continue;
+            }
+            for (com.alianga.jkit.storage.StorageField f : p.fields()) {
+                if ("sid".equals(f.key()) || "cookie".equals(f.key())) {
+                    assertTrue(f.key(), f.isSecret());
+                    seen++;
+                }
+            }
+        }
+        assertEquals(2, seen);
     }
 
     @Test

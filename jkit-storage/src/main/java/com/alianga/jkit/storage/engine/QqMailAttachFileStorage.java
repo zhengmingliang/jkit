@@ -478,7 +478,8 @@ public class QqMailAttachFileStorage implements FileStorage {
 
     private StorageEntry toEntry(String dir, QqMailAttachItem item) {
         return StorageEntry.file(StoragePaths.join(dir, fileName(item)), item.size, item.mtimeMs,
-                item.md5 != null && !item.md5.isEmpty() ? item.md5 : item.shortId);
+                item.md5 != null && !item.md5.isEmpty() ? item.md5 : item.shortId)
+                .withAttribute(StorageEntry.ATTR_COLLECTED, String.valueOf(item.collect));
     }
 
     /** {@code name__shortId.ext}；无扩展名 / 点开头视为无扩展名。 */
