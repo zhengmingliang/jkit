@@ -325,7 +325,7 @@ public class MailFileStorage implements FileStorage {
     }
 
     /**
-     * 分页列目录：只取一页邮件（默认每页 100 封），用于「加载更多」。
+     * 分页列目录：只取一页邮件（默认每页 50 封），用于「加载更多」。
      *
      * @param dir  目录
      * @param page 页号，从 0 起

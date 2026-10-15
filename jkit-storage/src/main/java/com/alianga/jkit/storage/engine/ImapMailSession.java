@@ -104,7 +104,7 @@ public final class ImapMailSession implements AutoCloseable {
     /** 批量 UID FETCH 每批封数。 */
     static final int FETCH_CHUNK = 300;
     /** {@code maxListMails} 默认值。 */
-    static final int DEFAULT_MAX_LIST_MAILS = 100;
+    static final int DEFAULT_MAX_LIST_MAILS = 50;
     /** basePath 取该值时表示整个邮箱（根下是顶层文件夹，含 其他文件夹）。 */
     public static final String WHOLE_MAILBOX = "/";
     private long maxAttachmentBytes = DEFAULT_MAX_ATTACHMENT_BYTES;
