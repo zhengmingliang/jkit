@@ -133,6 +133,8 @@ public final class ImapMailSession implements AutoCloseable {
                 readGreeting();
                 taggedOk("LOGIN " + quote(user) + " " + quote(password), "LOGIN");
                 this.delimiter = detectDelimiter();
+                folder = resolveBaseFolder(folder);
+                this.baseFolder = folder;
                 ensureSelected(folder);
                 this.flatDotHierarchy = !probeSlashHierarchy(folder);
                 connected = true;
@@ -499,7 +501,7 @@ public final class ImapMailSession implements AutoCloseable {
         if (absFolder.equals(selectedFolder)) {
             return;
         }
-        TaggedResult select = tagged("SELECT " + quote(absFolder));
+        TaggedResult select = tagged("SELECT " + quoteMailbox(absFolder));
         if (select.ok) {
             selectedFolder = absFolder;
             return;
@@ -509,7 +511,7 @@ public final class ImapMailSession implements AutoCloseable {
             throw StorageException.serverError(
                     "无法创建 IMAP 文件夹 " + absFolder + ": " + create.text, absFolder);
         }
-        TaggedResult again = tagged("SELECT " + quote(absFolder));
+        TaggedResult again = tagged("SELECT " + quoteMailbox(absFolder));
         if (!again.ok) {
             throw StorageException.serverError(
                     "无法选中 IMAP 文件夹 " + absFolder + ": " + again.text, absFolder);
@@ -560,7 +562,7 @@ public final class ImapMailSession implements AutoCloseable {
             }
         }
         // 直接 SELECT 探测
-        TaggedResult select = tagged("SELECT " + quote(abs));
+        TaggedResult select = tagged("SELECT " + quoteMailbox(abs));
         if (select.ok) {
             selectedFolder = abs;
             return true;
@@ -569,7 +571,7 @@ public final class ImapMailSession implements AutoCloseable {
     }
 
     private boolean selectIfExists(String absFolder) throws IOException {
-        TaggedResult select = tagged("SELECT " + quote(absFolder));
+        TaggedResult select = tagged("SELECT " + quoteMailbox(absFolder));
         if (select.ok) {
             selectedFolder = absFolder;
             return true;
@@ -588,7 +590,7 @@ public final class ImapMailSession implements AutoCloseable {
             pattern = recursive ? "*" : "%";
         }
         String tag = nextTag();
-        sendRaw(tag + " LIST " + quote(listRef) + " " + quote(pattern) + "\r\n");
+        sendRaw(tag + " LIST " + quoteMailbox(listRef) + " " + quoteMailbox(pattern) + "\r\n");
         List<String> names = new ArrayList<String>();
         while (true) {
             String line = readLine();
@@ -646,6 +648,62 @@ public final class ImapMailSession implements AutoCloseable {
         return false;
     }
 
+    /** QQ 网页自建文件夹在 IMAP 中挂的父目录名。 */
+    static final String QQ_OTHER_FOLDERS = "其他文件夹";
+    private static final java.util.logging.Logger LOG =
+            java.util.logging.Logger.getLogger(ImapMailSession.class.getName());
+
+    /**
+     * 按 {@code LIST "" "*"} 把用户输入的 basePath 解析为服务器上实际存在的邮箱：
+     * 先认完全一致，再认 {@code 其他文件夹<delim>输入}；都不存在则原样返回（随后自动 CREATE）。
+     *
+     * @param input 用户填写的 basePath（Unicode）
+     * @return 实际使用的邮箱名（Unicode）
+     */
+    String resolveBaseFolder(String input) throws IOException {
+        String wanted = "/".equals(delimiter) ? input : input.replace("/", delimiter);
+        String tag = nextTag();
+        sendRaw(tag + " LIST \"\" \"*\"\r\n");
+        java.util.Set<String> names = new java.util.HashSet<String>();
+        while (true) {
+            String line = readLine();
+            if (line == null) {
+                throw StorageException.serverError("LIST 连接中断", input);
+            }
+            if (line.startsWith(tag + " ")) {
+                break;
+            }
+            if (line.regionMatches(true, 0, "* LIST", 0, 6)) {
+                Matcher lit = LITERAL_AT_END.matcher(line);
+                if (lit.find()) {
+                    // 名字以字面量给出：读出原始字节当名字
+                    byte[] raw = readExact(Integer.parseInt(lit.group(1)));
+                    names.add(ImapUtf7.decode(new String(raw, StandardCharsets.US_ASCII)));
+                    continue;
+                }
+                String name = parseListMailboxName(line);
+                if (name != null) {
+                    names.add(name);
+                }
+            }
+        }
+        String chosen;
+        String reason;
+        String other = QQ_OTHER_FOLDERS + delimiter + wanted;
+        if (names.contains(wanted)) {
+            chosen = wanted;
+            reason = "完全匹配";
+        } else if (names.contains(other)) {
+            chosen = other;
+            reason = "匹配" + QQ_OTHER_FOLDERS + "下的自建文件夹";
+        } else {
+            chosen = wanted;
+            reason = "服务器上不存在，将自动创建";
+        }
+        LOG.info("IMAP basePath 解析: 输入=" + input + " 实际=" + chosen + "（" + reason + "）");
+        return chosen;
+    }
+
     private String detectDelimiter() throws IOException {
         String tag = nextTag();
         sendRaw(tag + " LIST \"\" \"\"\r\n");
@@ -687,6 +745,10 @@ public final class ImapMailSession implements AutoCloseable {
     }
 
     private static String parseListMailboxName(String line) {
+        return ImapUtf7.decode(parseListMailboxNameRaw(line));
+    }
+
+    private static String parseListMailboxNameRaw(String line) {
         // * LIST (\HasNoChildren) "/" "INBOX/foo"
         // * LIST () "/" INBOX
         int attrsEnd = line.indexOf(')');
@@ -877,7 +939,7 @@ public final class ImapMailSession implements AutoCloseable {
     }
 
     private void ensureSelected(String folder) throws IOException {
-        TaggedResult select = tagged("SELECT " + quote(folder));
+        TaggedResult select = tagged("SELECT " + quoteMailbox(folder));
         if (select.ok) {
             selectedFolder = folder;
             return;
@@ -887,7 +949,7 @@ public final class ImapMailSession implements AutoCloseable {
             throw StorageException.serverError(
                     "无法创建 IMAP 文件夹 " + folder + ": " + create.text, folder);
         }
-        TaggedResult again = tagged("SELECT " + quote(folder));
+        TaggedResult again = tagged("SELECT " + quoteMailbox(folder));
         if (!again.ok) {
             throw StorageException.serverError(
                     "无法选中 IMAP 文件夹 " + folder + ": " + again.text, folder);
@@ -1173,7 +1235,7 @@ public final class ImapMailSession implements AutoCloseable {
 
     private TaggedResult appendOnce(String target, byte[] mime) throws IOException {
         String tag = nextTag();
-        sendRaw(tag + " APPEND " + quote(target) + " {" + mime.length + "}\r\n");
+        sendRaw(tag + " APPEND " + quoteMailbox(target) + " {" + mime.length + "}\r\n");
         String cont = readLine();
         if (cont != null && cont.startsWith(tag + " ")) {
             boolean ok = cont.regionMatches(true, tag.length() + 1, "OK", 0, 2);
@@ -1195,12 +1257,12 @@ public final class ImapMailSession implements AutoCloseable {
 
     /** CREATE：busy 后若邮箱已存在则视为成功，不再重复 CREATE。 */
     private TaggedResult taggedCreate(final String mailbox) throws IOException {
-        return taggedRetry("CREATE " + quote(mailbox), () -> absMailboxListed(mailbox));
+        return taggedRetry("CREATE " + quoteMailbox(mailbox), () -> absMailboxListed(mailbox));
     }
 
     /** DELETE：busy 后若邮箱已不存在则视为成功。 */
     private TaggedResult taggedDelete(final String mailbox) throws IOException {
-        return taggedRetry("DELETE " + quote(mailbox), () -> !absMailboxListed(mailbox));
+        return taggedRetry("DELETE " + quoteMailbox(mailbox), () -> !absMailboxListed(mailbox));
     }
 
     /** 重试前检查上次是否其实已生效。 */
@@ -1236,7 +1298,7 @@ public final class ImapMailSession implements AutoCloseable {
 
     private boolean absMailboxListed(String mailbox) throws IOException {
         String tag = nextTag();
-        sendRaw(tag + " LIST \"\" " + quote(mailbox) + "\r\n");
+        sendRaw(tag + " LIST \"\" " + quoteMailbox(mailbox) + "\r\n");
         boolean found = false;
         while (true) {
             String line = readLine();
@@ -1774,6 +1836,11 @@ public final class ImapMailSession implements AutoCloseable {
             }
         }
         return new String(out.toByteArray(), charset);
+    }
+
+    /** 邮箱名统一走 modified UTF-7 再加引号（RFC 3501 5.1.3）。 */
+    static String quoteMailbox(String mailbox) {
+        return quote(ImapUtf7.encode(mailbox));
     }
 
     private static String quote(String value) {
