@@ -29,9 +29,9 @@ import java.util.regex.Pattern;
 /**
  * 邮件（IMAP）存储引擎：把邮箱文件夹当成文件盘（二期 Plan A）。
  *
- * <p><b>路径模型（过渡）</b>：仍使用单个 IMAP 文件夹（{@code basePath}/{@value #DEFAULT_FOLDER}），
- * 逻辑相对路径写入 Subject/附件名（可含 {@code /}，如 {@code docs/a.txt}）。
- * 真 IMAP 子邮箱层级待协议层；{@link MailGateway#mkdir(String)} 预留 CREATE 接缝。</p>
+ * <p><b>路径模型</b>：{@code basePath} 为 IMAP 根邮箱；逻辑目录映射为真 IMAP 子文件夹；
+ * 文件 Subject/附件名为路径最后一段（如 {@code docs/a.txt} → 文件夹 {@code basePath/docs}、
+ * Subject {@code a.txt}）。{@link MailGateway#mkdir(String)} 执行 CREATE。</p>
  *
  * <p><b>约定</b>：一个逻辑文件 ↔ 一封 MIME（单 {@link Attachment}），或分卷时多封
  * {@code name.part1}..{@code name.partN}（N 从 1 起、连续无缺口）；二期不做「一封邮件多文件」。
@@ -44,8 +44,8 @@ import java.util.regex.Pattern;
  * part 从 1 起连续无缺口，缺片/有缺口时 {@link StorageErrorCode#CONFLICT}，不向输出流写入；
  * {@code delete} 清掉所有已发现的 part（含残缺分卷）。</p>
  *
- * <p><b>连接</b>：{@code channelPool} 配置可登记（默认 1）；二期单会话串行锁，
- * 真多连接池待协议层。</p>
+ * <p><b>连接</b>：{@code channelPool}（默认 1，协议层上限 4）；实例级串行，
+ * 网关内按池大小借还 IMAP 会话。</p>
  *
  * <p>上传：同名先删再 {@code APPEND}（含全部分卷）。</p>
  *
@@ -65,7 +65,7 @@ public class MailFileStorage implements FileStorage {
     private final String folder;
     private final long maxAttachmentBytes;
     private final int channelPool;
-    /** 二期单会话串行；channelPool&gt;1 时仍串行，待真池。 */
+    /** 实例级串行；网关侧可按 channelPool 持有多会话。 */
     private final Object lock = new Object();
 
     /**
@@ -98,8 +98,7 @@ public class MailFileStorage implements FileStorage {
     }
 
     private static MailGateway newDefaultGateway() {
-        ImapMailSession session = new ImapMailSession();
-        return new DefaultMailGateway(session, new ImapAppendStore(session));
+        return new DefaultMailGateway();
     }
 
     @Override
@@ -167,7 +166,7 @@ public class MailFileStorage implements FileStorage {
                 }
                 throw StorageException.conflict("同名文件已存在，无法创建目录: " + normalized, normalized);
             }
-            // 可切换：先调网关（预留真 IMAP CREATE），再写逻辑占位
+            // 真 IMAP CREATE；.keep 仍写入子文件夹以兼容空目录与 Fake
             gateway.mkdir(normalized);
             String keepPath = StoragePaths.join(normalized, KEEP_NAME);
             if (!gateway.exists(keepPath)) {
@@ -456,6 +455,16 @@ public class MailFileStorage implements FileStorage {
         for (String name : toDelete) {
             deleteQuiet(name);
         }
+        try {
+            gateway.rmdir(dir);
+        } catch (StorageException e) {
+            if (e.code() != StorageErrorCode.NOT_FOUND) {
+                // 邮箱非空或不支持删除时不阻断文件侧清理
+                if (e.code() != StorageErrorCode.SERVER_ERROR) {
+                    throw e;
+                }
+            }
+        }
     }
 
     private void deletePartsByPrefix(String logicalName) {
@@ -485,8 +494,15 @@ public class MailFileStorage implements FileStorage {
     }
 
     private void appendMime(String logicalName, byte[] payload) {
-        byte[] mime = buildStoredMime(logicalName, payload);
-        gateway.append(folder, new ByteArrayInputStream(mime), mime.length);
+        String parent = StoragePaths.parent(logicalName);
+        String baseName = StoragePaths.name(logicalName);
+        if (!parent.isEmpty()) {
+            gateway.mkdir(parent);
+        }
+        byte[] mime = buildStoredMime(baseName, payload);
+        // folder = basePath 或 basePath/parent（网关/会话会解析）
+        String imapFolder = parent.isEmpty() ? folder : StoragePaths.join(folder, parent);
+        gateway.append(imapFolder, new ByteArrayInputStream(mime), mime.length);
     }
 
     private static String requireFilePath(String path) {
@@ -565,7 +581,7 @@ public class MailFileStorage implements FileStorage {
 
     /**
      * 经 jkit-notify {@link Attachment} + {@link MailMime} 组装存储用 RFC822。
-     * Subject/附件名均为逻辑路径（可含 {@code /}）。
+     * Subject/附件名为路径最后一段（不含目录前缀）。
      *
      * @param fileName 逻辑文件名
      * @param payload  附件字节

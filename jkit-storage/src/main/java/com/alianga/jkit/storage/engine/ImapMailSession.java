@@ -17,11 +17,12 @@ import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Base64;
-import java.util.Collections;
 import java.util.Date;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.TimeZone;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
@@ -31,8 +32,11 @@ import java.util.regex.Pattern;
  * 纯 JDK IMAP 会话：基于 {@link Socket}/{@link SSLSocket}，零 JavaMail 依赖，
  * 供 {@link MailFileStorage} / {@link ImapAppendStore} 使用。
  *
- * <p>路径模型与一期一致：扁平文件名 = 邮件 Subject（及附件 filename）；
- * {@link MailEntry#uid()} 使用 IMAP UID 字符串。</p>
+ * <p>二期路径模型：{@code basePath} 为根邮箱；逻辑目录映射为真 IMAP 子文件夹；
+ * 文件 Subject/附件名为路径最后一段。{@link MailEntry#uid()} 使用 IMAP UID。
+ * 若服务端禁止 {@code CREATE base/child}（如 QQ Invalid top folder name），
+ * 自动降级为 {@code base.child.seg} 扁平编码，逻辑路径仍用 {@code /}。
+ * 公开方法均在会话锁下串行，避免 SELECT 交错。</p>
  *
  * @author 郑明亮
  */
@@ -62,10 +66,21 @@ public final class ImapMailSession implements AutoCloseable {
             "\\?=\\s+=\\?");
 
     private final AtomicInteger tagSeq = new AtomicInteger(1);
+    /** 会话级串行锁（单连接 SELECT 状态不可并发）。 */
+    private final Object lock = new Object();
     private Socket socket;
     private InputStream rawIn;
     private OutputStream rawOut;
     private String selectedFolder;
+    /** 配置的根邮箱（basePath）。 */
+    private String baseFolder = DEFAULT_FOLDER;
+    /** LIST/NAMESPACE 报告的层级分隔符，默认 {@code /}。 */
+    private String delimiter = "/";
+    /**
+     * QQ 等禁止在自建顶层箱下用 {@code /} CREATE 子箱时，改用
+     * {@code base.seg1.seg2} 扁平编码（逻辑路径仍用 {@code /}）。
+     */
+    private boolean flatDotHierarchy;
     private long maxAttachmentBytes = DEFAULT_MAX_ATTACHMENT_BYTES;
     private boolean connected;
 
@@ -97,19 +112,25 @@ public final class ImapMailSession implements AutoCloseable {
             folder = DEFAULT_FOLDER;
         }
         this.maxAttachmentBytes = parseLong(cfg.get("maxAttachmentBytes"), DEFAULT_MAX_ATTACHMENT_BYTES);
-        closeQuietly();
-        try {
-            openSocket(host, port, ssl);
-            readGreeting();
-            taggedOk("LOGIN " + quote(user) + " " + quote(password), "LOGIN");
-            ensureSelected(folder);
-            connected = true;
-        } catch (StorageException e) {
+        synchronized (lock) {
             closeQuietly();
-            throw e;
-        } catch (IOException e) {
-            closeQuietly();
-            throw StorageException.connectFailed("IMAP 连接失败: " + host + ":" + port + " — " + e.getMessage());
+            this.baseFolder = folder;
+            this.delimiter = "/";
+            try {
+                openSocket(host, port, ssl);
+                readGreeting();
+                taggedOk("LOGIN " + quote(user) + " " + quote(password), "LOGIN");
+                this.delimiter = detectDelimiter();
+                ensureSelected(folder);
+                this.flatDotHierarchy = !probeSlashHierarchy(folder);
+                connected = true;
+            } catch (StorageException e) {
+                closeQuietly();
+                throw e;
+            } catch (IOException e) {
+                closeQuietly();
+                throw StorageException.connectFailed("IMAP 连接失败: " + host + ":" + port + " — " + e.getMessage());
+            }
         }
     }
 
@@ -118,198 +139,691 @@ public final class ImapMailSession implements AutoCloseable {
      */
     @Override
     public void close() {
-        if (!connected && socket == null) {
-            return;
-        }
-        try {
-            if (rawOut != null && socket != null && !socket.isClosed()) {
-                try {
-                    String tag = nextTag();
-                    sendRaw(tag + " LOGOUT\r\n");
-                } catch (IOException ignored) {
-                    // ignore logout errors
-                }
+        synchronized (lock) {
+            if (!connected && socket == null) {
+                return;
             }
-        } finally {
-            closeQuietly();
-            connected = false;
-            selectedFolder = null;
+            try {
+                if (rawOut != null && socket != null && !socket.isClosed()) {
+                    try {
+                        String tag = nextTag();
+                        sendRaw(tag + " LOGOUT\r\n");
+                    } catch (IOException ignored) {
+                        // ignore logout errors
+                    }
+                }
+            } finally {
+                closeQuietly();
+                connected = false;
+                selectedFolder = null;
+            }
         }
     }
 
     /**
-     * 列出邮箱文件夹内全部邮件条目。二期逻辑路径下 {@code name} 可含 {@code /}；子目录过滤由上层做。
+     * 列出指定逻辑目录下的条目：子 IMAP 邮箱（目录）+ 当前文件夹内邮件（文件）。
+     * {@code path} 为空时对 {@code basePath} 做递归展开，{@link MailEntry#name()} 为相对
+     * {@code basePath} 的完整逻辑路径，供 {@link MailFileStorage} 建索引。
      *
-     * @param path 相对路径（Plan A 忽略，单 folder 全量返回）
+     * @param path 相对 basePath 的目录；空串表示根
      * @return 条目列表
      */
     public List<MailEntry> list(String path) {
-        requireConnected();
-        // phase2 logical path: 单 IMAP folder 返回全部；子路径过滤由 MailFileStorage 做
-        try {
-            List<Long> uids = uidSearch("ALL");
-            if (uids.isEmpty()) {
-                return Collections.emptyList();
+        synchronized (lock) {
+            requireConnected();
+            String rel = path == null ? "" : path.trim();
+            if (rel.startsWith("/")) {
+                rel = rel.substring(1);
             }
-            List<MailEntry> result = new ArrayList<MailEntry>(uids.size());
-            for (Long uid : uids) {
-                MailEntry entry = fetchMeta(uid.longValue());
-                if (entry != null && !entry.name().isEmpty()) {
-                    result.add(entry);
+            try {
+                if (rel.isEmpty()) {
+                    return listAllUnderBase();
                 }
+                return listImmediate(rel);
+            } catch (IOException e) {
+                throw StorageException.io("IMAP list 失败", rel, e);
             }
-            return result;
-        } catch (IOException e) {
-            throw StorageException.io("IMAP list 失败", path == null ? "" : path, e);
         }
     }
 
     /**
-     * 下载指定名称对应的附件内容到输出流。
+     * 在 basePath 下逐级 CREATE 真 IMAP 子文件夹；已存在则幂等。
      *
-     * @param path 条目名称 / 路径
+     * @param dir 相对逻辑目录
+     */
+    public void mkdir(String dir) {
+        synchronized (lock) {
+            requireConnected();
+            String rel = normalizeRel(dir);
+            if (rel.isEmpty()) {
+                return;
+            }
+            try {
+                ensureMailboxPath(rel);
+            } catch (IOException e) {
+                throw StorageException.io("IMAP mkdir 失败", rel, e);
+            }
+        }
+    }
+
+    /**
+     * 删除相对逻辑目录对应的 IMAP 邮箱（先删深层子邮箱）；不存在则忽略。
+     *
+     * @param dir 相对逻辑目录
+     */
+    public void rmdir(String dir) {
+        synchronized (lock) {
+            requireConnected();
+            String rel = normalizeRel(dir);
+            if (rel.isEmpty()) {
+                return;
+            }
+            try {
+                deleteMailboxTree(rel);
+            } catch (IOException e) {
+                throw StorageException.io("IMAP rmdir 失败", rel, e);
+            }
+        }
+    }
+
+    /**
+     * 下载指定逻辑路径对应的附件内容到输出流。
+     *
+     * @param path 逻辑路径（可含目录）
      * @param out  目标输出流
      */
     public void download(String path, OutputStream out) {
-        requireConnected();
-        if (out == null) {
-            throw StorageException.invalidConfig("download 输出流不能为 null");
-        }
-        String name = requireName(path);
-        try {
-            long uid = findUidByName(name);
-            if (uid < 0L) {
-                throw StorageException.notFound(name);
+        synchronized (lock) {
+            requireConnected();
+            if (out == null) {
+                throw StorageException.invalidConfig("download 输出流不能为 null");
             }
-            byte[] mime = fetchBody(uid);
-            byte[] payload = extractAttachmentPayload(mime, name);
-            out.write(payload);
-            out.flush();
-        } catch (StorageException e) {
-            throw e;
-        } catch (IOException e) {
-            throw StorageException.io("IMAP download 失败: " + name, name, e);
+            ResolvedPath resolved = resolveLogicalFile(path);
+            try {
+                ensureSelected(resolved.imapFolder);
+                long uid = findUidByName(resolved.mailName);
+                if (uid < 0L) {
+                    throw StorageException.notFound(resolved.logical);
+                }
+                byte[] mime = fetchBody(uid);
+                byte[] payload = extractAttachmentPayload(mime, resolved.mailName);
+                out.write(payload);
+                out.flush();
+            } catch (StorageException e) {
+                throw e;
+            } catch (IOException e) {
+                throw StorageException.io("IMAP download 失败: " + resolved.logical, resolved.logical, e);
+            }
         }
     }
 
     /**
-     * 删除指定名称对应的邮件。找不到时抛 {@code NOT_FOUND}。
+     * 删除指定逻辑路径对应的邮件。找不到时抛 {@code NOT_FOUND}。
      *
-     * @param path 条目名称 / 路径
+     * @param path 逻辑路径
      */
     public void delete(String path) {
-        requireConnected();
-        String name = requireName(path);
-        try {
-            long uid = findUidByName(name);
-            if (uid < 0L) {
-                throw StorageException.notFound(name);
+        synchronized (lock) {
+            requireConnected();
+            ResolvedPath resolved = resolveLogicalFile(path);
+            try {
+                ensureSelected(resolved.imapFolder);
+                long uid = findUidByName(resolved.mailName);
+                if (uid < 0L) {
+                    throw StorageException.notFound(resolved.logical);
+                }
+                taggedOk("UID STORE " + uid + " +FLAGS.SILENT (\\Deleted)", "STORE");
+                taggedOk("EXPUNGE", "EXPUNGE");
+            } catch (StorageException e) {
+                throw e;
+            } catch (IOException e) {
+                throw StorageException.io("IMAP delete 失败: " + resolved.logical, resolved.logical, e);
             }
-            taggedOk("UID STORE " + uid + " +FLAGS.SILENT (\\Deleted)", "STORE");
-            taggedOk("EXPUNGE", "EXPUNGE");
-        } catch (StorageException e) {
-            throw e;
-        } catch (IOException e) {
-            throw StorageException.io("IMAP delete 失败: " + name, name, e);
         }
     }
 
     /**
-     * 判断条目是否存在；找不到只返回 {@code false}，不抛异常。
+     * 判断逻辑路径是否存在（文件或由 LIST 可见的目录）。
      *
-     * @param path 条目名称 / 路径
+     * @param path 逻辑路径
      * @return true 表示存在
      */
     public boolean exists(String path) {
-        requireConnected();
-        if (path == null || path.trim().isEmpty()) {
-            return true;
-        }
-        String name = path.trim();
-        // phase2 logical path: 允许 name 含 /
-        try {
-            return findUidByName(name) >= 0L;
-        } catch (IOException e) {
-            throw StorageException.io("IMAP exists 失败: " + name, name, e);
+        synchronized (lock) {
+            requireConnected();
+            if (path == null || path.trim().isEmpty()) {
+                return true;
+            }
+            String logical = normalizeRel(path);
+            try {
+                if (mailboxExists(logical)) {
+                    return true;
+                }
+                ResolvedPath resolved = resolveLogicalFile(logical);
+                ensureSelected(resolved.imapFolder);
+                return findUidByName(resolved.mailName) >= 0L;
+            } catch (IOException e) {
+                throw StorageException.io("IMAP exists 失败: " + logical, logical, e);
+            }
         }
     }
 
     /**
      * 查询条目元数据。找不到抛 {@link StorageException}（{@code NOT_FOUND}）。
      *
-     * @param path 条目名称 / 路径
-     * @return 元数据
+     * @param path 逻辑路径
+     * @return 元数据（目录时 {@link MailEntry#directory()} 为 true）
      */
     public MailEntry stat(String path) {
-        requireConnected();
-        String name = requireName(path);
-        try {
-            long uid = findUidByName(name);
-            if (uid < 0L) {
-                throw StorageException.notFound(name);
+        synchronized (lock) {
+            requireConnected();
+            String logical = normalizeRel(path);
+            try {
+                if (mailboxExists(logical)) {
+                    return new MailEntry(logical, true, 0L, -1L, null);
+                }
+                ResolvedPath resolved = resolveLogicalFile(logical);
+                ensureSelected(resolved.imapFolder);
+                long uid = findUidByName(resolved.mailName);
+                if (uid < 0L) {
+                    throw StorageException.notFound(logical);
+                }
+                MailEntry entry = fetchMeta(uid);
+                if (entry == null) {
+                    throw StorageException.notFound(logical);
+                }
+                return new MailEntry(logical, false, entry.size(), entry.mtimeEpochMs(), entry.uid());
+            } catch (StorageException e) {
+                throw e;
+            } catch (IOException e) {
+                throw StorageException.io("IMAP stat 失败: " + logical, logical, e);
             }
-            MailEntry entry = fetchMeta(uid);
-            if (entry == null) {
-                throw StorageException.notFound(name);
-            }
-            return entry;
-        } catch (StorageException e) {
-            throw e;
-        } catch (IOException e) {
-            throw StorageException.io("IMAP stat 失败: " + name, name, e);
         }
     }
 
     /**
-     * 将完整 MIME 追加到指定文件夹（供 {@link ImapAppendStore} 调用）。
+     * 将完整 MIME 追加到指定 IMAP 文件夹（供 {@link ImapAppendStore} 调用）。
+     * {@code folder} 可为绝对邮箱名，或相对 basePath 的逻辑目录（空则 basePath）。
      *
-     * @param folder      IMAP 文件夹
+     * @param folder      IMAP 文件夹或相对目录
      * @param mimeMessage MIME 流
      * @param sizeBytes   已知字节数；未知传 {@code -1}（将整段缓冲）
      */
     void appendMime(String folder, InputStream mimeMessage, long sizeBytes) {
-        requireConnected();
-        if (mimeMessage == null) {
-            throw StorageException.invalidConfig("APPEND MIME 流不能为 null");
+        synchronized (lock) {
+            requireConnected();
+            if (mimeMessage == null) {
+                throw StorageException.invalidConfig("APPEND MIME 流不能为 null");
+            }
+            String target = resolveAppendFolder(folder);
+            try {
+                byte[] mime;
+                if (sizeBytes >= 0L && sizeBytes <= Integer.MAX_VALUE) {
+                    mime = readExactFrom(mimeMessage, (int) sizeBytes);
+                } else {
+                    mime = readAll(mimeMessage);
+                }
+                if (mime.length > maxAttachmentBytes + 256L * 1024L) {
+                    throw new StorageException(StorageErrorCode.CONFLICT,
+                            "MIME 超过可接受大小: " + mime.length, target);
+                }
+                ensureMailboxAbsolute(target);
+                if (!target.equals(selectedFolder)) {
+                    ensureSelected(target);
+                }
+                String tag = nextTag();
+                sendRaw(tag + " APPEND " + quote(target) + " {" + mime.length + "}\r\n");
+                String cont = readLine();
+                if (cont == null || !cont.startsWith("+")) {
+                    throw StorageException.serverError(
+                            "APPEND 未收到续传应答: " + cont, target);
+                }
+                rawOut.write(mime);
+                rawOut.write(new byte[]{'\r', '\n'});
+                rawOut.flush();
+                TaggedResult result = readUntilTagged(tag);
+                if (!result.ok) {
+                    throw StorageException.serverError(
+                            "APPEND 失败: " + result.text, target);
+                }
+            } catch (StorageException e) {
+                throw e;
+            } catch (IOException e) {
+                throw StorageException.io("IMAP APPEND 失败", target, e);
+            }
         }
-        String target = trimToNull(folder);
-        if (target == null) {
-            target = selectedFolder != null ? selectedFolder : DEFAULT_FOLDER;
+    }
+
+    // ------------------------------------------------------------------ hierarchy
+
+    private List<MailEntry> listAllUnderBase() throws IOException {
+        List<MailEntry> result = new ArrayList<MailEntry>();
+        Set<String> dirs = new LinkedHashSet<String>();
+        for (String abs : listMailboxesUnder(baseFolder, true)) {
+            String rel = relativeFromBase(abs);
+            if (rel == null || rel.isEmpty()) {
+                continue;
+            }
+            dirs.add(rel);
         }
-        try {
-            byte[] mime;
-            if (sizeBytes >= 0L && sizeBytes <= Integer.MAX_VALUE) {
-                mime = readExactFrom(mimeMessage, (int) sizeBytes);
-            } else {
-                mime = readAll(mimeMessage);
+        for (String rel : dirs) {
+            result.add(new MailEntry(rel, true, 0L, -1L, null));
+        }
+        // 根及所有子文件夹中的邮件
+        Set<String> folders = new LinkedHashSet<String>();
+        folders.add("");
+        folders.addAll(dirs);
+        for (String rel : folders) {
+            String abs = toImapFolder(rel);
+            if (!selectIfExists(abs)) {
+                continue;
             }
-            if (mime.length > maxAttachmentBytes + 256L * 1024L) {
-                // MIME 包装略大于附件；硬上限仍由上层控制，这里防极端
-                throw new StorageException(StorageErrorCode.CONFLICT,
-                        "MIME 超过可接受大小: " + mime.length, target);
+            List<Long> uids = uidSearch("ALL");
+            for (Long uid : uids) {
+                MailEntry entry = fetchMeta(uid.longValue());
+                if (entry == null || entry.name().isEmpty()) {
+                    continue;
+                }
+                String logical = rel.isEmpty() ? entry.name() : rel + "/" + entry.name();
+                result.add(new MailEntry(logical, false, entry.size(), entry.mtimeEpochMs(), entry.uid()));
             }
-            if (!target.equals(selectedFolder)) {
-                ensureSelected(target);
+        }
+        return result;
+    }
+
+    private List<MailEntry> listImmediate(String relDir) throws IOException {
+        List<MailEntry> result = new ArrayList<MailEntry>();
+        String abs = toImapFolder(relDir);
+        if (!selectIfExists(abs)) {
+            throw StorageException.notFound(relDir);
+        }
+        for (String childAbs : listMailboxesUnder(abs, false)) {
+            String childRel = relativeFromBase(childAbs);
+            if (childRel == null || childRel.isEmpty()) {
+                continue;
             }
-            String tag = nextTag();
-            sendRaw(tag + " APPEND " + quote(target) + " {" + mime.length + "}\r\n");
-            String cont = readLine();
-            if (cont == null || !cont.startsWith("+")) {
-                throw StorageException.serverError(
-                        "APPEND 未收到续传应答: " + cont, target);
+            // 只要直接子级
+            String expectPrefix = relDir + "/";
+            if (!childRel.startsWith(expectPrefix)) {
+                continue;
             }
-            rawOut.write(mime);
-            rawOut.write(new byte[]{'\r', '\n'});
-            rawOut.flush();
-            TaggedResult result = readUntilTagged(tag);
-            if (!result.ok) {
-                throw StorageException.serverError(
-                        "APPEND 失败: " + result.text, target);
+            String rest = childRel.substring(expectPrefix.length());
+            if (rest.isEmpty() || rest.indexOf('/') >= 0) {
+                continue;
             }
-        } catch (StorageException e) {
-            throw e;
-        } catch (IOException e) {
-            throw StorageException.io("IMAP APPEND 失败", target, e);
+            result.add(new MailEntry(childRel, true, 0L, -1L, null));
+        }
+        List<Long> uids = uidSearch("ALL");
+        for (Long uid : uids) {
+            MailEntry entry = fetchMeta(uid.longValue());
+            if (entry == null || entry.name().isEmpty()) {
+                continue;
+            }
+            String logical = relDir + "/" + entry.name();
+            result.add(new MailEntry(logical, false, entry.size(), entry.mtimeEpochMs(), entry.uid()));
+        }
+        return result;
+    }
+
+    private void ensureMailboxPath(String relDir) throws IOException {
+        String current = "";
+        for (String segment : relDir.split("/")) {
+            if (segment.isEmpty()) {
+                continue;
+            }
+            current = current.isEmpty() ? segment : current + "/" + segment;
+            ensureMailboxAbsolute(toImapFolder(current));
+        }
+    }
+
+    private void ensureMailboxAbsolute(String absFolder) throws IOException {
+        if (absFolder == null || absFolder.isEmpty()) {
+            return;
+        }
+        if (absFolder.equals(selectedFolder)) {
+            return;
+        }
+        TaggedResult select = tagged("SELECT " + quote(absFolder));
+        if (select.ok) {
+            selectedFolder = absFolder;
+            return;
+        }
+        TaggedResult create = tagged("CREATE " + quote(absFolder));
+        if (!create.ok && !looksLikeAlreadyExists(create.text)) {
+            throw StorageException.serverError(
+                    "无法创建 IMAP 文件夹 " + absFolder + ": " + create.text, absFolder);
+        }
+        TaggedResult again = tagged("SELECT " + quote(absFolder));
+        if (!again.ok) {
+            throw StorageException.serverError(
+                    "无法选中 IMAP 文件夹 " + absFolder + ": " + again.text, absFolder);
+        }
+        selectedFolder = absFolder;
+    }
+
+    private void deleteMailboxTree(String relDir) throws IOException {
+        String abs = toImapFolder(relDir);
+        List<String> all = new ArrayList<String>();
+        for (String child : listMailboxesUnder(abs, true)) {
+            all.add(child);
+        }
+        all.add(abs);
+        // 深层优先
+        all.sort((a, b) -> Integer.compare(b.length(), a.length()));
+        // 离开可能被删的 selected
+        if (selectedFolder != null) {
+            for (String victim : all) {
+                if (selectedFolder.equals(victim) || selectedFolder.startsWith(victim + delimiter)) {
+                    ensureSelected(baseFolder);
+                    break;
+                }
+            }
+        }
+        for (String mailbox : all) {
+            TaggedResult del = tagged("DELETE " + quote(mailbox));
+            if (!del.ok && !looksLikeNotFound(del.text)) {
+                // 非空或不支持时尽量继续
+                if (!looksLikeAlreadyExists(del.text)) {
+                    // ignore soft failures for missing
+                }
+            }
+        }
+    }
+
+    private boolean mailboxExists(String relDir) throws IOException {
+        if (relDir == null || relDir.isEmpty()) {
+            return true;
+        }
+        String abs = toImapFolder(relDir);
+        if (abs.equals(baseFolder)) {
+            return true;
+        }
+        for (String found : listMailboxesUnder(baseFolder, true)) {
+            if (abs.equals(found)) {
+                return true;
+            }
+        }
+        // 直接 SELECT 探测
+        TaggedResult select = tagged("SELECT " + quote(abs));
+        if (select.ok) {
+            selectedFolder = abs;
+            return true;
+        }
+        return false;
+    }
+
+    private boolean selectIfExists(String absFolder) throws IOException {
+        TaggedResult select = tagged("SELECT " + quote(absFolder));
+        if (select.ok) {
+            selectedFolder = absFolder;
+            return true;
+        }
+        return false;
+    }
+
+    private List<String> listMailboxesUnder(String absParent, boolean recursive) throws IOException {
+        String listRef;
+        String pattern;
+        if (flatDotHierarchy) {
+            listRef = "";
+            pattern = absParent + ".*";
+        } else {
+            listRef = absParent;
+            pattern = recursive ? "*" : "%";
+        }
+        String tag = nextTag();
+        sendRaw(tag + " LIST " + quote(listRef) + " " + quote(pattern) + "\r\n");
+        List<String> names = new ArrayList<String>();
+        while (true) {
+            String line = readLine();
+            if (line == null) {
+                throw StorageException.serverError("LIST 连接中断", absParent);
+            }
+            if (line.startsWith("* LIST ") || line.startsWith("* list ")) {
+                String name = parseListMailboxName(line);
+                if (name != null && !name.isEmpty() && !name.equals(absParent)) {
+                    if (flatDotHierarchy && !isFlatDotChild(absParent, name, recursive)) {
+                        continue;
+                    }
+                    names.add(name);
+                }
+                continue;
+            }
+            if (line.startsWith(tag + " ")) {
+                if (!line.regionMatches(true, tag.length() + 1, "OK", 0, 2)) {
+                    throw StorageException.serverError("LIST 失败: " + line, absParent);
+                }
+                break;
+            }
+        }
+        return names;
+    }
+
+    private boolean isFlatDotChild(String absParent, String candidate, boolean recursive) {
+        String prefix = absParent + ".";
+        if (!candidate.startsWith(prefix)) {
+            return false;
+        }
+        String rest = candidate.substring(prefix.length());
+        if (rest.isEmpty()) {
+            return false;
+        }
+        if (recursive) {
+            return true;
+        }
+        return rest.indexOf('.') < 0;
+    }
+
+    /**
+     * 探测 base 下能否用服务器分隔符 CREATE 真子箱。
+     *
+     * @param base 根邮箱
+     * @return true 可用 {@code base/child}；false 需 flatDotHierarchy
+     */
+    private boolean probeSlashHierarchy(String base) throws IOException {
+        String probe = base + delimiter + "__jkit_hier_probe__";
+        TaggedResult create = tagged("CREATE " + quote(probe));
+        if (create.ok) {
+            tagged("DELETE " + quote(probe));
+            return true;
+        }
+        return false;
+    }
+
+    private String detectDelimiter() throws IOException {
+        String tag = nextTag();
+        sendRaw(tag + " LIST \"\" \"\"\r\n");
+        String found = "/";
+        while (true) {
+            String line = readLine();
+            if (line == null) {
+                break;
+            }
+            if (line.startsWith("* LIST ") || line.startsWith("* list ")) {
+                String d = parseListDelimiter(line);
+                if (d != null && !d.isEmpty()) {
+                    found = d;
+                }
+                continue;
+            }
+            if (line.startsWith(tag + " ")) {
+                break;
+            }
+        }
+        return found;
+    }
+
+    private static String parseListDelimiter(String line) {
+        // * LIST (\Noselect) "/" ""
+        int attrsEnd = line.indexOf(')');
+        if (attrsEnd < 0) {
+            return null;
+        }
+        String rest = line.substring(attrsEnd + 1).trim();
+        if (rest.startsWith("\"") && rest.length() >= 3) {
+            return rest.substring(1, 2);
+        }
+        int sp = rest.indexOf(' ');
+        if (sp > 0) {
+            return rest.substring(0, sp);
+        }
+        return null;
+    }
+
+    private static String parseListMailboxName(String line) {
+        // * LIST (\HasNoChildren) "/" "INBOX/foo"
+        // * LIST () "/" INBOX
+        int attrsEnd = line.indexOf(')');
+        if (attrsEnd < 0) {
+            return null;
+        }
+        String rest = line.substring(attrsEnd + 1).trim();
+        // skip delimiter token
+        if (rest.startsWith("\"")) {
+            int end = rest.indexOf('"', 1);
+            if (end < 0) {
+                return null;
+            }
+            rest = rest.substring(end + 1).trim();
+        } else {
+            int sp = rest.indexOf(' ');
+            if (sp < 0) {
+                return null;
+            }
+            rest = rest.substring(sp + 1).trim();
+        }
+        if (rest.startsWith("\"")) {
+            StringBuilder sb = new StringBuilder();
+            for (int i = 1; i < rest.length(); i++) {
+                char c = rest.charAt(i);
+                if (c == '\\' && i + 1 < rest.length()) {
+                    sb.append(rest.charAt(++i));
+                    continue;
+                }
+                if (c == '"') {
+                    break;
+                }
+                sb.append(c);
+            }
+            return sb.toString();
+        }
+        int sp = rest.indexOf(' ');
+        return sp < 0 ? rest : rest.substring(0, sp);
+    }
+
+    private String toImapFolder(String relDir) {
+        String rel = normalizeRel(relDir);
+        if (rel.isEmpty()) {
+            return baseFolder;
+        }
+        if (flatDotHierarchy) {
+            return baseFolder + "." + rel.replace("/", ".");
+        }
+        if ("/".equals(delimiter)) {
+            return baseFolder + "/" + rel;
+        }
+        return baseFolder + delimiter + rel.replace("/", delimiter);
+    }
+
+    private String relativeFromBase(String absFolder) {
+        if (absFolder == null) {
+            return null;
+        }
+        if (absFolder.equals(baseFolder)) {
+            return "";
+        }
+        if (flatDotHierarchy) {
+            String prefix = baseFolder + ".";
+            if (absFolder.startsWith(prefix)) {
+                return absFolder.substring(prefix.length()).replace(".", "/");
+            }
+            return null;
+        }
+        String prefix = baseFolder + delimiter;
+        if (absFolder.startsWith(prefix)) {
+            String rel = absFolder.substring(prefix.length());
+            if (!"/".equals(delimiter)) {
+                rel = rel.replace(delimiter, "/");
+            }
+            return rel;
+        }
+        prefix = baseFolder + "/";
+        if (absFolder.startsWith(prefix)) {
+            return absFolder.substring(prefix.length());
+        }
+        return null;
+    }
+
+    private String resolveAppendFolder(String folder) {
+        String raw = trimToNull(folder);
+        if (raw == null) {
+            return baseFolder;
+        }
+        if (raw.equals(baseFolder)) {
+            return baseFolder;
+        }
+        // 上层可能拼出 base/docs；flatDot 下需转成 base.docs
+        if (raw.startsWith(baseFolder + "/")) {
+            String rel = raw.substring(baseFolder.length() + 1);
+            return toImapFolder(rel);
+        }
+        if (raw.startsWith(baseFolder + delimiter) && !"/".equals(delimiter)) {
+            String rel = raw.substring(baseFolder.length() + delimiter.length());
+            return toImapFolder(rel.replace(delimiter, "/"));
+        }
+        if (raw.startsWith(baseFolder + ".")) {
+            return raw;
+        }
+        // 相对逻辑目录
+        return toImapFolder(raw);
+    }
+
+    private ResolvedPath resolveLogicalFile(String path) {
+        String logical = normalizeRel(path);
+        if (logical.isEmpty()) {
+            throw StorageException.invalidConfig("文件路径不能为空");
+        }
+        int at = logical.lastIndexOf('/');
+        String parent = at < 0 ? "" : logical.substring(0, at);
+        String name = at < 0 ? logical : logical.substring(at + 1);
+        return new ResolvedPath(logical, toImapFolder(parent), name);
+    }
+
+    private static String normalizeRel(String path) {
+        if (path == null) {
+            return "";
+        }
+        String unified = path.replace('\\', '/').trim();
+        while (unified.startsWith("/")) {
+            unified = unified.substring(1);
+        }
+        while (unified.endsWith("/")) {
+            unified = unified.substring(0, unified.length() - 1);
+        }
+        if (unified.isEmpty() || ".".equals(unified)) {
+            return "";
+        }
+        return unified;
+    }
+
+    private static boolean looksLikeNotFound(String text) {
+        if (text == null) {
+            return false;
+        }
+        String lower = text.toLowerCase(Locale.ROOT);
+        return lower.contains("not found") || lower.contains("doesn't exist")
+                || lower.contains("does not exist") || lower.contains("no such");
+    }
+
+    private static final class ResolvedPath {
+        final String logical;
+        final String imapFolder;
+        final String mailName;
+
+        ResolvedPath(String logical, String imapFolder, String mailName) {
+            this.logical = logical;
+            this.imapFolder = imapFolder;
+            this.mailName = mailName;
         }
     }
 

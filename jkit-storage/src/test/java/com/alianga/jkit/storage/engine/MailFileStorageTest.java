@@ -16,8 +16,10 @@ import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.Assert.assertArrayEquals;
@@ -28,7 +30,7 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 /**
- * 邮件存储单测：内存 FakeMailGateway，覆盖一期扁平 + 二期逻辑路径/mkdir/分卷。
+ * 邮件存储单测：内存 FakeMailGateway，覆盖扁平 + 真层级 mkdir/分卷。
  *
  * @author 郑明亮
  */
@@ -494,25 +496,55 @@ public class MailFileStorageTest {
     }
 
     /**
-     * 内存 Fake：name → 条目内容；支持逻辑路径与 mkdir 钩子。
+     * 内存 Fake：逻辑路径 → 内容；mkdir 登记真「文件夹」；append 按 folder+Subject 拼逻辑名。
      */
     static final class FakeMailGateway implements MailGateway {
         private final Map<String, Stored> store = new LinkedHashMap<String, Stored>();
+        private final Set<String> folders = new LinkedHashSet<String>();
         private final AtomicLong uidSeq = new AtomicLong(1L);
+        private String basePath = "jkit-mail-disk";
         private int deleteCount;
         private int appendCount;
         private int mkdirCount;
 
         @Override
         public void connect(Map<String, String> cfg) {
-            // no-op
+            if (cfg != null && cfg.get("basePath") != null && !cfg.get("basePath").trim().isEmpty()) {
+                basePath = cfg.get("basePath").trim();
+            }
         }
 
         @Override
         public List<MailEntry> list(String path) {
             List<MailEntry> out = new ArrayList<MailEntry>();
+            String rel = path == null ? "" : path.trim();
+            if (rel.isEmpty()) {
+                for (String dir : folders) {
+                    out.add(new MailEntry(dir, true, 0L, -1L, null));
+                }
+                for (Stored s : store.values()) {
+                    out.add(s.toEntry());
+                }
+                return out;
+            }
+            // 立即子级：与真会话 listImmediate 对齐（单测主要走 buildIndex 全量）
+            String prefix = rel + "/";
+            for (String dir : folders) {
+                if (dir.startsWith(prefix)) {
+                    String rest = dir.substring(prefix.length());
+                    if (!rest.isEmpty() && rest.indexOf('/') < 0) {
+                        out.add(new MailEntry(dir, true, 0L, -1L, null));
+                    }
+                }
+            }
             for (Stored s : store.values()) {
-                out.add(s.toEntry());
+                String logical = ImapMailSession.decodeMimeWords(s.name);
+                if (logical.startsWith(prefix)) {
+                    String rest = logical.substring(prefix.length());
+                    if (!rest.isEmpty() && rest.indexOf('/') < 0) {
+                        out.add(s.toEntry());
+                    }
+                }
             }
             return out;
         }
@@ -546,11 +578,17 @@ public class MailFileStorageTest {
 
         @Override
         public boolean exists(String path) {
+            if (path != null && folders.contains(path.trim())) {
+                return true;
+            }
             return findByLogicalName(path) != null;
         }
 
         @Override
         public MailEntry stat(String path) {
+            if (path != null && folders.contains(path.trim())) {
+                return new MailEntry(path.trim(), true, 0L, -1L, null);
+            }
             Stored s = findByLogicalName(path);
             if (s == null) {
                 throw StorageException.notFound(path);
@@ -561,7 +599,32 @@ public class MailFileStorageTest {
         @Override
         public void mkdir(String dir) {
             mkdirCount++;
-            // Plan A：真 CREATE 空实现；.keep 由 MailFileStorage 追加
+            if (dir == null || dir.trim().isEmpty()) {
+                return;
+            }
+            String current = "";
+            for (String segment : dir.replace('\\', '/').split("/")) {
+                if (segment.isEmpty()) {
+                    continue;
+                }
+                current = current.isEmpty() ? segment : current + "/" + segment;
+                folders.add(current);
+            }
+        }
+
+        @Override
+        public void rmdir(String dir) {
+            if (dir == null || dir.trim().isEmpty()) {
+                return;
+            }
+            String normalized = dir.trim();
+            String prefix = normalized + "/";
+            folders.remove(normalized);
+            for (String child : new ArrayList<String>(folders)) {
+                if (child.startsWith(prefix)) {
+                    folders.remove(child);
+                }
+            }
         }
 
         @Override
@@ -570,12 +633,33 @@ public class MailFileStorageTest {
             try {
                 byte[] mime = readAll(mimeMessage);
                 ParsedAttachment parsed = parseAttachment(mime);
+                String logical = toLogicalName(folder, parsed.name);
                 String uid = String.valueOf(uidSeq.getAndIncrement());
-                store.put(parsed.name, new Stored(parsed.name, parsed.payload, uid,
+                store.put(logical, new Stored(logical, parsed.payload, uid,
                         System.currentTimeMillis()));
             } catch (IOException e) {
                 throw StorageException.io("fake append", folder, e);
             }
+        }
+
+        private String toLogicalName(String folder, String subjectName) {
+            String baseName = subjectName == null ? "unnamed" : subjectName;
+            if (folder == null || folder.trim().isEmpty() || basePath.equals(folder)) {
+                return baseName;
+            }
+            String prefix = basePath + "/";
+            String rel;
+            if (folder.startsWith(prefix)) {
+                rel = folder.substring(prefix.length());
+            } else if (folder.equals(basePath)) {
+                rel = "";
+            } else {
+                rel = folder.startsWith("/") ? folder.substring(1) : folder;
+            }
+            if (rel.isEmpty()) {
+                return baseName;
+            }
+            return rel + "/" + baseName;
         }
 
         @Override
