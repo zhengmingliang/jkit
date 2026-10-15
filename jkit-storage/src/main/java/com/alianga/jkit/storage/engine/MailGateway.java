@@ -28,6 +28,48 @@ interface MailGateway extends AutoCloseable {
     List<MailEntry> list(String path);
 
     /**
+     * 只列一层（不递归子文件夹，大文件夹只取最新若干封）。默认退回 {@link #list(String) list("")}，
+     * 调用方会按目录过滤。
+     *
+     * @param path 相对目录；空串为根
+     * @return 条目（name 为完整逻辑路径）
+     */
+    default List<MailEntry> listDir(String path) {
+        return list("");
+    }
+
+    /**
+     * 分页列一层；默认不分页（total = -1）。
+     *
+     * @param path 相对目录
+     * @param page 页号，从 0 起
+     * @param size 每页封数
+     * @return 一页
+     */
+    default MailPage listDirPage(String path, int page, int size) {
+        return new MailPage(page == 0 ? listDir(path) : java.util.Collections.<MailEntry>emptyList(), -1L, page, size);
+    }
+
+    /** 一页邮件条目。 */
+    final class MailPage {
+        /** 条目（第 0 页含子文件夹）。 */
+        public final List<MailEntry> entries;
+        /** 文件夹邮件总封数（未知为 -1）。 */
+        public final long total;
+        /** 页号。 */
+        public final int page;
+        /** 每页封数。 */
+        public final int size;
+
+        public MailPage(List<MailEntry> entries, long total, int page, int size) {
+            this.entries = entries;
+            this.total = total;
+            this.page = page;
+            this.size = size;
+        }
+    }
+
+    /**
      * 下载。
      *
      * @param path 路径

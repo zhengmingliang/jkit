@@ -63,6 +63,10 @@ public class ImapMailForeignAttachTest {
                 + tag + " OK UID FETCH Completed";
     }
 
+    private static String untagged(String fetch) {
+        return fetch.substring(0, fetch.lastIndexOf("\r\n"));
+    }
+
     private static final String H_JKIT_SLASH = "X-Jkit-Size: 6\r\nSubject: a/b.txt\r\n\r\n";
     private static final String H_LEGACY = "From: jkit-storage@localhost\r\nSubject: old.bin\r\n\r\n";
     private static final String H_PLAIN = "From: =?UTF-8?B?5byg5LiJ?= <z@x.com>\r\nSubject: hello\r\n"
@@ -75,10 +79,11 @@ public class ImapMailForeignAttachTest {
                 "A0001 OK LIST completed",
                 "A0002 OK SELECT completed",
                 "* SEARCH 1 2 3 4", "A0003 OK SEARCH completed",
-                fetch("A0004", 1, H_JKIT_SLASH, JKIT_STRUCT),
-                fetch("A0005", 2, H_LEGACY, JKIT_STRUCT),
-                fetch("A0006", 3, H_PLAIN, TEXT_PART),
-                fetch("A0007", 4, H_FOREIGN, FOREIGN_STRUCT)).list("");
+                // 一次批量 UID FETCH（新邮件在前），只有最后一行带标签
+                untagged(fetch("A0004", 4, H_FOREIGN, FOREIGN_STRUCT)),
+                untagged(fetch("A0004", 3, H_PLAIN, TEXT_PART)),
+                untagged(fetch("A0004", 2, H_LEGACY, JKIT_STRUCT)),
+                fetch("A0004", 1, H_JKIT_SLASH, JKIT_STRUCT)).list("");
         Map<String, MailEntry> byName = new LinkedHashMap<String, MailEntry>();
         for (MailEntry e : list) {
             byName.put(e.name(), e);
@@ -117,9 +122,10 @@ public class ImapMailForeignAttachTest {
         for (String n : m.keySet()) {
             assertFalse(n, n.startsWith("hello"));
         }
-        // 每封邮件只一次 FETCH（头 + BODYSTRUCTURE 同一往返）
+        // 一个文件夹只一次批量 FETCH（头 + BODYSTRUCTURE，新邮件在前）
         String cmds = new String(sent.toByteArray(), StandardCharsets.UTF_8);
-        assertEquals(4, cmds.split("UID FETCH", -1).length - 1);
+        assertEquals(1, cmds.split("UID FETCH", -1).length - 1);
+        assertTrue(cmds, cmds.contains("UID FETCH 4,3,2,1 (UID INTERNALDATE"));
     }
 
     @Test

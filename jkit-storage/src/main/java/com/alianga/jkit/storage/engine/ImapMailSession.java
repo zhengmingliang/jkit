@@ -97,6 +97,16 @@ public final class ImapMailSession implements AutoCloseable {
      * {@code base.seg1.seg2} 扁平编码（逻辑路径仍用 {@code /}）。
      */
     private boolean flatDotHierarchy;
+    /** 层级方式是否已确认（首次 mkdir 时才用 CREATE 探测；连接时绝不写邮箱）。 */
+    private boolean hierarchyProbed = true;
+    /** list 单个文件夹时最多取最新多少封（配置键 {@code maxListMails}，0 不限）。 */
+    private int maxListMails = DEFAULT_MAX_LIST_MAILS;
+    /** 批量 UID FETCH 每批封数。 */
+    static final int FETCH_CHUNK = 300;
+    /** {@code maxListMails} 默认值。 */
+    static final int DEFAULT_MAX_LIST_MAILS = 100;
+    /** basePath 取该值时表示整个邮箱（根下是顶层文件夹，含 其他文件夹）。 */
+    public static final String WHOLE_MAILBOX = "/";
     private long maxAttachmentBytes = DEFAULT_MAX_ATTACHMENT_BYTES;
     private boolean connected;
     /** NO 且含 busy 时的最大重试次数。 */
@@ -138,6 +148,8 @@ public final class ImapMailSession implements AutoCloseable {
         if (folder == null) {
             folder = DEFAULT_FOLDER;
         }
+        boolean whole = WHOLE_MAILBOX.equals(folder);
+        this.maxListMails = (int) Math.max(0L, parseLong(cfg.get("maxListMails"), DEFAULT_MAX_LIST_MAILS));
         this.maxAttachmentBytes = parseLong(cfg.get("maxAttachmentBytes"), DEFAULT_MAX_ATTACHMENT_BYTES);
         this.busyBaseDelayMs = Math.max(0L, parseLong(cfg.get("busyRetryDelayMs"), 5000L));
         synchronized (lock) {
@@ -149,10 +161,7 @@ public final class ImapMailSession implements AutoCloseable {
                 readGreeting();
                 taggedOk("LOGIN " + quote(user) + " " + quote(password), "LOGIN");
                 this.delimiter = detectDelimiter();
-                folder = resolveBaseFolder(folder);
-                this.baseFolder = folder;
-                ensureSelected(folder);
-                this.flatDotHierarchy = !probeSlashHierarchy(folder);
+                initAfterLogin(folder, whole);
                 connected = true;
             } catch (StorageException e) {
                 closeQuietly();
@@ -160,6 +169,36 @@ public final class ImapMailSession implements AutoCloseable {
             } catch (IOException e) {
                 closeQuietly();
                 throw StorageException.connectFailed("IMAP 连接失败: " + host + ":" + port + " — " + e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * 登录后的初始化：解析 basePath、选中根文件夹。只有 LIST 成功且确实不存在时才 CREATE；
+     * 连接时不再 CREATE 探测子箱层级。
+     *
+     * @param folder 配置的 basePath
+     * @param whole  是否整个邮箱模式（basePath = {@value #WHOLE_MAILBOX}）
+     */
+    void initAfterLogin(String folder, boolean whole) throws IOException {
+        this.flatDotHierarchy = false;
+        this.hierarchyProbed = false;
+        if (whole) {
+            this.baseFolder = "";
+            this.hierarchyProbed = true;
+        } else {
+            BaseResolution base = resolveBase(folder);
+            folder = base.folder;
+            this.baseFolder = folder;
+            this.flatDotHierarchy = base.flatDot;
+            if (base.exists) {
+                selectExistingOrThrow(folder);
+            } else {
+                ensureSelected(folder);
+                LOG.info("IMAP basePath 已自动创建文件夹: " + folder
+                        + "（LIST 中既无同名也无 " + QQ_OTHER_FOLDERS + delimiter + folder
+                        + "；若邮箱开启了「文件夹区域加锁」或未勾选「收取我的文件夹」，"
+                        + "已有文件夹可能对 IMAP 不可见，请检查后改用正确 basePath）");
             }
         }
     }
@@ -215,6 +254,57 @@ public final class ImapMailSession implements AutoCloseable {
             }
         }
     }
+
+    /**
+     * 只列一层（不递归子文件夹）：子文件夹作为目录条目 + 本文件夹最新 {@code maxListMails} 封邮件。
+     *
+     * @param path 相对 basePath 的目录；空串表示根
+     * @return 条目（name 为相对 basePath 的完整逻辑路径）
+     */
+    public List<MailEntry> listDir(String path) {
+        return listDirPage(path, 0, maxListMails).entries;
+    }
+
+    /**
+     * 分页列一层：第 0 页含子文件夹；邮件按 UID 降序（新邮件在前）取第 {@code page} 页。
+     *
+     * @param path 相对目录
+     * @param page 页号，从 0 起
+     * @param size 每页封数；≤0 不分页
+     * @return 一页（total 为该文件夹邮件总封数）
+     */
+    public MailGateway.MailPage listDirPage(String path, int page, int size) {
+        synchronized (lock) {
+            requireConnected();
+            String rel = normalizeRel(path == null ? "" : path);
+            try {
+                pageNow = Math.max(0, page);
+                pageSize = size;
+                lastTotal = -1L;
+                List<MailEntry> entries = listImmediate(rel);
+                if (pageNow > 0) {
+                    List<MailEntry> mailsOnly = new ArrayList<MailEntry>();
+                    for (MailEntry e : entries) {
+                        if (!e.directory()) {
+                            mailsOnly.add(e);
+                        }
+                    }
+                    entries = mailsOnly;
+                }
+                return new MailGateway.MailPage(entries, lastTotal, pageNow, size);
+            } catch (IOException e) {
+                throw StorageException.io("IMAP list 失败", rel, e);
+            } finally {
+                pageNow = 0;
+                pageSize = -1;
+            }
+        }
+    }
+
+    /** listDirPage 进行中的页参数（-1 表示用 maxListMails）。 */
+    private int pageNow;
+    private int pageSize = -1;
+    private long lastTotal = -1L;
 
     /**
      * 在 basePath 下逐级 CREATE 真 IMAP 子文件夹；已存在则幂等。
@@ -462,10 +552,10 @@ public final class ImapMailSession implements AutoCloseable {
         folders.addAll(dirs);
         for (String rel : folders) {
             String abs = toImapFolder(rel);
-            if (!selectIfExists(abs)) {
+            if (abs.isEmpty() || !selectIfExists(abs)) {
                 continue;
             }
-            collectMails(rel, result);
+            collectMails(rel, result, 0);
         }
         return result;
     }
@@ -473,17 +563,27 @@ public final class ImapMailSession implements AutoCloseable {
     private List<MailEntry> listImmediate(String relDir) throws IOException {
         List<MailEntry> result = new ArrayList<MailEntry>();
         String abs = toImapFolder(relDir);
-        if (!selectIfExists(abs)) {
-            throw StorageException.notFound(relDir);
+        boolean selectable;
+        if (abs.isEmpty()) {
+            selectable = false;
+        } else {
+            TaggedResult select = tagged("SELECT " + quoteMailbox(abs));
+            selectable = select.ok;
+            if (selectable) {
+                onSelected(abs);
+            } else if (!absMailboxListed(abs)) {
+                throw StorageException.notFound(relDir);
+            } else if (listMailboxesUnder(abs, false).isEmpty()) {
+                // LIST 可见、SELECT 被拒且无子箱：多为文件夹加锁 / 未开放 IMAP
+                throw new StorageException(StorageErrorCode.AUTH_FAILED,
+                        "IMAP 文件夹无法打开: " + relDir + "（" + select.text
+                                + "）；可能开启了「文件夹区域加锁」或未勾选「收取我的文件夹」", null);
+            }
         }
+        String expectPrefix = relDir.isEmpty() ? "" : relDir + "/";
         for (String childAbs : listMailboxesUnder(abs, false)) {
             String childRel = relativeFromBase(childAbs);
-            if (childRel == null || childRel.isEmpty()) {
-                continue;
-            }
-            // 只要直接子级
-            String expectPrefix = relDir + "/";
-            if (!childRel.startsWith(expectPrefix)) {
+            if (childRel == null || childRel.isEmpty() || !childRel.startsWith(expectPrefix)) {
                 continue;
             }
             String rest = childRel.substring(expectPrefix.length());
@@ -492,11 +592,20 @@ public final class ImapMailSession implements AutoCloseable {
             }
             result.add(new MailEntry(childRel, true, 0L, -1L, null));
         }
-        collectMails(relDir, result);
+        if (selectable) {
+            collectMails(relDir, result);
+        }
         return result;
     }
 
     private void ensureMailboxPath(String relDir) throws IOException {
+        if (!hierarchyProbed) {
+            // 只有真的要建子文件夹时才 CREATE 探测一次层级方式
+            if (!flatDotHierarchy) {
+                flatDotHierarchy = !probeSlashHierarchy(baseFolder);
+            }
+            hierarchyProbed = true;
+        }
         String current = "";
         for (String segment : relDir.split("/")) {
             if (segment.isEmpty()) {
@@ -545,7 +654,12 @@ public final class ImapMailSession implements AutoCloseable {
         if (selectedFolder != null) {
             for (String victim : all) {
                 if (selectedFolder.equals(victim) || selectedFolder.startsWith(victim + delimiter)) {
-                    ensureSelected(baseFolder);
+                    if (baseFolder.isEmpty()) {
+                        tagged("UNSELECT");
+                        selectedFolder = null;
+                    } else {
+                        ensureSelected(baseFolder);
+                    }
                     break;
                 }
             }
@@ -598,9 +712,13 @@ public final class ImapMailSession implements AutoCloseable {
         if (flatDotHierarchy) {
             listRef = "";
             pattern = absParent + ".*";
-        } else {
-            listRef = absParent;
+        } else if (absParent.isEmpty()) {
+            listRef = "";
             pattern = recursive ? "*" : "%";
+        } else {
+            // QQ 对 LIST "<父>" "%" 返回空，必须写成 LIST "" "<父>/%"
+            listRef = "";
+            pattern = absParent + delimiter + (recursive ? "*" : "%");
         }
         String tag = nextTag();
         sendRaw(tag + " LIST " + quoteMailbox(listRef) + " " + quoteMailbox(pattern) + "\r\n");
@@ -611,7 +729,7 @@ public final class ImapMailSession implements AutoCloseable {
                 throw StorageException.serverError("LIST 连接中断", absParent);
             }
             if (line.startsWith("* LIST ") || line.startsWith("* list ")) {
-                String name = parseListMailboxName(line);
+                String name = listLineName(line);
                 if (name != null && !name.isEmpty() && !name.equals(absParent)) {
                     if (flatDotHierarchy && !isFlatDotChild(absParent, name, recursive)) {
                         continue;
@@ -674,34 +792,32 @@ public final class ImapMailSession implements AutoCloseable {
      * @return 实际使用的邮箱名（Unicode）
      */
     String resolveBaseFolder(String input) throws IOException {
-        String wanted = "/".equals(delimiter) ? input : input.replace("/", delimiter);
-        String tag = nextTag();
-        sendRaw(tag + " LIST \"\" \"*\"\r\n");
-        java.util.Set<String> names = new java.util.HashSet<String>();
-        while (true) {
-            String line = readLine();
-            if (line == null) {
-                throw StorageException.serverError("LIST 连接中断", input);
-            }
-            if (line.startsWith(tag + " ")) {
-                break;
-            }
-            if (line.regionMatches(true, 0, "* LIST", 0, 6)) {
-                Matcher lit = LITERAL_AT_END.matcher(line);
-                if (lit.find()) {
-                    // 名字以字面量给出：读出原始字节当名字
-                    byte[] raw = readExact(Integer.parseInt(lit.group(1)));
-                    names.add(ImapUtf7.decode(new String(raw, StandardCharsets.US_ASCII)));
-                    continue;
-                }
-                String name = parseListMailboxName(line);
-                if (name != null) {
-                    names.add(name);
-                }
-            }
+        return resolveBase(input).folder;
+    }
+
+    /** basePath 解析结果。 */
+    static final class BaseResolution {
+        final String folder;
+        final boolean exists;
+        final boolean flatDot;
+
+        BaseResolution(String folder, boolean exists, boolean flatDot) {
+            this.folder = folder;
+            this.exists = exists;
+            this.flatDot = flatDot;
         }
+    }
+
+    /**
+     * LIST 必须成功（OK）才可能走自动创建；LIST 失败 / 中断 / 超时一律报错，绝不 CREATE。
+     * 层级方式从 LIST 结果推断（只读），不再在连接时 CREATE 探测子箱。
+     */
+    BaseResolution resolveBase(String input) throws IOException {
+        String wanted = "/".equals(delimiter) ? input : input.replace("/", delimiter);
+        java.util.Set<String> names = new java.util.LinkedHashSet<String>(listAllMailboxNames(input));
         String chosen;
         String reason;
+        boolean exists = true;
         String other = QQ_OTHER_FOLDERS + delimiter + wanted;
         if (names.contains(wanted)) {
             chosen = wanted;
@@ -711,10 +827,71 @@ public final class ImapMailSession implements AutoCloseable {
             reason = "匹配" + QQ_OTHER_FOLDERS + "下的自建文件夹";
         } else {
             chosen = wanted;
+            exists = false;
             reason = "服务器上不存在，将自动创建";
         }
+        boolean dotChild = false;
+        boolean delimChild = false;
+        for (String n : names) {
+            if (n.startsWith(chosen + ".")) {
+                dotChild = true;
+            }
+            if (n.startsWith(chosen + delimiter)) {
+                delimChild = true;
+            }
+        }
+        boolean flat = !".".equals(delimiter) && dotChild && !delimChild;
         LOG.info("IMAP basePath 解析: 输入=" + input + " 实际=" + chosen + "（" + reason + "）");
-        return chosen;
+        return new BaseResolution(chosen, exists, flat);
+    }
+
+    /** {@code LIST "" "*"}：返回全部邮箱名（Unicode）；非 OK 或连接中断抛错。 */
+    private List<String> listAllMailboxNames(String context) throws IOException {
+        String tag = nextTag();
+        sendRaw(tag + " LIST \"\" \"*\"\r\n");
+        List<String> names = new ArrayList<String>();
+        while (true) {
+            String line = readLine();
+            if (line == null) {
+                throw StorageException.serverError("LIST 连接中断（未自动创建文件夹）", context);
+            }
+            if (line.startsWith(tag + " ")) {
+                if (!line.regionMatches(true, tag.length() + 1, "OK", 0, 2)) {
+                    throw StorageException.serverError("LIST 失败（未自动创建文件夹，请检查「文件夹区域加锁」"
+                            + "与「收取我的文件夹」设置）: " + line, context);
+                }
+                return names;
+            }
+            if (line.regionMatches(true, 0, "* LIST", 0, 6)) {
+                String name = listLineName(line);
+                if (name != null) {
+                    names.add(name);
+                }
+            }
+        }
+    }
+
+    /** 解析一行 {@code * LIST}；名字以 {@code {n}} 字面量给出时读出字面量。 */
+    private String listLineName(String line) throws IOException {
+        Matcher lit = LITERAL_AT_END.matcher(line);
+        if (lit.find()) {
+            byte[] raw = readExact(Integer.parseInt(lit.group(1)));
+            readLine();
+            return ImapUtf7.decode(new String(raw, StandardCharsets.US_ASCII));
+        }
+        return parseListMailboxName(line);
+    }
+
+    /** 选中已存在（LIST 可见）的邮箱；失败时报明确错误，绝不 CREATE。 */
+    private void selectExistingOrThrow(String folder) throws IOException {
+        TaggedResult select = tagged("SELECT " + quoteMailbox(folder));
+        if (select.ok) {
+            onSelected(folder);
+            return;
+        }
+        throw new StorageException(StorageErrorCode.AUTH_FAILED,
+                "IMAP 文件夹存在但无法打开: " + folder + "（" + select.text
+                        + "）；可能开启了「文件夹区域加锁」或未勾选「收取我的文件夹」", null);
     }
 
     private String detectDelimiter() throws IOException {
@@ -807,6 +984,9 @@ public final class ImapMailSession implements AutoCloseable {
         if (rel.isEmpty()) {
             return baseFolder;
         }
+        if (baseFolder.isEmpty()) {
+            return "/".equals(delimiter) ? rel : rel.replace("/", delimiter);
+        }
         if (flatDotHierarchy) {
             return baseFolder + "." + rel.replace("/", ".");
         }
@@ -822,6 +1002,9 @@ public final class ImapMailSession implements AutoCloseable {
         }
         if (absFolder.equals(baseFolder)) {
             return "";
+        }
+        if (baseFolder.isEmpty()) {
+            return "/".equals(delimiter) ? absFolder : absFolder.replace(delimiter, "/");
         }
         if (flatDotHierarchy) {
             String prefix = baseFolder + ".";
@@ -940,7 +1123,8 @@ public final class ImapMailSession implements AutoCloseable {
             s.setSoTimeout(SO_TIMEOUT_MS);
         }
         this.socket = s;
-        this.rawIn = s.getInputStream();
+        // 必须带缓冲：readLine 逐字节读，直接读 SSL 流每字节都是一次解密调用，500 封要几十秒
+        this.rawIn = new java.io.BufferedInputStream(s.getInputStream(), 64 * 1024);
         this.rawOut = s.getOutputStream();
     }
 
@@ -1116,18 +1300,40 @@ public final class ImapMailSession implements AutoCloseable {
     }
 
     private void collectMails(String rel, List<MailEntry> result) throws IOException {
+        int size = pageSize >= 0 ? pageSize : maxListMails;
         FolderIndex index = freshIndex();
-        for (Long uid : uidSearch("ALL")) {
-            FetchMessage msg = fetchRaw(uid.longValue());
-            if (msg == null) {
+        List<Long> all = newestFirst(uidSearch("ALL"), 0);
+        lastTotal = all.size();
+        List<Long> uids;
+        if (size <= 0) {
+            uids = all;
+        } else {
+            int from = (int) Math.min((long) pageNow * size, all.size());
+            uids = all.subList(from, Math.min(all.size(), from + size));
+        }
+        collectFrom(rel, result, index, uids);
+    }
+
+    /** @param limit 最多取最新多少封；0 不限（写路径的全量索引用） */
+    private void collectMails(String rel, List<MailEntry> result, int limit) throws IOException {
+        FolderIndex index = freshIndex();
+        collectFrom(rel, result, index, newestFirst(uidSearch("ALL"), limit));
+    }
+
+    private void collectFrom(String rel, List<MailEntry> result, FolderIndex index, List<Long> uids)
+            throws IOException {
+        for (FetchMessage msg : fetchMetaBatched(uids)) {
+            if (msg == null || msg.uid <= 0L) {
                 continue;
             }
-            if (!isJkitMail(msg.headerText)) {
-                indexForeign(index, uid.longValue(), msg);
+            long uid = msg.uid;
+            boolean jkit = isJkitMail(msg.headerText);
+            if (!jkit) {
+                indexForeign(index, uid, msg);
             }
-            List<MailEntry> entries = isJkitMail(msg.headerText)
-                    ? Collections.singletonList(jkitEntry(uid.longValue(), msg))
-                    : foreignMailEntries(uid.longValue(), msg);
+            List<MailEntry> entries = jkit
+                    ? Collections.singletonList(jkitEntry(uid, msg))
+                    : foreignMailEntries(uid, msg);
             for (MailEntry e : entries) {
                 if (e.name().isEmpty()) {
                     continue;
@@ -1135,6 +1341,46 @@ public final class ImapMailSession implements AutoCloseable {
                 result.add(e.withName(rel.isEmpty() ? e.name() : rel + "/" + e.name()));
             }
         }
+    }
+
+    /** UID 降序（新邮件在前），截取前 {@code limit} 个；limit≤0 不截。 */
+    static List<Long> newestFirst(List<Long> uids, int limit) {
+        List<Long> sorted = new ArrayList<Long>(uids);
+        sorted.sort(Collections.reverseOrder());
+        if (limit > 0 && sorted.size() > limit) {
+            return new ArrayList<Long>(sorted.subList(0, limit));
+        }
+        return sorted;
+    }
+
+    /** 按 {@link #FETCH_CHUNK} 分批 UID FETCH 头字段 + BODYSTRUCTURE（不取正文），保持入参顺序。 */
+    private List<FetchMessage> fetchMetaBatched(List<Long> uids) throws IOException {
+        List<FetchMessage> out = new ArrayList<FetchMessage>(uids.size());
+        for (int from = 0; from < uids.size(); from += FETCH_CHUNK) {
+            List<Long> chunk = uids.subList(from, Math.min(uids.size(), from + FETCH_CHUNK));
+            StringBuilder set = new StringBuilder();
+            for (Long u : chunk) {
+                if (set.length() > 0) {
+                    set.append(',');
+                }
+                set.append(u.longValue());
+            }
+            String tag = nextTag();
+            sendRaw(tag + " UID FETCH " + set + " (UID INTERNALDATE RFC822.SIZE " + META_FIELDS
+                    + " BODYSTRUCTURE)\r\n");
+            List<FetchMessage> msgs = readFetchMessages(tag, false);
+            Map<Long, FetchMessage> byUid = new HashMap<Long, FetchMessage>();
+            for (FetchMessage m : msgs) {
+                byUid.put(m.uid, m);
+            }
+            for (Long u : chunk) {
+                FetchMessage m = byUid.get(u);
+                if (m != null) {
+                    out.add(m);
+                }
+            }
+        }
+        return out;
     }
 
     /**
@@ -1225,18 +1471,7 @@ public final class ImapMailSession implements AutoCloseable {
         if (uids.isEmpty()) {
             return null;
         }
-        StringBuilder set = new StringBuilder();
-        for (Long u : uids) {
-            if (set.length() > 0) {
-                set.append(',');
-            }
-            set.append(u.longValue());
-        }
-        String tag = nextTag();
-        sendRaw(tag + " UID FETCH " + set + " (UID INTERNALDATE RFC822.SIZE " + META_FIELDS
-                + " BODYSTRUCTURE)\r\n");
-        List<FetchMessage> msgs = readFetchMessages(tag, false);
-        for (FetchMessage msg : msgs) {
+        for (FetchMessage msg : fetchMetaBatched(uids)) {
             if (msg.uid > 0L && !isJkitMail(msg.headerText)) {
                 indexForeign(index, msg.uid, msg);
             }
@@ -2117,6 +2352,8 @@ public final class ImapMailSession implements AutoCloseable {
             return;
         }
         String section = prefix.isEmpty() ? "1" : prefix;
+        String mainType = node.get(0) instanceof String ? (String) node.get(0) : "";
+        String subType = node.size() > 1 && node.get(1) instanceof String ? (String) node.get(1) : "";
         String encoding = node.size() > 5 && node.get(5) instanceof String ? (String) node.get(5) : null;
         long size = -1L;
         if (node.size() > 6 && node.get(6) instanceof String) {
@@ -2144,6 +2381,18 @@ public final class ImapMailSession implements AutoCloseable {
         String filename = paramValue(dispParams, "filename");
         if (filename == null) {
             filename = paramValue(params, "name");
+        }
+        boolean rfc822 = "message".equalsIgnoreCase(mainType) && "rfc822".equalsIgnoreCase(subType);
+        if (rfc822 && filename == null && node.size() > 8 && node.get(8) instanceof List) {
+            // 转发的整封邮件：展开内层附件（内层单段正文的 section 为 N.1）
+            List<?> inner = (List<?>) node.get(8);
+            boolean multi = !inner.isEmpty() && inner.get(0) instanceof List;
+            walkStructure(inner, multi ? section : section + ".1", out);
+            return;
+        }
+        if (filename == null && "application".equalsIgnoreCase(mainType)) {
+            // 无文件名的二进制段（备份脚本常见）：按段号合成名字
+            filename = "part-" + section + "." + (subType.isEmpty() ? "bin" : subType.toLowerCase(Locale.ROOT));
         }
         if (filename == null && !"attachment".equalsIgnoreCase(dispType)) {
             return;

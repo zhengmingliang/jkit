@@ -76,6 +76,26 @@ final class DefaultMailGateway implements MailGateway {
     }
 
     @Override
+    public MailPage listDirPage(String path, int page, int size) {
+        ImapMailSession session = borrow();
+        try {
+            return session.listDirPage(path, page, size);
+        } finally {
+            release(session);
+        }
+    }
+
+    @Override
+    public List<MailEntry> listDir(String path) {
+        ImapMailSession session = borrow();
+        try {
+            return session.listDir(path);
+        } finally {
+            release(session);
+        }
+    }
+
+    @Override
     public void download(String path, OutputStream out) {
         ImapMailSession session = borrow();
         try {

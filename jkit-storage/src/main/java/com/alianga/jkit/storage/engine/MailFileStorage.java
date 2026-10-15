@@ -174,6 +174,7 @@ public class MailFileStorage implements FileStorage {
                 throw StorageException.conflict("同名文件已存在，无法创建目录: " + normalized, normalized);
             }
             // 真 IMAP CREATE（fada3e0 协议层）；空目录不再写 .keep 占位
+            dirCache.clear();
             gateway.mkdir(normalized);
         }
     }
@@ -299,8 +300,60 @@ public class MailFileStorage implements FileStorage {
         return channelPool;
     }
 
+    /** 一页文件（IMAP 服务器端按 UID 降序分页）。 */
+    public static final class Page {
+        /** 本页条目（第 0 页含子目录）。 */
+        public final List<StorageEntry> entries;
+        /** 文件夹邮件总封数（一封外来邮件可能对应多个附件；未知 -1）。 */
+        public final long totalMails;
+        /** 页号，从 0 起。 */
+        public final int page;
+        /** 每页封数。 */
+        public final int size;
+
+        Page(List<StorageEntry> entries, long totalMails, int page, int size) {
+            this.entries = entries;
+            this.totalMails = totalMails;
+            this.page = page;
+            this.size = size;
+        }
+
+        /** @return 是否还有下一页 */
+        public boolean hasMore() {
+            return totalMails >= 0L && size > 0 && (long) (page + 1) * size < totalMails;
+        }
+    }
+
+    /**
+     * 分页列目录：只取一页邮件（默认每页 100 封），用于「加载更多」。
+     *
+     * @param dir  目录
+     * @param page 页号，从 0 起
+     * @param size 每页封数
+     * @return 一页
+     */
+    public Page listPage(String dir, int page, int size) {
+        String normalized = StoragePaths.normalize(dir);
+        synchronized (lock) {
+            MailGateway.MailPage mp = gateway.listDirPage(normalized, page, size);
+            // 已加载的页并入短缓存，后续 stat / 下载不再重扫
+            CachedDir prev = dirCache.get(normalized);
+            List<MailEntry> merged = new ArrayList<MailEntry>();
+            if (page > 0 && prev != null) {
+                merged.addAll(prev.entries);
+            }
+            merged.addAll(mp.entries);
+            dirCache.put(normalized, new CachedDir(merged, System.currentTimeMillis(),
+                    mp.total >= 0L && size > 0 && (long) (page + 1) * size < mp.total));
+            return new Page(listChildren(normalized, indexOf(mp.entries)), mp.total, mp.page, mp.size);
+        }
+    }
+
     private List<StorageEntry> listChildren(String dir) {
-        Index index = buildIndex();
+        return listChildren(dir, buildIndex(dir));
+    }
+
+    private List<StorageEntry> listChildren(String dir, Index index) {
         Map<String, StorageEntry> files = new LinkedHashMap<String, StorageEntry>();
         Set<String> dirs = new LinkedHashSet<String>();
 
@@ -361,10 +414,38 @@ public class MailFileStorage implements FileStorage {
     }
 
     private Resolved resolveLogical(String normalized) {
-        Index index = buildIndex();
+        // 只看父文件夹一层：避免为一次 stat/list 递归扫描整个 basePath
+        Index index;
+        try {
+            index = buildIndex(StoragePaths.parent(normalized));
+        } catch (StorageException e) {
+            if (e.code() == StorageErrorCode.NOT_FOUND) {
+                return null;
+            }
+            throw e;
+        }
         Resolved hit = index.byLogical.get(normalized);
         if (hit != null) {
             return hit;
+        }
+        if (parentTruncated(normalized)) {
+            // 大文件夹只加载了前几页：未命中时按名字问服务器（外来附件走 UID 索引 / 头扫描）
+            try {
+                MailEntry e = gateway.stat(normalized);
+                if (e != null) {
+                    if (e.directory()) {
+                        return Resolved.dir(e.mtimeEpochMs());
+                    }
+                    Resolved r = e.foreign() ? Resolved.foreignFile(e)
+                            : Resolved.file(e.size(), e.mtimeEpochMs(), e.uid(), Collections.<String>emptyList())
+                                    .withAttributes(e.attributes());
+                    return r;
+                }
+            } catch (StorageException ex) {
+                if (ex.code() != StorageErrorCode.NOT_FOUND) {
+                    throw ex;
+                }
+            }
         }
         // 合成目录：任意后代（含遗留 .keep / part）
         String prefix = normalized + "/";
@@ -382,7 +463,60 @@ public class MailFileStorage implements FileStorage {
     }
 
     private Index buildIndex() {
-        List<MailEntry> mails = gateway.list("");
+        return indexOf(gateway.list(""));
+    }
+
+    /** 单层索引：只列 {@code dir} 本身（子文件夹 + 本层邮件）。 */
+    private Index buildIndex(String dir) {
+        String key = dir == null ? "" : dir;
+        long now = System.currentTimeMillis();
+        CachedDir hit = dirCache.get(key);
+        if (hit != null && now - hit.at < DIR_CACHE_TTL_MS) {
+            return indexOf(hit.entries);
+        }
+        MailGateway.MailPage mp = gateway.listDirPage(key, 0, -1);
+        CachedDir cached = new CachedDir(new ArrayList<MailEntry>(mp.entries), now, truncated(mp));
+        dirCache.put(key, cached);
+        return indexOf(cached.entries);
+    }
+
+    /** 本层是否只列出了部分邮件（大文件夹分页）。 */
+    private static boolean truncated(MailGateway.MailPage mp) {
+        if (mp.total < 0L) {
+            return false;
+        }
+        Set<String> uids = new java.util.HashSet<String>();
+        for (MailEntry e : mp.entries) {
+            if (!e.directory() && e.uid() != null) {
+                int hash = e.uid().indexOf('#');
+                uids.add(hash < 0 ? e.uid() : e.uid().substring(0, hash));
+            }
+        }
+        return mp.total > uids.size();
+    }
+
+    private boolean parentTruncated(String normalized) {
+        CachedDir c = dirCache.get(StoragePaths.parent(normalized));
+        return c != null && c.truncated;
+    }
+
+    /** 单层列表短缓存：list 后紧跟的 stat / download 不再重扫整个文件夹；任何写操作清空。 */
+    static final long DIR_CACHE_TTL_MS = 30_000L;
+    private final Map<String, CachedDir> dirCache = new java.util.HashMap<String, CachedDir>();
+
+    private static final class CachedDir {
+        final List<MailEntry> entries;
+        final long at;
+        final boolean truncated;
+
+        CachedDir(List<MailEntry> entries, long at, boolean truncated) {
+            this.entries = entries;
+            this.at = at;
+            this.truncated = truncated;
+        }
+    }
+
+    private Index indexOf(List<MailEntry> mails) {
         Index index = new Index();
         if (mails == null) {
             return index;
@@ -508,6 +642,7 @@ public class MailFileStorage implements FileStorage {
             deleteQuiet(name);
         }
         try {
+            dirCache.clear();
             gateway.rmdir(dir);
         } catch (StorageException e) {
             if (e.code() != StorageErrorCode.NOT_FOUND) {
@@ -537,6 +672,7 @@ public class MailFileStorage implements FileStorage {
 
     private void deleteQuiet(String name) {
         try {
+            dirCache.clear();
             gateway.delete(name);
         } catch (StorageException e) {
             if (e.code() != StorageErrorCode.NOT_FOUND) {
@@ -549,11 +685,13 @@ public class MailFileStorage implements FileStorage {
         String parent = StoragePaths.parent(logicalName);
         String baseName = StoragePaths.name(logicalName);
         if (!parent.isEmpty()) {
+            dirCache.clear();
             gateway.mkdir(parent);
         }
         byte[] mime = buildStoredMime(baseName, payload, totalRaw);
         // folder = basePath 或 basePath/parent（网关/会话会解析）
         String imapFolder = parent.isEmpty() ? folder : StoragePaths.join(folder, parent);
+        dirCache.clear();
         gateway.append(imapFolder, new ByteArrayInputStream(mime), mime.length);
     }
 
