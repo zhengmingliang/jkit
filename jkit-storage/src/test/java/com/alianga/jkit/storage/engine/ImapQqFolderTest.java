@@ -100,10 +100,14 @@ public class ImapQqFolderTest {
                 "* LIST () \"/\" INBOX",
                 "A0001 OK LIST completed",
                 "A0002 NO no such mailbox",
-                "A0003 OK CREATE completed",
-                "A0004 OK SELECT completed");
+                "A0003 NO no such mailbox",
+                "A0004 OK CREATE completed",
+                "A0005 OK SELECT completed");
         s.initAfterLogin("jkit-mail-disk", false);
         String all = sentText();
+        assertTrue(all, all.contains("EXAMINE \"jkit-mail-disk\""));
+        assertTrue(all, all.contains("EXAMINE \"&UXZO1mWHTvZZOQ-/jkit-mail-disk\""));
+        assertTrue(all, all.indexOf("EXAMINE") < all.indexOf("CREATE"));
         assertEquals(all, 1, all.split("CREATE", -1).length - 1);
         assertTrue(all, all.contains("CREATE \"jkit-mail-disk\""));
         assertFalse(all, all.contains("__jkit_hier_probe__"));
@@ -192,5 +196,102 @@ public class ImapQqFolderTest {
             out.add(e.name());
         }
         return out;
+    }
+
+    @Test
+    public void hiddenFromListButExaminableIsNeverCreated() throws Exception {
+        ImapMailSession s = session("x",
+                "* LIST () \"/\" INBOX",
+                "A0001 OK LIST completed",
+                "A0002 NO no such mailbox",
+                "A0003 OK [READ-ONLY] EXAMINE completed",
+                "A0004 OK SELECT completed");
+        s.initAfterLogin("db-backup", false);
+        String all = sentText();
+        assertTrue(all, all.contains("EXAMINE \"db-backup\""));
+        assertTrue(all, all.contains("EXAMINE \"&UXZO1mWHTvZZOQ-/db-backup\""));
+        assertTrue(all, all.contains("SELECT \"&UXZO1mWHTvZZOQ-/db-backup\""));
+        assertFalse(all, all.contains("CREATE"));
+        assertFalse(all, all.contains("DELETE"));
+    }
+
+    @Test
+    public void exactNameExaminableIsUsedDirectly() throws Exception {
+        ImapMailSession s = session("x",
+                "* LIST () \"/\" INBOX",
+                "A0001 OK LIST completed",
+                "A0002 OK [READ-ONLY] EXAMINE completed",
+                "A0003 OK SELECT completed");
+        s.initAfterLogin("db-backup", false);
+        String all = sentText();
+        assertTrue(all, all.contains("SELECT \"db-backup\""));
+        assertFalse(all, all.contains("其他"));
+        assertFalse(all, all.contains("&UXZO1mWHTvZZOQ-"));
+        assertFalse(all, all.contains("CREATE"));
+    }
+
+    @Test
+    public void examineBadNeverCreates() throws Exception {
+        ImapMailSession s = session("x",
+                "* LIST () \"/\" INBOX",
+                "A0001 OK LIST completed",
+                "A0002 NO no such mailbox",
+                "A0003 BAD command syntax");
+        try {
+            s.initAfterLogin("db-backup", false);
+            fail("EXAMINE BAD 应抛");
+        } catch (StorageException e) {
+            assertTrue(e.getMessage(), e.getMessage().contains("未自动创建"));
+        }
+        assertFalse(sentText(), sentText().contains("CREATE"));
+    }
+
+    @Test
+    public void examineConnectionDropNeverCreates() throws Exception {
+        ImapMailSession s = session("x",
+                "* LIST () \"/\" INBOX",
+                "A0001 OK LIST completed");
+        try {
+            s.initAfterLogin("db-backup", false);
+            fail("EXAMINE 时连接中断应抛");
+        } catch (StorageException e) {
+            // 连接中断
+        }
+        assertFalse(sentText(), sentText().contains("CREATE"));
+    }
+
+    @Test
+    public void hierarchyInferredFromListSkipsProbe() throws Exception {
+        ImapMailSession s = session("x",
+                "* LIST () \"/\" \"jkit-mail-disk\"",
+                "* LIST () \"/\" \"jkit-mail-disk/a\"",
+                "A0001 OK LIST completed",
+                "A0002 OK SELECT completed",
+                "A0003 NO no such mailbox",
+                "A0004 OK CREATE completed",
+                "A0005 OK SELECT completed");
+        s.initAfterLogin("jkit-mail-disk", false);
+        s.mkdir("b");
+        String all = sentText();
+        assertFalse(all, all.contains("__jkit_hier_probe__"));
+        assertTrue(all, all.contains("CREATE \"jkit-mail-disk/b\""));
+    }
+
+    @Test
+    public void probeDeletedWhenHierarchyUnknown() throws Exception {
+        ImapMailSession s = session("x",
+                "* LIST () \"/\" \"jkit-mail-disk\"",
+                "A0001 OK LIST completed",
+                "A0002 OK SELECT completed",
+                "A0003 OK CREATE completed",
+                "A0004 OK DELETE completed",
+                "A0005 NO no such mailbox",
+                "A0006 OK CREATE completed",
+                "A0007 OK SELECT completed");
+        s.initAfterLogin("jkit-mail-disk", false);
+        s.mkdir("b");
+        String all = sentText();
+        assertTrue(all, all.contains("CREATE \"jkit-mail-disk/__jkit_hier_probe__\""));
+        assertTrue(all, all.contains("DELETE \"jkit-mail-disk/__jkit_hier_probe__\""));
     }
 }

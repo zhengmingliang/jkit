@@ -188,13 +188,21 @@ public final class ImapMailSession implements AutoCloseable {
             this.hierarchyProbed = true;
         } else {
             BaseResolution base = resolveBase(folder);
+            this.hierarchyProbed = base.hierarchyKnown;
+            if (!base.exists) {
+                // LIST 里看不到（文件夹加锁 / 未勾选收取等可能隐藏）：先只读 EXAMINE 两个候选，能开就用
+                String opened = examineCandidates(base.folder, base.otherCandidate);
+                if (opened != null) {
+                    base = new BaseResolution(opened, true, base.flatDot, base.hierarchyKnown, null);
+                }
+            }
             folder = base.folder;
             this.baseFolder = folder;
             this.flatDotHierarchy = base.flatDot;
             if (base.exists) {
                 selectExistingOrThrow(folder);
             } else {
-                ensureSelected(folder);
+                createAndSelect(folder);
                 LOG.info("IMAP basePath 已自动创建文件夹: " + folder
                         + "（LIST 中既无同名也无 " + QQ_OTHER_FOLDERS + delimiter + folder
                         + "；若邮箱开启了「文件夹区域加锁」或未勾选「收取我的文件夹」，"
@@ -771,12 +779,20 @@ public final class ImapMailSession implements AutoCloseable {
      */
     private boolean probeSlashHierarchy(String base) throws IOException {
         String probe = base + delimiter + "__jkit_hier_probe__";
-        TaggedResult create = taggedCreate(probe);
-        if (create.ok) {
-            taggedDelete(probe);
-            return true;
+        boolean created = false;
+        try {
+            created = taggedCreate(probe).ok;
+            return created;
+        } finally {
+            if (created) {
+                // 探测箱无论后续是否出错都要删掉，不在用户邮箱里留垃圾
+                try {
+                    taggedDelete(probe);
+                } catch (IOException | RuntimeException e) {
+                    LOG.warning("删除层级探测箱失败: " + probe + "（" + e.getMessage() + "）");
+                }
+            }
         }
-        return false;
     }
 
     /** QQ 网页自建文件夹在 IMAP 中挂的父目录名。 */
@@ -800,11 +816,18 @@ public final class ImapMailSession implements AutoCloseable {
         final String folder;
         final boolean exists;
         final boolean flatDot;
+        /** 层级方式能否从 LIST 推断（base 下已有子箱）；能则 mkdir 时不再 CREATE 探测。 */
+        final boolean hierarchyKnown;
+        /** 不存在时的第二候选（{@code 其他文件夹<delim>名}）。 */
+        final String otherCandidate;
 
-        BaseResolution(String folder, boolean exists, boolean flatDot) {
+        BaseResolution(String folder, boolean exists, boolean flatDot, boolean hierarchyKnown,
+                       String otherCandidate) {
             this.folder = folder;
             this.exists = exists;
             this.flatDot = flatDot;
+            this.hierarchyKnown = hierarchyKnown;
+            this.otherCandidate = otherCandidate;
         }
     }
 
@@ -828,7 +851,7 @@ public final class ImapMailSession implements AutoCloseable {
         } else {
             chosen = wanted;
             exists = false;
-            reason = "服务器上不存在，将自动创建";
+            reason = "LIST 中不存在，将先 EXAMINE 确认";
         }
         boolean dotChild = false;
         boolean delimChild = false;
@@ -842,7 +865,7 @@ public final class ImapMailSession implements AutoCloseable {
         }
         boolean flat = !".".equals(delimiter) && dotChild && !delimChild;
         LOG.info("IMAP basePath 解析: 输入=" + input + " 实际=" + chosen + "（" + reason + "）");
-        return new BaseResolution(chosen, exists, flat);
+        return new BaseResolution(chosen, exists, flat, dotChild || delimChild, exists ? null : other);
     }
 
     /** {@code LIST "" "*"}：返回全部邮箱名（Unicode）；非 OK 或连接中断抛错。 */
@@ -880,6 +903,48 @@ public final class ImapMailSession implements AutoCloseable {
             return ImapUtf7.decode(new String(raw, StandardCharsets.US_ASCII));
         }
         return parseListMailboxName(line);
+    }
+
+    /**
+     * LIST 中两者都不可见时，依次只读 EXAMINE 精确名与 {@code 其他文件夹<delim>名}。
+     * 只有两个都明确回 NO 才返回 null（允许随后 CREATE）；BAD / busy / 连接中断 / 超时一律抛错，绝不 CREATE。
+     *
+     * @return 能打开的邮箱名；都明确不存在返回 null
+     */
+    private String examineCandidates(String exact, String other) throws IOException {
+        for (String candidate : new String[] {exact, other}) {
+            if (candidate == null) {
+                continue;
+            }
+            TaggedResult r = tagged("EXAMINE " + quoteMailbox(candidate));
+            if (r.ok) {
+                LOG.info("IMAP basePath 在 LIST 中不可见，但 EXAMINE 可打开: " + candidate);
+                return candidate;
+            }
+            if (!isExplicitNo(r.text) || isBusy(r.text)) {
+                throw StorageException.serverError("EXAMINE " + candidate + " 异常（未自动创建文件夹）: "
+                        + r.text, candidate);
+            }
+        }
+        return null;
+    }
+
+    private static boolean isExplicitNo(String text) {
+        return text != null && text.regionMatches(true, 0, "NO", 0, 2)
+                && (text.length() == 2 || !Character.isLetter(text.charAt(2)));
+    }
+
+    /** 两个候选都明确不存在后才 CREATE 并选中。 */
+    private void createAndSelect(String folder) throws IOException {
+        TaggedResult create = taggedCreate(folder);
+        if (!create.ok && !looksLikeAlreadyExists(create.text)) {
+            throw StorageException.serverError("无法创建 IMAP 文件夹 " + folder + ": " + create.text, folder);
+        }
+        TaggedResult select = tagged("SELECT " + quoteMailbox(folder));
+        if (!select.ok) {
+            throw StorageException.serverError("无法选中 IMAP 文件夹 " + folder + ": " + select.text, folder);
+        }
+        onSelected(folder);
     }
 
     /** 选中已存在（LIST 可见）的邮箱；失败时报明确错误，绝不 CREATE。 */
