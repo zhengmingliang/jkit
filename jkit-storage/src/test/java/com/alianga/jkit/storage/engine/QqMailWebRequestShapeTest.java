@@ -27,7 +27,7 @@ import static org.junit.Assert.fail;
  */
 public class QqMailWebRequestShapeTest {
     private static final String SID = "SIDSECRET123";
-    private static final String COOKIE = "qm_sk=COOKIESECRET; xm_fld_key=FLDSECRET";
+    private static final String COOKIE = "qm_sk=COOKIESECRET; xm_fld_key=FLDSECRET; xm_sid=S1; xm_skey=K1; xm_data_ticket=T1; xm_uin=U1";
 
     private QqMailAttachFileStorage open(QqMailAttachFileStorageTest.Mock mock) {
         StorageConfig cfg = StorageConfig.empty().set("sid", SID).set("cookie", COOKIE)

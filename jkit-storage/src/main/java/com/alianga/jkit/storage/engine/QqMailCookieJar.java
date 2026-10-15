@@ -155,6 +155,28 @@ public final class QqMailCookieJar {
         return join(merged);
     }
 
+    /**
+     * @param names 必需的 Cookie 名
+     * @return 任一域都没有的名字（只返回名字，不含值）
+     */
+    synchronized java.util.List<String> missing(String... names) {
+        java.util.List<String> out = new java.util.ArrayList<String>();
+        for (String n : names) {
+            boolean found = false;
+            for (Map<String, String> m : byDomain.values()) {
+                String v = m.get(n);
+                if (v != null && !v.isEmpty()) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                out.add(n);
+            }
+        }
+        return out;
+    }
+
     private String get(String domain, String name) {
         Map<String, String> m = byDomain.get(domain);
         return m == null ? null : m.get(name);

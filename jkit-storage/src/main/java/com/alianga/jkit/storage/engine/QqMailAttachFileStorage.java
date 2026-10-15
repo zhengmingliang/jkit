@@ -114,6 +114,12 @@ public class QqMailAttachFileStorage implements FileStorage {
             throw StorageException.invalidConfig("缺少必填配置: sid");
         }
         this.jar = new QqMailCookieJar(config.getOr("cookie", ""));
+        List<String> missing = jar.missing(REQUIRED_COOKIES);
+        if (!missing.isEmpty()) {
+            throw new StorageException(StorageErrorCode.AUTH_FAILED,
+                    "cookie 不完整，缺少 " + String.join("、", missing)
+                            + "；请在已登录 wx.mail.qq.com 的浏览器里重新复制完整 Cookie", null);
+        }
         this.clock = clock != null ? clock : System::currentTimeMillis;
         this.client = new QqMailWebClient(sid, jar,
                 transport != null ? transport : QqMailWebClient.httpCoreTransport(config), this.clock);
@@ -230,10 +236,117 @@ public class QqMailAttachFileStorage implements FileStorage {
         if (!ROOT_DIRS.contains(d)) {
             throw StorageException.notFound(d);
         }
-        for (QqMailAttachItem item : fetchAll(d, null)) {
+        // 只取第一页（附件可达数万条）；更多页由 listPage 按需加载
+        return listPage(d, 0).entries;
+    }
+
+    /** 一页附件列表（服务器分页）。 */
+    public static final class Page {
+        /** 本页条目。 */
+        public final List<StorageEntry> entries;
+        /** 服务器返回的总数（body.total；缺失为 -1）。 */
+        public final long total;
+        /** 页号（从 0 起）。 */
+        public final int pageNow;
+        /** 每页大小。 */
+        public final int pageSize;
+
+        Page(List<StorageEntry> entries, long total, int pageNow, int pageSize) {
+            this.entries = entries;
+            this.total = total;
+            this.pageNow = pageNow;
+            this.pageSize = pageSize;
+        }
+
+        /** @return 是否还有下一页 */
+        public boolean hasMore() {
+            if (total >= 0L) {
+                return (long) (pageNow + 1) * pageSize < total;
+            }
+            return entries.size() >= pageSize;
+        }
+    }
+
+    /**
+     * 按服务器分页取一页（排序用配置的 sortType / sortDirection）。
+     *
+     * @param dir     分类目录（如 {@code 全部}）
+     * @param pageNow 页号，从 0 起
+     * @return 一页
+     */
+    public Page listPage(String dir, int pageNow) {
+        return listPage(dir, pageNow, sortType, sortDirection, null);
+    }
+
+    /**
+     * 按服务器分页取一页；排序与搜索都交给服务器。
+     *
+     * @param dir           分类目录
+     * @param pageNow       页号，从 0 起
+     * @param sortType      服务器 sort_type
+     * @param sortDirection 服务器 sort_direction
+     * @param key           搜索关键字；null 走普通列表
+     * @return 一页
+     */
+    public Page listPage(String dir, int pageNow, int sortType, int sortDirection, String key) {
+        String d = StoragePaths.normalize(dir);
+        if (!ROOT_DIRS.contains(d)) {
+            throw StorageException.notFound(d);
+        }
+        PageResult r = fetchPage(d, key, Math.max(0, pageNow), sortType, sortDirection);
+        List<StorageEntry> out = new ArrayList<StorageEntry>(r.items.size());
+        for (QqMailAttachItem item : r.items) {
             out.add(toEntry(d, item));
         }
-        return out;
+        return new Page(out, r.total, Math.max(0, pageNow), pageSize);
+    }
+
+    private static final class PageResult {
+        final List<QqMailAttachItem> items;
+        final int rawCount;
+        final long total;
+
+        PageResult(List<QqMailAttachItem> items, int rawCount, long total) {
+            this.items = items;
+            this.rawCount = rawCount;
+            this.total = total;
+        }
+    }
+
+    /** 单页请求（表单字段顺序同网页 HAR）。 */
+    private PageResult fetchPage(String dir, String key, int page, int sortType, int sortDirection) {
+        boolean fav = FAVORITES.equals(dir);
+        int type = fav ? 1 : TYPES.get(dir);
+        Map<String, String> form = new LinkedHashMap<String, String>();
+        form.put("page_size", String.valueOf(pageSize));
+        form.put("page_now", String.valueOf(page));
+        form.put("sort_type", String.valueOf(sortType));
+        form.put("func", fav ? "2" : "1");
+        form.put("attach_type", String.valueOf(type));
+        if (key != null) {
+            form.put("key", key);
+        }
+        form.put("sort_direction", String.valueOf(sortDirection));
+        String api = key != null ? "/attach/search" : "/attach/attach_list";
+        Map<String, Object> resp = call(api, form);
+        Map<String, Object> body = bodyOf(resp, api);
+        List<Map<String, Object>> raws = itemsOf(body, api);
+        List<QqMailAttachItem> items = new ArrayList<QqMailAttachItem>();
+        for (Map<String, Object> raw : raws) {
+            QqMailAttachItem item = new QqMailAttachItem(raw);
+            if (item.shortId == null) {
+                continue;
+            }
+            index.put(item.shortId, item);
+            if (fav && !item.collect && raw.get("is_collect") != null) {
+                continue;
+            }
+            if (fav) {
+                item.collect = true;
+            }
+            items.add(item);
+        }
+        return new PageResult(items, raws.size(), QqMailAttachItem.num(body.get("total"), -1L));
     }
 
     @Override
@@ -339,47 +452,45 @@ public class QqMailAttachFileStorage implements FileStorage {
         return hit;
     }
 
-    /** 拉全量分页；key 非空走 /attach/search。 */
+    /** 搜索最多翻多少页（定位单个文件用，不做全量拉取）。 */
+    static final int MAX_SEARCH_PAGES = 10;
+
+    /**
+     * 按关键字分页搜索（key 为 null 时为普通列表，仅测试 / 兼容用）：按 body.total 翻页，
+     * 短页先重试，仍不满报错，绝不静默截断；key 非空最多 {@link #MAX_SEARCH_PAGES} 页。
+     */
     List<QqMailAttachItem> fetchAll(String dir, String key) {
-        boolean fav = FAVORITES.equals(dir);
-        int type = fav ? 1 : TYPES.get(dir);
         List<QqMailAttachItem> all = new ArrayList<QqMailAttachItem>();
-        for (int page = 0; ; page++) {
-            Map<String, String> form = new LinkedHashMap<String, String>();
-            form.put("page_size", String.valueOf(pageSize));
-            form.put("page_now", String.valueOf(page));
-            // HAR 字段顺序；普通列表 func=1（缺失会 ret=-20002），收藏 func=2
-            form.put("sort_type", String.valueOf(sortType));
-            form.put("func", fav ? "2" : "1");
-            form.put("attach_type", String.valueOf(type));
-            if (key != null) {
-                form.put("key", key);
-            }
-            form.put("sort_direction", String.valueOf(sortDirection));
-            String api = key != null ? "/attach/search" : "/attach/attach_list";
-            Map<String, Object> resp = call(api, form);
-            Map<String, Object> body = bodyOf(resp, api);
-            List<Map<String, Object>> items = itemsOf(body, api);
-            for (Map<String, Object> raw : items) {
-                QqMailAttachItem item = new QqMailAttachItem(raw);
-                if (item.shortId == null) {
-                    continue;
+        java.util.Set<String> seen = new java.util.HashSet<String>();
+        int shortPageRetries = 0;
+        for (int page = 0; key == null || page < MAX_SEARCH_PAGES; page++) {
+            PageResult r = fetchPage(dir, key, page, sortType, sortDirection);
+            for (QqMailAttachItem item : r.items) {
+                if (seen.add(item.shortId)) {
+                    all.add(item);
                 }
-                index.put(item.shortId, item);
-                if (fav && !item.collect && raw.get("is_collect") != null) {
-                    continue;
-                }
-                all.add(item);
             }
-            long total = QqMailAttachItem.num(body.get("total"), -1L);
-            if (items.isEmpty() || items.size() < pageSize || (total >= 0L && (long) (page + 1) * pageSize >= total)) {
+            long total = r.total;
+            if (total < 0L) {
+                if (r.rawCount == 0 || r.rawCount < pageSize) {
+                    break;
+                }
+                continue;
+            }
+            if ((long) (page + 1) * pageSize >= total) {
                 break;
             }
-        }
-        if (fav) {
-            for (QqMailAttachItem i : all) {
-                i.collect = true;
+            if (r.rawCount < pageSize) {
+                if (shortPageRetries < PAGE_RETRIES) {
+                    shortPageRetries++;
+                    page--;
+                    continue;
+                }
+                throw StorageException.io("QQ 附件列表分页不完整：" + dir + " 第 " + (page + 1) + " 页只返回 "
+                        + r.rawCount + " 条（每页 " + pageSize + "，total=" + total + "，已取 " + all.size()
+                        + "）", dir, null);
             }
+            shortPageRetries = 0;
         }
         return all;
     }
@@ -407,8 +518,13 @@ public class QqMailAttachFileStorage implements FileStorage {
         return resp;
     }
 
+    /** 网页登录态必需的 Cookie 名。 */
+    static final String[] REQUIRED_COOKIES = {"xm_sid", "xm_skey", "xm_data_ticket", "xm_uin"};
+    /** 一页数量不足 / 拿不满 total 时的重试次数。 */
+    static final int PAGE_RETRIES = 2;
+
     StorageException mapRet(long ret, String path) {
-        if (ret == -20002L && authRetCodes.contains(ret)) {
+        if (ret == -20002L) {
             return new StorageException(StorageErrorCode.AUTH_FAILED,
                     "登录态无效或 cookie 不完整（ret=-20002 " + path + "），请重新扫码登录", null);
         }

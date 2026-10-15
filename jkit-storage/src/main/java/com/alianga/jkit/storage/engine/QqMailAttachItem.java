@@ -41,7 +41,9 @@ public final class QqMailAttachItem {
         this.bigAttachKey = str(m.get("big_attach_key"));
         this.bigAttachCode = str(m.get("big_attach_code"));
         this.etimeMs = toMillis(num(m.get("etime"), -1L));
-        this.shortId = QqMailAttachFileStorage.shortId(mailid, fileid);
+        // 超大附件可能没有 fileid：用 big_attach_key 区分同一封邮件里的多个附件，避免短 id 撞车合并
+        this.shortId = QqMailAttachFileStorage.shortId(mailid,
+                fileid != null && !fileid.isEmpty() ? fileid : bigAttachKey);
     }
 
     /** @return 是否超大附件（ftn，有 key/code，约 30 天过期） */

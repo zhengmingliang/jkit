@@ -37,7 +37,7 @@ import static org.junit.Assert.fail;
  */
 public class QqMailAttachFileStorageTest {
     private static final String SID = "SIDSECRET123";
-    private static final String COOKIE = "qm_sk=COOKIESECRET; wx_sid=W1";
+    private static final String COOKIE = "qm_sk=COOKIESECRET; wx_sid=W1; xm_sid=S1; xm_skey=K1; xm_data_ticket=T1; xm_uin=U1";
     private static final String BIG_FILEID = "{\"key\":\"KEYSECRET\",\"code\":\"CODESECRET\"}";
 
     /** 记录请求；按 (方法 + 路径前缀) 依次弹出预置响应。 */
@@ -191,7 +191,16 @@ public class QqMailAttachFileStorageTest {
                 .json("/attach/attach_list", page(3, item("f1", "a.png", 10, "m1", false),
                         item("f2", "b.png", 20, "m1", false)))
                 .json("/attach/attach_list", page(3, item("f3", "c.png", 30, "m2", false)));
-        List<StorageEntry> list = open(mock, "pageSize", "2").list("/图片");
+        QqMailAttachFileStorage fs = open(mock, "pageSize", "2");
+        // list 只取第一页；更多页走 listPage（服务器分页，带 total）
+        List<StorageEntry> firstPage = fs.list("/图片");
+        assertEquals(2, firstPage.size());
+        assertEquals(1, mock.calls.size());
+        QqMailAttachFileStorage.Page p1 = fs.listPage("/图片", 1);
+        assertEquals(3L, p1.total);
+        assertFalse(p1.hasMore());
+        List<StorageEntry> list = new ArrayList<StorageEntry>(firstPage);
+        list.addAll(p1.entries);
         assertEquals(3, list.size());
         assertEquals(2, mock.calls.size());
         assertTrue(mock.body(0).contains("page_now=0"));
@@ -229,7 +238,7 @@ public class QqMailAttachFileStorageTest {
                 assertEquals("unexpected response format: /attach/attach_list", e.getMessage());
             }
             try {
-                new QqMailAttachFileStorage(StorageConfig.empty().set("sid", SID),
+                new QqMailAttachFileStorage(StorageConfig.empty().set("sid", SID).set("cookie", COOKIE),
                         new Mock().json("/attach/set_collect", b), sleeps::add, () -> 1000L)
                         .call("/attach/set_collect", new LinkedHashMap<String, String>());
                 if (!b.contains("\"ret\":0}") || b.startsWith("{\"ret")) {
@@ -552,5 +561,81 @@ public class QqMailAttachFileStorageTest {
             assertEquals(StorageErrorCode.UNSUPPORTED, e.code());
             assertFalse(e.getMessage().contains("SECRET"));
         }
+    }
+
+    @Test
+    public void missingRequiredCookieNamesFailUpFrontWithoutValues() {
+        try {
+            new QqMailAttachFileStorage(StorageConfig.empty().set("sid", SID)
+                    .set("cookie", "qm_sk=COOKIESECRET; xm_sid=S1; xm_uin=U1"), new Mock(), sleeps::add, () -> 1L);
+            fail("缺 cookie 名应抛");
+        } catch (StorageException e) {
+            assertEquals(StorageErrorCode.AUTH_FAILED, e.code());
+            assertTrue(e.getMessage(), e.getMessage().contains("xm_skey") && e.getMessage().contains("xm_data_ticket"));
+            assertFalse(e.getMessage().contains("COOKIESECRET"));
+            assertFalse(e.getMessage().contains("xm_uin"));
+        }
+    }
+
+    @Test
+    public void ret20002IsAuthEvenWhenNotConfigured() {
+        Mock mock = new Mock().json("/attach/attach_list", err(-20002));
+        try {
+            open(mock, "authRetCodes", "-3").list("/全部");
+            fail();
+        } catch (StorageException e) {
+            assertEquals(StorageErrorCode.AUTH_FAILED, e.code());
+            assertTrue(e.getMessage().contains("ret=-20002"));
+        }
+    }
+
+    @Test
+    public void listReturnsFirstPageOnlyWithServerTotal() {
+        Mock mock = new Mock().json("/attach/attach_list", page(32002, item("f1", "a.zip", 1, "m1", false),
+                item("f2", "b.zip", 2, "m2", false)));
+        QqMailAttachFileStorage fs = open(mock, "pageSize", "2");
+        QqMailAttachFileStorage.Page p = fs.listPage("/压缩包", 0);
+        assertEquals(2, p.entries.size());
+        assertEquals(32002L, p.total);
+        assertTrue(p.hasMore());
+        assertEquals(1, mock.calls.size());
+        assertTrue(mock.body(0).contains("attach_type=6") || mock.body(0).contains("attach_type="));
+    }
+
+    @Test
+    public void listPagePassesServerSortAndSearch() {
+        Mock mock = new Mock().json("/attach/search", page(1, item("f1", "备份.tar.gz", 1, "m1", false)));
+        QqMailAttachFileStorage.Page p = open(mock).listPage("/全部", 3, 2, 0, "备份");
+        assertEquals(1, p.entries.size());
+        String b = decode(mock.body(0));
+        assertTrue(b, b.contains("page_now=3") && b.contains("sort_type=2") && b.contains("sort_direction=0")
+                && b.contains("key=备份"));
+    }
+
+    @Test
+    public void shortPageBeforeTotalRetriesThenFails() {
+        Mock mock = new Mock()
+                .json("/attach/search", page(10, item("f1", "x.txt", 1, "m1", false), item("f2", "x.txt", 1, "m2", false)))
+                .json("/attach/search", page(10, item("f3", "x.txt", 1, "m3", false)))
+                .json("/attach/search", page(10, item("f3", "x.txt", 1, "m3", false)))
+                .json("/attach/search", page(10, item("f3", "x.txt", 1, "m3", false)));
+        try {
+            open(mock, "pageSize", "2").fetchAll("全部", "x.txt");
+            fail("短页应报错");
+        } catch (StorageException e) {
+            assertTrue(e.getMessage(), e.getMessage().contains("分页不完整") && e.getMessage().contains("total=10"));
+        }
+        assertEquals(4, mock.calls.size());
+    }
+
+    @Test
+    public void bigAttachmentsWithoutFileidDoNotCollide() {
+        java.util.Map<String, Object> a = new java.util.HashMap<String, Object>();
+        a.put("mailid", "m1");
+        a.put("name", "x.bin");
+        a.put("big_attach_key", "K1");
+        java.util.Map<String, Object> b = new java.util.HashMap<String, Object>(a);
+        b.put("big_attach_key", "K2");
+        assertFalse(new QqMailAttachItem(a).shortId.equals(new QqMailAttachItem(b).shortId));
     }
 }
