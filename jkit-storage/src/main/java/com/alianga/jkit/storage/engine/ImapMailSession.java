@@ -26,6 +26,7 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -59,6 +60,8 @@ public final class ImapMailSession implements AutoCloseable {
     /** 单附件默认上限。 */
     static final long DEFAULT_MAX_ATTACHMENT_BYTES = MailFileStorage.DEFAULT_MAX_ATTACHMENT_BYTES;
 
+    private static final Pattern UIDVALIDITY = Pattern.compile(
+            "\\[UIDVALIDITY\\s+(\\d+)\\]", Pattern.CASE_INSENSITIVE);
     private static final Pattern LITERAL_AT_END = Pattern.compile("\\{(\\d+)\\}\\s*$");
     private static final Pattern FETCH_UID = Pattern.compile("\\bUID\\s+(\\d+)\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern FETCH_SIZE = Pattern.compile("\\bRFC822\\.SIZE\\s+(\\d+)\\b", Pattern.CASE_INSENSITIVE);
@@ -81,6 +84,10 @@ public final class ImapMailSession implements AutoCloseable {
     private InputStream rawIn;
     private OutputStream rawOut;
     private String selectedFolder;
+    /** 最近一次 SELECT 应答中的 UIDVALIDITY；未见为 -1。 */
+    private long lastUidValidity = -1L;
+    /** 外来附件索引：已解析的 IMAP 文件夹 → (UIDVALIDITY, 显示名 → uid#section 等)。 */
+    private final Map<String, FolderIndex> foreignIndex = new HashMap<String, FolderIndex>();
     /** 配置的根邮箱（basePath）。 */
     private String baseFolder = DEFAULT_FOLDER;
     /** LIST/NAMESPACE 报告的层级分隔符，默认 {@code /}。 */
@@ -266,7 +273,7 @@ public final class ImapMailSession implements AutoCloseable {
                 ensureSelected(resolved.imapFolder);
                 ForeignHit foreign = findForeign(resolved.mailName);
                 if (foreign != null) {
-                    out.write(fetchForeignPayload(foreign));
+                    out.write(downloadForeign(resolved.mailName, foreign));
                     out.flush();
                     return;
                 }
@@ -509,7 +516,7 @@ public final class ImapMailSession implements AutoCloseable {
         }
         TaggedResult select = tagged("SELECT " + quoteMailbox(absFolder));
         if (select.ok) {
-            selectedFolder = absFolder;
+            onSelected(absFolder);
             return;
         }
         TaggedResult create = taggedCreate(absFolder);
@@ -522,7 +529,7 @@ public final class ImapMailSession implements AutoCloseable {
             throw StorageException.serverError(
                     "无法选中 IMAP 文件夹 " + absFolder + ": " + again.text, absFolder);
         }
-        selectedFolder = absFolder;
+        onSelected(absFolder);
     }
 
     private void deleteMailboxTree(String relDir) throws IOException {
@@ -570,7 +577,7 @@ public final class ImapMailSession implements AutoCloseable {
         // 直接 SELECT 探测
         TaggedResult select = tagged("SELECT " + quoteMailbox(abs));
         if (select.ok) {
-            selectedFolder = abs;
+            onSelected(abs);
             return true;
         }
         return false;
@@ -579,7 +586,7 @@ public final class ImapMailSession implements AutoCloseable {
     private boolean selectIfExists(String absFolder) throws IOException {
         TaggedResult select = tagged("SELECT " + quoteMailbox(absFolder));
         if (select.ok) {
-            selectedFolder = absFolder;
+            onSelected(absFolder);
             return true;
         }
         return false;
@@ -947,7 +954,7 @@ public final class ImapMailSession implements AutoCloseable {
     private void ensureSelected(String folder) throws IOException {
         TaggedResult select = tagged("SELECT " + quoteMailbox(folder));
         if (select.ok) {
-            selectedFolder = folder;
+            onSelected(folder);
             return;
         }
         TaggedResult create = taggedCreate(folder);
@@ -960,7 +967,7 @@ public final class ImapMailSession implements AutoCloseable {
             throw StorageException.serverError(
                     "无法选中 IMAP 文件夹 " + folder + ": " + again.text, folder);
         }
-        selectedFolder = folder;
+        onSelected(folder);
     }
 
     private static boolean looksLikeAlreadyExists(String text) {
@@ -1109,10 +1116,14 @@ public final class ImapMailSession implements AutoCloseable {
     }
 
     private void collectMails(String rel, List<MailEntry> result) throws IOException {
+        FolderIndex index = freshIndex();
         for (Long uid : uidSearch("ALL")) {
             FetchMessage msg = fetchRaw(uid.longValue());
             if (msg == null) {
                 continue;
+            }
+            if (!isJkitMail(msg.headerText)) {
+                indexForeign(index, uid.longValue(), msg);
             }
             List<MailEntry> entries = isJkitMail(msg.headerText)
                     ? Collections.singletonList(jkitEntry(uid.longValue(), msg))
@@ -1163,36 +1174,186 @@ public final class ImapMailSession implements AutoCloseable {
         return attrs;
     }
 
-    /** 当前选中文件夹内按显示名找外来附件；名称不符合 {@code __xxxxxxxx} 形态直接返回 null。 */
+    /**
+     * 当前选中文件夹内按显示名找外来附件；名称不符合 {@code __xxxxxxxx} 形态直接返回 null。
+     * 先查索引（命中后用一次 BODYSTRUCTURE 校验该段文件名与 shortId 仍一致，QQ 的 UID 不可靠）；
+     * 未命中或校验失败时回退扫描：UID SEARCH ALL + 一次批量 FETCH 头与 BODYSTRUCTURE，绝不取整封邮件。
+     */
     private ForeignHit findForeign(String name) throws IOException {
         if (name == null || !FOREIGN_NAME.matcher(name).find()) {
             return null;
         }
-        for (Long uid : uidSearch("ALL")) {
-            FetchMessage msg = fetchRaw(uid.longValue());
-            if (msg == null || isJkitMail(msg.headerText)) {
-                continue;
+        ForeignHit cached = indexLookup(name);
+        if (cached != null) {
+            ForeignHit verified = verifyHit(name, cached);
+            if (verified != null) {
+                return verified;
             }
-            for (MailEntry e : foreignMailEntries(uid.longValue(), msg)) {
-                if (name.equals(e.name())) {
-                    String section = e.uid().substring(e.uid().indexOf('#') + 1);
-                    for (AttachmentPart p : attachmentParts(msg.structureText)) {
-                        if (p.section.equals(section)) {
-                            return new ForeignHit(uid.longValue(), p, e);
-                        }
-                    }
+            dropIndexEntry(name);
+        }
+        return scanForeign(name);
+    }
+
+    /** 索引命中后校验：只取该 UID 的 BODYSTRUCTURE；段文件名或 shortId 不符返回 null。 */
+    private ForeignHit verifyHit(String name, ForeignHit hit) throws IOException {
+        String tag = nextTag();
+        sendRaw(tag + " UID FETCH " + hit.uid + " (UID BODYSTRUCTURE)\r\n");
+        List<FetchMessage> msgs = readFetchMessages(tag, true);
+        if (msgs == null || msgs.isEmpty()) {
+            return null;
+        }
+        FetchMessage msg = msgs.get(0);
+        if (msg.uid > 0L && msg.uid != hit.uid) {
+            return null;
+        }
+        for (AttachmentPart p : attachmentParts(msg.structureText)) {
+            if (p.section.equals(hit.part.section)) {
+                boolean same = p.filename == null ? hit.part.filename == null : p.filename.equals(hit.part.filename);
+                if (same && name.equals(foreignDisplayName(p.filename, hit.uid, p.section))) {
+                    return new ForeignHit(hit.uid, p, hit.entry);
                 }
+                return null;
             }
         }
         return null;
     }
 
+    /** 回退扫描：UID SEARCH ALL + 单次批量 UID FETCH（头字段 + BODYSTRUCTURE），并重建本文件夹索引。 */
+    private ForeignHit scanForeign(String name) throws IOException {
+        FolderIndex index = freshIndex();
+        List<Long> uids = uidSearch("ALL");
+        if (uids.isEmpty()) {
+            return null;
+        }
+        StringBuilder set = new StringBuilder();
+        for (Long u : uids) {
+            if (set.length() > 0) {
+                set.append(',');
+            }
+            set.append(u.longValue());
+        }
+        String tag = nextTag();
+        sendRaw(tag + " UID FETCH " + set + " (UID INTERNALDATE RFC822.SIZE " + META_FIELDS
+                + " BODYSTRUCTURE)\r\n");
+        List<FetchMessage> msgs = readFetchMessages(tag, false);
+        for (FetchMessage msg : msgs) {
+            if (msg.uid > 0L && !isJkitMail(msg.headerText)) {
+                indexForeign(index, msg.uid, msg);
+            }
+        }
+        return index.hits.get(name);
+    }
+
+    /** 外来附件正文：只取 BODY.PEEK[section]；NO 或空（邮件已移走/删除）返回 null。 */
     private byte[] fetchForeignPayload(ForeignHit hit) throws IOException {
         String tag = nextTag();
         sendRaw(tag + " UID FETCH " + hit.uid + " (UID BODY.PEEK[" + hit.part.section + "])\r\n");
-        FetchMessage msg = readFetchMessage(tag, hit.uid);
-        byte[] raw = msg == null || msg.body == null ? new byte[0] : msg.body;
-        return decodeTransfer(raw, hit.part.encoding);
+        List<FetchMessage> msgs = readFetchMessages(tag, true);
+        if (msgs == null || msgs.isEmpty() || msgs.get(msgs.size() - 1).body == null) {
+            return null;
+        }
+        return decodeTransfer(msgs.get(msgs.size() - 1).body, hit.part.encoding);
+    }
+
+    /** 下载外来附件：索引条目失效（正文取不到）时丢弃并回退扫描一次。 */
+    private byte[] downloadForeign(String name, ForeignHit hit) throws IOException {
+        byte[] data = fetchForeignPayload(hit);
+        if (data != null) {
+            return data;
+        }
+        dropIndexEntry(name);
+        ForeignHit again = scanForeign(name);
+        data = again == null ? null : fetchForeignPayload(again);
+        if (data == null) {
+            throw StorageException.notFound(name);
+        }
+        return data;
+    }
+
+    // ---- 外来附件索引
+
+    private static final class FolderIndex {
+        final long uidValidity;
+        final Map<String, ForeignHit> hits = new HashMap<String, ForeignHit>();
+
+        FolderIndex(long uidValidity) {
+            this.uidValidity = uidValidity;
+        }
+    }
+
+    /** SELECT 成功后记录：UIDVALIDITY 变化则丢掉该文件夹整份索引。 */
+    private void onSelected(String folder) {
+        selectedFolder = folder;
+        FolderIndex idx = folder == null ? null : foreignIndex.get(folder);
+        if (idx != null && lastUidValidity >= 0L && idx.uidValidity != lastUidValidity) {
+            foreignIndex.remove(folder);
+        }
+    }
+
+    /** 为当前选中文件夹新建（替换）一份索引。 */
+    private FolderIndex freshIndex() {
+        FolderIndex idx = new FolderIndex(lastUidValidity);
+        if (selectedFolder != null) {
+            foreignIndex.put(selectedFolder, idx);
+        }
+        return idx;
+    }
+
+    private void indexForeign(FolderIndex index, long uid, FetchMessage msg) {
+        List<AttachmentPart> parts = attachmentParts(msg.structureText);
+        List<MailEntry> entries = foreignMailEntries(uid, msg);
+        for (int i = 0; i < entries.size() && i < parts.size(); i++) {
+            index.hits.put(entries.get(i).name(), new ForeignHit(uid, parts.get(i), entries.get(i)));
+        }
+    }
+
+    private ForeignHit indexLookup(String name) {
+        FolderIndex idx = selectedFolder == null ? null : foreignIndex.get(selectedFolder);
+        if (idx == null) {
+            return null;
+        }
+        if (lastUidValidity >= 0L && idx.uidValidity != lastUidValidity) {
+            foreignIndex.remove(selectedFolder);
+            return null;
+        }
+        return idx.hits.get(name);
+    }
+
+    private void dropIndexEntry(String name) {
+        FolderIndex idx = selectedFolder == null ? null : foreignIndex.get(selectedFolder);
+        if (idx != null) {
+            idx.hits.remove(name);
+        }
+    }
+
+    /** 单测：当前文件夹索引条目数。 */
+    int foreignIndexSizeForTest() {
+        FolderIndex idx = selectedFolder == null ? null : foreignIndex.get(selectedFolder);
+        return idx == null ? 0 : idx.hits.size();
+    }
+
+    /** 读取一个 tag 下的全部 FETCH 应答；{@code noIsEmpty} 时 NO/BAD 返回 null 而不抛异常。 */
+    private List<FetchMessage> readFetchMessages(String tag, boolean noIsEmpty) throws IOException {
+        List<FetchMessage> out = new ArrayList<FetchMessage>();
+        while (true) {
+            String line = readLine();
+            if (line == null) {
+                throw StorageException.serverError("FETCH 连接中断", selectedFolder);
+            }
+            if (line.startsWith("* ") && line.toUpperCase(Locale.ROOT).contains("FETCH")) {
+                out.add(parseFetchLine(line));
+                continue;
+            }
+            if (line.startsWith(tag + " ")) {
+                if (!line.regionMatches(true, tag.length() + 1, "OK", 0, 2)) {
+                    if (noIsEmpty) {
+                        return null;
+                    }
+                    throw StorageException.serverError("FETCH 失败: " + line, selectedFolder);
+                }
+                return out;
+            }
+        }
     }
 
     private byte[] fetchBody(long uid) throws IOException {
@@ -1627,6 +1788,10 @@ public final class ImapMailSession implements AutoCloseable {
                 throw StorageException.serverError("IMAP 连接中断，等待 " + tag, selectedFolder);
             }
             // 跳过未标记与能力行；FETCH 字面量不应出现在 LOGIN/SELECT 路径
+            Matcher uv = UIDVALIDITY.matcher(line);
+            if (line.startsWith("* ") && uv.find()) {
+                lastUidValidity = Long.parseLong(uv.group(1));
+            }
             if (line.startsWith(tag + " ")) {
                 boolean ok = line.regionMatches(true, tag.length() + 1, "OK", 0, 2);
                 boolean no = line.regionMatches(true, tag.length() + 1, "NO", 0, 2);
