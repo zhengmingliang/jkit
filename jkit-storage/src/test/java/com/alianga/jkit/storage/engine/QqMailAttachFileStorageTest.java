@@ -150,8 +150,18 @@ public class QqMailAttachFileStorageTest {
     }
 
     static String page(int total, String... items) {
-        return "{\"ret\":0,\"body\":{\"attach_list\":{\"total\":" + total + ",\"attach\":["
-                + String.join(",", items) + "]}}}";
+        return "{\"head\":{\"ret\":0,\"msg\":\"\",\"cgi\":\"attach_list\",\"time\":1760500000},"
+                + "\"body\":{\"attach_list\":{\"attach\":[" + String.join(",", items) + "]},\"total\":" + total
+                + ",\"file_total\":" + total + ",\"mail_total\":1},\"param\":{}}";
+    }
+
+    static String err(long ret) {
+        return "{\"head\":{\"ret\":" + ret + ",\"msg\":\"fail\",\"show_err_msg\":\"出错了\","
+                + "\"stack\":\"at secret.Stack(SIDSECRET123)\"},\"body\":{}}";
+    }
+
+    static String ok() {
+        return "{\"head\":{\"ret\":0},\"body\":{}}";
     }
 
     private static String pathOf(String dir, String name, String mailid, String fileid) {
@@ -201,11 +211,12 @@ public class QqMailAttachFileStorageTest {
     @Test
     public void missingAttachListStructureThrowsFormatError() {
         String[] bad = {
-            "{\"ret\":0}",
-            "{\"ret\":0,\"body\":{}}",
-            "{\"ret\":0,\"body\":{\"attach_list\":{\"total\":1}}}",
-            "{\"ret\":0,\"body\":{\"attach_list\":{\"total\":1,\"attach\":{}}}}",
-            "{\"ret\":0,\"data\":{\"total\":1,\"list\":[]}}"
+            "{\"ret\":0,\"body\":{\"attach_list\":{\"attach\":[]}}}",
+            "{\"head\":{},\"body\":{\"attach_list\":{\"attach\":[]}}}",
+            "{\"head\":{\"ret\":0}}",
+            "{\"head\":{\"ret\":0},\"body\":{}}",
+            "{\"head\":{\"ret\":0},\"body\":{\"attach_list\":{\"attach\":{}}}}",
+            "{\"head\":{\"ret\":0},\"body\":{\"attach_list\":[]}}"
         };
         for (String b : bad) {
             Mock mock = new Mock().json("/attach/attach_list", b).json("/attach/search", b);
@@ -218,6 +229,16 @@ public class QqMailAttachFileStorageTest {
                 assertEquals("unexpected response format: /attach/attach_list", e.getMessage());
             }
             try {
+                new QqMailAttachFileStorage(StorageConfig.empty().set("sid", SID),
+                        new Mock().json("/attach/set_collect", b), sleeps::add, () -> 1000L)
+                        .call("/attach/set_collect", new LinkedHashMap<String, String>());
+                if (!b.contains("\"ret\":0}") || b.startsWith("{\"ret")) {
+                    fail("缺 head.ret 应抛: " + b);
+                }
+            } catch (StorageException e) {
+                assertEquals(StorageErrorCode.IO_ERROR, e.code());
+            }
+            try {
                 fs.stat(pathOf("全部", "a.txt", "m1", "f1"));
                 fail("search 也应抛格式错误");
             } catch (StorageException e) {
@@ -225,6 +246,15 @@ public class QqMailAttachFileStorageTest {
                 assertTrue(e.getMessage().contains("/attach/search"));
             }
         }
+    }
+
+    @Test
+    public void emptySearchAttachListObjectIsEmptyNotError() {
+        Mock mock = new Mock().json("/attach/search",
+                "{\"head\":{\"ret\":0},\"body\":{\"attach_list\":{},\"total\":0},\"param\":{}}");
+        QqMailAttachFileStorage fs = open(mock);
+        assertFalse(fs.exists(pathOf("全部", "nothing.txt", "m1", "f1")));
+        assertEquals(1, mock.calls.size());
     }
 
     @Test
@@ -297,8 +327,9 @@ public class QqMailAttachFileStorageTest {
 
     @Test
     public void retMappingAuthAndUnknown() {
-        Mock mock = new Mock().json("/login/checksid", "{\"ret\":-101}")
-                .json("/attach/attach_list", "{\"ret\":12345}");
+        Mock mock = new Mock().json("/login/checksid", err(-101))
+                .json("/attach/attach_list", err(12345))
+                .json("/attach/search", err(-21619));
         QqMailAttachFileStorage fs = open(mock);
         try {
             fs.checkSid();
@@ -314,14 +345,22 @@ public class QqMailAttachFileStorageTest {
             assertEquals(StorageErrorCode.IO_ERROR, e.code());
             assertTrue(e.getMessage().contains("ret=12345"));
             assertFalse(e.getMessage().contains(SID));
+            assertFalse(e.getMessage().contains("stack") || e.getMessage().contains("出错了"));
         }
-        assertEquals(2, mock.calls.size()); // 鉴权失败不自动重试
+        try {
+            fs.stat(pathOf("全部", "a.txt", "m1", "f1"));
+            fail();
+        } catch (StorageException e) {
+            assertEquals(StorageErrorCode.UNSUPPORTED, e.code());
+            assertTrue(e.getMessage().contains("-21619"));
+        }
+        assertEquals(3, mock.calls.size()); // 鉴权失败不自动重试
     }
 
     @Test
     public void setCollectRequestBody() {
         Mock mock = new Mock().json("/attach/attach_list", page(1, item("f1", "a\"b.txt", 1, "m1", false)))
-                .json("/attach/set_collect", "{\"ret\":0}");
+                .json("/attach/set_collect", ok());
         QqMailAttachFileStorage fs = open(mock);
         String path = fs.list("/全部").get(0).path();
         fs.setCollect(path, true);

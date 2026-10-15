@@ -359,8 +359,8 @@ public class QqMailAttachFileStorage implements FileStorage {
             }
             String api = key != null ? "/attach/search" : "/attach/attach_list";
             Map<String, Object> resp = call(api, form);
-            Map<String, Object> attachList = attachListOf(resp, api);
-            List<Map<String, Object>> items = itemsOf(attachList, api);
+            Map<String, Object> body = bodyOf(resp, api);
+            List<Map<String, Object>> items = itemsOf(body, api);
             for (Map<String, Object> raw : items) {
                 QqMailAttachItem item = new QqMailAttachItem(raw);
                 if (item.shortId == null) {
@@ -372,7 +372,7 @@ public class QqMailAttachFileStorage implements FileStorage {
                 }
                 all.add(item);
             }
-            long total = QqMailAttachItem.num(attachList.get("total"), -1L);
+            long total = QqMailAttachItem.num(body.get("total"), -1L);
             if (items.isEmpty() || items.size() < pageSize || (total >= 0L && (long) (page + 1) * pageSize >= total)) {
                 break;
             }
@@ -389,7 +389,15 @@ public class QqMailAttachFileStorage implements FileStorage {
     Map<String, Object> call(String path, Map<String, String> form) {
         throttle();
         Map<String, Object> resp = client.post(path, form);
-        long ret = QqMailAttachItem.num(resp.get("ret"), 0L);
+        // HAR 实测：所有接口 ret 在 head.ret；head.stack / show_err_msg 不进异常
+        Object head = resp.get("head");
+        if (!(head instanceof Map) || ((Map<?, ?>) head).get("ret") == null) {
+            throw badFormat(path);
+        }
+        long ret = QqMailAttachItem.num(((Map<?, ?>) head).get("ret"), Long.MIN_VALUE);
+        if (ret == Long.MIN_VALUE) {
+            throw badFormat(path);
+        }
         if (ret != 0L) {
             throw mapRet(ret, path);
         }
@@ -430,23 +438,30 @@ public class QqMailAttachFileStorage implements FileStorage {
         return StorageException.io("unexpected response format: " + api, null, null);
     }
 
-    /** 实测（HAR）：列表位于 {@code body.attach_list}，ret 在顶层。 */
+    /** HAR 实测：{@code body.attach_list.attach[]}，{@code body.total}。 */
     @SuppressWarnings("unchecked")
-    private static Map<String, Object> attachListOf(Map<String, Object> resp, String api) {
+    private static Map<String, Object> bodyOf(Map<String, Object> resp, String api) {
         Object body = resp.get("body");
         if (!(body instanceof Map)) {
             throw badFormat(api);
         }
-        Object al = ((Map<String, Object>) body).get("attach_list");
+        return (Map<String, Object>) body;
+    }
+
+    /**
+     * {@code body.attach_list.attach[]}；搜索无结果时 {@code attach_list} 为 {@code {}} → 空列表。
+     * 缺 attach_list、或 attach 存在但非数组 → IO_ERROR。
+     */
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> itemsOf(Map<String, Object> body, String api) {
+        Object al = body.get("attach_list");
         if (!(al instanceof Map)) {
             throw badFormat(api);
         }
-        return (Map<String, Object>) al;
-    }
-
-    /** {@code body.attach_list.attach[]}；缺失或非数组 → IO_ERROR，绝不当作空列表。 */
-    @SuppressWarnings("unchecked")
-    private static List<Map<String, Object>> itemsOf(Map<String, Object> attachList, String api) {
+        Map<String, Object> attachList = (Map<String, Object>) al;
+        if (!attachList.containsKey("attach")) {
+            return Collections.emptyList();
+        }
         Object v = attachList.get("attach");
         if (!(v instanceof List)) {
             throw badFormat(api);
