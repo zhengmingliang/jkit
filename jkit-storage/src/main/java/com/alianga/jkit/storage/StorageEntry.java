@@ -37,6 +37,18 @@ public final class StorageEntry {
     /** 扩展属性键：是否已收藏，值 "true"/"false"（目前仅 qqmail-attach 提供）。 */
     public static final String ATTR_COLLECTED = "collected";
 
+    /** 扩展属性键：所在邮件主题（RFC2047 已解码；mail / qq-mail 引擎）。 */
+    public static final String ATTR_MAIL_SUBJECT = "mail.subject";
+
+    /** 扩展属性键：发件人（显示名已解码 + 地址，如 {@code 张三 <a@b.com>}）。 */
+    public static final String ATTR_MAIL_FROM = "mail.from";
+
+    /** 扩展属性键：邮件时间，ISO-8601 带偏移（Date 头，缺失则 INTERNALDATE）。 */
+    public static final String ATTR_MAIL_DATE = "mail.date";
+
+    /** 扩展属性键：值 "true" 表示条目是非 jkit 邮件的附件（只读，不可删改）。 */
+    public static final String ATTR_MAIL_FOREIGN = "mail.foreign";
+
     private StorageEntry(String path, boolean directory, long size, long lastModified, String etag) {
         this(path, directory, size, lastModified, etag, Collections.<String, String>emptyMap());
     }

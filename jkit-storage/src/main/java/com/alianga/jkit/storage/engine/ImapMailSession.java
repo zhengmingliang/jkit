@@ -1,5 +1,6 @@
 package com.alianga.jkit.storage.engine;
 
+import com.alianga.jkit.storage.StorageEntry;
 import com.alianga.jkit.storage.StorageErrorCode;
 import com.alianga.jkit.storage.StorageException;
 
@@ -12,12 +13,20 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Collections;
 import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -255,6 +264,12 @@ public final class ImapMailSession implements AutoCloseable {
             ResolvedPath resolved = resolveLogicalFile(path);
             try {
                 ensureSelected(resolved.imapFolder);
+                ForeignHit foreign = findForeign(resolved.mailName);
+                if (foreign != null) {
+                    out.write(fetchForeignPayload(foreign));
+                    out.flush();
+                    return;
+                }
                 long uid = findUidByName(resolved.mailName);
                 if (uid < 0L) {
                     throw StorageException.notFound(resolved.logical);
@@ -282,6 +297,9 @@ public final class ImapMailSession implements AutoCloseable {
             ResolvedPath resolved = resolveLogicalFile(path);
             try {
                 ensureSelected(resolved.imapFolder);
+                if (findForeign(resolved.mailName) != null) {
+                    throw StorageException.unsupported("外来邮件附件只读，不能删除: " + resolved.logical);
+                }
                 long uid = findUidByName(resolved.mailName);
                 if (uid < 0L) {
                     throw StorageException.notFound(resolved.logical);
@@ -315,7 +333,7 @@ public final class ImapMailSession implements AutoCloseable {
                 }
                 ResolvedPath resolved = resolveLogicalFile(logical);
                 ensureSelected(resolved.imapFolder);
-                return findUidByName(resolved.mailName) >= 0L;
+                return findForeign(resolved.mailName) != null || findUidByName(resolved.mailName) >= 0L;
             } catch (IOException e) {
                 throw StorageException.io("IMAP exists 失败: " + logical, logical, e);
             }
@@ -338,6 +356,10 @@ public final class ImapMailSession implements AutoCloseable {
                 }
                 ResolvedPath resolved = resolveLogicalFile(logical);
                 ensureSelected(resolved.imapFolder);
+                ForeignHit foreign = findForeign(resolved.mailName);
+                if (foreign != null) {
+                    return foreign.entry.withName(logical);
+                }
                 long uid = findUidByName(resolved.mailName);
                 if (uid < 0L) {
                     throw StorageException.notFound(logical);
@@ -346,7 +368,7 @@ public final class ImapMailSession implements AutoCloseable {
                 if (entry == null) {
                     throw StorageException.notFound(logical);
                 }
-                return new MailEntry(logical, false, entry.size(), entry.mtimeEpochMs(), entry.uid());
+                return entry.withName(logical);
             } catch (StorageException e) {
                 throw e;
             } catch (IOException e) {
@@ -436,15 +458,7 @@ public final class ImapMailSession implements AutoCloseable {
             if (!selectIfExists(abs)) {
                 continue;
             }
-            List<Long> uids = uidSearch("ALL");
-            for (Long uid : uids) {
-                MailEntry entry = fetchMeta(uid.longValue());
-                if (entry == null || entry.name().isEmpty()) {
-                    continue;
-                }
-                String logical = rel.isEmpty() ? entry.name() : rel + "/" + entry.name();
-                result.add(new MailEntry(logical, false, entry.size(), entry.mtimeEpochMs(), entry.uid()));
-            }
+            collectMails(rel, result);
         }
         return result;
     }
@@ -471,15 +485,7 @@ public final class ImapMailSession implements AutoCloseable {
             }
             result.add(new MailEntry(childRel, true, 0L, -1L, null));
         }
-        List<Long> uids = uidSearch("ALL");
-        for (Long uid : uids) {
-            MailEntry entry = fetchMeta(uid.longValue());
-            if (entry == null || entry.name().isEmpty()) {
-                continue;
-            }
-            String logical = relDir + "/" + entry.name();
-            result.add(new MailEntry(logical, false, entry.size(), entry.mtimeEpochMs(), entry.uid()));
-        }
+        collectMails(relDir, result);
         return result;
     }
 
@@ -1017,7 +1023,7 @@ public final class ImapMailSession implements AutoCloseable {
             }
             if (best >= 0L) {
                 MailEntry meta = fetchMeta(best);
-                if (meta != null && nameEquals(meta.name(), name)) {
+                if (meta != null && !meta.foreign() && nameEquals(meta.name(), name)) {
                     return best;
                 }
             }
@@ -1025,7 +1031,7 @@ public final class ImapMailSession implements AutoCloseable {
             for (int i = byHeader.size() - 1; i >= 0; i--) {
                 long uid = byHeader.get(i).longValue();
                 MailEntry meta = fetchMeta(uid);
-                if (meta != null && nameEquals(meta.name(), name)) {
+                if (meta != null && !meta.foreign() && nameEquals(meta.name(), name)) {
                     return uid;
                 }
             }
@@ -1034,7 +1040,7 @@ public final class ImapMailSession implements AutoCloseable {
         for (int i = all.size() - 1; i >= 0; i--) {
             long uid = all.get(i).longValue();
             MailEntry meta = fetchMeta(uid);
-            if (meta != null && nameEquals(meta.name(), name)) {
+            if (meta != null && !meta.foreign() && nameEquals(meta.name(), name)) {
                 return uid;
             }
         }
@@ -1050,14 +1056,34 @@ public final class ImapMailSession implements AutoCloseable {
         }
     }
 
+    /**
+     * 单封邮件元数据。jkit 写入的邮件返回其文件条目；外来邮件返回 {@code foreign=true}
+     * 的占位条目（名称不可用于匹配，调用方据此跳过）。
+     */
     private MailEntry fetchMeta(long uid) throws IOException {
-        String tag = nextTag();
-        sendRaw(tag + " UID FETCH " + uid
-                + " (UID INTERNALDATE RFC822.SIZE BODY.PEEK[HEADER.FIELDS (SUBJECT X-JKIT-SIZE)] BODYSTRUCTURE)\r\n");
-        FetchMessage msg = readFetchMessage(tag, uid);
+        FetchMessage msg = fetchRaw(uid);
         if (msg == null) {
             return null;
         }
+        if (!isJkitMail(msg.headerText)) {
+            return new MailEntry("", false, -1L, parseInternalDate(msg.internalDate),
+                    String.valueOf(uid), true, null);
+        }
+        return jkitEntry(uid, msg);
+    }
+
+    /**
+     * 一次 FETCH 取齐 list 所需：INTERNALDATE、识别/属性用头（SUBJECT FROM DATE MESSAGE-ID
+     * X-JKIT-*）与 BODYSTRUCTURE；外来附件枚举不再额外往返。
+     */
+    private FetchMessage fetchRaw(long uid) throws IOException {
+        String tag = nextTag();
+        sendRaw(tag + " UID FETCH " + uid + " (UID INTERNALDATE RFC822.SIZE " + META_FIELDS
+                + " BODYSTRUCTURE)\r\n");
+        return readFetchMessage(tag, uid);
+    }
+
+    private MailEntry jkitEntry(long uid, FetchMessage msg) {
         String subject = parseSubject(msg.headerText);
         if (subject == null || subject.isEmpty()) {
             subject = parseFilenameFromStructure(msg.structureText);
@@ -1067,7 +1093,106 @@ public final class ImapMailSession implements AutoCloseable {
         }
         long size = payloadSize(msg.headerText, msg.structureText);
         long mtime = parseInternalDate(msg.internalDate);
-        return new MailEntry(subject, false, size, mtime, String.valueOf(uid));
+        Map<String, String> attrs = new LinkedHashMap<String, String>();
+        attrs.put(StorageEntry.ATTR_MAIL_SUBJECT, subject);
+        String date = mailDateIso(headerValue(msg.headerText, "Date"), msg.internalDate);
+        if (date != null) {
+            attrs.put(StorageEntry.ATTR_MAIL_DATE, date);
+        }
+        // Subject 中的 / 不是路径分隔符：换成 U+2215 显示，目录只来自 IMAP 文件夹
+        return new MailEntry(jkitDisplayName(subject), false, size, mtime, String.valueOf(uid), false, attrs);
+    }
+
+    /** jkit 文件名：Subject 原样，仅把 {@code /} 换成 U+2215（避免被当路径拆分）。 */
+    static String jkitDisplayName(String subject) {
+        return subject == null ? "" : subject.replace('/', SLASH_STANDIN);
+    }
+
+    private void collectMails(String rel, List<MailEntry> result) throws IOException {
+        for (Long uid : uidSearch("ALL")) {
+            FetchMessage msg = fetchRaw(uid.longValue());
+            if (msg == null) {
+                continue;
+            }
+            List<MailEntry> entries = isJkitMail(msg.headerText)
+                    ? Collections.singletonList(jkitEntry(uid.longValue(), msg))
+                    : foreignMailEntries(uid.longValue(), msg);
+            for (MailEntry e : entries) {
+                if (e.name().isEmpty()) {
+                    continue;
+                }
+                result.add(e.withName(rel.isEmpty() ? e.name() : rel + "/" + e.name()));
+            }
+        }
+    }
+
+    /**
+     * 外来（非 jkit 写入）邮件的唯一出口：按附件逐个列出，无附件的不列。
+     * 名称 {@code <base>__<shortId>.<ext>}，shortId = sha256(uid + "\n" + section) 前 8 位 hex。
+     */
+    List<MailEntry> foreignMailEntries(long uid, FetchMessage msg) {
+        List<AttachmentPart> parts = attachmentParts(msg.structureText);
+        if (parts.isEmpty()) {
+            return Collections.emptyList();
+        }
+        Map<String, String> attrs = mailAttrs(msg);
+        attrs.put(StorageEntry.ATTR_MAIL_FOREIGN, "true");
+        long mtime = parseInternalDate(msg.internalDate);
+        List<MailEntry> out = new ArrayList<MailEntry>(parts.size());
+        for (AttachmentPart p : parts) {
+            out.add(new MailEntry(foreignDisplayName(p.filename, uid, p.section), false, p.decodedSize(),
+                    mtime, uid + "#" + p.section, true, attrs));
+        }
+        return out;
+    }
+
+    private static Map<String, String> mailAttrs(FetchMessage msg) {
+        Map<String, String> attrs = new LinkedHashMap<String, String>();
+        String subject = parseSubject(msg.headerText);
+        if (subject != null) {
+            attrs.put(StorageEntry.ATTR_MAIL_SUBJECT, subject);
+        }
+        String from = headerValue(msg.headerText, "From");
+        if (from != null) {
+            attrs.put(StorageEntry.ATTR_MAIL_FROM, decodeMimeWords(from));
+        }
+        String date = mailDateIso(headerValue(msg.headerText, "Date"), msg.internalDate);
+        if (date != null) {
+            attrs.put(StorageEntry.ATTR_MAIL_DATE, date);
+        }
+        return attrs;
+    }
+
+    /** 当前选中文件夹内按显示名找外来附件；名称不符合 {@code __xxxxxxxx} 形态直接返回 null。 */
+    private ForeignHit findForeign(String name) throws IOException {
+        if (name == null || !FOREIGN_NAME.matcher(name).find()) {
+            return null;
+        }
+        for (Long uid : uidSearch("ALL")) {
+            FetchMessage msg = fetchRaw(uid.longValue());
+            if (msg == null || isJkitMail(msg.headerText)) {
+                continue;
+            }
+            for (MailEntry e : foreignMailEntries(uid.longValue(), msg)) {
+                if (name.equals(e.name())) {
+                    String section = e.uid().substring(e.uid().indexOf('#') + 1);
+                    for (AttachmentPart p : attachmentParts(msg.structureText)) {
+                        if (p.section.equals(section)) {
+                            return new ForeignHit(uid.longValue(), p, e);
+                        }
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private byte[] fetchForeignPayload(ForeignHit hit) throws IOException {
+        String tag = nextTag();
+        sendRaw(tag + " UID FETCH " + hit.uid + " (UID BODY.PEEK[" + hit.part.section + "])\r\n");
+        FetchMessage msg = readFetchMessage(tag, hit.uid);
+        byte[] raw = msg == null || msg.body == null ? new byte[0] : msg.body;
+        return decodeTransfer(raw, hit.part.encoding);
     }
 
     private byte[] fetchBody(long uid) throws IOException {
@@ -1606,13 +1731,425 @@ public final class ImapMailSession implements AutoCloseable {
         }
     }
 
+    // ------------------------------------------------------------------ jkit 识别 / 外来附件
+
+    private static final String META_FIELDS =
+            "BODY.PEEK[HEADER.FIELDS (SUBJECT FROM DATE MESSAGE-ID X-JKIT-SIZE X-JKIT-TOTAL-SIZE)]";
+    /** 外来附件显示名尾部：{@code __} + 8 位 hex + 可选扩展名。 */
+    private static final Pattern FOREIGN_NAME = Pattern.compile("__[0-9a-f]{8}(\\.[^./]*)?$");
+    private static final char SLASH_STANDIN = '\u2215';
+    private static final String JKIT_FROM = "jkit-storage@localhost";
+    private static final String JKIT_MSGID_SUFFIX = "@jkit-storage>";
+
+    /**
+     * 是否 jkit 写入：任一 {@code X-Jkit-*} 头；或 jkit 生成的 Message-ID（{@code <uuid@jkit-storage>}）；
+     * 或遗留邮件（无 X-Jkit-Size，b85b232 之前）的 From {@code jkit-storage@localhost}。
+     */
+    static boolean isJkitMail(String headerText) {
+        if (headerText == null || headerText.isEmpty()) {
+            return false;
+        }
+        for (String line : headerText.split("\r\n|\n")) {
+            if (line.regionMatches(true, 0, "X-Jkit-", 0, 7)) {
+                return true;
+            }
+        }
+        String msgId = headerValue(headerText, "Message-ID");
+        if (msgId != null && msgId.toLowerCase(Locale.ROOT).contains(JKIT_MSGID_SUFFIX)) {
+            return true;
+        }
+        String from = headerValue(headerText, "From");
+        return from != null && from.toLowerCase(Locale.ROOT).contains(JKIT_FROM);
+    }
+
+    /** 取头字段值（不区分大小写，折行展开）；无则 null。 */
+    static String headerValue(String headerText, String name) {
+        if (headerText == null) {
+            return null;
+        }
+        StringBuilder value = null;
+        for (String line : headerText.split("\r\n|\n")) {
+            if (value != null) {
+                if (line.startsWith(" ") || line.startsWith("\t")) {
+                    value.append(' ').append(line.trim());
+                    continue;
+                }
+                break;
+            }
+            if (line.regionMatches(true, 0, name + ":", 0, name.length() + 1)) {
+                value = new StringBuilder(line.substring(name.length() + 1).trim());
+            }
+        }
+        return value == null ? null : value.toString();
+    }
+
+    /** 邮件时间 ISO-8601（带偏移）：优先 Date 头，其次 INTERNALDATE；都解析不了返回 null。 */
+    static String mailDateIso(String dateHeader, String internalDate) {
+        if (dateHeader != null) {
+            String v = dateHeader.replaceAll("\\([^)]*\\)", " ").trim().replaceAll("\\s+", " ");
+            String[] patterns = {"EEE, d MMM yyyy HH:mm:ss Z", "d MMM yyyy HH:mm:ss Z",
+                    "EEE, d MMM yyyy HH:mm Z", "EEE, d MMM yyyy HH:mm:ss zzz"};
+            for (String p : patterns) {
+                try {
+                    return OffsetDateTime.parse(v, DateTimeFormatter.ofPattern(p, Locale.US))
+                            .format(DateTimeFormatter.ISO_OFFSET_DATE_TIME);
+                } catch (DateTimeParseException ignored) {
+                    // next
+                }
+            }
+            try {
+                return OffsetDateTime.parse(v, DateTimeFormatter.RFC_1123_DATE_TIME)
+                        .format(DateTimeFormatter.ISO_OFFSET_DATE_TIME);
+            } catch (DateTimeParseException ignored) {
+                // fall back to INTERNALDATE
+            }
+        }
+        if (internalDate != null) {
+            try {
+                return OffsetDateTime.parse(internalDate.trim(),
+                        DateTimeFormatter.ofPattern("d-MMM-yyyy HH:mm:ss Z", Locale.US))
+                        .format(DateTimeFormatter.ISO_OFFSET_DATE_TIME);
+            } catch (DateTimeParseException ignored) {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    /** BODYSTRUCTURE 中的一个附件段。 */
+    static final class AttachmentPart {
+        final String section;
+        final String encoding;
+        final long encodedSize;
+        final String filename;
+
+        AttachmentPart(String section, String encoding, long encodedSize, String filename) {
+            this.section = section;
+            this.encoding = encoding;
+            this.encodedSize = encodedSize;
+            this.filename = filename;
+        }
+
+        /** 解码后字节：BASE64 按折行长度精确反推（±2B）；QP 等取编码长度（近似）。 */
+        long decodedSize() {
+            if (encodedSize < 0L) {
+                return -1L;
+            }
+            if ("BASE64".equalsIgnoreCase(encoding)) {
+                return rawFromFoldedBase64(encodedSize);
+            }
+            return encodedSize;
+        }
+    }
+
+    private static final class ForeignHit {
+        final long uid;
+        final AttachmentPart part;
+        final MailEntry entry;
+
+        ForeignHit(long uid, AttachmentPart part, MailEntry entry) {
+            this.uid = uid;
+            this.part = part;
+            this.entry = entry;
+        }
+    }
+
+    /** 解析 BODYSTRUCTURE（可带前缀 "BODYSTRUCTURE "），列出附件段；解析失败返回空。 */
+    static List<AttachmentPart> attachmentParts(String structureText) {
+        List<AttachmentPart> out = new ArrayList<AttachmentPart>();
+        if (structureText == null) {
+            return out;
+        }
+        int start = structureText.indexOf('(');
+        if (start < 0) {
+            return out;
+        }
+        try {
+            Object root = parseSexp(structureText, new int[] {start});
+            if (root instanceof List) {
+                walkStructure((List<?>) root, "", out);
+            }
+        } catch (RuntimeException e) {
+            out.clear();
+        }
+        return out;
+    }
+
+    private static Object parseSexp(String s, int[] pos) {
+        while (pos[0] < s.length() && Character.isWhitespace(s.charAt(pos[0]))) {
+            pos[0]++;
+        }
+        if (pos[0] >= s.length()) {
+            return null;
+        }
+        char c = s.charAt(pos[0]);
+        if (c == '(') {
+            pos[0]++;
+            List<Object> list = new ArrayList<Object>();
+            while (true) {
+                while (pos[0] < s.length() && Character.isWhitespace(s.charAt(pos[0]))) {
+                    pos[0]++;
+                }
+                if (pos[0] >= s.length()) {
+                    return list;
+                }
+                if (s.charAt(pos[0]) == ')') {
+                    pos[0]++;
+                    return list;
+                }
+                list.add(parseSexp(s, pos));
+            }
+        }
+        if (c == '"') {
+            pos[0]++;
+            StringBuilder sb = new StringBuilder();
+            while (pos[0] < s.length()) {
+                char ch = s.charAt(pos[0]);
+                if (ch == '\\' && pos[0] + 1 < s.length()) {
+                    sb.append(s.charAt(pos[0] + 1));
+                    pos[0] += 2;
+                    continue;
+                }
+                pos[0]++;
+                if (ch == '"') {
+                    break;
+                }
+                sb.append(ch);
+            }
+            return sb.toString();
+        }
+        if (c == '{') {
+            // 字面量占位：parseFetchLine 未保留结构内字面量内容
+            int end = s.indexOf('}', pos[0]);
+            pos[0] = end < 0 ? s.length() : end + 1;
+            return null;
+        }
+        int begin = pos[0];
+        while (pos[0] < s.length()) {
+            char ch = s.charAt(pos[0]);
+            if (Character.isWhitespace(ch) || ch == '(' || ch == ')') {
+                break;
+            }
+            pos[0]++;
+        }
+        String atom = s.substring(begin, pos[0]);
+        if (atom.isEmpty()) {
+            pos[0]++;
+            return null;
+        }
+        return "NIL".equalsIgnoreCase(atom) ? null : atom;
+    }
+
+    private static void walkStructure(List<?> node, String prefix, List<AttachmentPart> out) {
+        if (node.isEmpty()) {
+            return;
+        }
+        if (node.get(0) instanceof List) {
+            for (int i = 0; i < node.size() && node.get(i) instanceof List; i++) {
+                String sec = prefix.isEmpty() ? String.valueOf(i + 1) : prefix + "." + (i + 1);
+                walkStructure((List<?>) node.get(i), sec, out);
+            }
+            return;
+        }
+        String section = prefix.isEmpty() ? "1" : prefix;
+        String encoding = node.size() > 5 && node.get(5) instanceof String ? (String) node.get(5) : null;
+        long size = -1L;
+        if (node.size() > 6 && node.get(6) instanceof String) {
+            try {
+                size = Long.parseLong((String) node.get(6));
+            } catch (NumberFormatException ignored) {
+                size = -1L;
+            }
+        }
+        List<?> params = node.size() > 2 && node.get(2) instanceof List ? (List<?>) node.get(2) : null;
+        String dispType = null;
+        List<?> dispParams = null;
+        for (int i = 7; i < node.size(); i++) {
+            Object o = node.get(i);
+            if (o instanceof List && !((List<?>) o).isEmpty() && ((List<?>) o).get(0) instanceof String) {
+                List<?> d = (List<?>) o;
+                String t = (String) d.get(0);
+                if ("attachment".equalsIgnoreCase(t) || "inline".equalsIgnoreCase(t)) {
+                    dispType = t;
+                    dispParams = d.size() > 1 && d.get(1) instanceof List ? (List<?>) d.get(1) : null;
+                    break;
+                }
+            }
+        }
+        String filename = paramValue(dispParams, "filename");
+        if (filename == null) {
+            filename = paramValue(params, "name");
+        }
+        if (filename == null && !"attachment".equalsIgnoreCase(dispType)) {
+            return;
+        }
+        out.add(new AttachmentPart(section, encoding, size, filename));
+    }
+
+    /** 从 BODYSTRUCTURE 参数表取值：RFC2231（含续行、charset）优先，否则 RFC2047 解码。 */
+    static String paramValue(List<?> params, String key) {
+        if (params == null) {
+            return null;
+        }
+        Map<String, String> m = new LinkedHashMap<String, String>();
+        for (int i = 0; i + 1 < params.size(); i += 2) {
+            Object k = params.get(i);
+            Object v = params.get(i + 1);
+            if (k instanceof String && v instanceof String) {
+                m.put(((String) k).toLowerCase(Locale.ROOT), (String) v);
+            }
+        }
+        return decodeRfc2231Param(m, key.toLowerCase(Locale.ROOT));
+    }
+
+    static String decodeRfc2231Param(Map<String, String> m, String key) {
+        String single = m.get(key + "*");
+        if (single != null) {
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            String charset = extValueInto(single, true, bytes);
+            return new String(bytes.toByteArray(), charsetOr(charset));
+        }
+        if (m.containsKey(key + "*0") || m.containsKey(key + "*0*")) {
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            String charset = null;
+            for (int i = 0; ; i++) {
+                String ext = m.get(key + "*" + i + "*");
+                String plain = m.get(key + "*" + i);
+                if (ext == null && plain == null) {
+                    break;
+                }
+                if (ext != null) {
+                    String cs = extValueInto(ext, i == 0, bytes);
+                    if (i == 0) {
+                        charset = cs;
+                    }
+                } else {
+                    byte[] b = plain.getBytes(charsetOr(charset));
+                    bytes.write(b, 0, b.length);
+                }
+            }
+            return decodeMimeWords(new String(bytes.toByteArray(), charsetOr(charset)));
+        }
+        String plain = m.get(key);
+        return plain == null ? null : decodeMimeWords(plain);
+    }
+
+    /** 写入百分号解码字节；首段带 {@code charset'lang'} 前缀时返回 charset。 */
+    private static String extValueInto(String value, boolean first, ByteArrayOutputStream bytes) {
+        String v = value;
+        String charset = null;
+        if (first) {
+            int q1 = v.indexOf('\'');
+            int q2 = q1 < 0 ? -1 : v.indexOf('\'', q1 + 1);
+            if (q2 >= 0) {
+                charset = v.substring(0, q1);
+                v = v.substring(q2 + 1);
+            }
+        }
+        for (int i = 0; i < v.length(); i++) {
+            char c = v.charAt(i);
+            if (c == '%' && i + 2 < v.length()) {
+                int hi = Character.digit(v.charAt(i + 1), 16);
+                int lo = Character.digit(v.charAt(i + 2), 16);
+                if (hi >= 0 && lo >= 0) {
+                    bytes.write((hi << 4) | lo);
+                    i += 2;
+                    continue;
+                }
+            }
+            byte[] b = String.valueOf(c).getBytes(StandardCharsets.UTF_8);
+            bytes.write(b, 0, b.length);
+        }
+        return charset;
+    }
+
+    private static Charset charsetOr(String name) {
+        if (name == null || name.trim().isEmpty()) {
+            return StandardCharsets.UTF_8;
+        }
+        try {
+            return Charset.forName(name.trim());
+        } catch (RuntimeException e) {
+            return StandardCharsets.UTF_8;
+        }
+    }
+
+    /** 外来附件显示名：{@code <base>__<shortId><.ext>}；文件名中的 / 与 \ 换成 _。 */
+    static String foreignDisplayName(String filename, long uid, String section) {
+        String n = filename == null ? "" : filename.trim().replace('/', '_').replace('\\', '_');
+        if (n.isEmpty()) {
+            n = "attachment";
+        }
+        int dot = n.lastIndexOf('.');
+        boolean hasExt = dot > 0 && dot < n.length() - 1;
+        String base = hasExt ? n.substring(0, dot) : n;
+        String ext = hasExt ? n.substring(dot) : "";
+        return base + "__" + shortId(uid, section) + ext;
+    }
+
+    static String shortId(long uid, String section) {
+        try {
+            byte[] d = MessageDigest.getInstance("SHA-256")
+                    .digest((uid + "\n" + section).getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder(8);
+            for (int i = 0; i < 4; i++) {
+                sb.append(String.format("%02x", d[i] & 0xff));
+            }
+            return sb.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /** 按 Content-Transfer-Encoding 解码附件段。 */
+    static byte[] decodeTransfer(byte[] data, String encoding) {
+        if (data == null) {
+            return new byte[0];
+        }
+        if ("BASE64".equalsIgnoreCase(encoding)) {
+            return Base64.getMimeDecoder().decode(data);
+        }
+        if ("QUOTED-PRINTABLE".equalsIgnoreCase(encoding)) {
+            return decodeQuotedPrintable(data);
+        }
+        return data;
+    }
+
+    static byte[] decodeQuotedPrintable(byte[] data) {
+        ByteArrayOutputStream out = new ByteArrayOutputStream(data.length);
+        for (int i = 0; i < data.length; i++) {
+            byte b = data[i];
+            if (b == '=') {
+                if (i + 1 < data.length && data[i + 1] == '\n') {
+                    i += 1;
+                    continue;
+                }
+                if (i + 2 < data.length && data[i + 1] == '\r' && data[i + 2] == '\n') {
+                    i += 2;
+                    continue;
+                }
+                if (i + 2 < data.length) {
+                    int hi = Character.digit(data[i + 1], 16);
+                    int lo = Character.digit(data[i + 2], 16);
+                    if (hi >= 0 && lo >= 0) {
+                        out.write((hi << 4) | lo);
+                        i += 2;
+                        continue;
+                    }
+                }
+            }
+            out.write(b);
+        }
+        return out.toByteArray();
+    }
+
     // ------------------------------------------------------------------ parse helpers
 
     private static String requireName(String path) {
         if (path == null || path.trim().isEmpty()) {
             throw StorageException.invalidConfig("文件路径不能为空");
         }
-        // phase2 logical path: Subject/name 可为 dir/file，不再拒绝 /
+        // 目录只来自 IMAP 文件夹；Subject 中的 / 不作路径分隔（list 显示为 U+2215）
         return path.trim();
     }
 

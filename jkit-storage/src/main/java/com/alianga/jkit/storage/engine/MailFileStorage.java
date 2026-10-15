@@ -187,6 +187,9 @@ public class MailFileStorage implements FileStorage {
             if (existing != null && existing.directory) {
                 throw StorageException.conflict("目标是目录，无法上传文件: " + name, name);
             }
+            if (existing != null && existing.foreign) {
+                throw foreignReadOnly(name);
+            }
             deleteExact(name);
             long partRaw = MailChunking.partRawBytes(maxAttachmentBytes);
             if (payload.length <= partRaw) {
@@ -266,6 +269,9 @@ public class MailFileStorage implements FileStorage {
             if (resolved.directory) {
                 deleteUnder(normalized);
                 return;
+            }
+            if (resolved.foreign) {
+                throw foreignReadOnly(normalized);
             }
             deleteExact(normalized);
         }
@@ -387,6 +393,13 @@ public class MailFileStorage implements FileStorage {
                 continue;
             }
             String name = entry.name();
+            if (entry.foreign()) {
+                // 外来邮件附件：只读条目，不参与分卷归并 / 目录段推导
+                for (MailEntry f : foreignMailEntries(entry)) {
+                    index.byLogical.put(f.name(), Resolved.foreignFile(f));
+                }
+                continue;
+            }
             index.rawNames.add(name);
             Matcher m = PART_PATTERN.matcher(name);
             if (m.matches()) {
@@ -405,7 +418,7 @@ public class MailFileStorage implements FileStorage {
                 continue;
             }
             index.byLogical.put(name, Resolved.file(entry.size(), entry.mtimeEpochMs(), entry.uid(),
-                    Collections.<String>emptyList()));
+                    Collections.<String>emptyList()).withAttributes(entry.attributes()));
         }
         for (Map.Entry<String, List<PartPiece>> e : partBags.entrySet()) {
             List<PartPiece> bag = e.getValue();
@@ -435,6 +448,21 @@ public class MailFileStorage implements FileStorage {
         return index;
     }
 
+    /**
+     * 外来（非 jkit 写入）邮件条目的唯一出口。会话层已按附件逐个展开（无附件邮件不出现），
+     * 这里默认原样收录；若改为隐藏外来邮件，返回空列表即可。
+     *
+     * @param entry 会话层给出的外来附件条目（{@link MailEntry#foreign()} 为 true）
+     * @return 要收入索引的条目
+     */
+    List<MailEntry> foreignMailEntries(MailEntry entry) {
+        return Collections.singletonList(entry);
+    }
+
+    private static StorageException foreignReadOnly(String path) {
+        return StorageException.unsupported("非 jkit 写入的邮件附件只读: " + path);
+    }
+
     private void deleteExact(String logicalName) {
         Resolved resolved = resolveLogical(logicalName);
         if (resolved == null) {
@@ -454,6 +482,12 @@ public class MailFileStorage implements FileStorage {
     private void deleteUnder(String dir) {
         Index index = buildIndex();
         String prefix = dir + "/";
+        for (Map.Entry<String, Resolved> e : index.byLogical.entrySet()) {
+            if (e.getValue().foreign && e.getKey().startsWith(prefix)) {
+                // 删目录会连带删掉 IMAP 文件夹里的普通邮件，拒绝
+                throw StorageException.unsupported("目录内含非 jkit 写入的邮件，拒绝删除: " + dir);
+            }
+        }
         Set<String> toDelete = new LinkedHashSet<String>();
         for (String raw : index.rawNames) {
             if (raw.equals(dir) || raw.startsWith(prefix)) {
@@ -492,7 +526,7 @@ public class MailFileStorage implements FileStorage {
         }
         String prefix = logicalName + ".part";
         for (MailEntry entry : mails) {
-            if (entry != null && entry.name() != null && entry.name().startsWith(prefix)) {
+            if (entry != null && !entry.foreign() && entry.name() != null && entry.name().startsWith(prefix)) {
                 Matcher m = PART_PATTERN.matcher(entry.name());
                 if (m.matches() && logicalName.equals(m.group(1))) {
                     deleteQuiet(entry.name());
@@ -669,6 +703,9 @@ public class MailFileStorage implements FileStorage {
         final List<String> parts;
         /** 分卷缺片/缺口/非从 1 连续时为 true；exists/stat/download 抛 CONFLICT。 */
         final boolean incompleteParts;
+        /** 非 jkit 写入邮件的附件（只读）。 */
+        boolean foreign;
+        Map<String, String> attributes = Collections.<String, String>emptyMap();
 
         private Resolved(boolean directory, long size, long mtime, String etag, List<String> parts,
                          boolean incompleteParts) {
@@ -697,11 +734,26 @@ public class MailFileStorage implements FileStorage {
             return new Resolved(false, size, mtime, etag, parts, incompleteParts);
         }
 
+        static Resolved foreignFile(MailEntry e) {
+            Resolved r = file(e.size(), e.mtimeEpochMs(), e.uid(), Collections.<String>emptyList());
+            r.foreign = true;
+            return r.withAttributes(e.attributes());
+        }
+
+        Resolved withAttributes(Map<String, String> attrs) {
+            this.attributes = attrs == null ? Collections.<String, String>emptyMap() : attrs;
+            return this;
+        }
+
         StorageEntry toStorageEntry(String path) {
             if (directory) {
                 return StorageEntry.dir(path, mtime);
             }
-            return StorageEntry.file(path, size, mtime, etag);
+            StorageEntry entry = StorageEntry.file(path, size, mtime, etag);
+            for (Map.Entry<String, String> a : attributes.entrySet()) {
+                entry = entry.withAttribute(a.getKey(), a.getValue());
+            }
+            return entry;
         }
     }
 }

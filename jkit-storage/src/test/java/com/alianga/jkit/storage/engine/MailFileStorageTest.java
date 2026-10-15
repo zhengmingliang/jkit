@@ -567,6 +567,42 @@ public class MailFileStorageTest {
         }
     }
 
+    @Test
+    public void foreignAttachmentListedReadOnlyWithAttributes() {
+        FakeMailGateway fake = new FakeMailGateway();
+        FileStorage fs = open(fake);
+        fs.mkdir("docs");
+        fake.addForeign("docs/r__0123abcd.pdf", "PDF!".getBytes(StandardCharsets.UTF_8));
+        fs.upload("docs/mine.txt", "x".getBytes(StandardCharsets.UTF_8));
+        List<StorageEntry> list = fs.list("docs");
+        assertEquals(2, list.size());
+        StorageEntry f = fs.stat("docs/r__0123abcd.pdf");
+        assertEquals(4L, f.size());
+        assertEquals("外来/主题", f.attribute(StorageEntry.ATTR_MAIL_SUBJECT));
+        assertEquals("true", f.attribute(StorageEntry.ATTR_MAIL_FOREIGN));
+        assertArrayEquals("PDF!".getBytes(StandardCharsets.UTF_8), fs.readBytes("docs/r__0123abcd.pdf"));
+        assertUnsupported(() -> fs.delete("docs/r__0123abcd.pdf"));
+        assertUnsupported(() -> fs.upload("docs/r__0123abcd.pdf", new byte[1]));
+        assertUnsupported(() -> fs.rename("docs/r__0123abcd.pdf", "docs/z.pdf"));
+        assertUnsupported(() -> fs.delete("docs"));
+        assertTrue(fs.exists("docs/mine.txt"));
+    }
+
+    @Test
+    public void chunkedFileStillOneEntryBesideForeign() {
+        FakeMailGateway fake = new FakeMailGateway();
+        FileStorage fs = new MailFileStorage(StorageConfig.empty()
+                .set("host", "imap.example.com").set("user", "u").set("password", "p")
+                .set("basePath", "jkit-mail-disk").set("maxAttachmentBytes", "5"), fake);
+        fake.addForeign("a__0123abcd.bin", new byte[3]);
+        fs.upload("big.bin", "abcdefghij".getBytes(StandardCharsets.UTF_8));
+        List<StorageEntry> list = fs.list("");
+        assertEquals(2, list.size());
+        StorageEntry big = fs.stat("big.bin");
+        assertEquals(10L, big.size());
+        assertArrayEquals("abcdefghij".getBytes(StandardCharsets.UTF_8), fs.readBytes("big.bin"));
+    }
+
     /**
      * 内存 Fake：逻辑路径 → 内容；mkdir 登记真「文件夹」；append 按 folder+Subject 拼逻辑名。
      */
@@ -599,6 +635,12 @@ public class MailFileStorageTest {
                 for (Stored s : store.values()) {
                     out.add(s.toEntry());
                 }
+                for (Map.Entry<String, byte[]> f : foreign.entrySet()) {
+                    Map<String, String> attrs = new LinkedHashMap<String, String>();
+                    attrs.put(StorageEntry.ATTR_MAIL_SUBJECT, "外来/主题");
+                    attrs.put(StorageEntry.ATTR_MAIL_FOREIGN, "true");
+                    out.add(new MailEntry(f.getKey(), false, f.getValue().length, 1000L, "9#2", true, attrs));
+                }
                 return out;
             }
             // 立即子级：与真会话 listImmediate 对齐（单测主要走 buildIndex 全量）
@@ -623,8 +665,23 @@ public class MailFileStorageTest {
             return out;
         }
 
+        /** 外来邮件附件（只读）：逻辑名 → 内容。 */
+        final Map<String, byte[]> foreign = new LinkedHashMap<String, byte[]>();
+
+        void addForeign(String logical, byte[] data) {
+            foreign.put(logical, data);
+        }
+
         @Override
         public void download(String path, OutputStream out) {
+            if (foreign.containsKey(path)) {
+                try {
+                    out.write(foreign.get(path));
+                } catch (IOException e) {
+                    throw StorageException.io("fake download", path, e);
+                }
+                return;
+            }
             Stored s = findByLogicalName(path);
             if (s == null) {
                 throw StorageException.notFound(path);
