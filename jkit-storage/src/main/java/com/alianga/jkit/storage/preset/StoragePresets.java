@@ -114,7 +114,10 @@ public final class StoragePresets {
                 "公有云", null, StorageConfig.empty().set("pathStyle", "true")));
         platforms.add(s3("generic-s3", "其它 S3 兼容存储", null, "S3 兼容", null,
                 StorageConfig.empty().set("pathStyle", "true")));
-        long qqMax = 45L * 1024L * 1024L;
+        // 2026-10-15 实测 QQ IMAP：整封 MIME 51,850,514B 接受，53,421,722B 明确 NO "Mail length exceeded"
+        // （约 50MiB 整封上限）；取实测上限 -20% ≈ 41.5MB 整封 → maxAttachmentBytes 39MiB
+        // （+256K 余量后整封上限 41,156,608B，单片原始 30,063,966B）。
+        long qqMax = 39L * 1024L * 1024L;
         platforms.add(new StoragePlatform("qq-mail", "QQ 邮箱", "mail", "邮件",
                 Arrays.asList(
                         StorageField.optional("host", "IMAP 服务器", "imap.qq.com", null),
@@ -125,7 +128,7 @@ public final class StoragePresets {
                         StorageField.optional("basePath", "邮箱文件夹", "jkit-mail-disk",
                                 "IMAP 文件夹名，默认 jkit-mail-disk"),
                         StorageField.optional("maxAttachmentBytes", "单附件上限字节",
-                                String.valueOf(qqMax), "QQ 约 50MB，默认 45MiB"),
+                                String.valueOf(qqMax), "QQ 整封实测约 50MB，默认 39MiB（-20% 余量）"),
                         StorageField.optional("channelPool", "并发通道数", "1",
                                 "二期单会话串行；>1 预留，真多连接池待协议层")),
                 StorageConfig.empty()

@@ -387,6 +387,7 @@ public final class ImapMailSession implements AutoCloseable {
                 for (int attempt = 0; ; attempt++) {
                     TaggedResult result = appendOnce(target, mime);
                     if (result.ok) {
+                        verifyAppended(target, mime, messageId, parseAppendUid(result.text));
                         return;
                     }
                     if (!isBusy(result.text) || attempt >= busyMaxRetries) {
@@ -395,7 +396,9 @@ public final class ImapMailSession implements AutoCloseable {
                     }
                     backoff(attempt);
                     // APPEND 非幂等：上次可能已入箱，按 Message-ID 查重
-                    if (messageId != null && messageIdExists(messageId)) {
+                    long existing = messageId == null ? -1L : findUidByMessageId(messageId);
+                    if (existing > 0L) {
+                        verifyAppended(target, mime, messageId, existing);
                         return;
                     }
                 }
@@ -979,7 +982,7 @@ public final class ImapMailSession implements AutoCloseable {
     private MailEntry fetchMeta(long uid) throws IOException {
         String tag = nextTag();
         sendRaw(tag + " UID FETCH " + uid
-                + " (UID INTERNALDATE RFC822.SIZE BODY.PEEK[HEADER.FIELDS (SUBJECT)] BODYSTRUCTURE)\r\n");
+                + " (UID INTERNALDATE RFC822.SIZE BODY.PEEK[HEADER.FIELDS (SUBJECT X-JKIT-SIZE)] BODYSTRUCTURE)\r\n");
         FetchMessage msg = readFetchMessage(tag, uid);
         if (msg == null) {
             return null;
@@ -991,7 +994,7 @@ public final class ImapMailSession implements AutoCloseable {
         if (subject == null || subject.isEmpty()) {
             subject = "uid-" + uid;
         }
-        long size = estimatePayloadSize(msg.structureText, msg.rfc822Size);
+        long size = payloadSize(msg.headerText, msg.structureText);
         long mtime = parseInternalDate(msg.internalDate);
         return new MailEntry(subject, false, size, mtime, String.valueOf(uid));
     }
@@ -1231,9 +1234,134 @@ public final class ImapMailSession implements AutoCloseable {
         }
     }
 
-    private boolean messageIdExists(String messageId) throws IOException {
+    private long findUidByMessageId(String messageId) throws IOException {
         taggedOnce("NOOP");
-        return !uidSearch("HEADER Message-ID " + quote(messageId)).isEmpty();
+        List<Long> uids = uidSearch("HEADER Message-ID " + quote(messageId));
+        return uids.isEmpty() ? -1L : uids.get(uids.size() - 1).longValue();
+    }
+
+    private static final Pattern APPEND_UID = Pattern.compile(
+            "\\[APPENDUID\\s+\\d+\\s+(\\d+)\\]", Pattern.CASE_INSENSITIVE);
+
+    static long parseAppendUid(String text) {
+        if (text == null) {
+            return -1L;
+        }
+        Matcher m = APPEND_UID.matcher(text);
+        return m.find() ? Long.parseLong(m.group(1)) : -1L;
+    }
+
+    /**
+     * APPEND 后校验落盘：QQ 的 RFC822.SIZE 不可信（实测大邮件也只报 ~900B），
+     * 故按 APPENDUID（缺失则 Message-ID）定位，比较 {@code X-Jkit-Size} 与
+     * BODYSTRUCTURE 中附件 Base64 段长度；不符则删掉该邮件并抛 IO_ERROR。
+     */
+    private void verifyAppended(String target, byte[] mime, String messageId, long uid)
+            throws IOException {
+        long expectRaw = headerLong(mime, "X-Jkit-Size");
+        if (uid <= 0L) {
+            if (messageId == null) {
+                return;
+            }
+            uid = findUidByMessageId(messageId);
+            if (uid <= 0L) {
+                throw StorageException.io("APPEND 后找不到邮件（服务端可能丢弃）: " + messageId,
+                        target, null);
+            }
+        }
+        if (expectRaw < 0L) {
+            return;
+        }
+        String tag = nextTag();
+        sendRaw(tag + " UID FETCH " + uid
+                + " (UID BODYSTRUCTURE BODY.PEEK[HEADER.FIELDS (X-JKIT-SIZE)])\r\n");
+        FetchMessage msg = readFetchMessage(tag, uid);
+        long gotRaw = msg == null ? -1L : parseHeaderLong(msg.headerText, "X-Jkit-Size");
+        long gotEnc = msg == null ? -1L : lastBase64Size(msg.structureText);
+        long wantEnc = foldedBase64Length(expectRaw);
+        if (gotRaw != expectRaw || gotEnc < 0L || Math.abs(gotEnc - wantEnc) > 2L) {
+            deleteUidQuiet(uid);
+            throw StorageException.io("APPEND 校验失败 uid=" + uid + " X-Jkit-Size=" + gotRaw
+                    + "/" + expectRaw + " base64=" + gotEnc + "/" + wantEnc, target, null);
+        }
+    }
+
+    private void deleteUidQuiet(long uid) {
+        try {
+            taggedOnce("UID STORE " + uid + " +FLAGS.SILENT (\\Deleted)");
+            TaggedResult r = taggedOnce("UID EXPUNGE " + uid);
+            if (!r.ok) {
+                taggedOnce("EXPUNGE");
+            }
+        } catch (IOException | StorageException ignored) {
+            // 尽力清理，主异常由调用方抛出
+        }
+    }
+
+    /** 76 列折行（行间 CRLF、末行无 CRLF）的 Base64 长度。 */
+    static long foldedBase64Length(long raw) {
+        if (raw <= 0L) {
+            return 0L;
+        }
+        long b64 = (raw + 2L) / 3L * 4L;
+        long lines = (b64 + 75L) / 76L;
+        return b64 + 2L * (lines - 1L);
+    }
+
+    /** 由附件 Base64 段长度估算原始字节（遗留邮件无 X-Jkit-Size 时用）。 */
+    static long rawFromFoldedBase64(long encoded) {
+        if (encoded <= 0L) {
+            return 0L;
+        }
+        long lines = (encoded + 2L) / 78L + 1L;
+        long b64 = encoded - 2L * (lines - 1L);
+        return Math.max(0L, b64 / 4L * 3L);
+    }
+
+    static long lastBase64Size(String structure) {
+        if (structure == null) {
+            return -1L;
+        }
+        Matcher m = Pattern.compile("\"BASE64\"\\s+(\\d+)", Pattern.CASE_INSENSITIVE)
+                .matcher(structure);
+        long last = -1L;
+        while (m.find()) {
+            last = Long.parseLong(m.group(1));
+        }
+        return last;
+    }
+
+    static long parseHeaderLong(String headerText, String name) {
+        if (headerText == null) {
+            return -1L;
+        }
+        for (String line : headerText.split("\r\n|\n")) {
+            if (line.regionMatches(true, 0, name + ":", 0, name.length() + 1)) {
+                try {
+                    return Long.parseLong(line.substring(name.length() + 1).trim());
+                } catch (NumberFormatException e) {
+                    return -1L;
+                }
+            }
+        }
+        return -1L;
+    }
+
+    private static long headerLong(byte[] mime, String name) {
+        int limit = Math.min(mime.length, 64 * 1024);
+        String head = new String(mime, 0, limit, StandardCharsets.ISO_8859_1);
+        int end = head.indexOf("\r\n\r\n");
+        return parseHeaderLong(end >= 0 ? head.substring(0, end) : head, name);
+    }
+
+    /** list/stat 大小：优先 X-Jkit-Size，否则按附件 Base64 段估算；绝不用 RFC822.SIZE。 */
+    static long payloadSize(String headerText, String structure) {
+        long x = parseHeaderLong(headerText, "X-Jkit-Size");
+        if (x >= 0L) {
+            return x;
+        }
+        long enc = lastBase64Size(structure);
+        return enc >= 0L ? rawFromFoldedBase64(enc) : -1L;
     }
 
     static String extractMessageId(byte[] mime) {
@@ -1484,22 +1612,6 @@ public final class ImapMailSession implements AutoCloseable {
             }
         }
         return sb.toString();
-    }
-
-    private static long estimatePayloadSize(String structure, long rfc822Size) {
-        if (structure != null) {
-            // 粗略：找 BASE64 后的数字作为传输长度，再 *3/4
-            Pattern partSize = Pattern.compile("\"BASE64\"\\s+(\\d+)", Pattern.CASE_INSENSITIVE);
-            Matcher m = partSize.matcher(structure);
-            long last = -1L;
-            while (m.find()) {
-                last = Long.parseLong(m.group(1));
-            }
-            if (last >= 0L) {
-                return Math.max(0L, last * 3L / 4L);
-            }
-        }
-        return rfc822Size > 0L ? rfc822Size : -1L;
     }
 
     private static long parseInternalDate(String raw) {

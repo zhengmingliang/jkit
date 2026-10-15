@@ -44,6 +44,14 @@ public class ImapMailSessionBusyRetryTest {
         return n;
     }
 
+    /** FETCH 应答：BODYSTRUCTURE 附件 BASE64 段长 + X-Jkit-Size 头字面量（末尾留给 ")" 行）。 */
+    static String fetchSize(long uid, long xSize, long b64) {
+        String hdr = "X-Jkit-Size: " + xSize + "\r\n\r\n";
+        return "* 1 FETCH (UID " + uid + " BODYSTRUCTURE ((\"TEXT\" \"PLAIN\" NIL NIL NIL \"BASE64\" 40 1)"
+                + "(\"APPLICATION\" \"OCTET-STREAM\" NIL NIL NIL \"BASE64\" " + b64 + ") \"MIXED\")"
+                + " BODY[HEADER.FIELDS (X-JKIT-SIZE)] {" + hdr.length() + "}\r\n" + hdr + ")";
+    }
+
     @Test
     public void busyThenSuccessRetries() {
         session("A0001 NO no such mailbox",
@@ -105,10 +113,79 @@ public class ImapMailSessionBusyRetryTest {
                 "A0002 NO System busy",
                 "A0003 OK NOOP",
                 "* SEARCH 7",
-                "A0004 OK SEARCH done")
+                "A0004 OK SEARCH done",
+                fetchSize(7, 2, 4), "A0005 OK FETCH done")
                 .appendMime("", new ByteArrayInputStream(mime), mime.length);
         assertEquals(1, count(" APPEND "));
         assertEquals(1, count("HEADER Message-ID"));
         assertEquals(1, sleeps.size());
+    }
+
+    private byte[] mime2() {
+        return MailFileStorage.buildStoredMime("a.txt", "hi".getBytes(StandardCharsets.UTF_8));
+    }
+
+    @Test
+    public void appendVerifyOkByAppendUid() {
+        byte[] mime = mime2();
+        session("A0001 OK SELECT done", "+ go",
+                "A0002 OK [APPENDUID 1 5] APPEND completed",
+                fetchSize(5, 2, 4), "A0003 OK FETCH done")
+                .appendMime("", new ByteArrayInputStream(mime), mime.length);
+        assertEquals(0, count("EXPUNGE"));
+        assertEquals(1, count("UID FETCH 5 "));
+    }
+
+    @Test
+    public void appendVerifyFallsBackToMessageIdSearch() {
+        byte[] mime = mime2();
+        session("A0001 OK SELECT done", "+ go", "A0002 OK APPEND completed",
+                "A0003 OK NOOP", "* SEARCH 9", "A0004 OK SEARCH done",
+                fetchSize(9, 2, 4), "A0005 OK FETCH done")
+                .appendMime("", new ByteArrayInputStream(mime), mime.length);
+        assertEquals(1, count("HEADER Message-ID"));
+        assertEquals(1, count("UID FETCH 9 "));
+    }
+
+    @Test
+    public void appendSizeMismatchDeletesAndThrowsIoError() {
+        byte[] mime = mime2();
+        ImapMailSession s = session("A0001 OK SELECT done", "+ go",
+                "A0002 OK [APPENDUID 1 5] APPEND completed",
+                fetchSize(5, 2, 0), "A0003 OK FETCH done",   // 附件被截断
+                "A0004 OK STORE", "A0005 OK EXPUNGE");
+        try {
+            s.appendMime("", new ByteArrayInputStream(mime), mime.length);
+            fail("截断应抛");
+        } catch (StorageException e) {
+            assertEquals(com.alianga.jkit.storage.StorageErrorCode.IO_ERROR, e.code());
+        }
+        assertEquals(1, count("UID STORE 5 +FLAGS.SILENT (\\Deleted)"));
+        assertEquals(1, count("UID EXPUNGE 5"));
+    }
+
+    @Test
+    public void appendMissingAfterOkThrowsIoError() {
+        byte[] mime = mime2();
+        ImapMailSession s = session("A0001 OK SELECT done", "+ go", "A0002 OK APPEND completed",
+                "A0003 OK NOOP", "* SEARCH", "A0004 OK SEARCH done");
+        try {
+            s.appendMime("", new ByteArrayInputStream(mime), mime.length);
+            fail("服务端丢邮件应抛");
+        } catch (StorageException e) {
+            assertEquals(com.alianga.jkit.storage.StorageErrorCode.IO_ERROR, e.code());
+        }
+    }
+
+    @Test
+    public void listSizeUsesJkitHeaderThenLegacyBase64NeverRfc822() {
+        assertEquals(34661586L, ImapMailSession.payloadSize("X-Jkit-Size: 34661586\r\n",
+                "(\"BASE64\" 1138)"));
+        long enc = ImapMailSession.foldedBase64Length(1000L);
+        long legacy = ImapMailSession.payloadSize("Subject: a\r\n", "(\"BASE64\" " + enc + ")");
+        assertTrue("legacy=" + legacy, Math.abs(legacy - 1000L) <= 2L);
+        assertEquals(-1L, ImapMailSession.payloadSize(null, null));
+        // QQ 实测：3827302 原始 → BODYSTRUCTURE 5237362
+        assertEquals(5237362L, ImapMailSession.foldedBase64Length(3827302L));
     }
 }

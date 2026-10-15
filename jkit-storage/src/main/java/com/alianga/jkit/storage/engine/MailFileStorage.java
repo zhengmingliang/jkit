@@ -47,13 +47,20 @@ import java.util.regex.Pattern;
  * <p><b>连接</b>：{@code channelPool}（默认 1，协议层上限 4）；实例级串行，
  * 网关内按池大小借还 IMAP 会话。</p>
  *
- * <p>上传：同名先删再 {@code APPEND}（含全部分卷）。</p>
+ * <p>上传：同名先删再 {@code APPEND}（含全部分卷）；每封 APPEND 后按 APPENDUID / Message-ID
+ * 回查 {@code X-Jkit-Size} 与附件 Base64 段长，不符即删并抛 IO_ERROR；分卷中途失败回滚已写片。
+ * list/stat 大小取 {@code X-Jkit-Size}（遗留邮件按 Base64 段估算），不用 RFC822.SIZE
+ * （QQ 实测对大邮件也只报约 900B）。</p>
+ *
+ * <p><b>已知限制</b>：宿主若使用 jkit-notify 2.0.4，纯 ASCII Subject 仍会被 RFC2047 编码
+ * （2.0.5 起不编码）；读取侧已解码 encoded-word，按明文路径查找不受影响，但在邮箱客户端里
+ * 看到的原始 Subject 为编码形式。</p>
  *
  * @author 郑明亮
  */
 public class MailFileStorage implements FileStorage {
-    /** QQ 等邮箱默认单附件上限（约 50MB，取 45MiB 留余量）。 */
-    public static final long DEFAULT_MAX_ATTACHMENT_BYTES = 45L * 1024L * 1024L;
+    /** 默认单附件上限 39MiB：QQ 2026-10-15 实测整封约 50MB，取 -20% 余量。 */
+    public static final long DEFAULT_MAX_ATTACHMENT_BYTES = 39L * 1024L * 1024L;
     /** 未配置 basePath 时的默认 IMAP 文件夹。 */
     public static final String DEFAULT_FOLDER = "jkit-mail-disk";
     /** 历史空目录占位名；mkdir 已改真 CREATE，不再写入，list 仍隐藏遗留 {@code .keep}。 */
@@ -183,19 +190,33 @@ public class MailFileStorage implements FileStorage {
             deleteExact(name);
             long partRaw = MailChunking.partRawBytes(maxAttachmentBytes);
             if (payload.length <= partRaw) {
-                appendMime(name, payload);
+                appendMime(name, payload, -1L);
                 return;
             }
             Attachment whole = Attachment.of(name, payload);
+            List<String> written = new ArrayList<String>();
             long offset = 0L;
             int partNo = 1;
-            while (offset < payload.length) {
-                long chunk = Math.min(partRaw, payload.length - offset);
-                String partName = name + ".part" + partNo;
-                Attachment part = whole.slice(offset, chunk, partName);
-                appendMime(partName, part.content());
-                offset += chunk;
-                partNo++;
+            try {
+                while (offset < payload.length) {
+                    long chunk = Math.min(partRaw, payload.length - offset);
+                    String partName = name + ".part" + partNo;
+                    Attachment part = whole.slice(offset, chunk, partName);
+                    appendMime(partName, part.content(), payload.length);
+                    written.add(partName);
+                    offset += chunk;
+                    partNo++;
+                }
+            } catch (RuntimeException e) {
+                // 中途失败：回滚已写分卷，避免残缺文件
+                for (String w : written) {
+                    try {
+                        deleteQuiet(w);
+                    } catch (RuntimeException ignored) {
+                        // 尽力回滚
+                    }
+                }
+                throw e;
             }
         }
     }
@@ -490,13 +511,13 @@ public class MailFileStorage implements FileStorage {
         }
     }
 
-    private void appendMime(String logicalName, byte[] payload) {
+    private void appendMime(String logicalName, byte[] payload, long totalRaw) {
         String parent = StoragePaths.parent(logicalName);
         String baseName = StoragePaths.name(logicalName);
         if (!parent.isEmpty()) {
             gateway.mkdir(parent);
         }
-        byte[] mime = buildStoredMime(baseName, payload);
+        byte[] mime = buildStoredMime(baseName, payload, totalRaw);
         // folder = basePath 或 basePath/parent（网关/会话会解析）
         String imapFolder = parent.isEmpty() ? folder : StoragePaths.join(folder, parent);
         gateway.append(imapFolder, new ByteArrayInputStream(mime), mime.length);
@@ -585,16 +606,33 @@ public class MailFileStorage implements FileStorage {
      * @return 完整 RFC822 字节
      */
     static byte[] buildStoredMime(String fileName, byte[] payload) {
-        Attachment attachment = Attachment.of(fileName, payload == null ? new byte[0] : payload);
+        return buildStoredMime(fileName, payload, -1L);
+    }
+
+    /**
+     * 组装存储 MIME，并在头部写 {@code X-Jkit-Size}（本封附件原始字节）、
+     * 分卷时 {@code X-Jkit-Total-Size}（整文件原始字节），缺 Message-ID 时补唯一值。
+     */
+    static byte[] buildStoredMime(String fileName, byte[] payload, long totalRaw) {
+        byte[] data = payload == null ? new byte[0] : payload;
+        Attachment attachment = Attachment.of(fileName, data);
         Message message = Message.text(fileName, "Stored by jkit-storage MailFileStorage.")
                 .attachment(attachment);
         ChannelConfig mimeCfg = ChannelConfig.smtp("127.0.0.1", 25)
                 .from("jkit-storage@localhost")
                 .to("jkit-storage@localhost");
         byte[] rendered = MailMime.render(message, "jkit-storage@localhost", mimeCfg);
-        // 唯一 Message-ID：busy 重试前按它 SEARCH，避免重复 APPEND
-        byte[] header = ("Message-ID: <" + java.util.UUID.randomUUID() + "@jkit-storage>\r\n")
-                .getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+        StringBuilder extra = new StringBuilder();
+        extra.append("X-Jkit-Size: ").append(data.length).append("\r\n");
+        if (totalRaw >= 0L) {
+            extra.append("X-Jkit-Total-Size: ").append(totalRaw).append("\r\n");
+        }
+        // 唯一 Message-ID：busy 重试 / APPEND 校验按它 SEARCH
+        if (ImapMailSession.extractMessageId(rendered) == null) {
+            extra.append("Message-ID: <").append(java.util.UUID.randomUUID())
+                    .append("@jkit-storage>\r\n");
+        }
+        byte[] header = extra.toString().getBytes(java.nio.charset.StandardCharsets.US_ASCII);
         byte[] out = new byte[header.length + rendered.length];
         System.arraycopy(header, 0, out, 0, header.length);
         System.arraycopy(rendered, 0, out, header.length, rendered.length);

@@ -140,7 +140,7 @@ public class MailFileStorageTest {
         assertEquals("993", qq.defaults().get("imapPort"));
         assertEquals("true", qq.defaults().get("ssl"));
         assertEquals("jkit-mail-disk", qq.defaults().get("basePath"));
-        assertEquals(String.valueOf(45L * 1024L * 1024L), qq.defaults().get("maxAttachmentBytes"));
+        assertEquals(String.valueOf(39L * 1024L * 1024L), qq.defaults().get("maxAttachmentBytes"));
         assertEquals("1", qq.defaults().get("channelPool"));
         assertNotNull(findField(qq, "channelPool"));
         StoragePlatform generic = FileStorages.platform("mail");
@@ -227,6 +227,39 @@ public class MailFileStorageTest {
         byte[] mime = MailFileStorage.buildStoredMime("big.bin.part12", new byte[(int) raw]);
         assertTrue("mime=" + mime.length + " limit=" + MailChunking.maxMimeBytes(max),
                 mime.length <= MailChunking.maxMimeBytes(max));
+    }
+
+    @Test
+    public void midwayPartFailureRollsBackEarlierParts() {
+        StorageConfig cfg = StorageConfig.empty()
+                .set("host", "imap.example.com").set("user", "u").set("password", "p")
+                .set("maxAttachmentBytes", "4");
+        FakeMailGateway fake = new FakeMailGateway();
+        fake.failAppendAt = 3;
+        FileStorage fs = new MailFileStorage(cfg, fake);
+        try {
+            fs.upload("roll.bin", "123456789012".getBytes(StandardCharsets.UTF_8));
+            fail("第 3 片失败应抛");
+        } catch (StorageException e) {
+            assertEquals(StorageErrorCode.IO_ERROR, e.code());
+        }
+        assertFalse(fake.exists("roll.bin.part1"));
+        assertFalse(fake.exists("roll.bin.part2"));
+        assertFalse(fs.exists("roll.bin"));
+    }
+
+    @Test
+    public void storedMimeCarriesJkitSizeHeaders() {
+        String one = new String(MailFileStorage.buildStoredMime("a.txt", new byte[123]),
+                StandardCharsets.ISO_8859_1);
+        assertTrue(one.contains("X-Jkit-Size: 123\r\n"));
+        assertFalse(one.contains("X-Jkit-Total-Size"));
+        assertEquals(1, one.split("(?i)Message-ID:", -1).length - 1);
+        String part = new String(MailFileStorage.buildStoredMime("a.part1", new byte[7], 20L),
+                StandardCharsets.ISO_8859_1);
+        assertTrue(part.contains("X-Jkit-Size: 7\r\n"));
+        assertTrue(part.contains("X-Jkit-Total-Size: 20\r\n"));
+        assertTrue(ImapMailSession.extractMessageId(part.getBytes(StandardCharsets.ISO_8859_1)) != null);
     }
 
     @Test
@@ -545,6 +578,8 @@ public class MailFileStorageTest {
         private int deleteCount;
         private int appendCount;
         private int mkdirCount;
+        /** 第 N 次 append 抛 IO_ERROR（模拟校验失败）。 */
+        int failAppendAt = -1;
 
         @Override
         public void connect(Map<String, String> cfg) {
@@ -669,6 +704,9 @@ public class MailFileStorageTest {
         @Override
         public void append(String folder, InputStream mimeMessage, long sizeBytes) {
             appendCount++;
+            if (failAppendAt > 0 && appendCount == failAppendAt) {
+                throw StorageException.io("fake append 校验失败", folder, null);
+            }
             try {
                 byte[] mime = readAll(mimeMessage);
                 ParsedAttachment parsed = parseAttachment(mime);
