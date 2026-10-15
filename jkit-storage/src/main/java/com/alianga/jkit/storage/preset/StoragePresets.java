@@ -138,6 +138,24 @@ public final class StoragePresets {
                         .set("basePath", "jkit-mail-disk")
                         .set("maxAttachmentBytes", String.valueOf(qqMax))
                         .set("channelPool", "1")));
+        // QQ 邮箱网页版附件管理（只读）：sid + cookie 来自扫码登录，凭据不入日志
+        platforms.add(new StoragePlatform("qq-mail-attach", "QQ 邮箱附件管理（只读）", "qqmail-attach", "邮件",
+                Arrays.asList(
+                        StorageField.required("sid", "会话 sid"),
+                        StorageField.secret("cookie", "Cookie", true),
+                        StorageField.optional("sortType", "排序字段", "1", "1 时间 2 fileid 3 大小 4 ctime"),
+                        StorageField.optional("sortDirection", "排序方向", "1", "1 降序 2 升序"),
+                        StorageField.optional("pageSize", "分页大小", "100", null),
+                        StorageField.optional("requestIntervalMs", "请求间隔毫秒", "300", "节流"),
+                        StorageField.optional("authRetCodes", "鉴权失败 ret 码", "-3,-101,-102",
+                                "待抓包确认"),
+                        StorageField.optional("imapFallback", "IMAP 回退连接", "",
+                                "引用 mail 引擎连接配置（TODO）")),
+                StorageConfig.empty()
+                        .set("sortType", "1")
+                        .set("sortDirection", "1")
+                        .set("pageSize", "100")
+                        .set("requestIntervalMs", "300")));
         platforms.add(new StoragePlatform("mail", "IMAP 邮箱", "mail", "邮件",
                 Arrays.asList(
                         StorageField.required("host", "IMAP 服务器"),
