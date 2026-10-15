@@ -161,6 +161,9 @@ public class MailFileStorageTest {
         FakeMailGateway fake = new FakeMailGateway();
         FileStorage fs = open(fake);
         fs.mkdir("docs");
+        assertEquals(1, fake.mkdirCount);
+        assertEquals(0, fake.appendCount); // 真 CREATE，不写 .keep
+        assertFalse(fake.exists("docs/.keep"));
         assertTrue(fs.exists("docs"));
         assertTrue(fs.stat("docs").isDirectory());
 
@@ -169,7 +172,7 @@ public class MailFileStorageTest {
         assertEquals("docs", root.get(0).path());
         assertTrue(root.get(0).isDirectory());
 
-        // 空目录 list 不暴露 .keep
+        // 空目录 list 为空（无 .keep 占位）
         assertTrue(fs.list("docs").isEmpty());
 
         fs.upload("docs/a.txt", "nested".getBytes(StandardCharsets.UTF_8));
@@ -206,6 +209,24 @@ public class MailFileStorageTest {
         } catch (StorageException e) {
             assertEquals(StorageErrorCode.CONFLICT, e.code());
         }
+    }
+
+    @Test
+    public void mkdirUsesGatewayCreateWithoutKeep() {
+        FakeMailGateway fake = new FakeMailGateway();
+        FileStorage fs = open(fake);
+        fs.mkdir("a/b");
+        assertEquals(1, fake.mkdirCount);
+        assertEquals(0, fake.appendCount);
+        assertTrue(fs.exists("a"));
+        assertTrue(fs.exists("a/b"));
+        assertFalse(fake.exists("a/.keep"));
+        assertFalse(fake.exists("a/b/.keep"));
+        assertTrue(fs.list("a/b").isEmpty());
+        List<StorageEntry> kids = fs.list("a");
+        assertEquals(1, kids.size());
+        assertEquals("a/b", kids.get(0).path());
+        assertTrue(kids.get(0).isDirectory());
     }
 
     @Test

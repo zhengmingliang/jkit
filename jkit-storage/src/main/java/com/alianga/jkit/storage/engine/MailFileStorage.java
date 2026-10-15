@@ -56,7 +56,7 @@ public class MailFileStorage implements FileStorage {
     public static final long DEFAULT_MAX_ATTACHMENT_BYTES = 45L * 1024L * 1024L;
     /** 未配置 basePath 时的默认 IMAP 文件夹。 */
     public static final String DEFAULT_FOLDER = "jkit-mail-disk";
-    /** 空目录占位文件名。 */
+    /** 历史空目录占位名；mkdir 已改真 CREATE，不再写入，list 仍隐藏遗留 {@code .keep}。 */
     public static final String KEEP_NAME = ".keep";
     /** {@code name.partN}（N 从 1 起）。 */
     private static final Pattern PART_PATTERN = Pattern.compile("^(.*)\\.part(\\d+)$");
@@ -166,12 +166,8 @@ public class MailFileStorage implements FileStorage {
                 }
                 throw StorageException.conflict("同名文件已存在，无法创建目录: " + normalized, normalized);
             }
-            // 真 IMAP CREATE；.keep 仍写入子文件夹以兼容空目录与 Fake
+            // 真 IMAP CREATE（fada3e0 协议层）；空目录不再写 .keep 占位
             gateway.mkdir(normalized);
-            String keepPath = StoragePaths.join(normalized, KEEP_NAME);
-            if (!gateway.exists(keepPath)) {
-                appendMime(keepPath, new byte[0]);
-            }
         }
     }
 
@@ -313,7 +309,7 @@ public class MailFileStorage implements FileStorage {
         for (String raw : index.rawNames) {
             String logical = stripPart(raw);
             if (KEEP_NAME.equals(StoragePaths.name(logical))) {
-                // .keep 也贡献目录段
+                // 遗留 .keep 也贡献目录段
             }
             if (!StoragePaths.isUnder(dir, logical) || logical.equals(dir)) {
                 continue;
@@ -342,7 +338,7 @@ public class MailFileStorage implements FileStorage {
         if (hit != null) {
             return hit;
         }
-        // 合成目录：任意后代（含 .keep / part）
+        // 合成目录：任意后代（含遗留 .keep / part）
         String prefix = normalized + "/";
         for (String raw : index.rawNames) {
             String logical = stripPart(raw);
@@ -515,7 +511,7 @@ public class MailFileStorage implements FileStorage {
                     "逻辑路径不能使用保留后缀 .partN（分卷专用）: " + normalized);
         }
         if (KEEP_NAME.equals(StoragePaths.name(normalized)) && normalized.indexOf('/') < 0) {
-            // 允许路径中的 .keep；根下单独 .keep 也允许（占位）
+            // 兼容遗留根下 .keep；mkdir 不再主动创建
         }
         return normalized;
     }
