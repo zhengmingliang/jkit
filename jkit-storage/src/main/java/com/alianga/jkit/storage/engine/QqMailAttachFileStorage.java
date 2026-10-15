@@ -114,15 +114,15 @@ public class QqMailAttachFileStorage implements FileStorage {
             throw StorageException.invalidConfig("缺少必填配置: sid");
         }
         this.jar = new QqMailCookieJar(config.getOr("cookie", ""));
+        this.clock = clock != null ? clock : System::currentTimeMillis;
         this.client = new QqMailWebClient(sid, jar,
-                transport != null ? transport : QqMailWebClient.httpCoreTransport(config));
+                transport != null ? transport : QqMailWebClient.httpCoreTransport(config), this.clock);
         this.sortType = (int) config.longOr("sortType", 1L);
         this.sortDirection = (int) config.longOr("sortDirection", 1L);
         this.pageSize = (int) Math.max(1L, Math.min(500L, config.longOr("pageSize", 100L)));
         this.requestIntervalMs = Math.max(0L, config.longOr("requestIntervalMs", 300L));
-        this.authRetCodes = parseCodes(config.getOr("authRetCodes", "-3,-101,-102"));
+        this.authRetCodes = parseCodes(config.getOr("authRetCodes", "-3,-101,-102,-20002"));
         this.sleeper = sleeper != null ? sleeper : Thread::sleep;
-        this.clock = clock != null ? clock : System::currentTimeMillis;
         // TODO: imapFallback 引用 mail 引擎配置；readmail 取 Message-ID 未抓包，宿主可 setImapFallback 注入
         this.imapFallbackConfigured = !config.getOr("imapFallback", "").trim().isEmpty();
     }
@@ -141,7 +141,7 @@ public class QqMailAttachFileStorage implements FileStorage {
 
     /** 校验 sid；失效抛 AUTH_FAILED（需重新扫码），不自动重试。 */
     public void checkSid() {
-        call("/login/checksid", new LinkedHashMap<String, String>());
+        call("/login/checksid", new LinkedHashMap<String, String>(), true);
     }
 
     /**
@@ -153,9 +153,9 @@ public class QqMailAttachFileStorage implements FileStorage {
     public void setCollect(String path, boolean collect) {
         QqMailAttachItem item = requireItem(path);
         Map<String, String> form = new LinkedHashMap<String, String>();
-        form.put("is_collect", String.valueOf(collect));
         form.put("filter", "{\"fileid\":" + jsonStr(item.fileid) + ",\"name\":" + jsonStr(item.name)
                 + ",\"mailid\":" + jsonStr(item.mailid) + "}");
+        form.put("is_collect", String.valueOf(collect));
         call("/attach/set_collect", form);
         item.collect = collect;
     }
@@ -348,15 +348,14 @@ public class QqMailAttachFileStorage implements FileStorage {
             Map<String, String> form = new LinkedHashMap<String, String>();
             form.put("page_size", String.valueOf(pageSize));
             form.put("page_now", String.valueOf(page));
-            form.put("attach_type", String.valueOf(type));
+            // HAR 字段顺序；普通列表 func=1（缺失会 ret=-20002），收藏 func=2
             form.put("sort_type", String.valueOf(sortType));
-            form.put("sort_direction", String.valueOf(sortDirection));
-            if (fav) {
-                form.put("func", "2");
-            }
+            form.put("func", fav ? "2" : "1");
+            form.put("attach_type", String.valueOf(type));
             if (key != null) {
                 form.put("key", key);
             }
+            form.put("sort_direction", String.valueOf(sortDirection));
             String api = key != null ? "/attach/search" : "/attach/attach_list";
             Map<String, Object> resp = call(api, form);
             Map<String, Object> body = bodyOf(resp, api);
@@ -387,8 +386,12 @@ public class QqMailAttachFileStorage implements FileStorage {
 
     /** 节流 + ret 映射。 */
     Map<String, Object> call(String path, Map<String, String> form) {
+        return call(path, form, false);
+    }
+
+    private Map<String, Object> call(String path, Map<String, String> form, boolean inQuery) {
         throttle();
-        Map<String, Object> resp = client.post(path, form);
+        Map<String, Object> resp = client.post(path, form, inQuery);
         // HAR 实测：所有接口 ret 在 head.ret；head.stack / show_err_msg 不进异常
         Object head = resp.get("head");
         if (!(head instanceof Map) || ((Map<?, ?>) head).get("ret") == null) {
@@ -405,6 +408,10 @@ public class QqMailAttachFileStorage implements FileStorage {
     }
 
     StorageException mapRet(long ret, String path) {
+        if (ret == -20002L && authRetCodes.contains(ret)) {
+            return new StorageException(StorageErrorCode.AUTH_FAILED,
+                    "登录态无效或 cookie 不完整（ret=-20002 " + path + "），请重新扫码登录", null);
+        }
         if (authRetCodes.contains(ret)) {
             return new StorageException(StorageErrorCode.AUTH_FAILED,
                     "QQ 邮箱网页会话失效（ret=" + ret + " " + path + "），请重新扫码登录", null);

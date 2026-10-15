@@ -16,6 +16,9 @@ import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.LongSupplier;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -35,14 +38,23 @@ final class QqMailWebClient {
     private static final String UA =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36";
 
+    static final String LANGUAGE = "en";
+    private static final Logger LOG = Logger.getLogger(QqMailWebClient.class.getName());
+
     private final String sid;
     private final QqMailCookieJar jar;
     private final QqMailTransport transport;
+    private final LongSupplier clock;
 
     QqMailWebClient(String sid, QqMailCookieJar jar, QqMailTransport transport) {
+        this(sid, jar, transport, null);
+    }
+
+    QqMailWebClient(String sid, QqMailCookieJar jar, QqMailTransport transport, LongSupplier clock) {
         this.sid = sid;
         this.jar = jar;
         this.transport = transport;
+        this.clock = clock != null ? clock : System::currentTimeMillis;
     }
 
     /** 默认传输：HttpCore，单跳不跟随重定向。 */
@@ -61,22 +73,31 @@ final class QqMailWebClient {
     }
 
     /**
-     * POST 表单并解析 JSON 根对象（自动带 sid）。
+     * POST 表单并解析 JSON 根对象：URL 无查询串，表单按业务字段原序后接 language、r、sid（同网页）。
+     */
+    Map<String, Object> post(String path, Map<String, String> form) {
+        return post(path, form, false);
+    }
+
+    /**
+     * @param inQuery true 时 language、r、sid 放在 URL 查询串、表单为空（/login/checksid 网页即如此）
      */
     @SuppressWarnings("unchecked")
-    Map<String, Object> post(String path, Map<String, String> form) {
+    Map<String, Object> post(String path, Map<String, String> form, boolean inQuery) {
         Map<String, String> all = new LinkedHashMap<String, String>();
-        all.put("sid", sid);
         if (form != null) {
             all.putAll(form);
         }
-        Map<String, String> headers = baseHeaders(BASE_URL + path);
+        all.put("language", LANGUAGE);
+        all.put("r", String.valueOf(clock.getAsLong()));
+        all.put("sid", sid);
+        String url = inQuery ? BASE_URL + path + "?" + encodeForm(all) : BASE_URL + path;
+        Map<String, String> headers = baseHeaders(url);
         headers.put("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");
-        headers.put("Origin", BASE_URL);
         headers.put("Accept", "application/json");
-        String url = BASE_URL + path;
-        QqMailTransport.Response resp = transport.exchange("POST", url, headers,
-                encodeForm(all).getBytes(StandardCharsets.UTF_8));
+        byte[] body = inQuery ? new byte[0] : encodeForm(all).getBytes(StandardCharsets.UTF_8);
+        debug("POST", path, inQuery ? all : null, inQuery ? null : all, headers);
+        QqMailTransport.Response resp = transport.exchange("POST", url, headers, body);
         try {
             jar.absorb(host(url), resp.all("Set-Cookie"));
             checkHttp(resp.status, path);
@@ -104,7 +125,9 @@ final class QqMailWebClient {
         q.put("sid", sid);
         String url = BASE_URL + path + "?" + encodeForm(q);
         for (int hop = 0; ; hop++) {
-            QqMailTransport.Response resp = transport.exchange("GET", url, baseHeaders(url), null);
+            Map<String, String> headers = baseHeaders(url);
+            debug("GET", hop == 0 ? path : "(redirect " + hop + ")", hop == 0 ? q : null, null, headers);
+            QqMailTransport.Response resp = transport.exchange("GET", url, headers, null);
             boolean handedOff = false;
             try {
                 jar.absorb(host(url), resp.all("Set-Cookie"));
@@ -142,13 +165,28 @@ final class QqMailWebClient {
 
     private Map<String, String> baseHeaders(String url) {
         Map<String, String> h = new LinkedHashMap<String, String>();
+        h.put("Origin", BASE_URL);
         h.put("Referer", REFERER);
+        h.put("Sec-Fetch-Site", "same-origin");
+        h.put("Sec-Fetch-Mode", "cors");
         h.put("User-Agent", UA);
         String cookie = jar.headerFor(host(url));
         if (cookie != null) {
             h.put("Cookie", cookie);
         }
         return h;
+    }
+
+    /** FINE 调试：只记路径与参数名/头名，绝不记值（含 Cookie、sid）。 */
+    private static void debug(String method, String path, Map<String, String> query,
+                              Map<String, String> form, Map<String, String> headers) {
+        if (!LOG.isLoggable(Level.FINE)) {
+            return;
+        }
+        LOG.fine("qqmail " + method + " " + path
+                + " query=" + (query == null ? "[]" : query.keySet().toString())
+                + " form=" + (form == null ? "[]" : form.keySet().toString())
+                + " headers=" + headers.keySet());
     }
 
     private static void checkHttp(int status, String path) {

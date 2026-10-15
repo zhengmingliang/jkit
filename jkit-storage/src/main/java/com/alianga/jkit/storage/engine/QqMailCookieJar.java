@@ -102,6 +102,14 @@ public final class QqMailCookieJar {
                     if (lower.startsWith("domain=")) {
                         String d = attr.substring(7).trim().toLowerCase(Locale.ROOT);
                         domain = d.startsWith(".") ? d.substring(1) : d;
+                    } else if (lower.startsWith("expires=")) {
+                        try {
+                            remove |= java.time.ZonedDateTime.parse(attr.substring(8).trim(),
+                                    java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME)
+                                    .toInstant().toEpochMilli() <= System.currentTimeMillis();
+                        } catch (RuntimeException ignored) {
+                            // 非标准日期：忽略
+                        }
                     } else if (lower.startsWith("max-age=")) {
                         try {
                             remove = Long.parseLong(attr.substring(8).trim()) <= 0L;
@@ -113,6 +121,8 @@ public final class QqMailCookieJar {
                 if (!isQqHost(domain)) {
                     continue;
                 }
+                // 空值或已过期 = 服务端清除该 Cookie
+                remove |= value.isEmpty() || "deleted".equalsIgnoreCase(value);
                 if (remove) {
                     for (Map<String, String> m : byDomain.values()) {
                         changed |= m.remove(name) != null;

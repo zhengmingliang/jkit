@@ -198,7 +198,7 @@ public class QqMailAttachFileStorageTest {
         assertTrue(mock.body(1).contains("page_now=1"));
         assertTrue(mock.body(0).contains("attach_type=2"));
         assertTrue(mock.body(0).contains("sort_type=1") && mock.body(0).contains("sort_direction=1"));
-        assertTrue(mock.body(0).startsWith("sid=" + SID));
+        assertTrue(mock.body(0).startsWith("page_size=2&") && mock.body(0).endsWith("&sid=" + SID));
         assertEquals(Collections.singletonList(300L), sleeps);
         StorageEntry first = list.get(0);
         assertEquals(10L, first.size());
