@@ -138,21 +138,14 @@ public final class ImapMailSession implements AutoCloseable {
     }
 
     /**
-     * 列出路径下的邮件条目；{@code name} 无路径前缀。一期仅支持空路径。
+     * 列出邮箱文件夹内全部邮件条目。二期逻辑路径下 {@code name} 可含 {@code /}；子目录过滤由上层做。
      *
-     * @param path 相对路径（一期扁平模型多为空串）
+     * @param path 相对路径（Plan A 忽略，单 folder 全量返回）
      * @return 条目列表
      */
     public List<MailEntry> list(String path) {
         requireConnected();
-        String normalized = path == null ? "" : path.trim();
-        if (!normalized.isEmpty() && normalized.indexOf('/') < 0) {
-            // 非空且无斜杠：按单文件 stat 语义不在 list 使用；一期 MailFileStorage 只 list ""
-            return Collections.emptyList();
-        }
-        if (normalized.indexOf('/') >= 0) {
-            return Collections.emptyList();
-        }
+        // phase2 logical path: 单 IMAP folder 返回全部；子路径过滤由 MailFileStorage 做
         try {
             List<Long> uids = uidSearch("ALL");
             if (uids.isEmpty()) {
@@ -233,9 +226,7 @@ public final class ImapMailSession implements AutoCloseable {
             return true;
         }
         String name = path.trim();
-        if (name.indexOf('/') >= 0) {
-            return false;
-        }
+        // phase2 logical path: 允许 name 含 /
         try {
             return findUidByName(name) >= 0L;
         } catch (IOException e) {
@@ -761,11 +752,8 @@ public final class ImapMailSession implements AutoCloseable {
         if (path == null || path.trim().isEmpty()) {
             throw StorageException.invalidConfig("文件路径不能为空");
         }
-        String name = path.trim();
-        if (name.indexOf('/') >= 0) {
-            throw StorageException.invalidConfig("邮件存储一期仅支持扁平路径: " + name);
-        }
-        return name;
+        // phase2 logical path: Subject/name 可为 dir/file，不再拒绝 /
+        return path.trim();
     }
 
     /**

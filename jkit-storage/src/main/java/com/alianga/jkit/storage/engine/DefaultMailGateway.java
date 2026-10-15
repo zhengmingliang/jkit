@@ -50,6 +50,11 @@ final class DefaultMailGateway implements MailGateway {
     }
 
     @Override
+    public void mkdir(String dir) {
+        // phase2 logical path: 真 IMAP CREATE 子邮箱待协议层；占位 .keep 由 MailFileStorage 写入
+    }
+
+    @Override
     public void append(String folder, InputStream mimeMessage, long sizeBytes) {
         appendStore.append(folder, mimeMessage, sizeBytes);
     }

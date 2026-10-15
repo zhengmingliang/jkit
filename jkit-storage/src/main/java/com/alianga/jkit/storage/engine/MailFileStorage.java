@@ -17,19 +17,33 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
- * 邮件（IMAP）存储引擎一期：把邮箱文件夹当成扁平文件盘。
+ * 邮件（IMAP）存储引擎：把邮箱文件夹当成文件盘（二期 Plan A）。
  *
- * <p>路径模型（一期）：{@link StoragePaths#normalize(String)} 后的整段即邮件条目
- * {@code name}（无路径前缀）；根目录 {@code ""} 视为存在的目录；含 {@code /} 的嵌套路径
- * 一律拒绝（{@code INVALID_CONFIG}）。{@code mkdir / copy / rename} 暂不支持。</p>
+ * <p><b>路径模型（过渡）</b>：仍使用单个 IMAP 文件夹（{@code basePath}/{@value #DEFAULT_FOLDER}），
+ * 逻辑相对路径写入 Subject/附件名（可含 {@code /}，如 {@code docs/a.txt}）。
+ * 真 IMAP 子邮箱层级待协议层；{@link MailGateway#mkdir(String)} 预留 CREATE 接缝。</p>
  *
- * <p>上传：同名先 {@code delete} 再 {@code APPEND}（APPEND 本身不做隐式覆盖）；
- * MIME 经 jkit-notify {@link Attachment} + {@link MailMime}/{@code SmtpChannel} 组装。</p>
+ * <p><b>约定</b>：一个逻辑文件 ↔ 一封 MIME（单 {@link Attachment}），或分卷时多封
+ * {@code name.part1}..{@code name.partN}；二期不做「一封邮件多文件」。</p>
  *
- * <p>真实 IMAP 由 {@link ImapMailSession} / {@link ImapAppendStore} 实现。</p>
+ * <p><b>分卷</b>：超过 {@code maxAttachmentBytes} 时用 {@link Attachment#slice} 拆分；
+ * {@code list} 隐藏 part、对外逻辑名与合计大小；{@code download} 按序合成；
+ * {@code delete} 清掉所有 part。</p>
+ *
+ * <p><b>连接</b>：{@code channelPool} 配置可登记（默认 1）；二期单会话串行锁，
+ * 真多连接池待协议层。</p>
+ *
+ * <p>上传：同名先删再 {@code APPEND}（含全部分卷）。</p>
  *
  * @author 郑明亮
  */
@@ -38,13 +52,20 @@ public class MailFileStorage implements FileStorage {
     public static final long DEFAULT_MAX_ATTACHMENT_BYTES = 45L * 1024L * 1024L;
     /** 未配置 basePath 时的默认 IMAP 文件夹。 */
     public static final String DEFAULT_FOLDER = "jkit-mail-disk";
+    /** 空目录占位文件名。 */
+    public static final String KEEP_NAME = ".keep";
+    /** {@code name.partN}（N 从 1 起）。 */
+    private static final Pattern PART_PATTERN = Pattern.compile("^(.*)\\.part(\\d+)$");
 
     private final MailGateway gateway;
     private final String folder;
     private final long maxAttachmentBytes;
+    private final int channelPool;
+    /** 二期单会话串行；channelPool&gt;1 时仍串行，待真池。 */
+    private final Object lock = new Object();
 
     /**
-     * 由配置创建并连接（生产路径，使用 IMAP 桩 / 真实实现）。
+     * 由配置创建并连接（生产路径，使用 IMAP 真实实现）。
      *
      * @param config 连接配置
      */
@@ -68,6 +89,7 @@ public class MailFileStorage implements FileStorage {
         this.gateway = gateway;
         this.folder = config.getOr("basePath", DEFAULT_FOLDER);
         this.maxAttachmentBytes = config.longOr("maxAttachmentBytes", DEFAULT_MAX_ATTACHMENT_BYTES);
+        this.channelPool = (int) Math.max(1L, config.longOr("channelPool", 1L));
         this.gateway.connect(config.asMap());
     }
 
@@ -87,10 +109,9 @@ public class MailFileStorage implements FileStorage {
         if (normalized.isEmpty()) {
             return true;
         }
-        if (isNested(normalized)) {
-            return false;
+        synchronized (lock) {
+            return resolveLogical(normalized) != null;
         }
-        return gateway.exists(normalized);
     }
 
     @Override
@@ -99,64 +120,108 @@ public class MailFileStorage implements FileStorage {
         if (normalized.isEmpty()) {
             return StorageEntry.dir("", 0L);
         }
-        requireFlat(normalized);
-        MailEntry entry = gateway.stat(normalized);
-        return toStorageEntry(entry);
+        synchronized (lock) {
+            Resolved resolved = resolveLogical(normalized);
+            if (resolved == null) {
+                throw StorageException.notFound(normalized);
+            }
+            return resolved.toStorageEntry(normalized);
+        }
     }
 
     @Override
     public List<StorageEntry> list(String dir) {
         String normalized = StoragePaths.normalize(dir);
-        if (isNested(normalized)) {
-            throw StorageException.invalidConfig("邮件存储一期仅支持扁平路径，不支持嵌套目录: " + normalized);
-        }
-        if (!normalized.isEmpty()) {
-            throw StorageException.notFound(normalized);
-        }
-        List<MailEntry> mails = gateway.list(normalized);
-        List<StorageEntry> result = new ArrayList<StorageEntry>();
-        if (mails == null) {
-            return result;
-        }
-        for (MailEntry entry : mails) {
-            if (entry == null) {
-                continue;
+        synchronized (lock) {
+            if (!normalized.isEmpty()) {
+                Resolved dirHit = resolveLogical(normalized);
+                if (dirHit == null || !dirHit.directory) {
+                    throw StorageException.notFound(normalized);
+                }
             }
-            result.add(toStorageEntry(entry));
+            return listChildren(normalized);
         }
-        return result;
     }
 
     @Override
     public void mkdir(String dir) {
-        throw StorageException.unsupported("邮件存储一期不支持 mkdir");
+        String normalized = StoragePaths.normalize(dir);
+        if (normalized.isEmpty()) {
+            return;
+        }
+        synchronized (lock) {
+            Resolved existing = resolveLogical(normalized);
+            if (existing != null) {
+                if (existing.directory) {
+                    return;
+                }
+                throw StorageException.conflict("同名文件已存在，无法创建目录: " + normalized, normalized);
+            }
+            // 可切换：先调网关（预留真 IMAP CREATE），再写逻辑占位
+            gateway.mkdir(normalized);
+            String keepPath = StoragePaths.join(normalized, KEEP_NAME);
+            if (!gateway.exists(keepPath)) {
+                appendMime(keepPath, new byte[0]);
+            }
+        }
     }
 
     @Override
     public void upload(String path, InputStream in, long size) {
-        String name = requireFlatFile(path);
+        String name = requireFilePath(path);
         byte[] payload = readPayload(in, size, name);
-        if (payload.length > maxAttachmentBytes) {
-            throw StorageException.conflict(
-                    "附件超过上限 " + maxAttachmentBytes + " 字节: " + name, name);
-        }
-        if (gateway.exists(name)) {
-            try {
-                gateway.delete(name);
-            } catch (StorageException e) {
-                if (e.code() != StorageErrorCode.NOT_FOUND) {
-                    throw e;
-                }
+        synchronized (lock) {
+            Resolved existing = resolveLogical(name);
+            if (existing != null && existing.directory) {
+                throw StorageException.conflict("目标是目录，无法上传文件: " + name, name);
+            }
+            deleteExact(name);
+            if (payload.length <= maxAttachmentBytes) {
+                appendMime(name, payload);
+                return;
+            }
+            Attachment whole = Attachment.of(name, payload);
+            long offset = 0L;
+            int partNo = 1;
+            while (offset < payload.length) {
+                long chunk = Math.min(maxAttachmentBytes, payload.length - offset);
+                String partName = name + ".part" + partNo;
+                Attachment part = whole.slice(offset, chunk, partName);
+                appendMime(partName, part.content());
+                offset += chunk;
+                partNo++;
             }
         }
-        byte[] mime = buildStoredMime(name, payload);
-        gateway.append(folder, new ByteArrayInputStream(mime), mime.length);
     }
 
     @Override
     public void download(String path, OutputStream out) {
-        String name = requireFlatFile(path);
-        gateway.download(name, out);
+        String name = requireFilePath(path);
+        if (out == null) {
+            throw StorageException.invalidConfig("download 输出流不能为 null");
+        }
+        synchronized (lock) {
+            Resolved resolved = resolveLogical(name);
+            if (resolved == null) {
+                throw StorageException.notFound(name);
+            }
+            if (resolved.directory) {
+                throw StorageException.conflict("目标是目录，无法按文件下载: " + name, name);
+            }
+            try {
+                if (resolved.parts.isEmpty()) {
+                    gateway.download(name, out);
+                } else {
+                    for (String partName : resolved.parts) {
+                        gateway.download(partName, out);
+                    }
+                }
+            } catch (StorageException e) {
+                throw e;
+            } catch (RuntimeException e) {
+                throw StorageException.io("下载失败: " + name, name, e);
+            }
+        }
     }
 
     @Override
@@ -165,60 +230,262 @@ public class MailFileStorage implements FileStorage {
         if (normalized.isEmpty()) {
             throw StorageException.invalidConfig("拒绝删除存储根目录");
         }
-        if (isNested(normalized)) {
-            return;
-        }
-        try {
-            gateway.delete(normalized);
-        } catch (StorageException e) {
-            if (e.code() == StorageErrorCode.NOT_FOUND) {
+        synchronized (lock) {
+            Resolved resolved = resolveLogical(normalized);
+            if (resolved == null) {
                 return;
             }
-            throw e;
+            if (resolved.directory) {
+                deleteUnder(normalized);
+                return;
+            }
+            deleteExact(normalized);
         }
     }
 
     @Override
     public void copy(String src, String dst) {
-        throw StorageException.unsupported("邮件存储一期不支持 copy");
+        throw StorageException.unsupported("邮件存储暂不支持 copy");
     }
 
     @Override
     public void rename(String src, String dst) {
-        throw StorageException.unsupported("邮件存储一期不支持 rename");
+        throw StorageException.unsupported("邮件存储暂不支持 rename");
     }
 
     @Override
     public void close() {
-        gateway.close();
-    }
-
-    private static StorageEntry toStorageEntry(MailEntry entry) {
-        String name = entry.name();
-        if (entry.directory()) {
-            return StorageEntry.dir(name, entry.mtimeEpochMs());
-        }
-        return StorageEntry.file(name, entry.size(), entry.mtimeEpochMs(), entry.uid());
-    }
-
-    private static boolean isNested(String normalized) {
-        return normalized.indexOf('/') >= 0;
-    }
-
-    private static void requireFlat(String normalized) {
-        if (isNested(normalized)) {
-            throw StorageException.invalidConfig(
-                    "邮件存储一期仅支持扁平路径，不支持嵌套目录: " + normalized);
+        synchronized (lock) {
+            gateway.close();
         }
     }
 
-    private static String requireFlatFile(String path) {
+    /** 测试/诊断：登记的通道池上限（二期仍串行）。 */
+    int channelPool() {
+        return channelPool;
+    }
+
+    private List<StorageEntry> listChildren(String dir) {
+        Index index = buildIndex();
+        Map<String, StorageEntry> files = new LinkedHashMap<String, StorageEntry>();
+        Set<String> dirs = new LinkedHashSet<String>();
+
+        for (Map.Entry<String, Resolved> e : index.byLogical.entrySet()) {
+            String logical = e.getKey();
+            Resolved resolved = e.getValue();
+            if (!StoragePaths.isUnder(dir, logical) || logical.equals(dir)) {
+                continue;
+            }
+            String rel = StoragePaths.relativize(dir, logical);
+            if (rel == null) {
+                continue;
+            }
+            int slash = rel.indexOf('/');
+            if (slash >= 0) {
+                dirs.add(StoragePaths.join(dir, rel.substring(0, slash)));
+                continue;
+            }
+            if (KEEP_NAME.equals(rel)) {
+                continue;
+            }
+            if (resolved.directory) {
+                dirs.add(logical);
+                continue;
+            }
+            files.put(logical, resolved.toStorageEntry(logical));
+        }
+
+        // 仅有深层后代、尚无进 dirs 的中间段
+        for (String raw : index.rawNames) {
+            String logical = stripPart(raw);
+            if (KEEP_NAME.equals(StoragePaths.name(logical))) {
+                // .keep 也贡献目录段
+            }
+            if (!StoragePaths.isUnder(dir, logical) || logical.equals(dir)) {
+                continue;
+            }
+            String rel = StoragePaths.relativize(dir, logical);
+            if (rel == null) {
+                continue;
+            }
+            int slash = rel.indexOf('/');
+            if (slash >= 0) {
+                dirs.add(StoragePaths.join(dir, rel.substring(0, slash)));
+            }
+        }
+
+        List<StorageEntry> result = new ArrayList<StorageEntry>();
+        for (String d : dirs) {
+            result.add(StorageEntry.dir(d));
+        }
+        result.addAll(files.values());
+        return result;
+    }
+
+    private Resolved resolveLogical(String normalized) {
+        Index index = buildIndex();
+        Resolved hit = index.byLogical.get(normalized);
+        if (hit != null) {
+            return hit;
+        }
+        // 合成目录：任意后代（含 .keep / part）
+        String prefix = normalized + "/";
+        for (String raw : index.rawNames) {
+            String logical = stripPart(raw);
+            if (logical.equals(normalized) || logical.startsWith(prefix)) {
+                return Resolved.dir();
+            }
+            // raw 本身以 prefix 开头（未 strip 时）
+            if (raw.startsWith(prefix) || raw.equals(normalized)) {
+                return Resolved.dir();
+            }
+        }
+        return null;
+    }
+
+    private Index buildIndex() {
+        List<MailEntry> mails = gateway.list("");
+        Index index = new Index();
+        if (mails == null) {
+            return index;
+        }
+        Map<String, List<PartPiece>> partBags = new LinkedHashMap<String, List<PartPiece>>();
+        for (MailEntry entry : mails) {
+            if (entry == null || entry.name() == null || entry.name().isEmpty()) {
+                continue;
+            }
+            String name = entry.name();
+            index.rawNames.add(name);
+            Matcher m = PART_PATTERN.matcher(name);
+            if (m.matches()) {
+                String base = m.group(1);
+                int no = Integer.parseInt(m.group(2));
+                List<PartPiece> bag = partBags.get(base);
+                if (bag == null) {
+                    bag = new ArrayList<PartPiece>();
+                    partBags.put(base, bag);
+                }
+                bag.add(new PartPiece(no, name, entry));
+                continue;
+            }
+            if (entry.directory()) {
+                index.byLogical.put(name, Resolved.dir(entry.mtimeEpochMs()));
+                continue;
+            }
+            index.byLogical.put(name, Resolved.file(entry.size(), entry.mtimeEpochMs(), entry.uid(),
+                    Collections.<String>emptyList()));
+        }
+        for (Map.Entry<String, List<PartPiece>> e : partBags.entrySet()) {
+            List<PartPiece> bag = e.getValue();
+            Collections.sort(bag);
+            List<String> partNames = new ArrayList<String>(bag.size());
+            long total = 0L;
+            long mtime = -1L;
+            StringBuilder etag = new StringBuilder();
+            for (PartPiece p : bag) {
+                partNames.add(p.name);
+                if (p.entry.size() >= 0L) {
+                    total += p.entry.size();
+                }
+                if (p.entry.mtimeEpochMs() > mtime) {
+                    mtime = p.entry.mtimeEpochMs();
+                }
+                if (etag.length() > 0) {
+                    etag.append('+');
+                }
+                etag.append(p.entry.uid() == null ? p.name : p.entry.uid());
+            }
+            // 若同时存在整文件与分卷，分卷覆盖（upload 会先删）
+            index.byLogical.put(e.getKey(), Resolved.file(total, mtime, etag.toString(), partNames));
+        }
+        return index;
+    }
+
+    private void deleteExact(String logicalName) {
+        Resolved resolved = resolveLogical(logicalName);
+        if (resolved == null) {
+            return;
+        }
+        if (resolved.parts.isEmpty()) {
+            deleteQuiet(logicalName);
+            // 兼容：误存为 part 前缀时再扫一遍
+            deletePartsByPrefix(logicalName);
+        } else {
+            for (String part : resolved.parts) {
+                deleteQuiet(part);
+            }
+        }
+    }
+
+    private void deleteUnder(String dir) {
+        Index index = buildIndex();
+        String prefix = dir + "/";
+        Set<String> toDelete = new LinkedHashSet<String>();
+        for (String raw : index.rawNames) {
+            if (raw.equals(dir) || raw.startsWith(prefix)) {
+                toDelete.add(raw);
+            }
+        }
+        for (String logical : new ArrayList<String>(index.byLogical.keySet())) {
+            if (logical.equals(dir) || logical.startsWith(prefix)) {
+                Resolved r = index.byLogical.get(logical);
+                if (r != null && !r.parts.isEmpty()) {
+                    toDelete.addAll(r.parts);
+                } else {
+                    toDelete.add(logical);
+                }
+            }
+        }
+        for (String name : toDelete) {
+            deleteQuiet(name);
+        }
+    }
+
+    private void deletePartsByPrefix(String logicalName) {
+        List<MailEntry> mails = gateway.list("");
+        if (mails == null) {
+            return;
+        }
+        String prefix = logicalName + ".part";
+        for (MailEntry entry : mails) {
+            if (entry != null && entry.name() != null && entry.name().startsWith(prefix)) {
+                Matcher m = PART_PATTERN.matcher(entry.name());
+                if (m.matches() && logicalName.equals(m.group(1))) {
+                    deleteQuiet(entry.name());
+                }
+            }
+        }
+    }
+
+    private void deleteQuiet(String name) {
+        try {
+            gateway.delete(name);
+        } catch (StorageException e) {
+            if (e.code() != StorageErrorCode.NOT_FOUND) {
+                throw e;
+            }
+        }
+    }
+
+    private void appendMime(String logicalName, byte[] payload) {
+        byte[] mime = buildStoredMime(logicalName, payload);
+        gateway.append(folder, new ByteArrayInputStream(mime), mime.length);
+    }
+
+    private static String requireFilePath(String path) {
         String normalized = StoragePaths.normalize(path);
         if (normalized.isEmpty()) {
             throw StorageException.invalidConfig("文件路径不能为空");
         }
-        requireFlat(normalized);
+        if (KEEP_NAME.equals(StoragePaths.name(normalized)) && normalized.indexOf('/') < 0) {
+            // 允许路径中的 .keep；根下单独 .keep 也允许（占位）
+        }
         return normalized;
+    }
+
+    private static String stripPart(String name) {
+        Matcher m = PART_PATTERN.matcher(name);
+        return m.matches() ? m.group(1) : name;
     }
 
     private static byte[] readPayload(InputStream in, long size, String name) {
@@ -257,8 +524,9 @@ public class MailFileStorage implements FileStorage {
 
     /**
      * 经 jkit-notify {@link Attachment} + {@link MailMime} 组装存储用 RFC822。
+     * Subject/附件名均为逻辑路径（可含 {@code /}）。
      *
-     * @param fileName 附件文件名（同时作 Subject）
+     * @param fileName 逻辑文件名
      * @param payload  附件字节
      * @return 完整 RFC822 字节
      */
@@ -270,5 +538,62 @@ public class MailFileStorage implements FileStorage {
                 .from("jkit-storage@localhost")
                 .to("jkit-storage@localhost");
         return MailMime.render(message, "jkit-storage@localhost", mimeCfg);
+    }
+
+    private static final class Index {
+        final Map<String, Resolved> byLogical = new LinkedHashMap<String, Resolved>();
+        final List<String> rawNames = new ArrayList<String>();
+    }
+
+    private static final class PartPiece implements Comparable<PartPiece> {
+        final int no;
+        final String name;
+        final MailEntry entry;
+
+        PartPiece(int no, String name, MailEntry entry) {
+            this.no = no;
+            this.name = name;
+            this.entry = entry;
+        }
+
+        @Override
+        public int compareTo(PartPiece o) {
+            return Integer.compare(this.no, o.no);
+        }
+    }
+
+    private static final class Resolved {
+        final boolean directory;
+        final long size;
+        final long mtime;
+        final String etag;
+        final List<String> parts;
+
+        private Resolved(boolean directory, long size, long mtime, String etag, List<String> parts) {
+            this.directory = directory;
+            this.size = size;
+            this.mtime = mtime;
+            this.etag = etag;
+            this.parts = parts == null ? Collections.<String>emptyList() : parts;
+        }
+
+        static Resolved dir() {
+            return dir(-1L);
+        }
+
+        static Resolved dir(long mtime) {
+            return new Resolved(true, 0L, mtime, null, Collections.<String>emptyList());
+        }
+
+        static Resolved file(long size, long mtime, String etag, List<String> parts) {
+            return new Resolved(false, size, mtime, etag, parts);
+        }
+
+        StorageEntry toStorageEntry(String path) {
+            if (directory) {
+                return StorageEntry.dir(path, mtime);
+            }
+            return StorageEntry.file(path, size, mtime, etag);
+        }
     }
 }

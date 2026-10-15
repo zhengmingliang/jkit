@@ -28,7 +28,7 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 /**
- * 邮件存储一期单测：内存 FakeMailGateway，不连真实 QQ / IMAP。
+ * 邮件存储单测：内存 FakeMailGateway，覆盖一期扁平 + 二期逻辑路径/mkdir/分卷。
  *
  * @author 郑明亮
  */
@@ -116,19 +116,17 @@ public class MailFileStorageTest {
     }
 
     @Test
-    public void oversizeConflict() {
+    public void oversizeConflictWhenBelowChunkThresholdDisabled() {
+        // maxAttachmentBytes 极小且仍走分卷：不再 CONFLICT，见 chunkedUploadDownloadDelete
         StorageConfig cfg = StorageConfig.empty()
                 .set("host", "imap.example.com")
                 .set("user", "u")
                 .set("password", "p")
                 .set("maxAttachmentBytes", "10");
         FileStorage fs = new MailFileStorage(cfg, new FakeMailGateway());
-        try {
-            fs.upload("big.bin", new byte[11]);
-            fail("超限应 CONFLICT");
-        } catch (StorageException e) {
-            assertEquals(StorageErrorCode.CONFLICT, e.code());
-        }
+        fs.upload("big.bin", new byte[11]);
+        assertTrue(fs.exists("big.bin"));
+        assertEquals(11, fs.stat("big.bin").size());
     }
 
     @Test
@@ -141,29 +139,164 @@ public class MailFileStorageTest {
         assertEquals("true", qq.defaults().get("ssl"));
         assertEquals("jkit-mail-disk", qq.defaults().get("basePath"));
         assertEquals(String.valueOf(45L * 1024L * 1024L), qq.defaults().get("maxAttachmentBytes"));
+        assertEquals("1", qq.defaults().get("channelPool"));
+        assertNotNull(findField(qq, "channelPool"));
         StoragePlatform generic = FileStorages.platform("mail");
         assertNotNull(generic);
         assertEquals("mail", generic.engine());
+        assertEquals("1", generic.defaults().get("channelPool"));
     }
 
     @Test
-    public void mkdirCopyRenameUnsupported() {
+    public void copyRenameStillUnsupported() {
         FileStorage fs = open(new FakeMailGateway());
-        assertUnsupported(() -> fs.mkdir("d"));
         assertUnsupported(() -> fs.copy("a", "b"));
         assertUnsupported(() -> fs.rename("a", "b"));
     }
 
     @Test
-    public void nestedPathRejected() {
-        FileStorage fs = open(new FakeMailGateway());
-        try {
-            fs.upload("dir/a.txt", "x".getBytes(StandardCharsets.UTF_8));
-            fail("嵌套路径应 INVALID_CONFIG");
-        } catch (StorageException e) {
-            assertEquals(StorageErrorCode.INVALID_CONFIG, e.code());
+    public void mkdirListNestedUploadRoundtrip() {
+        FakeMailGateway fake = new FakeMailGateway();
+        FileStorage fs = open(fake);
+        fs.mkdir("docs");
+        assertTrue(fs.exists("docs"));
+        assertTrue(fs.stat("docs").isDirectory());
+
+        List<StorageEntry> root = fs.list("");
+        assertEquals(1, root.size());
+        assertEquals("docs", root.get(0).path());
+        assertTrue(root.get(0).isDirectory());
+
+        // 空目录 list 不暴露 .keep
+        assertTrue(fs.list("docs").isEmpty());
+
+        fs.upload("docs/a.txt", "nested".getBytes(StandardCharsets.UTF_8));
+        assertTrue(fs.exists("docs/a.txt"));
+        assertEquals("nested", fs.readString("docs/a.txt"));
+
+        List<StorageEntry> kids = fs.list("docs");
+        assertEquals(1, kids.size());
+        assertEquals("a.txt", kids.get(0).name());
+        assertEquals("docs/a.txt", kids.get(0).path());
+
+        fs.mkdir("docs/sub");
+        fs.upload("docs/sub/b.txt", "deep".getBytes(StandardCharsets.UTF_8));
+        List<StorageEntry> docsKids = fs.list("docs");
+        Map<String, StorageEntry> byPath = new LinkedHashMap<String, StorageEntry>();
+        for (StorageEntry e : docsKids) {
+            byPath.put(e.path(), e);
         }
-        assertFalse(fs.exists("dir/a.txt"));
+        assertTrue(byPath.containsKey("docs/a.txt"));
+        assertTrue(byPath.containsKey("docs/sub"));
+        assertTrue(byPath.get("docs/sub").isDirectory());
+        assertEquals("deep", fs.readString("docs/sub/b.txt"));
+    }
+
+    @Test
+    public void mkdirIdempotentAndConflictWithFile() {
+        FileStorage fs = open(new FakeMailGateway());
+        fs.mkdir("d");
+        fs.mkdir("d");
+        fs.upload("file.txt", "x".getBytes(StandardCharsets.UTF_8));
+        try {
+            fs.mkdir("file.txt");
+            fail("同名文件应 CONFLICT");
+        } catch (StorageException e) {
+            assertEquals(StorageErrorCode.CONFLICT, e.code());
+        }
+    }
+
+    @Test
+    public void chunkedUploadDownloadDelete() {
+        StorageConfig cfg = StorageConfig.empty()
+                .set("host", "imap.example.com")
+                .set("user", "u")
+                .set("password", "p")
+                .set("basePath", "jkit-mail-disk")
+                .set("maxAttachmentBytes", "5");
+        FakeMailGateway fake = new FakeMailGateway();
+        FileStorage fs = new MailFileStorage(cfg, fake);
+        byte[] data = "abcdefghij".getBytes(StandardCharsets.UTF_8); // 10 bytes → 2 parts
+        fs.upload("big.bin", data);
+        assertTrue(fs.exists("big.bin"));
+        assertFalse("list 应隐藏 part", fs.exists("big.bin.part1") && visibleInList(fs, "big.bin.part1"));
+        assertEquals(10, fs.stat("big.bin").size());
+        assertArrayEquals(data, fs.readBytes("big.bin"));
+
+        List<StorageEntry> listed = fs.list("");
+        assertEquals(1, listed.size());
+        assertEquals("big.bin", listed.get(0).name());
+        assertEquals(10, listed.get(0).size());
+
+        // 底层应有分卷
+        assertTrue(fake.exists("big.bin.part1"));
+        assertTrue(fake.exists("big.bin.part2"));
+        assertFalse(fake.exists("big.bin"));
+
+        fs.delete("big.bin");
+        assertFalse(fs.exists("big.bin"));
+        assertFalse(fake.exists("big.bin.part1"));
+        assertFalse(fake.exists("big.bin.part2"));
+    }
+
+    @Test
+    public void chunkedNestedPathAndOverwrite() {
+        StorageConfig cfg = StorageConfig.empty()
+                .set("host", "imap.example.com")
+                .set("user", "u")
+                .set("password", "p")
+                .set("maxAttachmentBytes", "4");
+        FakeMailGateway fake = new FakeMailGateway();
+        FileStorage fs = new MailFileStorage(cfg, fake);
+        fs.mkdir("docs");
+        byte[] v1 = "12345678".getBytes(StandardCharsets.UTF_8);
+        fs.upload("docs/big.bin", v1);
+        assertArrayEquals(v1, fs.readBytes("docs/big.bin"));
+        byte[] v2 = "ABCD".getBytes(StandardCharsets.UTF_8); // 恰好 1 片
+        fs.upload("docs/big.bin", v2);
+        assertArrayEquals(v2, fs.readBytes("docs/big.bin"));
+        assertFalse(fake.exists("docs/big.bin.part1"));
+        assertTrue(fake.exists("docs/big.bin"));
+    }
+
+    @Test
+    public void listDepthForSyncWalk() {
+        FileStorage fs = open(new FakeMailGateway());
+        fs.mkdir("a");
+        fs.mkdir("a/b");
+        fs.upload("a/b/c.txt", "c".getBytes(StandardCharsets.UTF_8));
+        fs.upload("root.txt", "r".getBytes(StandardCharsets.UTF_8));
+
+        List<StorageEntry> root = fs.list("");
+        Map<String, StorageEntry> rootMap = indexByPath(root);
+        assertTrue(rootMap.containsKey("a"));
+        assertTrue(rootMap.get("a").isDirectory());
+        assertTrue(rootMap.containsKey("root.txt"));
+        assertFalse(rootMap.containsKey("a/b"));
+        assertFalse(rootMap.containsKey("a/b/c.txt"));
+
+        List<StorageEntry> aKids = fs.list("a");
+        Map<String, StorageEntry> aMap = indexByPath(aKids);
+        assertTrue(aMap.containsKey("a/b"));
+        assertTrue(aMap.get("a/b").isDirectory());
+        assertFalse(aMap.containsKey("a/b/c.txt"));
+
+        List<StorageEntry> bKids = fs.list("a/b");
+        assertEquals(1, bKids.size());
+        assertEquals("a/b/c.txt", bKids.get(0).path());
+    }
+
+    @Test
+    public void deleteDirectoryRemovesDescendants() {
+        FileStorage fs = open(new FakeMailGateway());
+        fs.mkdir("docs");
+        fs.upload("docs/a.txt", "x".getBytes(StandardCharsets.UTF_8));
+        fs.mkdir("docs/sub");
+        fs.upload("docs/sub/b.txt", "y".getBytes(StandardCharsets.UTF_8));
+        fs.delete("docs");
+        assertFalse(fs.exists("docs"));
+        assertFalse(fs.exists("docs/a.txt"));
+        assertFalse(fs.exists("docs/sub/b.txt"));
     }
 
     @Test
@@ -200,7 +333,6 @@ public class MailFileStorageTest {
         assertEquals("你好.txt", ImapMailSession.decodeMimeWords("=?UTF-8?B?"
                 + java.util.Base64.getEncoder().encodeToString("你好.txt".getBytes(StandardCharsets.UTF_8))
                 + "?="));
-        // Q-encoding: =E4=BD=A0 is 你 in UTF-8
         assertEquals("你", ImapMailSession.decodeMimeWords("=?UTF-8?Q?=E4=BD=A0?="));
         assertEquals("ab", ImapMailSession.decodeMimeWords(
                 "=?UTF-8?B?YQ==?= =?UTF-8?B?Yg==?="));
@@ -214,7 +346,6 @@ public class MailFileStorageTest {
     public void encodedSubjectFromMimeMatchesPlainPath() {
         FakeMailGateway fake = new FakeMailGateway();
         FileStorage fs = open(fake);
-        // 先走真实 MailMime 渲染，再模拟 QQ 把编码 Subject 原样塞进网关
         byte[] mime = MailFileStorage.buildStoredMime("report-中文.txt",
                 "payload".getBytes(StandardCharsets.UTF_8));
         String mimeText = new String(mime, StandardCharsets.UTF_8);
@@ -222,7 +353,6 @@ public class MailFileStorageTest {
         assertTrue("MIME 应含 Subject", at >= 0);
         int end = mimeText.indexOf("\r\n", at);
         String subject = mimeText.substring(at + "Subject: ".length(), end).trim();
-        // 中文文件名 Subject 必为 RFC2047；即便未来 ASCII 不编码，namesMatch 仍应成立
         fake.putEncodedSubjectEntry(subject, "payload".getBytes(StandardCharsets.UTF_8));
 
         assertTrue(fs.exists("report-中文.txt"));
@@ -245,6 +375,43 @@ public class MailFileStorageTest {
         assertArrayEquals("x".getBytes(StandardCharsets.UTF_8), fs.readBytes("plain-ascii.txt"));
     }
 
+    @Test
+    public void channelPoolConfigAccepted() {
+        FakeMailGateway fake = new FakeMailGateway();
+        MailFileStorage fs = new MailFileStorage(StorageConfig.empty()
+                .set("host", "imap.example.com")
+                .set("user", "u")
+                .set("password", "p")
+                .set("channelPool", "4"), fake);
+        assertEquals(4, fs.channelPool());
+    }
+
+    private static boolean visibleInList(FileStorage fs, String path) {
+        for (StorageEntry e : fs.list("")) {
+            if (path.equals(e.path())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static Map<String, StorageEntry> indexByPath(List<StorageEntry> entries) {
+        Map<String, StorageEntry> map = new LinkedHashMap<String, StorageEntry>();
+        for (StorageEntry e : entries) {
+            map.put(e.path(), e);
+        }
+        return map;
+    }
+
+    private static com.alianga.jkit.storage.StorageField findField(StoragePlatform platform, String key) {
+        for (com.alianga.jkit.storage.StorageField f : platform.fields()) {
+            if (key.equals(f.key())) {
+                return f;
+            }
+        }
+        return null;
+    }
+
     private static FileStorage open(FakeMailGateway fake) {
         return new MailFileStorage(StorageConfig.empty()
                 .set("host", "imap.example.com")
@@ -263,13 +430,14 @@ public class MailFileStorageTest {
     }
 
     /**
-     * 内存 Fake：name → 条目内容。
+     * 内存 Fake：name → 条目内容；支持逻辑路径与 mkdir 钩子。
      */
     static final class FakeMailGateway implements MailGateway {
         private final Map<String, Stored> store = new LinkedHashMap<String, Stored>();
         private final AtomicLong uidSeq = new AtomicLong(1L);
         private int deleteCount;
         private int appendCount;
+        private int mkdirCount;
 
         @Override
         public void connect(Map<String, String> cfg) {
@@ -303,10 +471,8 @@ public class MailFileStorageTest {
             deleteCount++;
             Stored s = findByLogicalName(path);
             if (s == null) {
-                // 后端找不到时抛 NOT_FOUND；MailFileStorage.delete 负责吞掉以保持幂等
                 throw StorageException.notFound(path);
             }
-            // 可能按逻辑名或编码名存着，两边都尝试移除
             store.remove(path);
             store.remove(ImapMailSession.decodeMimeWords(path));
             store.remove(s.name);
@@ -326,6 +492,12 @@ public class MailFileStorageTest {
                 throw StorageException.notFound(path);
             }
             return s.toEntry();
+        }
+
+        @Override
+        public void mkdir(String dir) {
+            mkdirCount++;
+            // Plan A：真 CREATE 空实现；.keep 由 MailFileStorage 追加
         }
 
         @Override
@@ -373,7 +545,6 @@ public class MailFileStorageTest {
                             text.substring(subjectAt + "Subject: ".length(), end).trim());
                 }
             }
-            // SmtpChannel 正文与附件均为 base64；取最后一个 base64 part 作为附件载荷
             String marker = "Content-Transfer-Encoding: base64\r\n";
             int encAt = text.lastIndexOf(marker);
             if (encAt < 0) {
@@ -394,14 +565,10 @@ public class MailFileStorageTest {
             return new ParsedAttachment(name, payload);
         }
 
-        /** 与活连 ImapMailSession 共用 RFC2047 解码。 */
         private static String decodeMimeWords(String raw) {
             return ImapMailSession.decodeMimeWords(raw);
         }
 
-        /**
-         * 模拟 QQ：list/stat 仍暴露编码 Subject，查找时按解码后明文匹配。
-         */
         void putEncodedSubjectEntry(String encodedSubject, byte[] payload) {
             String uid = String.valueOf(uidSeq.getAndIncrement());
             String logical = ImapMailSession.decodeMimeWords(encodedSubject);
@@ -436,7 +603,6 @@ public class MailFileStorageTest {
         }
 
         MailEntry toEntry() {
-            // 与 ImapMailSession.fetchMeta 一致：对外逻辑名为解码后的明文
             String logical = ImapMailSession.decodeMimeWords(name);
             return new MailEntry(logical, false, bytes.length, mtime, uid);
         }

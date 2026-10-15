@@ -125,13 +125,16 @@ public final class StoragePresets {
                         StorageField.optional("basePath", "邮箱文件夹", "jkit-mail-disk",
                                 "IMAP 文件夹名，默认 jkit-mail-disk"),
                         StorageField.optional("maxAttachmentBytes", "单附件上限字节",
-                                String.valueOf(qqMax), "QQ 约 50MB，默认 45MiB")),
+                                String.valueOf(qqMax), "QQ 约 50MB，默认 45MiB"),
+                        StorageField.optional("channelPool", "并发通道数", "1",
+                                "二期单会话串行；>1 预留，真多连接池待协议层")),
                 StorageConfig.empty()
                         .set("host", "imap.qq.com")
                         .set("imapPort", "993")
                         .set("ssl", "true")
                         .set("basePath", "jkit-mail-disk")
-                        .set("maxAttachmentBytes", String.valueOf(qqMax))));
+                        .set("maxAttachmentBytes", String.valueOf(qqMax))
+                        .set("channelPool", "1")));
         platforms.add(new StoragePlatform("mail", "IMAP 邮箱", "mail", "邮件",
                 Arrays.asList(
                         StorageField.required("host", "IMAP 服务器"),
@@ -142,12 +145,15 @@ public final class StoragePresets {
                         StorageField.optional("basePath", "邮箱文件夹", "jkit-mail-disk",
                                 "IMAP 文件夹名，默认 jkit-mail-disk"),
                         StorageField.optional("maxAttachmentBytes", "单附件上限字节",
-                                String.valueOf(qqMax), "单附件大小上限")),
+                                String.valueOf(qqMax), "单附件大小上限"),
+                        StorageField.optional("channelPool", "并发通道数", "1",
+                                "二期单会话串行；>1 预留，真多连接池待协议层")),
                 StorageConfig.empty()
                         .set("imapPort", "993")
                         .set("ssl", "true")
                         .set("basePath", "jkit-mail-disk")
-                        .set("maxAttachmentBytes", String.valueOf(qqMax))));
+                        .set("maxAttachmentBytes", String.valueOf(qqMax))
+                        .set("channelPool", "1")));
         return platforms;
     }
 

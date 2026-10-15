@@ -59,6 +59,14 @@ interface MailGateway extends AutoCloseable {
     MailEntry stat(String path);
 
     /**
+     * 创建目录。二期 Plan A：上层写逻辑占位 {@code dir/.keep}；
+     * 下一刀可在此接 {@link ImapMailSession} CREATE 真子邮箱。
+     *
+     * @param dir 逻辑目录路径（可含 {@code /}）
+     */
+    void mkdir(String dir);
+
+    /**
      * APPEND MIME。
      *
      * @param folder      文件夹
