@@ -11,6 +11,7 @@ import java.util.Arrays;
 import java.util.List;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -187,5 +188,41 @@ public class ImapMailSessionBusyRetryTest {
         assertEquals(-1L, ImapMailSession.payloadSize(null, null));
         // QQ 实测：3827302 原始 → BODYSTRUCTURE 5237362
         assertEquals(5237362L, ImapMailSession.foldedBase64Length(3827302L));
+    }
+
+    /** 2026-10-15 真号 QQ 抓包（临时文件夹，已删）：20B 文件，头为 {37} 字面量，其后同行接 BODYSTRUCTURE。 */
+    static String qqFetchSample(String tag) {
+        String hdr = "X-Jkit-Size: 20\r\nSubject: s20.txt\r\n\r\n";
+        return "* 1 FETCH (UID 1 INTERNALDATE \"15-Oct-2026 11:51:34 +0800\" RFC822.SIZE 611 "
+                + "BODY[HEADER.FIELDS (SUBJECT X-JKIT-SIZE)] {" + hdr.length() + "}\r\n" + hdr
+                + " BODYSTRUCTURE ((\"TEXT\" \"PLAIN\" (\"CHARSET\" \"us-ascii\") NIL NIL NIL 3 1 NIL NIL NIL)"
+                + "(\"APPLICATION\" \"OCTET-STREAM\" (\"name\" \"=?gbk?B?czIwLnR4dA==?=\") NIL NIL \"BASE64\" 28"
+                + " NIL (\"attachment\" (\"filename\" \"s20.txt\")) NIL) \"MIXED\" (\"BOUNDARY\" \"b\") NIL NIL))\r\n"
+                + tag + " OK UID FETCH Completed";
+    }
+
+    @Test
+    public void realQqFetchSampleReadsJkitSizeExactly() {
+        assertEquals(37, "X-Jkit-Size: 20\r\nSubject: s20.txt\r\n\r\n".length());
+        MailEntry e = session(qqFetchSample("A0001")).fetchMetaForTest(1L);
+        assertEquals("s20.txt", e.name());
+        assertEquals(20L, e.size());   // base64 估算会得 21
+    }
+
+    @Test
+    public void statTwentyByteFileShowsExactlyTwenty() {
+        MailEntry e = session("A0001 OK LIST completed",
+                "A0002 NO no such folder",
+                "A0003 OK SELECT complete",
+                "* SEARCH 1", "A0004 OK UID SEARCH completed",
+                qqFetchSample("A0005"), qqFetchSample("A0006")).stat("s20.txt");
+        assertEquals("s20.txt", e.name());
+        assertEquals(20L, e.size());
+        assertFalse(e.directory());
+    }
+
+    @Test
+    public void caseInsensitiveHeaderName() {
+        assertEquals(20L, ImapMailSession.parseHeaderLong("x-jkit-size: 20\r\n", "X-Jkit-Size"));
     }
 }

@@ -979,6 +979,15 @@ public final class ImapMailSession implements AutoCloseable {
         return -1L;
     }
 
+    /** 单测：直接解析一次 FETCH 元数据。 */
+    MailEntry fetchMetaForTest(long uid) {
+        try {
+            return fetchMeta(uid);
+        } catch (IOException e) {
+            throw StorageException.io("fetchMeta", "uid=" + uid, e);
+        }
+    }
+
     private MailEntry fetchMeta(long uid) throws IOException {
         String tag = nextTag();
         sendRaw(tag + " UID FETCH " + uid
@@ -1043,6 +1052,7 @@ public final class ImapMailSession implements AutoCloseable {
         StringBuilder acc = new StringBuilder();
         String line = firstLine;
         byte[] lastLiteral = null;
+        byte[] headerLiteral = null;
         String lastLiteralField = null;
         while (true) {
             Matcher lit = LITERAL_AT_END.matcher(line);
@@ -1055,7 +1065,14 @@ public final class ImapMailSession implements AutoCloseable {
                 // IMAP literal is followed by continuation of the same response line OR more.
                 // After literal bytes, the next characters continue the FETCH; often ")\r\n" or more fields.
                 String fieldHint = without.toUpperCase(Locale.ROOT);
-                if (fieldHint.contains("BODY[")) {
+                // QQ: BODY[HEADER.FIELDS (SUBJECT X-JKIT-SIZE)] {37}\r\n<头字面量> BODYSTRUCTURE (...)
+                // 须先于 "BODY[" 判定，否则头字面量被当成正文，X-Jkit-Size 读不到
+                int lastBody = fieldHint.lastIndexOf("BODY[");
+                if (lastBody >= 0 && fieldHint.indexOf("HEADER", lastBody) >= 0) {
+                    lastLiteralField = "HEADER";
+                    headerLiteral = data;
+                    acc.append("{").append(size).append("}");
+                } else if (fieldHint.contains("BODY[")) {
                     lastLiteralField = "BODY";
                     lastLiteral = data;
                     acc.append("{").append(size).append("}");
@@ -1104,7 +1121,12 @@ public final class ImapMailSession implements AutoCloseable {
         if (structAt >= 0) {
             msg.structureText = all.substring(structAt);
         }
-        if ("HEADER".equals(lastLiteralField) && lastLiteral != null) {
+        if (headerLiteral != null) {
+            msg.headerText = new String(headerLiteral, StandardCharsets.UTF_8);
+        }
+        if (msg.headerText != null) {
+            // 已取到头字面量
+        } else if ("HEADER".equals(lastLiteralField) && lastLiteral != null) {
             msg.headerText = new String(lastLiteral, StandardCharsets.UTF_8);
         } else if ("BODY".equals(lastLiteralField) && lastLiteral != null) {
             msg.body = lastLiteral;
