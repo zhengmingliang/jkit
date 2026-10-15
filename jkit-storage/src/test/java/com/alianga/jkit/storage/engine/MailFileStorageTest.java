@@ -190,6 +190,61 @@ public class MailFileStorageTest {
         }
     }
 
+    @Test
+    public void rfc2047DecodeWordsBAndQ() {
+        String plain = "hello.txt";
+        String b = "=?UTF-8?B?"
+                + java.util.Base64.getEncoder().encodeToString(plain.getBytes(StandardCharsets.UTF_8))
+                + "?=";
+        assertEquals(plain, ImapMailSession.decodeMimeWords(b));
+        assertEquals("你好.txt", ImapMailSession.decodeMimeWords("=?UTF-8?B?"
+                + java.util.Base64.getEncoder().encodeToString("你好.txt".getBytes(StandardCharsets.UTF_8))
+                + "?="));
+        // Q-encoding: =E4=BD=A0 is 你 in UTF-8
+        assertEquals("你", ImapMailSession.decodeMimeWords("=?UTF-8?Q?=E4=BD=A0?="));
+        assertEquals("ab", ImapMailSession.decodeMimeWords(
+                "=?UTF-8?B?YQ==?= =?UTF-8?B?Yg==?="));
+        assertTrue(ImapMailSession.namesMatch(b, plain));
+        assertTrue(ImapMailSession.namesMatch(plain, b));
+        assertTrue(ImapMailSession.namesMatch(b, b));
+        assertFalse(ImapMailSession.namesMatch(b, "other.txt"));
+    }
+
+    @Test
+    public void encodedSubjectFromMimeMatchesPlainPath() {
+        FakeMailGateway fake = new FakeMailGateway();
+        FileStorage fs = open(fake);
+        // 先走真实 MailMime 渲染，再模拟 QQ 把编码 Subject 原样塞进网关
+        byte[] mime = MailFileStorage.buildStoredMime("report-中文.txt",
+                "payload".getBytes(StandardCharsets.UTF_8));
+        String mimeText = new String(mime, StandardCharsets.UTF_8);
+        int at = mimeText.indexOf("Subject: ");
+        assertTrue("MIME 应含 Subject", at >= 0);
+        int end = mimeText.indexOf("\r\n", at);
+        String subject = mimeText.substring(at + "Subject: ".length(), end).trim();
+        // 中文文件名 Subject 必为 RFC2047；即便未来 ASCII 不编码，namesMatch 仍应成立
+        fake.putEncodedSubjectEntry(subject, "payload".getBytes(StandardCharsets.UTF_8));
+
+        assertTrue(fs.exists("report-中文.txt"));
+        assertEquals("report-中文.txt", fs.stat("report-中文.txt").name());
+        assertEquals("payload", fs.readString("report-中文.txt"));
+        List<StorageEntry> listed = fs.list("");
+        assertEquals(1, listed.size());
+        assertEquals("report-中文.txt", listed.get(0).name());
+        assertFalse("list 不应仍是 encoded-word", listed.get(0).name().contains("=?"));
+        fs.delete("report-中文.txt");
+        assertFalse(fs.exists("report-中文.txt"));
+    }
+
+    @Test
+    public void asciiRoundtripStillWorksWhenSubjectPlain() {
+        FakeMailGateway fake = new FakeMailGateway();
+        FileStorage fs = open(fake);
+        fs.upload("plain-ascii.txt", "x".getBytes(StandardCharsets.UTF_8));
+        assertTrue(fs.exists("plain-ascii.txt"));
+        assertArrayEquals("x".getBytes(StandardCharsets.UTF_8), fs.readBytes("plain-ascii.txt"));
+    }
+
     private static FileStorage open(FakeMailGateway fake) {
         return new MailFileStorage(StorageConfig.empty()
                 .set("host", "imap.example.com")
@@ -232,7 +287,7 @@ public class MailFileStorageTest {
 
         @Override
         public void download(String path, OutputStream out) {
-            Stored s = store.get(path);
+            Stored s = findByLogicalName(path);
             if (s == null) {
                 throw StorageException.notFound(path);
             }
@@ -246,21 +301,27 @@ public class MailFileStorageTest {
         @Override
         public void delete(String path) {
             deleteCount++;
-            if (!store.containsKey(path)) {
+            Stored s = findByLogicalName(path);
+            if (s == null) {
                 // 后端找不到时抛 NOT_FOUND；MailFileStorage.delete 负责吞掉以保持幂等
                 throw StorageException.notFound(path);
             }
+            // 可能按逻辑名或编码名存着，两边都尝试移除
             store.remove(path);
+            store.remove(ImapMailSession.decodeMimeWords(path));
+            store.remove(s.name);
+            String logical = ImapMailSession.decodeMimeWords(s.name);
+            store.remove(logical);
         }
 
         @Override
         public boolean exists(String path) {
-            return store.containsKey(path);
+            return findByLogicalName(path) != null;
         }
 
         @Override
         public MailEntry stat(String path) {
-            Stored s = store.get(path);
+            Stored s = findByLogicalName(path);
             if (s == null) {
                 throw StorageException.notFound(path);
             }
@@ -287,7 +348,7 @@ public class MailFileStorageTest {
         }
 
         String lastUidFor(String name) {
-            Stored s = store.get(name);
+            Stored s = findByLogicalName(name);
             return s == null ? null : s.uid;
         }
 
@@ -333,34 +394,31 @@ public class MailFileStorageTest {
             return new ParsedAttachment(name, payload);
         }
 
-        /** 解 SmtpChannel Subject 的 RFC2047 encoded-word，与 ImapMailSession 对齐。 */
+        /** 与活连 ImapMailSession 共用 RFC2047 解码。 */
         private static String decodeMimeWords(String raw) {
-            if (raw == null || !raw.contains("=?")) {
-                return raw;
+            return ImapMailSession.decodeMimeWords(raw);
+        }
+
+        /**
+         * 模拟 QQ：list/stat 仍暴露编码 Subject，查找时按解码后明文匹配。
+         */
+        void putEncodedSubjectEntry(String encodedSubject, byte[] payload) {
+            String uid = String.valueOf(uidSeq.getAndIncrement());
+            String logical = ImapMailSession.decodeMimeWords(encodedSubject);
+            store.put(logical, new Stored(encodedSubject, payload, uid, System.currentTimeMillis()));
+        }
+
+        private Stored findByLogicalName(String path) {
+            Stored direct = store.get(path);
+            if (direct != null) {
+                return direct;
             }
-            try {
-                java.util.regex.Pattern p = java.util.regex.Pattern.compile(
-                        "=\\?([^?]+)\\?([bBqQ])\\?([^?]*)\\?=");
-                java.util.regex.Matcher m = p.matcher(raw);
-                StringBuffer sb = new StringBuffer();
-                while (m.find()) {
-                    String charset = m.group(1);
-                    char enc = Character.toUpperCase(m.group(2).charAt(0));
-                    String data = m.group(3);
-                    String decoded;
-                    if (enc == 'B') {
-                        byte[] bytes = java.util.Base64.getDecoder().decode(data);
-                        decoded = new String(bytes, charset);
-                    } else {
-                        decoded = data.replace("_", " ");
-                    }
-                    m.appendReplacement(sb, java.util.regex.Matcher.quoteReplacement(decoded));
+            for (Stored s : store.values()) {
+                if (ImapMailSession.namesMatch(s.name, path)) {
+                    return s;
                 }
-                m.appendTail(sb);
-                return sb.toString();
-            } catch (Exception e) {
-                return raw;
             }
+            return null;
         }
     }
 
@@ -378,7 +436,9 @@ public class MailFileStorageTest {
         }
 
         MailEntry toEntry() {
-            return new MailEntry(name, false, bytes.length, mtime, uid);
+            // 与 ImapMailSession.fetchMeta 一致：对外逻辑名为解码后的明文
+            String logical = ImapMailSession.decodeMimeWords(name);
+            return new MailEntry(logical, false, bytes.length, mtime, uid);
         }
     }
 

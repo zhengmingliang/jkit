@@ -55,6 +55,11 @@ public final class ImapMailSession implements AutoCloseable {
             "FILENAME\"\\s+\"([^\"]+)\"", Pattern.CASE_INSENSITIVE);
     private static final Pattern NAME_ATTR = Pattern.compile(
             "\"NAME\"\\s+\"([^\"]+)\"", Pattern.CASE_INSENSITIVE);
+    private static final Pattern ENCODED_WORD = Pattern.compile(
+            "=\\?([^?]+)\\?([bBqQ])\\?([^?]*)\\?=");
+    /** 两个 encoded-word 之间仅空白时应视为相邻（RFC2047）。 */
+    private static final Pattern ENCODED_WORD_GAP = Pattern.compile(
+            "\\?=\\s+=\\?");
 
     private final AtomicInteger tagSeq = new AtomicInteger(1);
     private Socket socket;
@@ -763,15 +768,34 @@ public final class ImapMailSession implements AutoCloseable {
         return name;
     }
 
+    /**
+     * 逻辑文件名是否相等：两侧都先 RFC2047 解码再比；并兼容一侧仍是 encoded-word。
+     */
+    static boolean namesMatch(String storedOrDecoded, String requested) {
+        if (storedOrDecoded == null || requested == null) {
+            return false;
+        }
+        if (storedOrDecoded.equals(requested)) {
+            return true;
+        }
+        String left = decodeMimeWords(storedOrDecoded);
+        String right = decodeMimeWords(requested);
+        if (left.equals(right)) {
+            return true;
+        }
+        // 兼容服务端仍回传编码串、调用方给明文（或相反）
+        return left.equals(requested) || storedOrDecoded.equals(right);
+    }
+
     private static boolean nameEquals(String a, String b) {
-        return a != null && a.equals(b);
+        return namesMatch(a, b);
     }
 
     private static String parseSubject(String headerText) {
         if (headerText == null || headerText.isEmpty()) {
             return null;
         }
-        String[] lines = headerText.split("\r\n");
+        String[] lines = headerText.split("\r\n|\n");
         StringBuilder subject = null;
         for (String line : lines) {
             if (subject != null) {
@@ -797,13 +821,33 @@ public final class ImapMailSession implements AutoCloseable {
         }
         Matcher m = FILENAME_ATTR.matcher(structure);
         if (m.find()) {
-            return m.group(1);
+            return decodeMimeWords(unquoteImapString(m.group(1)));
         }
         Matcher n = NAME_ATTR.matcher(structure);
         if (n.find()) {
-            return n.group(1);
+            return decodeMimeWords(unquoteImapString(n.group(1)));
         }
         return null;
+    }
+
+    /** 去掉 BODYSTRUCTURE 偶发包裹的反斜杠转义。 */
+    private static String unquoteImapString(String raw) {
+        if (raw == null || raw.isEmpty()) {
+            return raw;
+        }
+        if (raw.indexOf('\\') < 0) {
+            return raw;
+        }
+        StringBuilder sb = new StringBuilder(raw.length());
+        for (int i = 0; i < raw.length(); i++) {
+            char c = raw.charAt(i);
+            if (c == '\\' && i + 1 < raw.length()) {
+                sb.append(raw.charAt(++i));
+            } else {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
     }
 
     private static long estimatePayloadSize(String structure, long rfc822Size) {
@@ -902,16 +946,22 @@ public final class ImapMailSession implements AutoCloseable {
         }
     }
 
-    private static String decodeMimeWords(String raw) {
-        // 极简：若是 =?UTF-8?B?...?= 则解；否则原样
-        if (raw == null || !raw.contains("=?")) {
+    /**
+     * 解码 RFC2047 encoded-word（B/Q，UTF-8 等）。相邻 encoded-word 之间的空白按 RFC 丢弃。
+     * 包可见供 Fake 网关与单测与活连共用同一套规则。
+     */
+    static String decodeMimeWords(String raw) {
+        if (raw == null || raw.isEmpty() || raw.indexOf("=?") < 0) {
             return raw;
         }
         try {
-            Pattern p = Pattern.compile("=\\?([^?]+)\\?([bBqQ])\\?([^?]*)\\?=");
-            Matcher m = p.matcher(raw);
+            // 空白分隔的多个 encoded-word：先压成可匹配形式
+            String normalized = ENCODED_WORD_GAP.matcher(raw).replaceAll("?==?");
+            Matcher m = ENCODED_WORD.matcher(normalized);
             StringBuffer sb = new StringBuffer();
+            boolean any = false;
             while (m.find()) {
+                any = true;
                 String charset = m.group(1);
                 char enc = Character.toUpperCase(m.group(2).charAt(0));
                 String data = m.group(3);
@@ -920,15 +970,40 @@ public final class ImapMailSession implements AutoCloseable {
                     byte[] bytes = Base64.getDecoder().decode(data);
                     decoded = new String(bytes, charset);
                 } else {
-                    decoded = data.replace("_", " ");
+                    decoded = decodeQuotedPrintableWord(data, charset);
                 }
                 m.appendReplacement(sb, Matcher.quoteReplacement(decoded));
+            }
+            if (!any) {
+                return raw;
             }
             m.appendTail(sb);
             return sb.toString();
         } catch (Exception e) {
             return raw;
         }
+    }
+
+    private static String decodeQuotedPrintableWord(String data, String charset) throws Exception {
+        ByteArrayOutputStream out = new ByteArrayOutputStream(data.length());
+        for (int i = 0; i < data.length(); i++) {
+            char c = data.charAt(i);
+            if (c == '_') {
+                out.write(' ');
+            } else if (c == '=' && i + 2 < data.length()) {
+                int hi = Character.digit(data.charAt(i + 1), 16);
+                int lo = Character.digit(data.charAt(i + 2), 16);
+                if (hi >= 0 && lo >= 0) {
+                    out.write((hi << 4) + lo);
+                    i += 2;
+                } else {
+                    out.write(c);
+                }
+            } else {
+                out.write(c > 0xff ? '?' : (int) c);
+            }
+        }
+        return new String(out.toByteArray(), charset);
     }
 
     private static String quote(String value) {
