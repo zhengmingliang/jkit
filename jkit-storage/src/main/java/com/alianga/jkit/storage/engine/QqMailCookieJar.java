@@ -146,6 +146,23 @@ public final class QqMailCookieJar {
         }
     }
 
+    /**
+     * @param name Cookie 名
+     * @return 值；不存在或为空返回 null（不记录）
+     */
+    public synchronized String getValue(String name) {
+        if (name == null) {
+            return null;
+        }
+        for (Map<String, String> m : byDomain.values()) {
+            String v = m.get(name);
+            if (v != null && !v.isEmpty()) {
+                return v;
+            }
+        }
+        return null;
+    }
+
     /** @return 所有 Cookie 合并串（秘密） */
     public synchronized String snapshot() {
         Map<String, String> merged = new LinkedHashMap<String, String>();

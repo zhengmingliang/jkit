@@ -89,6 +89,15 @@ public class QqMailAttachFileStorage implements FileStorage {
     private final int pageSize;
     private final long requestIntervalMs;
     private final Set<Long> authRetCodes;
+    /** 主动 checksid 间隔（毫秒）；0 表示不主动检查。 */
+    private final long sessionCheckIntervalMs;
+    /** 续期查询参数 ds（可选；无加密包时不使用）。 */
+    private final String renewDs;
+    /** 浏览器抓到的 /login/login 加密表单体（可选；无则无法静默续期）。 */
+    private final byte[] renewBody;
+    private volatile long lastSessionOkAt = -1L;
+    private final Object renewLock = new Object();
+    private volatile boolean renewing;
     private final Sleeper sleeper;
     private final LongSupplier clock;
     private volatile AttachImapFallback imapFallback;
@@ -128,6 +137,18 @@ public class QqMailAttachFileStorage implements FileStorage {
         this.pageSize = (int) Math.max(1L, Math.min(500L, config.longOr("pageSize", 100L)));
         this.requestIntervalMs = Math.max(0L, config.longOr("requestIntervalMs", 300L));
         this.authRetCodes = parseCodes(config.getOr("authRetCodes", "-3,-101,-102,-20002"));
+        this.sessionCheckIntervalMs = Math.max(0L, config.longOr("sessionCheckIntervalMs", 600_000L));
+        this.renewDs = config.getOr("renewDs", "").trim();
+        String renewBodyB64 = config.getOr("renewBodyBase64", "").trim();
+        byte[] body = null;
+        if (!renewBodyB64.isEmpty()) {
+            try {
+                body = java.util.Base64.getDecoder().decode(renewBodyB64);
+            } catch (IllegalArgumentException e) {
+                body = null;
+            }
+        }
+        this.renewBody = body;
         this.sleeper = sleeper != null ? sleeper : Thread::sleep;
         // TODO: imapFallback 引用 mail 引擎配置；readmail 取 Message-ID 未抓包，宿主可 setImapFallback 注入
         this.imapFallbackConfigured = !config.getOr("imapFallback", "").trim().isEmpty();
@@ -135,9 +156,44 @@ public class QqMailAttachFileStorage implements FileStorage {
 
     // ------------------------------------------------------------------ 扩展 API
 
+    /**
+     * Cookie / sid 更新：续期或 Set-Cookie 后回推，宿主应加密写回连接配置。
+     * 值属于密钥，实现方不得记日志。
+     */
+    public interface SessionUpdateListener {
+        /**
+         * @param cookie 合并 Cookie 头
+         * @param sid    当前 sid（可能已更新）
+         */
+        void onSessionUpdated(String cookie, String sid);
+    }
+
+    private volatile QqMailCookieJar.CookieUpdateListener cookieListener;
+    private volatile SessionUpdateListener sessionListener;
+
+    private void wireJarListener() {
+        jar.setListener(cookie -> {
+            QqMailCookieJar.CookieUpdateListener cl = cookieListener;
+            if (cl != null) {
+                cl.onCookiesUpdated(cookie);
+            }
+            SessionUpdateListener sl = sessionListener;
+            if (sl != null) {
+                sl.onSessionUpdated(cookie, client.sid());
+            }
+        });
+    }
+
     /** @param listener Cookie 更新回调（attach_list 等响应的 Set-Cookie），宿主可加密写回配置 */
     public void setCookieUpdateListener(QqMailCookieJar.CookieUpdateListener listener) {
-        jar.setListener(listener);
+        this.cookieListener = listener;
+        wireJarListener();
+    }
+
+    /** @param listener Cookie+sid 一并回推 */
+    public void setSessionUpdateListener(SessionUpdateListener listener) {
+        this.sessionListener = listener;
+        wireJarListener();
     }
 
     /** @param fallback 网页下载失败时的 IMAP 回退（超大附件不回退） */
@@ -147,7 +203,7 @@ public class QqMailAttachFileStorage implements FileStorage {
 
     /** 校验 sid；失效抛 AUTH_FAILED（需重新扫码），不自动重试。 */
     public void checkSid() {
-        call("/login/checksid", new LinkedHashMap<String, String>(), true);
+        callOnce("/login/checksid", new LinkedHashMap<String, String>(), true, true);
     }
 
     /**
@@ -501,6 +557,12 @@ public class QqMailAttachFileStorage implements FileStorage {
     }
 
     private Map<String, Object> call(String path, Map<String, String> form, boolean inQuery) {
+        ensureSession();
+        return callOnce(path, form, inQuery, true);
+    }
+
+    private Map<String, Object> callOnce(String path, Map<String, String> form, boolean inQuery,
+                                         boolean allowRenew) {
         throttle();
         Map<String, Object> resp = client.post(path, form, inQuery);
         // HAR 实测：所有接口 ret 在 head.ret；head.stack / show_err_msg 不进异常
@@ -512,10 +574,77 @@ public class QqMailAttachFileStorage implements FileStorage {
         if (ret == Long.MIN_VALUE) {
             throw badFormat(path);
         }
-        if (ret != 0L) {
-            throw mapRet(ret, path);
+        if (ret == 0L) {
+            lastSessionOkAt = clock.getAsLong();
+            return resp;
         }
-        return resp;
+        if (allowRenew && isAuthRet(ret) && tryRenewSession()) {
+            return callOnce(path, form, inQuery, false);
+        }
+        throw mapRet(ret, path);
+    }
+
+    private boolean isAuthRet(long ret) {
+        return ret == -20002L || authRetCodes.contains(ret);
+    }
+
+    /**
+     * 主动在过期前检查会话；失败则尝试续期一次。
+     * 无可用加密续期包时，checksid 失败会直接抛 AUTH_FAILED（与续期失败相同）。
+     */
+    private void ensureSession() {
+        if (sessionCheckIntervalMs <= 0L) {
+            return;
+        }
+        long now = clock.getAsLong();
+        // 尚未成功过：不做主动检查，交给业务请求上的 -20002 续期路径
+        if (lastSessionOkAt < 0L || now - lastSessionOkAt < sessionCheckIntervalMs) {
+            return;
+        }
+        try {
+            callOnce("/login/checksid", new LinkedHashMap<String, String>(), true, true);
+        } catch (StorageException e) {
+            if (e.code() == StorageErrorCode.AUTH_FAILED) {
+                throw e;
+            }
+            // 非鉴权错误：不阻断后续业务请求
+        }
+    }
+
+    /**
+     * 调用网页续期端点一次。无配置加密包时返回 false 且不发请求
+     * （空调 /login/login 会清 Cookie，实测 ret=-20023）。
+     *
+     * @return 是否续期成功
+     */
+    boolean tryRenewSession() {
+        synchronized (renewLock) {
+            if (renewing) {
+                return false;
+            }
+            if (renewBody == null || renewBody.length == 0) {
+                return false;
+            }
+            renewing = true;
+        }
+        try {
+            boolean ok = client.renewLogin(renewDs, renewBody);
+            if (ok) {
+                lastSessionOkAt = clock.getAsLong();
+                SessionUpdateListener sl = sessionListener;
+                if (sl != null) {
+                    sl.onSessionUpdated(jar.snapshot(), client.sid());
+                }
+            }
+            return ok;
+        } finally {
+            renewing = false;
+        }
+    }
+
+    /** 测试 / 运维：强制尝试续期。 */
+    public boolean renewSession() {
+        return tryRenewSession();
     }
 
     /** 网页登录态必需的 Cookie 名。 */

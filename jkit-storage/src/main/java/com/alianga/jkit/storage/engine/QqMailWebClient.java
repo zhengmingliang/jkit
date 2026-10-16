@@ -41,7 +41,7 @@ final class QqMailWebClient {
     static final String LANGUAGE = "en";
     private static final Logger LOG = Logger.getLogger(QqMailWebClient.class.getName());
 
-    private final String sid;
+    private volatile String sid;
     private final QqMailCookieJar jar;
     private final QqMailTransport transport;
     private final LongSupplier clock;
@@ -55,6 +55,76 @@ final class QqMailWebClient {
         this.jar = jar;
         this.transport = transport;
         this.clock = clock != null ? clock : System::currentTimeMillis;
+    }
+
+    /** @return 当前 sid（秘密，测试只比长度/相等性） */
+    String sid() {
+        return sid;
+    }
+
+    /** 续期成功后更新 sid（值不进日志）。 */
+    void updateSid(String newSid) {
+        if (newSid != null && !newSid.isBlank()) {
+            this.sid = newSid.trim();
+        }
+    }
+
+    /**
+     * 网页静默续期：{@code POST /login/login?xm_req_type=web-pwd&...&ds=...}，
+     * 表单为浏览器设备密钥加密包。无加密包时不得空调（实测会清 Cookie 并返回 ret=-20023）。
+     *
+     * @param ds             查询参数 ds（32 位十六进制设备摘要）；空则不发
+     * @param encryptedForm  已编码的表单体（与 HAR 一致的一整段）；空则拒绝调用
+     * @return 是否 HTTP 2xx 且未返回 JSON 错误头
+     */
+    boolean renewLogin(String ds, byte[] encryptedForm) {
+        if (encryptedForm == null || encryptedForm.length == 0) {
+            return false;
+        }
+        Map<String, String> q = new LinkedHashMap<String, String>();
+        q.put("xm_req_type", "web-pwd");
+        q.put("language", "zh");
+        q.put("r", String.valueOf(clock.getAsLong()));
+        q.put("sid", sid);
+        if (ds != null && !ds.isBlank()) {
+            q.put("ds", ds.trim());
+        }
+        String url = BASE_URL + "/login/login?" + encodeForm(q);
+        Map<String, String> headers = baseHeaders(url);
+        headers.put("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");
+        headers.put("Accept", "application/json");
+        debug("POST", "/login/login", q, null, headers);
+        QqMailTransport.Response resp = transport.exchange("POST", url, headers, encryptedForm);
+        try {
+            jar.absorb(host(url), resp.all("Set-Cookie"));
+            if (resp.status < 200 || resp.status >= 300) {
+                return false;
+            }
+            // 成功时响应多为密文；失败时为 JSON head.ret != 0
+            String text = new String(readAll(resp.body), StandardCharsets.UTF_8).trim();
+            if (text.startsWith("{")) {
+                try {
+                    Object parsed = JSON.parse(text);
+                    if (parsed instanceof Map) {
+                        Object head = ((Map<?, ?>) parsed).get("head");
+                        if (head instanceof Map && ((Map<?, ?>) head).get("ret") != null) {
+                            long ret = Long.parseLong(String.valueOf(((Map<?, ?>) head).get("ret")));
+                            return ret == 0L;
+                        }
+                    }
+                } catch (RuntimeException ignored) {
+                    return false;
+                }
+            }
+            // 密文响应：视为成功；sid 若在 Set-Cookie 的 xm_sid 中则上层同步
+            String xmSid = jar.getValue("xm_sid");
+            if (xmSid != null && !xmSid.equals(sid)) {
+                updateSid(xmSid);
+            }
+            return true;
+        } finally {
+            resp.close();
+        }
     }
 
     /** 默认传输：HttpCore，单跳不跟随重定向。 */
