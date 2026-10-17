@@ -125,10 +125,44 @@ public class SftpFileStorage implements FileStorage {
             return StorageEntry.dir("", 0L);
         }
         JschBridge.Attrs attrs = bridge().lstat(remoteOf(normalized));
+        StorageEntry entry;
         if (attrs.directory) {
-            return StorageEntry.dir(normalized, attrs.mtimeSeconds * 1000L);
+            entry = StorageEntry.dir(normalized, attrs.mtimeSeconds * 1000L);
+        } else {
+            entry = StorageEntry.file(normalized, attrs.size, attrs.mtimeSeconds * 1000L, null);
         }
-        return StorageEntry.file(normalized, attrs.size, attrs.mtimeSeconds * 1000L, null);
+        // lstat 只有数字 uid/gid；尽量再从父目录列表取 longname 里的名字
+        return withOwnershipFromParent(entry, normalized, attrs);
+    }
+
+    /** 给 stat 结果补属主 / 组：数字 id 兜底，longname 名字优先；取不到时原样返回。 */
+    private StorageEntry withOwnershipFromParent(StorageEntry entry, String normalized,
+                                                 JschBridge.Attrs attrs) {
+        String numericOwner = attrs.uid != null && attrs.uid >= 0 ? Integer.toString(attrs.uid) : null;
+        String numericGroup = attrs.gid != null && attrs.gid >= 0 ? Integer.toString(attrs.gid) : null;
+        String parent = StoragePaths.parent(normalized);
+        String name = StoragePaths.name(normalized);
+        try {
+            for (JschBridge.Entry sibling : bridge().list(remoteOf(parent))) {
+                if (sibling.name.equals(name)) {
+                    return entryWithOwnership(entry, sibling.owner, sibling.group);
+                }
+            }
+        } catch (StorageException ignored) {
+            // 属主是展示增强，列表失败不拖垮 stat
+        }
+        return entryWithOwnership(entry, numericOwner, numericGroup);
+    }
+
+    private static StorageEntry entryWithOwnership(StorageEntry entry, String owner, String group) {
+        StorageEntry result = entry;
+        if (owner != null && !owner.isEmpty()) {
+            result = result.withAttribute(StorageEntry.ATTR_OWNER, owner);
+        }
+        if (group != null && !group.isEmpty()) {
+            result = result.withAttribute(StorageEntry.ATTR_GROUP, group);
+        }
+        return result;
     }
 
     @Override
@@ -137,11 +171,10 @@ public class SftpFileStorage implements FileStorage {
         List<StorageEntry> entries = new ArrayList<StorageEntry>();
         for (JschBridge.Entry entry : bridge().list(remoteOf(normalized))) {
             String childPath = StoragePaths.join(normalized, entry.name);
-            if (entry.directory) {
-                entries.add(StorageEntry.dir(childPath, entry.mtimeSeconds * 1000L));
-            } else {
-                entries.add(StorageEntry.file(childPath, entry.size, entry.mtimeSeconds * 1000L, null));
-            }
+            StorageEntry child = entry.directory
+                    ? StorageEntry.dir(childPath, entry.mtimeSeconds * 1000L)
+                    : StorageEntry.file(childPath, entry.size, entry.mtimeSeconds * 1000L, null);
+            entries.add(entryWithOwnership(child, entry.owner, entry.group));
         }
         return entries;
     }
@@ -644,10 +677,14 @@ public class SftpFileStorage implements FileStorage {
                         continue;
                     }
                     Object attrs = method(item.getClass(), "getAttrs").invoke(item);
+                    String longName = (String) method(item.getClass(), "getLongname").invoke(item);
+                    Integer uid = (Integer) method(attrs.getClass(), "getUId").invoke(attrs);
+                    Integer gid = (Integer) method(attrs.getClass(), "getGId").invoke(attrs);
                     entries.add(new Entry(filename,
                             (Boolean) method(attrs.getClass(), "isDir").invoke(attrs),
                             (Long) method(attrs.getClass(), "getSize").invoke(attrs),
-                            (Integer) method(attrs.getClass(), "getMTime").invoke(attrs)));
+                            (Integer) method(attrs.getClass(), "getMTime").invoke(attrs),
+                            ownerOf(longName, uid), groupOf(longName, gid)));
                     touchIo();
                 }
                 release(channel, false);
@@ -689,11 +726,14 @@ public class SftpFileStorage implements FileStorage {
                 touchIo();
                 Object attrs = method(channel.getClass(), "lstat", String.class)
                         .invoke(channel, remotePath);
+                Integer uid = (Integer) method(attrs.getClass(), "getUId").invoke(attrs);
+                Integer gid = (Integer) method(attrs.getClass(), "getGId").invoke(attrs);
                 touchIo();
                 release(channel, false);
                 return new Attrs((Boolean) method(attrs.getClass(), "isDir").invoke(attrs),
                         (Long) method(attrs.getClass(), "getSize").invoke(attrs),
-                        (Integer) method(attrs.getClass(), "getMTime").invoke(attrs));
+                        (Integer) method(attrs.getClass(), "getMTime").invoke(attrs),
+                        uid, gid);
             } catch (InvocationTargetException e) {
                 release(channel, isConnectionLevel(e.getCause()));
                 throw mapThrowable(e.getCause(), remotePath, "读取元数据");
@@ -918,12 +958,19 @@ public class SftpFileStorage implements FileStorage {
             private final boolean directory;
             private final long size;
             private final int mtimeSeconds;
+            /** 属主（名字优先，拿不到时为数字 uid 字符串），未知为 null。 */
+            private final String owner;
+            /** 用户组（名字优先，拿不到时为数字 gid 字符串），未知为 null。 */
+            private final String group;
 
-            private Entry(String name, boolean directory, long size, int mtimeSeconds) {
+            private Entry(String name, boolean directory, long size, int mtimeSeconds,
+                          String owner, String group) {
                 this.name = name;
                 this.directory = directory;
                 this.size = size;
                 this.mtimeSeconds = mtimeSeconds;
+                this.owner = owner;
+                this.group = group;
             }
         }
 
@@ -932,12 +979,54 @@ public class SftpFileStorage implements FileStorage {
             private final boolean directory;
             private final long size;
             private final int mtimeSeconds;
+            private final Integer uid;
+            private final Integer gid;
 
-            private Attrs(boolean directory, long size, int mtimeSeconds) {
+            private Attrs(boolean directory, long size, int mtimeSeconds, Integer uid, Integer gid) {
                 this.directory = directory;
                 this.size = size;
                 this.mtimeSeconds = mtimeSeconds;
+                this.uid = uid;
+                this.gid = gid;
             }
         }
+
+        /** longname 里的名字优先；没有 / 解析失败时退回数字 id（id 无效返回 null）。 */
+        private static String ownerOf(String longName, Integer uid) {
+            String[] names = parseLongNameOwner(longName);
+            if (names != null && names[0] != null && !names[0].isEmpty()) {
+                return names[0];
+            }
+            return uid != null && uid >= 0 ? Integer.toString(uid) : null;
+        }
+
+        private static String groupOf(String longName, Integer gid) {
+            String[] names = parseLongNameOwner(longName);
+            if (names != null && names[1] != null && !names[1].isEmpty()) {
+                return names[1];
+            }
+            return gid != null && gid >= 0 ? Integer.toString(gid) : null;
+        }
+    }
+
+    /** SFTP v3 longname 形如 "-rw-r--r-- 1 alice staff 5 Oct ..."：第 3/4 列即属主 / 组。 */
+    private static final java.util.regex.Pattern UNIX_LONGNAME =
+            java.util.regex.Pattern.compile("^[dbclps-][rwxstST-]{9}\\s");
+
+    /**
+     * 从 SFTP 条目的 longname 解析属主 / 组。
+     *
+     * @param longName 服务器返回的 ls -l 风格长名（可为 null）
+     * @return [owner, group]；非 Unix 风格或列数不足返回 null
+     */
+    static String[] parseLongNameOwner(String longName) {
+        if (longName == null || !UNIX_LONGNAME.matcher(longName).find()) {
+            return null;
+        }
+        String[] tokens = longName.split("\\s+", 9);
+        if (tokens.length < 8) {
+            return null;
+        }
+        return new String[]{tokens[2], tokens[3]};
     }
 }

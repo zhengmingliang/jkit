@@ -34,6 +34,7 @@ import java.util.concurrent.ConcurrentSkipListMap;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
@@ -165,10 +166,46 @@ public class FtpFileStorageTest {
         assertEquals(4, byName.get("logo.png").size());
         assertEquals(5, byName.get("readme.txt").size());
         assertTrue(byName.get("sub").isDirectory());
+        // MLSD 机器格式携带属主 / 组事实
+        assertEquals("ftp", byName.get("logo.png").attribute(StorageEntry.ATTR_OWNER));
+        assertEquals("staff", byName.get("logo.png").attribute(StorageEntry.ATTR_GROUP));
+        assertEquals("ftp", byName.get("sub").attribute(StorageEntry.ATTR_OWNER));
 
         List<StorageEntry> sub = storage.list("docs/sub");
         assertEquals(1, sub.size());
         assertEquals("docs/sub/nested.txt", sub.get(0).path());
+    }
+
+    @Test
+    public void listCarriesOwnerAndGroupFromTextListing() throws IOException {
+        FakeFtpServer legacy = new FakeFtpServer("test", "secret", false, false);
+        legacy.start();
+        try {
+            FileStorage storage = storageOn(legacy, "owner-case");
+            storage.upload("owner-case/plain.txt", "abc".getBytes(StandardCharsets.UTF_8));
+            storage.mkdir("owner-case/subdir");
+            StorageEntry file = null;
+            StorageEntry dir = null;
+            for (StorageEntry entry : storage.list("owner-case")) {
+                if ("plain.txt".equals(entry.name())) {
+                    file = entry;
+                }
+                if ("subdir".equals(entry.name())) {
+                    dir = entry;
+                }
+            }
+            assertNotNull(file);
+            assertNotNull(dir);
+            // Unix 文本 LIST 第 3/4 列
+            assertEquals("ftp", file.attribute(StorageEntry.ATTR_OWNER));
+            assertEquals("ftp", file.attribute(StorageEntry.ATTR_GROUP));
+            assertEquals("ftp", dir.attribute(StorageEntry.ATTR_OWNER));
+            // stat 经父目录列表补全属主
+            assertEquals("ftp", storage.stat("owner-case/plain.txt")
+                    .attribute(StorageEntry.ATTR_OWNER));
+        } finally {
+            legacy.stop();
+        }
     }
 
     @Test
@@ -975,9 +1012,10 @@ public class FtpFileStorageTest {
                 String name = nameOf(dir, key);
                 String modify = formatDate(entry.mtime);
                 if (entry.directory) {
-                    return "type=dir;modify=" + modify + "; " + name;
+                    return "type=dir;modify=" + modify + ";unix.owner=ftp;unix.group=staff; " + name;
                 }
-                return "type=file;size=" + entry.data.length + ";modify=" + modify + "; " + name;
+                return "type=file;size=" + entry.data.length + ";modify=" + modify
+                        + ";unix.owner=ftp;unix.group=staff; " + name;
             }
 
             private String unixLine(Entry entry, String name) {

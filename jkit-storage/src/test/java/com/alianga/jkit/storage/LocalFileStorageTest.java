@@ -50,6 +50,32 @@ public class LocalFileStorageTest {
     }
 
     @Test
+    public void entriesCarryPosixOwnerAndGroup() throws Exception {
+        Path root = Files.createTempDirectory("jkit-local-owner");
+        try {
+            FileStorage local = newStorage(root);
+            java.nio.file.attribute.PosixFileAttributes expected;
+            try {
+                expected = Files.readAttributes(root,
+                        java.nio.file.attribute.PosixFileAttributes.class);
+            } catch (UnsupportedOperationException | java.nio.file.FileSystemException notPosix) {
+                return; // 非 POSIX 文件系统不提供属主，跳过
+            }
+            local.upload("a.txt", "x".getBytes(StandardCharsets.UTF_8));
+            local.mkdir("d");
+            StorageEntry file = local.stat("a.txt");
+            assertEquals(expected.owner().getName(), file.attribute(StorageEntry.ATTR_OWNER));
+            assertEquals(expected.group().getName(), file.attribute(StorageEntry.ATTR_GROUP));
+            List<StorageEntry> list = local.list("");
+            StorageEntry dir = list.stream().filter(e -> e.name().equals("d")).findFirst().orElseThrow();
+            assertEquals(expected.owner().getName(), dir.attribute(StorageEntry.ATTR_OWNER));
+            assertEquals(expected.group().getName(), dir.attribute(StorageEntry.ATTR_GROUP));
+        } finally {
+            deleteRecursively(root);
+        }
+    }
+
+    @Test
     public void absolutePathJoinsBasePath() throws Exception {
         Path root = Files.createTempDirectory("jkit-local-test");
         try {

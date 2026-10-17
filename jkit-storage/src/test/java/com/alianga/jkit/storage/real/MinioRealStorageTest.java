@@ -134,6 +134,15 @@ public class MinioRealStorageTest {
         return names;
     }
 
+    private static StorageEntry byName(List<StorageEntry> entries, String name) {
+        for (StorageEntry entry : entries) {
+            if (entry.name().equals(name)) {
+                return entry;
+            }
+        }
+        throw new AssertionError("列表中缺少 " + name);
+    }
+
     @BeforeClass
     public static void startServer() throws Exception {
         String binary = locateBinary();
@@ -192,6 +201,18 @@ public class MinioRealStorageTest {
         if (dataDir != null) {
             deleteRecursively(dataDir);
         }
+    }
+
+    /** ListObjectsV2 引擎（fetch-owner）。 */
+    private static FileStorage engineV2() {
+        Map<String, String> values = new LinkedHashMap<String, String>();
+        values.put("endpoint", endpoint);
+        values.put("bucket", bucket);
+        values.put("accessKey", accessKey);
+        values.put("secretKey", secretKey);
+        values.put("pathStyle", "true");
+        values.put("listVersion", "2");
+        return FileStorages.of("generic-s3", values);
     }
 
     /** 标准配置引擎（无分片）。 */
@@ -304,6 +325,18 @@ public class MinioRealStorageTest {
     @Test
     public void realServerBehaviorMatrix() throws Exception {
         exercise(engine(0L));
+    }
+
+    /** ListObjectsV2 + fetch-owner：文件条目应带对象 owner（MinIO/RustFS/AWS 行为一致）。 */
+    @Test
+    public void listV2ReturnsObjectOwner() {
+        FileStorage fs = engineV2();
+        fs.upload("owner-dir/中文.txt", "owner".getBytes(StandardCharsets.UTF_8));
+        List<StorageEntry> list = fs.list("owner-dir");
+        StorageEntry file = byName(list, "中文.txt");
+        String owner = file.attribute(StorageEntry.ATTR_OWNER);
+        assertTrue("V2 fetch-owner 列表条目应带对象 owner", owner != null && !owner.isEmpty());
+        fs.deleteDir("owner-dir");
     }
 
     /** 目录占位对象：mkdir 后 list / exists 都能看到目录。 */

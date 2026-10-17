@@ -302,6 +302,11 @@ final class FtpClient {
         if (utf8 && "UTF-8".equalsIgnoreCase(charset.name())) {
             command("OPTS UTF8 ON");
         }
+        if (mlsdSupported) {
+            // 请求 MLSD/MLST 带上属主 / 组事实：pyftpdlib 等按 OPTS 相交后输出
+            // unix.uid/gid（部分服务端还给名字）；不支持的服务器回 500/502，应答忽略
+            command("OPTS MLST type;size;modify;perm;unix.owner;unix.group;unix.uid;unix.gid;");
+        }
     }
 
     private void sendLine(String line) throws IOException {

@@ -74,10 +74,11 @@ public class LocalFileStorage implements FileStorage {
         }
         try {
             if (Files.isDirectory(target)) {
-                return StorageEntry.dir(normalized, Files.getLastModifiedTime(target).toMillis());
+                return withOwnership(StorageEntry.dir(normalized,
+                        Files.getLastModifiedTime(target).toMillis()), target);
             }
-            return StorageEntry.file(normalized, Files.size(target),
-                    Files.getLastModifiedTime(target).toMillis(), null);
+            return withOwnership(StorageEntry.file(normalized, Files.size(target),
+                    Files.getLastModifiedTime(target).toMillis(), null), target);
         } catch (IOException e) {
             throw StorageException.io("读取元数据失败: " + normalized, normalized, e);
         }
@@ -96,16 +97,40 @@ public class LocalFileStorage implements FileStorage {
                 String childPath = normalized.isEmpty()
                         ? child.getFileName().toString() : normalized + "/" + child.getFileName().toString();
                 if (Files.isDirectory(child)) {
-                    entries.add(StorageEntry.dir(childPath, Files.getLastModifiedTime(child).toMillis()));
+                    entries.add(withOwnership(
+                            StorageEntry.dir(childPath, Files.getLastModifiedTime(child).toMillis()), child));
                 } else {
-                    entries.add(StorageEntry.file(childPath, Files.size(child),
-                            Files.getLastModifiedTime(child).toMillis(), null));
+                    entries.add(withOwnership(StorageEntry.file(childPath, Files.size(child),
+                            Files.getLastModifiedTime(child).toMillis(), null), child));
                 }
             }
         } catch (IOException e) {
             throw StorageException.io("列出目录失败: " + normalized, normalized, e);
         }
         return entries;
+    }
+
+    /**
+     * POSIX 文件系统补充属主 / 用户组（如 {@code zml / zml}）；
+     * 非 POSIX（Windows 部分视图、FAT）拿不到时保持无该属性，不影响其它元数据。
+     */
+    private static StorageEntry withOwnership(StorageEntry entry, Path target) {
+        try {
+            java.nio.file.attribute.PosixFileAttributes attrs =
+                    Files.readAttributes(target, java.nio.file.attribute.PosixFileAttributes.class);
+            StorageEntry result = entry;
+            String owner = attrs.owner() == null ? null : attrs.owner().getName();
+            if (owner != null && !owner.isEmpty()) {
+                result = result.withAttribute(StorageEntry.ATTR_OWNER, owner);
+            }
+            String group = attrs.group() == null ? null : attrs.group().getName();
+            if (group != null && !group.isEmpty()) {
+                result = result.withAttribute(StorageEntry.ATTR_GROUP, group);
+            }
+            return result;
+        } catch (IOException | UnsupportedOperationException | ClassCastException ignored) {
+            return entry;
+        }
     }
 
     @Override

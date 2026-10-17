@@ -49,6 +49,12 @@ public final class StorageEntry {
     /** 扩展属性键：值 "true" 表示条目是非 jkit 邮件的附件（只读，不可删改）。 */
     public static final String ATTR_MAIL_FOREIGN = "mail.foreign";
 
+    /** 扩展属性键：属主（Unix 用户 / 对象 owner 显示名；拿不到名字时为数字 uid）。 */
+    public static final String ATTR_OWNER = "owner";
+
+    /** 扩展属性键：用户组（Unix 组名；拿不到名字时为数字 gid；对象存储通常无此值）。 */
+    public static final String ATTR_GROUP = "group";
+
     private StorageEntry(String path, boolean directory, long size, long lastModified, String etag) {
         this(path, directory, size, lastModified, etag, Collections.<String, String>emptyMap());
     }

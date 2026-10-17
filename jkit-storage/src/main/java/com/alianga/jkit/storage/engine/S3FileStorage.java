@@ -526,6 +526,8 @@ public class S3FileStorage implements FileStorage {
             query.put("max-keys", "1000");
             if (listV2) {
                 query.put("list-type", "2");
+                // V2 默认不返回对象 owner：请求带上，用于条目属主展示（不支持的服务端忽略）
+                query.put("fetch-owner", "true");
                 if (token != null && !token.isEmpty()) {
                     query.put("continuation-token", token);
                 }
@@ -548,11 +550,11 @@ public class S3FileStorage implements FileStorage {
                 }
                 long size = parseLong(Xmls.textOr(content, "Size", "0"));
                 if (key.endsWith("/")) {
-                    entries.add(StorageEntry.dir(StoragePaths.join(prefix, relative)));
+                    entries.add(withOwner(StorageEntry.dir(StoragePaths.join(prefix, relative)), content));
                 } else {
-                    entries.add(StorageEntry.file(StoragePaths.join(prefix, relative), size,
+                    entries.add(withOwner(StorageEntry.file(StoragePaths.join(prefix, relative), size,
                             parseIso8601(Xmls.textOr(content, "LastModified", null)),
-                            Xmls.textOr(content, "ETag", null)));
+                            Xmls.textOr(content, "ETag", null)), content));
                 }
             }
             for (Element common : Xmls.children(root, "CommonPrefixes")) {
@@ -581,6 +583,24 @@ public class S3FileStorage implements FileStorage {
             }
         }
         return new ListPage(entries, token);
+    }
+
+    /**
+     * 把 Contents/Owner 挂到条目上（ListObjects V1 通常自带，V2 需 fetch-owner）：
+     * 优先 DisplayName，没有则用 ID；服务端不回 owner 时原样返回。
+     */
+    private static StorageEntry withOwner(StorageEntry entry, Element content) {
+        Element owner = Xmls.first(content, "Owner");
+        if (owner == null) {
+            return entry;
+        }
+        String display = Xmls.textOr(owner, "DisplayName", null);
+        String id = Xmls.textOr(owner, "ID", null);
+        String value = display != null && !display.isEmpty() ? display : id;
+        if (value == null || value.isEmpty()) {
+            return entry;
+        }
+        return entry.withAttribute(StorageEntry.ATTR_OWNER, value);
     }
 
     private static boolean containsDir(List<StorageEntry> entries, String prefix, String relative) {

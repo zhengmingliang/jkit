@@ -84,6 +84,21 @@ public class S3FileStorageTest {
         assertTrue(names(list).contains("root.txt"));
         List<StorageEntry> sub = s3.list("a");
         assertEquals(2, sub.size());
+        // V1 列表默认带对象 owner
+        StorageEntry one = sub.stream().filter(e -> e.name().equals("one.txt")).findFirst().orElseThrow();
+        assertEquals("fake-owner", one.attribute(StorageEntry.ATTR_OWNER));
+    }
+
+    @Test
+    public void listV2RequestsAndParsesObjectOwner() {
+        Properties overrides = new Properties();
+        overrides.setProperty("listVersion", "2");
+        FileStorage s3 = storage(overrides);
+        s3.upload("a/one.txt", "1".getBytes(StandardCharsets.UTF_8));
+        List<StorageEntry> sub = s3.list("a");
+        // V2 请求必须带 fetch-owner=true，服务端才回 Owner
+        assertEquals("true", server.lastListQuery.get().get("fetch-owner"));
+        assertEquals("fake-owner", sub.get(0).attribute(StorageEntry.ATTR_OWNER));
     }
 
     @Test

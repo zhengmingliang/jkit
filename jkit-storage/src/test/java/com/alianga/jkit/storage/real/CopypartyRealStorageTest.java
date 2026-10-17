@@ -48,9 +48,21 @@ public class CopypartyRealStorageTest {
     private static int sftpPort;
     private static int httpPort;
     private static boolean sftpUp;
+    /** copyparty 进程与测试同用户运行：文件条目属主即当前 uid/gid。 */
+    private static String currentUid;
+    private static String currentGid;
 
     /** 三个引擎共用的行为矩阵：上传下载 / 列表 / 目录 / 重命名复制 / 删除。 */
     private static void exercise(FileStorage fs, String root) throws Exception {
+        exercise(fs, root, null, null);
+    }
+
+    /**
+     * @param expectedOwner 期望的条目属主（null 表示该协议不提供，如 WebDAV）
+     * @param expectedGroup 期望的用户组
+     */
+    private static void exercise(FileStorage fs, String root,
+                                 String expectedOwner, String expectedGroup) throws Exception {
         byte[] data = "你好，真实服务器！real-protocol".getBytes(StandardCharsets.UTF_8);
         fs.upload(root + "/docs/中文说明.txt", data);
         assertEquals(new String(data, StandardCharsets.UTF_8),
@@ -74,6 +86,17 @@ public class CopypartyRealStorageTest {
         assertTrue(names(list).contains("中文说明.txt"));
         assertTrue(names(list).contains("inner"));
         assertTrue(names(list).contains("empty"));
+        if (expectedOwner != null) {
+            // 文件与目录条目都带属主 / 组；stat 同样能取到
+            StorageEntry textFile = byName(list, "中文说明.txt");
+            StorageEntry innerDir = byName(list, "inner");
+            assertEquals(expectedOwner, textFile.attribute(StorageEntry.ATTR_OWNER));
+            assertEquals(expectedGroup, textFile.attribute(StorageEntry.ATTR_GROUP));
+            assertEquals(expectedOwner, innerDir.attribute(StorageEntry.ATTR_OWNER));
+            assertEquals(expectedGroup, innerDir.attribute(StorageEntry.ATTR_GROUP));
+            assertEquals(expectedOwner,
+                    fs.stat(root + "/docs/中文说明.txt").attribute(StorageEntry.ATTR_OWNER));
+        }
 
         fs.rename(root + "/docs/inner/deep.bin", root + "/docs/inner/deep2.bin");
         assertFalse(fs.exists(root + "/docs/inner/deep.bin"));
@@ -132,10 +155,21 @@ public class CopypartyRealStorageTest {
         return names;
     }
 
+    private static StorageEntry byName(List<StorageEntry> entries, String name) {
+        for (StorageEntry entry : entries) {
+            if (entry.name().equals(name)) {
+                return entry;
+            }
+        }
+        throw new AssertionError("列表中缺少 " + name);
+    }
+
     @BeforeClass
     public static void startServer() throws Exception {
         String binary = locateBinary();
         Assume.assumeTrue("copyparty 不在 PATH，跳过真实协议集成测试", binary != null);
+        currentUid = commandOutput("id", "-u");
+        currentGid = commandOutput("id", "-g");
         ftpPort = freePort();
         sftpPort = freePort();
         httpPort = freePort();
@@ -179,6 +213,19 @@ public class CopypartyRealStorageTest {
         if (server != null) {
             server.destroy();
         }
+    }
+
+    private static String commandOutput(String... command) throws IOException {
+        Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
+        try {
+            String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
+            if (process.waitFor() == 0) {
+                return output;
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        return null;
     }
 
     private static String locateBinary() throws IOException {
@@ -228,7 +275,8 @@ public class CopypartyRealStorageTest {
         values.put("passive", "true");
         String root = "jkit-ftp-" + System.nanoTime();
         try {
-            exercise(FileStorages.of("ftp", values), root);
+            // MLSD 经 OPTS MLST 带上 unix.uid/gid（copyparty 只给数字 id）
+            exercise(FileStorages.of("ftp", values), root, currentUid, currentGid);
         } finally {
             FileStorages.of("ftp", values).deleteDir(root);
         }
@@ -245,7 +293,8 @@ public class CopypartyRealStorageTest {
         values.put("basePath", "/data");
         String root = "jkit-sftp-" + System.nanoTime();
         try {
-            exercise(FileStorages.of("sftp", values), root);
+            // paramiko 只回数字 uid/gid（longname 与 attrs 一致）
+            exercise(FileStorages.of("sftp", values), root, currentUid, currentGid);
         } finally {
             FileStorages.of("sftp", values).deleteDir(root);
         }

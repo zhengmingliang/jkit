@@ -214,14 +214,42 @@ public class FtpFileStorage implements FileStorage {
     private StorageEntry statInternal(FtpClient ftp, String normalized) throws IOException {
         String remote = remoteOf(normalized);
         FtpClient.Reply sizeReply = ftp.command("SIZE " + remote);
+        StorageEntry entry;
         if (sizeReply.code() == 213) {
             long size = parseLongSafely(sizeReply.text().trim(), StorageEntry.SIZE_UNKNOWN);
-            return StorageEntry.file(normalized, size, queryMtime(ftp, remote), null);
+            entry = StorageEntry.file(normalized, size, queryMtime(ftp, remote), null);
+        } else if (ftp.command("CWD " + remote).code() == 250) {
+            entry = StorageEntry.dir(normalized, queryMtime(ftp, remote));
+        } else {
+            throw StorageException.notFound(normalized);
         }
-        if (ftp.command("CWD " + remote).code() == 250) {
-            return StorageEntry.dir(normalized, queryMtime(ftp, remote));
+        // SIZE/MDTM 不带属主：复用父目录列表补 owner/group（多一次数据连接，失败则忽略）
+        return withOwnershipFromParent(ftp, normalized, entry);
+    }
+
+    /** 从父目录列表中按名字找到属主 / 组属性补到条目；取不到时原样返回。 */
+    private StorageEntry withOwnershipFromParent(FtpClient ftp, String normalized, StorageEntry entry) {
+        String parent = StoragePaths.parent(normalized);
+        String name = StoragePaths.name(normalized);
+        try {
+            for (StorageEntry sibling : listInternal(ftp, parent)) {
+                if (sibling.name().equals(name)) {
+                    StorageEntry merged = entry;
+                    String owner = sibling.attribute(StorageEntry.ATTR_OWNER);
+                    String group = sibling.attribute(StorageEntry.ATTR_GROUP);
+                    if (owner != null) {
+                        merged = merged.withAttribute(StorageEntry.ATTR_OWNER, owner);
+                    }
+                    if (group != null) {
+                        merged = merged.withAttribute(StorageEntry.ATTR_GROUP, group);
+                    }
+                    return merged;
+                }
+            }
+        } catch (IOException | StorageException ignored) {
+            // 属主信息是展示增强，不能拖垮 stat 主流程
         }
-        throw StorageException.notFound(normalized);
+        return entry;
     }
 
     private List<StorageEntry> listInternal(FtpClient ftp, String normalized) throws IOException {
@@ -583,6 +611,10 @@ public class FtpFileStorage implements FileStorage {
             boolean skip = false;
             long size = StorageEntry.SIZE_UNKNOWN;
             long mtime = StorageEntry.MTIME_UNKNOWN;
+            String ownerName = null;
+            String groupName = null;
+            String uid = null;
+            String gid = null;
             for (String fact : trimmed.substring(0, at).split(";")) {
                 int eq = fact.indexOf('=');
                 if (eq <= 0) {
@@ -600,14 +632,34 @@ public class FtpFileStorage implements FileStorage {
                     size = parseLongSafely(value, StorageEntry.SIZE_UNKNOWN);
                 } else if ("modify".equals(key)) {
                     mtime = parseFtpTimestamp(value);
+                } else if ("unix.owner".equals(key)) {
+                    ownerName = value;
+                } else if ("unix.group".equals(key)) {
+                    groupName = value;
+                } else if ("unix.uid".equals(key)) {
+                    uid = value;
+                } else if ("unix.gid".equals(key)) {
+                    gid = value;
                 }
             }
             if (skip) {
                 continue;
             }
             String child = childPath(normalized, name);
-            entries.add(directory ? StorageEntry.dir(child, mtime)
-                    : StorageEntry.file(child, size, mtime, null));
+            StorageEntry entry = directory ? StorageEntry.dir(child, mtime)
+                    : StorageEntry.file(child, size, mtime, null);
+            // 优先服务端给的名字，没有时退回数字 uid/gid
+            if (ownerName != null && !ownerName.isEmpty()) {
+                entry = entry.withAttribute(StorageEntry.ATTR_OWNER, ownerName);
+            } else if (uid != null && !uid.isEmpty()) {
+                entry = entry.withAttribute(StorageEntry.ATTR_OWNER, uid);
+            }
+            if (groupName != null && !groupName.isEmpty()) {
+                entry = entry.withAttribute(StorageEntry.ATTR_GROUP, groupName);
+            } else if (gid != null && !gid.isEmpty()) {
+                entry = entry.withAttribute(StorageEntry.ATTR_GROUP, gid);
+            }
+            entries.add(entry);
         }
         return entries;
     }
@@ -659,7 +711,16 @@ public class FtpFileStorage implements FileStorage {
         long size = parseLongSafely(tokens[4], StorageEntry.SIZE_UNKNOWN);
         long mtime = parseLsDate(tokens[5], tokens[6], tokens[7]);
         String child = childPath(normalized, name);
-        return directory ? StorageEntry.dir(child, mtime) : StorageEntry.file(child, size, mtime, null);
+        StorageEntry entry = directory ? StorageEntry.dir(child, mtime)
+                : StorageEntry.file(child, size, mtime, null);
+        // Unix ls -l 第 3/4 列为属主 / 组（名字或数字 id）
+        if (!tokens[2].isEmpty()) {
+            entry = entry.withAttribute(StorageEntry.ATTR_OWNER, tokens[2]);
+        }
+        if (!tokens[3].isEmpty()) {
+            entry = entry.withAttribute(StorageEntry.ATTR_GROUP, tokens[3]);
+        }
+        return entry;
     }
 
     /**

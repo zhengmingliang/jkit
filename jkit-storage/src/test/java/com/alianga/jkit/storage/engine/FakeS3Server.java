@@ -26,6 +26,9 @@ import java.util.concurrent.CopyOnWriteArrayList;
 final class FakeS3Server {
     final Map<String, byte[]> objects = new ConcurrentHashMap<>();
     final Map<String, String> lastContentTypes = new ConcurrentHashMap<>();
+    /** 最近一次 ListObjects 的查询参数（断言 fetch-owner 等请求形态用）。 */
+    final java.util.concurrent.atomic.AtomicReference<Map<String, String>> lastListQuery =
+            new java.util.concurrent.atomic.AtomicReference<>();
     /** 分片上传状态：uploadId → (partNumber → 数据)。完成后清空。 */
     final Map<String, Map<Integer, byte[]>> multipartParts = new ConcurrentHashMap<>();
     private final java.util.concurrent.atomic.AtomicLong uploadIds = new java.util.concurrent.atomic.AtomicLong();
@@ -244,6 +247,7 @@ final class FakeS3Server {
     }
 
     private void respondList(HttpExchange exchange, Map<String, String> query) throws IOException {
+        lastListQuery.set(query);
         String prefix = query.getOrDefault("prefix", "");
         String delimiter = query.getOrDefault("delimiter", "");
         String marker = query.getOrDefault("marker", query.getOrDefault("continuation-token", ""));
@@ -255,6 +259,7 @@ final class FakeS3Server {
         List<String> commonPrefixes = new ArrayList<>();
         int count = 0;
         boolean truncated = false;
+        boolean listV2 = query.containsKey("list-type");
         String nextMarker = null;
         for (String key : sorted) {
             if (!key.startsWith(prefix) || key.equals(prefix)
@@ -284,7 +289,13 @@ final class FakeS3Server {
             }
             contents.append("<Contents><Key>").append(key).append("</Key><LastModified>")
                     .append("2026-10-11T00:00:00.000Z").append("</LastModified><ETag>&quot;e&quot;</ETag><Size>")
-                    .append(objects.get(key).length).append("</Size></Contents>");
+                    .append(objects.get(key).length).append("</Size>");
+            // 与真实服务一致：V1 默认带 Owner；V2 仅 fetch-owner=true 时返回
+            boolean fetchOwner = !listV2 || "true".equalsIgnoreCase(query.get("fetch-owner"));
+            if (fetchOwner) {
+                contents.append("<Owner><DisplayName>fake-owner</DisplayName><ID>uid-1</ID></Owner>");
+            }
+            contents.append("</Contents>");
             count++;
         }
         if (truncated && nextMarker == null && !commonPrefixes.isEmpty()) {
@@ -293,7 +304,6 @@ final class FakeS3Server {
         for (String common : commonPrefixes) {
             prefixes.append("<CommonPrefixes><Prefix>").append(common).append("</Prefix></CommonPrefixes>");
         }
-        boolean listV2 = query.containsKey("list-type");
         StringBuilder xml = new StringBuilder();
         xml.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?><ListBucketResult>")
                 .append("<Name>").append(bucket).append("</Name>")
