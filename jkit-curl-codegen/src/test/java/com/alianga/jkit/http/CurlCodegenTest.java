@@ -205,6 +205,17 @@ public class CurlCodegenTest {
     }
 
     @Test
+    public void wgetKeepsMultipartFileFieldsAsComments() {
+        String curl = "curl -F 'a=1' -F 'f=@/tmp/x.bin;filename=x.bin' https://example.com/up";
+        String wget = GeneratorRegistry.get().generate("shell-wget", CurlParser.parseModel(curl)).source();
+        // wget 无法发送 multipart，但文件字段不能静默丢弃，需以注释列出
+        assertTrue(wget, wget.contains("#   -F f=@/tmp/x.bin"));
+        assertTrue(wget, wget.contains("#   --form-string a=1"));
+        assertTrue(wget, wget.startsWith("#"));
+        assertTrue(wget, wget.contains("https://example.com/up"));
+    }
+
+    @Test
     public void multipartAppearsInOkHttpAndCurlRoundTrip() {
         String curl = "curl -F 'a=1' -F 'f=@/tmp/x.bin;filename=x.bin' https://example.com/up";
         ParsedCurlRequest model = CurlParser.parseModel(curl);

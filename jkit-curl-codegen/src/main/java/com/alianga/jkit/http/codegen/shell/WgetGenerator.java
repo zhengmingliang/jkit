@@ -6,6 +6,7 @@ import com.alianga.jkit.http.codegen.CurlGenSupport;
 import com.alianga.jkit.http.codegen.GeneratedCode;
 import com.alianga.jkit.http.curl.ParsedCurlRequest;
 import com.alianga.jkit.http.curl.ParsedCurlRequest.Body;
+import com.alianga.jkit.http.curl.ParsedCurlRequest.FormPart;
 import com.alianga.jkit.http.curl.ParsedCurlRequest.Header;
 
 import java.util.ArrayList;
@@ -35,10 +36,16 @@ public final class WgetGenerator extends AbstractCodeGenerator {
         return "wget";
     }
 
+    /** 注释只能占一行：把字段值里的换行压成空格。 */
+    private static String oneLine(String s) {
+        return s == null ? "" : s.replace('\r', ' ').replace('\n', ' ');
+    }
+
     @Override
     public GeneratedCode generate(ParsedCurlRequest req) {
         List<String> notes = new ArrayList<String>();
         List<String> lines = new ArrayList<String>();
+        List<String> comments = new ArrayList<String>();
         lines.add("wget --quiet --output-document -");
         String method = req.method().toUpperCase(Locale.ROOT);
         Body body = req.body();
@@ -49,7 +56,14 @@ public final class WgetGenerator extends AbstractCodeGenerator {
             lines.add("  --header=" + CodeQuote.sh(h.name() + ": " + h.value()));
         }
         if (body.kind() == Body.Kind.MULTIPART) {
+            // wget 无法发送 multipart：不静默丢弃字段，而是以注释逐条列出，便于改用 curl
             notes.add("wget 不支持 multipart/form-data，请改用 curl。");
+            comments.add("# wget 无法发送 multipart/form-data，以下字段未包含在命令中，请改用 curl：");
+            for (FormPart part : body.parts()) {
+                comments.add(part.file()
+                        ? "#   -F " + oneLine(part.name()) + "=@" + oneLine(part.filePath())
+                        : "#   --form-string " + oneLine(part.name()) + "=" + oneLine(part.value()));
+            }
         } else if (body.kind() == Body.Kind.FILE) {
             lines.add("  --body-file=" + CodeQuote.sh(body.filePath()));
             notes.add("正文来自本地文件，请确认路径在运行环境中可访问。");
@@ -84,6 +98,9 @@ public final class WgetGenerator extends AbstractCodeGenerator {
         lines.add("  " + CodeQuote.sh(req.url()));
 
         StringBuilder src = new StringBuilder();
+        for (String comment : comments) {
+            src.append(comment).append('\n');
+        }
         for (int i = 0; i < lines.size(); i++) {
             src.append(lines.get(i));
             src.append(i == lines.size() - 1 ? "\n" : " \\\n");
