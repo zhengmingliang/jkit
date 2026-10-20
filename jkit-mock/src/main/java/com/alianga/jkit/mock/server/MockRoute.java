@@ -157,6 +157,8 @@ public final class MockRoute {
         this.method = method == null || method.trim().isEmpty() ? "*" : method.trim();
         this.path = path == null || path.trim().isEmpty() ? "/" : path.trim();
         this.statusCode = statusCode <= 0 ? 200 : statusCode;
+        // 注：100–599 之外的字段值不做构造层 clamp——serve 阶段已有护栏按 500 兑底并写日志
+        // （见 MockHttpServerTest＃invalidStatusCodeServedAs500AndLogged），比静默变 200 更显眼
         this.latencyMs = Math.max(0L, latencyMs);
         this.contentType = contentType == null || contentType.trim().isEmpty()
                 ? "application/json; charset=utf-8"
