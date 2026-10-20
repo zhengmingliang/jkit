@@ -58,7 +58,8 @@ import java.util.function.Consumer;
  * </ul>
  *
  * <p><b>健壮性</b>：路由表为空且无代理即全 404（不回落演示路由）；状态码超出 100–599 的
- * 响应按 500 兜底返回错误 JSON；handler 顶层兜底异常并保证每条请求都有日志。</p>
+ * 响应按 500 兜底返回错误 JSON；handler 顶层兜底异常并保证每条请求都有日志；
+ * 请求体超过 {@link #setMaxBodyBytes(long) maxBodyBytes}（默认 64MB）立刻 413 不再读入。</p>
  *
  * <pre>{@code
  * MockHttpServer server = new MockHttpServer();
@@ -100,6 +101,8 @@ public final class MockHttpServer {
     private static final byte[] UPGRADE_REQUIRED_BODY =
             "{\"error\":\"this route is a WebSocket mock; connect with ws://\"}"
                     .getBytes(StandardCharsets.UTF_8);
+    /** 请求体默认大小上限（防止大文件上传白噪音 OOM）：64MB。 */
+    public static final long DEFAULT_MAX_BODY_BYTES = 64L * 1024 * 1024;
     private static final String SSE_CONTENT_TYPE = "text/event-stream; charset=utf-8";
     /** 自动 WS 端口时从 HTTP 端口 +1 起最多扫描的端口数。 */
     private static final int WS_PORT_SCAN = 20;
@@ -127,6 +130,8 @@ public final class MockHttpServer {
     private volatile int actualWebSocketPort = -1;
     private volatile int port;
     private volatile String proxyTarget;
+    /** 请求体最大读取字节数；超过立刻 413，不在读全量。0 / 负数 = 不限。 */
+    private volatile long maxBodyBytes = DEFAULT_MAX_BODY_BYTES;
     private final AtomicBoolean stopping = new AtomicBoolean(false);
     /** 本次启动时刻；未运行时为 null。 */
     private volatile Instant startedAt;
@@ -316,6 +321,19 @@ public final class MockHttpServer {
     }
 
     /**
+     * 配置请求体最大读取字节数（防 OOM）。缺省 {@link #DEFAULT_MAX_BODY_BYTES}；
+     * 传 {@code 0} / 负数表示不限。运行中修改对后续请求立即生效。
+     */
+    public void setMaxBodyBytes(long maxBodyBytes) {
+        this.maxBodyBytes = maxBodyBytes > 0 ? maxBodyBytes : Long.MAX_VALUE;
+    }
+
+    /** 当前请求体上限；{@link Long#MAX_VALUE} 表示不限。 */
+    public long getMaxBodyBytes() {
+        return maxBodyBytes;
+    }
+
+    /**
      * 配置 CRUD 资源存储。缺省纯内存；传入带 {@code dataDir} 的实现后，增删改会原子落盘
      * 到 {@code <dataDir>/<resource>.json}，重启自动加载。
      *
@@ -413,7 +431,18 @@ public final class MockHttpServer {
         byte[] requestBody = EMPTY_BODY;
         boolean proxied = false;
         try {
-            requestBody = readAll(exchange.getRequestBody());
+            LimitedBody limited = readAll(exchange.getRequestBody(), maxBodyBytes);
+            if (limited.exceeded) {
+                // 请求体超过 maxBodyBytes：不等读完就断，直接 413。
+                // 不进路由匹配/回显/转发，finally 照常留一条日志（body 为已读前缀）。
+                requestBody = limited.bytes;
+                status = 413;
+                contentType = JSON_CT;
+                responseBytes = payloadTooLargeBody(maxBodyBytes);
+                writeResponse(exchange, status, contentType, responseBytes);
+                return;
+            }
+            requestBody = limited.bytes;
             matched = findRoute(method, path);
             boolean streamed = false;
             if (matched != null) {
@@ -1199,11 +1228,59 @@ public final class MockHttpServer {
         }
     }
 
-    private static byte[] readAll(InputStream in) throws IOException {
+    /**
+     * 读取请求体并限制字节数：先读 {@code limit} 字节，再试图多读 1 字节判断超限。
+     * 超限时 {@link LimitedBody#exceeded} 为真，且 {@code bytes} 已含前 {@code limit} 字节
+     * （供日志留痕），读入的总内存不超过 limit + 1。日志最终由调用方截断展示。
+     */
+    private static LimitedBody readAll(InputStream in, long limit) throws IOException {
         if (in == null) {
-            return EMPTY_BODY;
+            return new LimitedBody(EMPTY_BODY, false);
         }
-        return in.readAllBytes();
+        if (limit <= 0) {
+            return new LimitedBody(in.readAllBytes(), false);
+        }
+        java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
+        byte[] chunk = new byte[8192];
+        long total = 0L;
+        boolean exceeded = false;
+        int n;
+        while ((n = in.read(chunk)) > 0) {
+            long room = limit - total;
+            int take = (int) Math.min(room, (long) n);
+            if (take > 0) {
+                buffer.write(chunk, 0, take);
+                total += take;
+            }
+            if (total >= limit && n > take) {
+                // 已到上限且还有剩余：不再整读，防 OOM
+                exceeded = true;
+                break;
+            }
+        }
+        if (!exceeded && total >= limit) {
+            // 恰好等于 limit：再试一字节判断是否真的超出
+            int more = in.read();
+            exceeded = more >= 0;
+        }
+        return new LimitedBody(buffer.toByteArray(), exceeded);
+    }
+
+    /** {@link #readAll(InputStream, long)} 的结果体。 */
+    private static final class LimitedBody {
+        private final byte[] bytes;
+        private final boolean exceeded;
+
+        LimitedBody(byte[] bytes, boolean exceeded) {
+            this.bytes = bytes;
+            this.exceeded = exceeded;
+        }
+    }
+
+    /** 413 兜底响应体。 */
+    private static byte[] payloadTooLargeBody(long limitBytes) {
+        return ("{\"error\":\"payload too large\",\"limit\":" + limitBytes + "}")
+                .getBytes(StandardCharsets.UTF_8);
     }
 
     /**
