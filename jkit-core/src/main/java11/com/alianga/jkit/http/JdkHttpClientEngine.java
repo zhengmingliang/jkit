@@ -53,6 +53,15 @@ public final class JdkHttpClientEngine implements HttpEngine {
         if (request == null || request.getUrl() == null) {
             throw new IOException("the request URL can not be null");
         }
+        // 本引擎在 ignoreSsl 时装配 trust-all 上下文并把 endpointIdentificationAlgorithm
+        // 置为 null，但 JDK HttpClient 仍会强制做服务端主机名校验（实现里无条件启用端点
+        // 识别，没有 per-request HostnameVerifier 钩子）。目的地址是 IP 字面量
+        //（v4/v6 皆然）时，站点证书通常不含 IP SAN，握手必然失败。
+        // 此时降级走 UrlConnectionHttpEngine：同样 trust-all，且显式恒真
+        // HostnameVerifier，IP 字面量场景可以正常握手。对调用方完全透明。
+        if (request.isIgnoreSsl() && isIpLiteralHost(hostOf(request.getUrl()))) {
+            return new UrlConnectionHttpEngine().execute(request);
+        }
         try {
             if (request.isStreamResponse()) {
                 return executeStream(request);
@@ -255,6 +264,41 @@ public final class JdkHttpClientEngine implements HttpEngine {
             return ctx;
         } catch (Exception e) {
             throw new IllegalStateException("init SSLContext failed", e);
+        }
+    }
+
+    /**
+     * 判断 URL 的目标主机是否为 IP 字面量。
+     * IPv6 字面量在 {@code URI.getHost()} 结果中必然含 {@code ':'}（方括号会被去掉）；
+     * IPv4 字面量为四段纯数字域名，用简单正则识别。
+     * 解析失败（null / 空串）按主机名处理，交给本引擎正常路径。
+     */
+    static boolean isIpLiteralHost(String host) {
+        if (host == null) {
+            return false;
+        }
+        if (host.startsWith("[") && host.endsWith("]")) {
+            return true;
+        }
+        if (host.indexOf(':') >= 0) {
+            return true;
+        }
+        return host.matches("\\d{1,3}(\\.\\d{1,3}){3}");
+    }
+
+    /**
+     * 从请求 URL 中提取 host（小写）。URL 非法时返回 {@code null}，由调用方按
+     * 非 IP 字面量处理（本引擎后续路径会给出原本的 invalid url 错误）。
+     */
+    static String hostOf(String url) {
+        if (url == null) {
+            return null;
+        }
+        try {
+            String h = new URI(url).getHost();
+            return h == null ? null : h.toLowerCase();
+        } catch (java.net.URISyntaxException e) {
+            return null;
         }
     }
 }
