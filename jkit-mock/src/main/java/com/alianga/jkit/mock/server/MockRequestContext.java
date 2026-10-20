@@ -52,7 +52,12 @@ public final class MockRequestContext {
         return of(method, path, pathParams, rawQuery, headers, body, variables, null);
     }
 
-    static MockRequestContext of(String method, String path, Map<String, String> pathParams,
+    /**
+     * 构造一次入站请求的上下文（公开：桌面 UI 预览渲染、工具脚本复用）。
+     * 另有两个包内筒版重载：不带全局变量 / 不带事件文本。
+     */
+    public static MockRequestContext of(String method, String path,
+                                        Map<String, String> pathParams,
                                  String rawQuery, Map<String, List<String>> headers, byte[] body,
                                  Map<String, String> variables, String eventText) {
         return new MockRequestContext(method, path,

@@ -31,6 +31,16 @@ final class MockBodyRenderer {
      * @return 渲染后的文本
      */
     static String routeFrame(MockRoute route, MockRequestContext ctx) {
+        return routeFrame(route, ctx, null);
+    }
+
+    /**
+     * 同 {@link #routeFrame(MockRoute, MockRequestContext)}，另把渲染原因收集进 errors
+     * （templated 路由未知变量 / Mock.js 失败都会记录；调用方经 X-Mock-Warning 暴露）。
+     * {@code route.templated} 为 true 时改用 {@link MockResponseTemplate}（扩展变量、
+     * 未解析保留原文、JSON 转义），false 走历史路径行为不变。
+     */
+    static String routeFrame(MockRoute route, MockRequestContext ctx, java.util.List<String> errors) {
         String raw = route.body == null ? "" : route.body;
         if (route.echoRequest.enabled) {
             String echoJson = MockRequestEcho.echoJson(ctx, route.echoRequest);
@@ -39,9 +49,9 @@ final class MockBodyRenderer {
             }
             Map<String, String> extra = new LinkedHashMap<>();
             extra.put("request", echoJson);
-            return render(raw, route.dynamicTemplate, ctx, extra);
+            return render(raw, route.dynamicTemplate, route.templated, ctx, extra, errors);
         }
-        return render(raw, route.dynamicTemplate, ctx, null);
+        return render(raw, route.dynamicTemplate, route.templated, ctx, null, errors);
     }
 
     static String render(String raw, boolean dynamicTemplate, MockRequestContext ctx) {
@@ -63,8 +73,19 @@ final class MockBodyRenderer {
      */
     static String render(String raw, boolean dynamicTemplate, MockRequestContext ctx,
                          Map<String, String> extra, List<String> errors) {
+        return render(raw, dynamicTemplate, false, ctx, extra, errors);
+    }
+
+    /**
+     * @param templated true 用 {@link MockResponseTemplate}（扩展变量 + 未解析保留原文 + JSON 转义），
+     *                  false 用历史 {@link MockTemplateRenderer}（行为完全不变）
+     */
+    static String render(String raw, boolean dynamicTemplate, boolean templated,
+                         MockRequestContext ctx, Map<String, String> extra, List<String> errors) {
         String template = raw == null ? "" : raw;
-        String rendered = MockTemplateRenderer.render(template, ctx, extra);
+        String rendered = templated
+                ? MockResponseTemplate.render(template, ctx, extra, errors)
+                : MockTemplateRenderer.render(template, ctx, extra);
         if (!dynamicTemplate) {
             return rendered;
         }
@@ -73,8 +94,9 @@ final class MockBodyRenderer {
         } catch (RuntimeException ex) {
             // 模板非法回落占位符替换后的原文，避免整帧失败断连；原因交给调用方暴露
             if (errors != null) {
-                errors.add(ex.getMessage() == null ? ex.getClass().getSimpleName()
-                        : ex.getMessage());
+                errors.add("dynamic-template-failed: "
+                        + (ex.getMessage() == null ? ex.getClass().getSimpleName()
+                        : ex.getMessage()));
             }
             return rendered;
         }

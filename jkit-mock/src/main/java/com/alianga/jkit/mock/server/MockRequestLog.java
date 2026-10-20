@@ -32,6 +32,11 @@ public final class MockRequestLog {
     public final Map<String, String> requestHeaders;
     /** 实际写出的响应头快照（每名取首值、不可变）；连接中断时以已设置的头为准。 */
     public final Map<String, String> responseHeaders;
+    /**
+     * 本次触发并生效的网络层故障标识（{@link MockFault#toString()}，如 {@code SLOW_BODY(256B/200ms)}）；
+     * 未触发故障时为空串。概率未命中不记，方便定位「为什么这条请求没故障」。
+     */
+    public final String fault;
 
     public MockRequestLog(Instant timestamp, String method, String path, String query,
                           boolean matched, int status, long durationMs) {
@@ -74,6 +79,19 @@ public final class MockRequestLog {
                           String requestBody, String responseBody, boolean proxied,
                           String protocol, Map<String, String> requestHeaders,
                           Map<String, String> responseHeaders) {
+        this(timestamp, method, path, query, matched, status, durationMs,
+                requestBody, responseBody, proxied, protocol, requestHeaders, responseHeaders, "");
+    }
+
+    /**
+     * @param fault 本次触发的故障标识（{@link MockFault#toString()}）；空串表示未触发，可传 null
+     * @since 2.0.5
+     */
+    public MockRequestLog(Instant timestamp, String method, String path, String query,
+                          boolean matched, int status, long durationMs,
+                          String requestBody, String responseBody, boolean proxied,
+                          String protocol, Map<String, String> requestHeaders,
+                          Map<String, String> responseHeaders, String fault) {
         this.timestamp = timestamp == null ? Instant.now() : timestamp;
         this.method = method == null ? "" : method;
         this.path = path == null ? "" : path;
@@ -87,6 +105,7 @@ public final class MockRequestLog {
         this.protocol = protocol == null || protocol.trim().isEmpty() ? "HTTP" : protocol;
         this.requestHeaders = safeHeaders(requestHeaders);
         this.responseHeaders = safeHeaders(responseHeaders);
+        this.fault = fault == null ? "" : fault;
     }
 
     private static Map<String, String> safeHeaders(Map<String, String> headers) {
@@ -99,8 +118,9 @@ public final class MockRequestLog {
     @Override
     public String toString() {
         String q = query.isEmpty() ? "" : "?" + query;
-        return String.format("%s %s%s -> %d (%dms)%s%s",
+        return String.format("%s %s%s -> %d (%dms)%s%s%s",
                 method, path, q, status, durationMs,
-                matched ? "" : " [miss]", proxied ? " [proxy]" : "");
+                matched ? "" : " [miss]", proxied ? " [proxy]" : "",
+                fault.isEmpty() ? "" : " [fault: " + fault + "]");
     }
 }

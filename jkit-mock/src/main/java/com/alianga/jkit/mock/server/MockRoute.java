@@ -49,8 +49,10 @@ public final class MockRoute {
     public final boolean crud;
     /** 为 true 时 body 按 Mock.js 模板（{@code @cname}、{@code 'list|1-3'} 等）每次请求渲染。 */
     public final boolean dynamicTemplate;
-    /** 附加响应头（保序）；值支持 {@code {{query.x}}} 等占位符。 */
-    public final Map<String, String> headers;
+    /**
+     * 附加响应头（保序，值支持占位符；审计 P1-2：同名可多枚，如 Set-Cookie）。
+     */
+    public final Map<String, List<String>> headers;
     /** 响应方案；非空时按「规则全中者优，无中者取第一条」挑选，主字段不再参与。 */
     public final List<MockResponse> responses;
     /** 标签（逗号分隔的自由文本，纯元信息：搜索 / 分组用，引擎不参与匹配）。 */
@@ -63,6 +65,14 @@ public final class MockRoute {
     public final MockPushPolicy pushPolicy;
     /** 多响应方案挑选策略；null 按 {@link MockPlanStrategy#FIRST}（历史行为）。 */
     public final MockPlanStrategy responseStrategy;
+    /** 网络层故障注入配置；{@link MockFault.Mode#NONE}（缺省）时与历史行为一致。 */
+    public final MockFault fault;
+    /**
+     * 为 true 时响应体与响应头值按「响应模板变量」渲染（{{request.*}} / {{faker.*}} 等扩展变量、
+     * 未解析保留原文并遇 {@code X-Mock-Warning}、字面量 {{ 转义）；false 时与历史行为完全一致
+     * （历史路由的响应体里可能本来就写着 {{xxx}} 字面量）。
+     */
+    public final boolean templated;
     /** 序贯命中的计数器（{@link MockPlanStrategy#SEQUENCE} 轮播用）；随路由对象生命周期，热更新即重置。 */
     public final java.util.concurrent.atomic.AtomicLong planHitCounter = new java.util.concurrent.atomic.AtomicLong();
 
@@ -138,8 +148,9 @@ public final class MockRoute {
                      String protocol, MockEchoConfig echoRequest, MockPushPolicy pushPolicy,
                      String tags) {
         this(method, path, statusCode, latencyMs, contentType, body, responseSchema, dynamicSchema,
-                echo, enabled, dynamicTemplate, headers, responses, latencyMaxMs, crud,
-                name, description, protocol, echoRequest, pushPolicy, tags, null);
+                echo, enabled, dynamicTemplate, toMulti(headers), responses, latencyMaxMs, crud,
+                name, description, protocol, echoRequest, pushPolicy, tags, null,
+                MockFault.none(), false);
     }
 
     /**
@@ -154,6 +165,41 @@ public final class MockRoute {
                      long latencyMaxMs, boolean crud, String name, String description,
                      String protocol, MockEchoConfig echoRequest, MockPushPolicy pushPolicy,
                      String tags, MockPlanStrategy responseStrategy) {
+        this(method, path, statusCode, latencyMs, contentType, body, responseSchema, dynamicSchema,
+                echo, enabled, dynamicTemplate, toMulti(headers), responses, latencyMaxMs, crud,
+                name, description, protocol, echoRequest, pushPolicy, tags, responseStrategy,
+                MockFault.none(), false);
+    }
+
+    /**
+     * 多值响应头全参构造（审计 P1-2）：builder 用；同名列内多枚全部保留。
+     *
+     * @param multiHeaders 同名可多枚的响应头；键按输入顺序、每枚一个值。
+     *                     注意与历史 Map<String, String> 全参构造擦除后同签名，运行时实际
+     *                     值类型由 {@link #toMulti(Map)} 兼容（旧字节码传 String 值也能读）。
+     */
+    public MockRoute(String method, String path, int statusCode, long latencyMs,
+                     String contentType, String body, String responseSchema, boolean dynamicSchema,
+                     boolean echo, boolean enabled, boolean dynamicTemplate,
+                     Map<String, List<String>> multiHeaders, List<MockResponse> responses,
+                     long latencyMaxMs, boolean crud, String name, String description,
+                     String protocol, MockEchoConfig echoRequest, MockPushPolicy pushPolicy,
+                     String tags, MockPlanStrategy responseStrategy, boolean builderMarker) {
+        this(method, path, statusCode, latencyMs, contentType, body, responseSchema, dynamicSchema,
+                echo, enabled, dynamicTemplate, multiHeaders, responses, latencyMaxMs, crud,
+                name, description, protocol, echoRequest, pushPolicy, tags, responseStrategy,
+                MockFault.none(), false);
+    }
+
+    /** 多值响应头真身构造（私有）：同名列内多枚全部保留。 */
+    private MockRoute(String method, String path, int statusCode, long latencyMs,
+                      String contentType, String body, String responseSchema, boolean dynamicSchema,
+                      boolean echo, boolean enabled, boolean dynamicTemplate,
+                      Map<String, List<String>> multiHeaders, List<MockResponse> responses,
+                      long latencyMaxMs, boolean crud, String name, String description,
+                      String protocol, MockEchoConfig echoRequest, MockPushPolicy pushPolicy,
+                      String tags, MockPlanStrategy responseStrategy,
+                      MockFault fault, boolean templated) {
         this.method = method == null || method.trim().isEmpty() ? "*" : method.trim();
         this.path = path == null || path.trim().isEmpty() ? "/" : path.trim();
         this.statusCode = statusCode <= 0 ? 200 : statusCode;
@@ -174,11 +220,13 @@ public final class MockRoute {
         this.name = name == null ? "" : name.trim();
         this.description = description == null ? "" : description.trim();
         this.tags = tags == null ? "" : tags.trim();
-        Map<String, String> headerCopy = new LinkedHashMap<>();
-        if (headers != null) {
-            for (Map.Entry<String, String> e : headers.entrySet()) {
-                if (e.getKey() != null && !e.getKey().trim().isEmpty()) {
-                    headerCopy.put(e.getKey().trim(), e.getValue() == null ? "" : e.getValue());
+        Map<String, List<String>> headerCopy = new LinkedHashMap<>();
+        if (multiHeaders != null) {
+            for (Map.Entry<String, List<String>> e : multiHeaders.entrySet()) {
+                if (e.getKey() != null && !e.getKey().trim().isEmpty()
+                        && e.getValue() != null && !e.getValue().isEmpty()) {
+                    headerCopy.put(e.getKey().trim(),
+                            Collections.unmodifiableList(new ArrayList<>(e.getValue())));
                 }
             }
         }
@@ -194,6 +242,8 @@ public final class MockRoute {
         this.echoRequest = echoRequest == null ? MockEchoConfig.disabled() : echoRequest;
         this.pushPolicy = pushPolicy;
         this.responseStrategy = responseStrategy == null ? MockPlanStrategy.FIRST : responseStrategy;
+        this.fault = fault == null ? MockFault.none() : fault;
+        this.templated = templated;
     }
 
     /** 是否为 SSE 路由。 */
@@ -210,6 +260,30 @@ public final class MockRoute {
         return new Builder();
     }
 
+    /**
+     * 响应头表兼容归一：值为 List 时逐枚收集，为 String（历史单值、擦除后的旧字节码也会走到这里）
+     * 时当一枚；键不动。放在漏斗构造的入口，使多值/单值两种历史调用都归一到 List 语义。
+     */
+    private static Map<String, List<String>> toMulti(Map<String, ?> headers) {
+        Map<String, List<String>> out = new LinkedHashMap<>();
+        if (headers == null) {
+            return out;
+        }
+        for (Map.Entry<String, ?> e : headers.entrySet()) {
+            List<String> values = new ArrayList<>();
+            Object v = e.getValue();
+            if (v instanceof List) {
+                for (Object o : (List<?>) v) {
+                    values.add(o == null ? "" : String.valueOf(o));
+                }
+            } else if (v != null) {
+                values.add(String.valueOf(v));
+            }
+            out.put(e.getKey(), values);
+        }
+        return out;
+    }
+
     /** {@link MockRoute} 的 builder（JDK 8 兼容，字段均可链式设置）。 */
     public static final class Builder {
         private String method = "GET";
@@ -223,7 +297,7 @@ public final class MockRoute {
         private boolean echo;
         private boolean enabled = true;
         private boolean dynamicTemplate;
-        private Map<String, String> headers = new LinkedHashMap<>();
+        private Map<String, List<String>> headers = new LinkedHashMap<>();
         private List<MockResponse> responses = new ArrayList<>();
         private long latencyMaxMs;
         private boolean crud;
@@ -234,12 +308,32 @@ public final class MockRoute {
         private MockPushPolicy pushPolicy;
         private String tags = "";
         private MockPlanStrategy responseStrategy;
+        private MockFault fault = MockFault.none();
+        private boolean templated;
 
         /**
          * 多响应方案挑选策略；null 按 {@link MockPlanStrategy#FIRST}。
          */
         public Builder responseStrategy(MockPlanStrategy value) {
             this.responseStrategy = value;
+            return this;
+        }
+
+        /**
+         * 网络层故障注入配置；null 按 {@link MockFault#none()}（不注入，历史行为）。
+         *
+         * @param value 故障配置（builder 内对非法参数抛 IllegalArgumentException，不静默回落）
+         */
+        public Builder fault(MockFault value) {
+            this.fault = value == null ? MockFault.none() : value;
+            return this;
+        }
+
+        /**
+         * 响应模板变量开关（{{request.*}} / {{faker.*}} 等）；默认 false（历史行为）。
+         */
+        public Builder templated(boolean value) {
+            this.templated = value;
             return this;
         }
 
@@ -344,14 +438,39 @@ public final class MockRoute {
             return this;
         }
 
+        /**
+         * 追加一枚响应头；同名多次调用即多枚（审计 P1-2，Set-Cookie 场景）。
+         */
         public Builder header(String name, String value) {
-            this.headers.put(name, value);
+            if (name != null && !name.trim().isEmpty()) {
+                this.headers.computeIfAbsent(name.trim(), k -> new ArrayList<>()).add(value == null ? "" : value);
+            }
             return this;
         }
 
+        /** 兼容单值 API：同名被覆盖为单枚多行内集合（即每枚一条）。 */
         public Builder headers(Map<String, String> values) {
             if (values != null) {
-                this.headers.putAll(values);
+                for (Map.Entry<String, String> e : values.entrySet()) {
+                    header(e.getKey(), e.getValue());
+                }
+            }
+            return this;
+        }
+
+        /**
+         * 多值响应头（审计 P1-2）：同名多枚合一；调用方的列表自身安全管理。
+         */
+        public Builder headersMulti(Map<String, List<String>> values) {
+            if (values != null) {
+                for (Map.Entry<String, List<String>> e : values.entrySet()) {
+                    if (e.getValue() == null || e.getValue().isEmpty()) {
+                        continue;
+                    }
+                    for (String v : e.getValue()) {
+                        header(e.getKey(), v);
+                    }
+                }
             }
             return this;
         }
@@ -369,10 +488,12 @@ public final class MockRoute {
         }
 
         public MockRoute build() {
+            // 直接调私有真身构造：fault / templated 只在 builder 链可设，历史便捷构造保持缺省
             return new MockRoute(method, path, statusCode, latencyMs, contentType, body,
                     responseSchema, dynamicSchema, echo, enabled, dynamicTemplate,
                     headers, responses, latencyMaxMs, crud, name, description,
-                    protocol, echoRequest, pushPolicy, tags, responseStrategy);
+                    protocol, echoRequest, pushPolicy, tags, responseStrategy,
+                    fault, templated);
         }
     }
 

@@ -33,6 +33,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
+import java.util.function.IntSupplier;
 
 /**
  * 零依赖的本地 Mock HTTP 服务：纯 JDK {@link HttpServer} 实现（代理转发复用 jkit 自带
@@ -430,6 +431,7 @@ public final class MockHttpServer {
         long latencyMs = 0L;
         byte[] requestBody = EMPTY_BODY;
         boolean proxied = false;
+        String faultLabel = "";
         try {
             LimitedBody limited = readAll(exchange.getRequestBody(), maxBodyBytes);
             if (limited.exceeded) {
@@ -457,9 +459,9 @@ public final class MockHttpServer {
                     protocol = "SSE";
                 } else if (matched.isWebSocket()) {
                     // WS 路由被当普通 HTTP 访问：提示需要 Upgrade（浏览器 EventSource/fetch 可见）
-                    Map<String, String> upgrade = new LinkedHashMap<>();
-                    upgrade.put("Upgrade", "websocket");
-                    upgrade.put("Connection", "Upgrade");
+                    Map<String, List<String>> upgrade = new LinkedHashMap<>();
+                    upgrade.put("Upgrade", Collections.singletonList("websocket"));
+                    upgrade.put("Connection", Collections.singletonList("Upgrade"));
                     resolved = new Resolved(426, 0L, JSON_CT, UPGRADE_REQUIRED_BODY, upgrade);
                 } else {
                     resolved = matched.crud
@@ -471,10 +473,8 @@ public final class MockHttpServer {
                 contentType = resolved.contentType;
                 responseBytes = resolved.body;
                 if (!streamed && resolved.headers != null && !resolved.headers.isEmpty()) {
-                    // SSE 已在分派内部提交响应头，不能再改；普通响应统一在这里挂附加头
-                    for (Map.Entry<String, String> e : resolved.headers.entrySet()) {
-                        exchange.getResponseHeaders().set(e.getKey(), e.getValue());
-                    }
+                    // SSE 已在分派内部提交响应头，不能再改；普通响应统一在这里挂附加头（同名多枚，审计 P1-2）
+                    setResponseHeaders(exchange.getResponseHeaders(), resolved.headers);
                 }
             } else if (proxyTarget != null) {
                 // 代理回源：未命中路由原样转发真实后端
@@ -483,9 +483,7 @@ public final class MockHttpServer {
                 contentType = forwarded.contentType;
                 responseBytes = forwarded.body;
                 if (forwarded.headers != null && !forwarded.headers.isEmpty()) {
-                    for (Map.Entry<String, String> e : forwarded.headers.entrySet()) {
-                        exchange.getResponseHeaders().set(e.getKey(), e.getValue());
-                    }
+                    setResponseHeaders(exchange.getResponseHeaders(), forwarded.headers);
                 }
                 proxied = true;
             } else if ("OPTIONS".equalsIgnoreCase(method)) {
@@ -516,6 +514,38 @@ public final class MockHttpServer {
                     contentType = JSON_CT;
                     responseBytes = INVALID_STATUS_BODY;
                 }
+                // 故障注入在「延迟之后、写出之前」生效：延迟与故障可叠加，先慢后断/先慢后坏
+                MockFault fault = faultOf(matched);
+                if (fault != null && fault.probabilityPercent > 0 && hitFaultProbability(fault)) {
+                    faultLabel = fault.toString();
+                    switch (fault.mode) {
+                        case CONNECTION_CLOSE:
+                            // 近似「拔线」：JDK HttpServer 做不到精确 TCP RST，这里不写任何响应
+                            // 直接结束交换，sun 实现按响应未提交回收连接；客户端通常读到
+                            // EOF / empty reply / connection reset，足以击穿「必然有响应」的容错
+                            exchange.close();
+                            return;
+                        case EMPTY_RESPONSE:
+                            // 状态码与响应头正常，体为空
+                            responseBytes = EMPTY_BODY;
+                            break;
+                        case TRUNCATED_BODY:
+                            // writeTruncated 自己声明头、写半截、断流收场；exchange 已提交，
+                            // 不能再走统一 writeResponse（重复 sendResponseHeaders 会吃掉半截效果）
+                            writeTruncated(exchange, status, contentType, responseBytes, fault);
+                            return;
+                        case SLOW_BODY:
+                            // writeSlow 自己声明 chunked 头并分块写完;out 已关闭，主体不再由
+                            // 统一出口重写（重写会把 chunked 再提交一次，客户端取到截短体）
+                            writeSlow(exchange, status, contentType, responseBytes, fault);
+                            return;
+                        case INVALID_JSON:
+                        default:
+                            responseBytes = corruptJson(responseBytes);
+                            contentType = JSON_CT;
+                            break;
+                    }
+                }
                 writeResponse(exchange, status, contentType, responseBytes);
             }
         } catch (IOException ex) {
@@ -536,7 +566,7 @@ public final class MockHttpServer {
                     matched != null || proxied, status, durationMs,
                     truncateBytesForLog(requestBody, LOG_TEXT_MAX),
                     truncateBytesForLog(responseBytes, LOG_TEXT_MAX), proxied, protocol,
-                    requestHeaders, responseHeaders));
+                    requestHeaders, responseHeaders, faultLabel));
             exchange.close();
         }
     }
@@ -586,7 +616,7 @@ public final class MockHttpServer {
             }
         }
         long latencyMs = route.latencyMs;
-        Map<String, String> headers = renderHeadersSafe(route.headers, ctx);
+        Map<String, List<String>> headers = renderHeadersSafe(route.headers, ctx);
         boolean isGet = "GET".equalsIgnoreCase(method);
         boolean isPost = "POST".equalsIgnoreCase(method);
         boolean isPut = "PUT".equalsIgnoreCase(method);
@@ -661,44 +691,47 @@ public final class MockHttpServer {
     private Resolved resolveRoute(MockRoute route, MockRequestContext ctx, byte[] requestBody) {
         if (route.echo) {
             String reqCt = ctx.headerFirst("Content-Type");
+            List<String> errors = route.templated ? new ArrayList<>() : null;
             return new Resolved(route.statusCode, route.latencyMs,
                     reqCt == null || reqCt.trim().isEmpty() ? route.contentType : reqCt,
-                    requestBody, renderHeadersSafe(route.headers, ctx));
+                    requestBody,
+                    withWarning(renderHeadersSafe(route, ctx, errors), errors));
         }
         if (route.echoRequest.enabled) {
             // 「返回请求参数」模式：body 为空直接返回回显 JSON；非空时与模板叠加（{{request}}）
-            String body = MockBodyRenderer.routeFrame(route, ctx);
+            List<String> errors = route.templated ? new ArrayList<>() : null;
+            String body = MockBodyRenderer.routeFrame(route, ctx, errors);
             return new Resolved(route.statusCode, route.latencyMs, route.contentType,
                     body.getBytes(StandardCharsets.UTF_8),
-                    renderHeadersSafe(route.headers, ctx));
+                    withWarning(renderHeadersSafe(route, ctx, errors), errors));
         }
         MockResponse picked = pickResponse(route, ctx);
         if (picked != null) {
             List<String> errors = new ArrayList<>();
-            String body = MockBodyRenderer.render(picked.body, picked.dynamicTemplate, ctx,
-                    null, errors);
+            String body = MockBodyRenderer.render(picked.body, picked.dynamicTemplate,
+                    route.templated, ctx, null, errors);
             return new Resolved(picked.statusCode, picked.latencyMs, picked.contentType,
                     body.getBytes(StandardCharsets.UTF_8),
-                    withWarning(renderHeadersSafe(picked.headers, ctx), errors));
+                    withWarning(renderHeaders(route, picked.headers, ctx, errors), errors));
         }
         if (route.dynamicSchema && !route.responseSchema.trim().isEmpty()) {
             return new Resolved(route.statusCode, route.latencyMs, route.contentType,
                     renderSchemaBody(route, ctx).getBytes(StandardCharsets.UTF_8),
-                    renderHeadersSafe(route.headers, ctx));
+                    renderHeadersSafe(route, ctx, null));
         }
         List<String> errors = new ArrayList<>();
-        String body = MockBodyRenderer.render(route.body, route.dynamicTemplate, ctx,
-                null, errors);
+        String body = MockBodyRenderer.render(route.body, route.dynamicTemplate,
+                route.templated, ctx, null, errors);
         return new Resolved(route.statusCode, route.latencyMs, route.contentType,
                 body.getBytes(StandardCharsets.UTF_8),
-                withWarning(renderHeadersSafe(route.headers, ctx), errors));
+                withWarning(renderHeadersSafe(route, ctx, errors), errors));
     }
 
     /**
      * 模板渲染失败时把原因通过 {@code X-Mock-Warning} 响应头暴露（HTTP 头只能 ASCII，
      * 原因截断并去非法字符）；无错误返回原表。
      */
-    private static Map<String, String> withWarning(Map<String, String> headers,
+    private static Map<String, List<String>> withWarning(Map<String, List<String>> headers,
                                                    List<String> errors) {
         if (errors == null || errors.isEmpty()) {
             return headers;
@@ -708,10 +741,119 @@ public final class MockHttpServer {
         if (cleaned.length() > 160) {
             cleaned = cleaned.substring(0, 160);
         }
-        Map<String, String> out = headers == null
-                ? new LinkedHashMap<String, String>() : new LinkedHashMap<>(headers);
-        out.put("X-Mock-Warning", "dynamic-template-failed: " + cleaned);
+        Map<String, List<String>> out = headers == null
+                ? new LinkedHashMap<String, List<String>>() : new LinkedHashMap<>(headers);
+        out.put("X-Mock-Warning", Collections.singletonList(cleaned));
         return out;
+    }
+
+    /**
+     * 概率随机源（可注入，单测固定结果）；缺省 ThreadLocalRandom。约定输出 0–99 的整数，
+     * 与 {@link MockFault#probabilityPercent} 直接比较（{@code hit < probability} 即命中）。
+     * 不直接写死 {@code Math.random()}，就是为了测试时能 0 恒不中、99 恒中。
+     */
+    private volatile IntSupplier faultProbabilitySource =
+            () -> ThreadLocalRandom.current().nextInt(100);
+
+    /**
+     * 注入故障概率随机源（0–99）；传 null 恢复缺省。测试与需要可复现故障的场景用。
+     *
+     * @param source 随机源；命中判定为 {@code source.getAsInt() < fault.probabilityPercent}
+     */
+    public void setFaultProbabilitySource(IntSupplier source) {
+        this.faultProbabilitySource = source == null
+                ? () -> ThreadLocalRandom.current().nextInt(100) : source;
+    }
+
+    /** 当前路由的故障配置；NONE（含未配置）返回 null，统一「无故障」分支。 */
+    private static MockFault faultOf(MockRoute route) {
+        MockFault fault = route == null ? null : route.fault;
+        return fault == null || fault.mode == MockFault.Mode.NONE ? null : fault;
+    }
+
+    /** 概率命中判定：随机源返回值落在 [0, probabilityPercent) 即命中（percent=100 必中）。 */
+    private boolean hitFaultProbability(MockFault fault) {
+        int roll = faultProbabilitySource.getAsInt();
+        return roll >= 0 && roll < fault.probabilityPercent;
+    }
+
+    /**
+     * TRUNCATED_BODY：声明完整 Content-Length，只写出一部分后断开。
+     * JDK HttpServer 的 sendResponseHeaders 已承诺长度，中途断流客户端侧就是
+     * Incomplete/EOF/SocketException——这正是要模拟的现象。返回已写出的前缀供日志留痕。
+     */
+    private void writeTruncated(HttpExchange exchange, int status, String contentType,
+                                byte[] body, MockFault fault) throws IOException {
+        Headers headers = exchange.getResponseHeaders();
+        headers.set("Access-Control-Allow-Origin", CORS_ORIGIN);
+        if (contentType != null && !contentType.trim().isEmpty()) {
+            headers.set("Content-Type", contentType);
+        }
+        // 声明全量长度，但只写一部分：客户端按声明长度读会一直等到断流
+        exchange.sendResponseHeaders(status, body.length);
+        int written = body.length == 0 ? 0 : fault.truncatedBytesFor(body.length);
+        OutputStream out = exchange.getResponseBody();
+        if (written > 0) {
+            out.write(body, 0, written);
+            out.flush();
+        }
+        // 不 close out，让交换直接结束——半截响应由连接关闭顶替
+        exchange.close();
+    }
+
+    /**
+     * SLOW_BODY：分块写出，块间 sleep。sleep 温和抖动 50ms 步进，响应停服同样可控。
+     */
+    private void writeSlow(HttpExchange exchange, int status, String contentType,
+                           byte[] body, MockFault fault) throws IOException {
+        Headers headers = exchange.getResponseHeaders();
+        headers.set("Access-Control-Allow-Origin", CORS_ORIGIN);
+        if (contentType != null && !contentType.trim().isEmpty()) {
+            headers.set("Content-Type", contentType);
+        }
+        // 分块输出没有总长：0 让 JDK HttpServer 走 chunked
+        exchange.sendResponseHeaders(status, 0L);
+        OutputStream out = exchange.getResponseBody();
+        int chunk = fault.chunkBytes > 0 ? fault.chunkBytes : Math.max(1, body.length / 2);
+        long delay = Math.max(0L, fault.chunkDelayMs);
+        for (int offset = 0; offset < body.length || offset == 0 && body.length == 0;
+                offset += chunk) {
+            int to = Math.min(offset + chunk, body.length);
+            if (to > offset) {
+                out.write(body, offset, to - offset);
+                out.flush();
+            }
+            if (to >= body.length) {
+                break;
+            }
+            if (delay > 0 && !sleepInterruptible(delay)) {
+                // 服务停止打断分块间隔：直接断流收尾
+                exchange.close();
+                return;
+            }
+        }
+        out.close();
+    }
+
+    /**
+     * INVALID_JSON：把 JSON 体在末尾「截断」或「多出尾部逗号」刻意损坏；
+     * Content-Type 仍由路由声明（application/json），客户端解析必失败。
+     */
+    private static byte[] corruptJson(byte[] body) {
+        String text = new String(body, StandardCharsets.UTF_8);
+        String trimmed = text.stripTrailing();
+        if (trimmed.isEmpty()) {
+            return "{\"broken\":,".getBytes(StandardCharsets.UTF_8);
+        }
+        char last = trimmed.charAt(trimmed.length() - 1);
+        if (last == '}' || last == ']') {
+            // 尾部逗号：{"a":1,} / [1,] —— 历史上最经典的解析器雷区
+            return (trimmed.substring(0, trimmed.length() - 1) + "," + last)
+                    .getBytes(StandardCharsets.UTF_8);
+        }
+        // 非括号结尾（纯文本体）：直接截掉末尾两个字符，制造截断类损坏
+        return trimmed.substring(0, Math.max(1, trimmed.length() - 2))
+                .getBytes(StandardCharsets.UTF_8);
     }
 
     /** SSE 心跳注释间隔：同时承担断开探测（写出失败即结束连接），1s 让单测能快速收尾。 */
@@ -724,7 +866,7 @@ public final class MockHttpServer {
      * 返回后由统一出口留日志。帧内容与 HTTP 同源（占位符 / Mock.js / 请求参数回显）。
      */
     private Resolved serveSse(MockRoute route, MockRequestContext ctx, HttpExchange exchange) {
-        Map<String, String> headers = renderHeadersSafe(route.headers, ctx);
+        Map<String, List<String>> headers = renderHeadersSafe(route.headers, ctx);
         int status = route.statusCode <= 0 ? 200 : route.statusCode;
         SsePusher pusher = null;
         try {
@@ -733,9 +875,7 @@ public final class MockHttpServer {
             exchange.getResponseHeaders().set("Connection", "keep-alive");
             exchange.getResponseHeaders().set("Access-Control-Allow-Origin", CORS_ORIGIN);
             if (headers != null) {
-                for (Map.Entry<String, String> e : headers.entrySet()) {
-                    exchange.getResponseHeaders().set(e.getKey(), e.getValue());
-                }
+                setResponseHeaders(exchange.getResponseHeaders(), headers);
             }
             exchange.sendResponseHeaders(status, 0);
             pusher = new SsePusher(exchange.getResponseBody(), route, ctx);
@@ -946,10 +1086,36 @@ public final class MockHttpServer {
         }
     }
 
-    private static Map<String, String> renderHeadersSafe(Map<String, String> headers,
-                                                         MockRequestContext ctx) {
+    private static Map<String, List<String>> renderHeadersSafe(Map<String, List<String>> headers,
+                                                               MockRequestContext ctx) {
         if (headers == null || headers.isEmpty()) {
             return null;
+        }
+        return MockTemplateRenderer.renderHeaders(headers, ctx);
+    }
+
+    /**
+     * 路由级附加响应头渲染：templated 路由改用 {@link MockResponseTemplate}（值取不到保留
+     * 原文并收集 warning），未开启时行为不变。ERRS 可空。
+     */
+    private static Map<String, List<String>> renderHeadersSafe(MockRoute route,
+                                                               MockRequestContext ctx,
+                                                               List<String> errs) {
+        return renderHeaders(route, route.headers, ctx, errs);
+    }
+
+    private static Map<String, List<String>> renderHeaders(MockRoute route,
+                                                           Map<String, List<String>> headers,
+                                                           MockRequestContext ctx,
+                                                           List<String> errs) {
+        if (headers == null || headers.isEmpty()) {
+            return null;
+        }
+        if (route.templated) {
+            Map<String, List<String>> rendered =
+                    MockResponseTemplate.renderHeaders(headers, ctx, errs == null
+                            ? new ArrayList<String>() : errs);
+            return rendered.isEmpty() ? null : rendered;
         }
         return MockTemplateRenderer.renderHeaders(headers, ctx);
     }
@@ -978,7 +1144,7 @@ public final class MockHttpServer {
         }
         try {
             HttpResponse response = request.execute();
-            Map<String, String> headers = new LinkedHashMap<>();
+            Map<String, List<String>> headers = new LinkedHashMap<>();
             String contentType = null;
             for (Map.Entry<String, List<String>> e : response.headers().entrySet()) {
                 String name = e.getKey();
@@ -990,7 +1156,7 @@ public final class MockHttpServer {
                         || "content-length".equals(lower) || "server".equals(lower) || "date".equals(lower)) {
                     continue;
                 }
-                headers.put(name, e.getValue().get(0));
+                headers.put(name, new ArrayList<>(e.getValue()));
                 if ("content-type".equals(lower)) {
                     contentType = e.getValue().get(0);
                 }
@@ -1011,15 +1177,36 @@ public final class MockHttpServer {
         private final long latencyMs;
         private final String contentType;
         private final byte[] body;
-        private final Map<String, String> headers;
+        private final Map<String, List<String>> headers;
 
         Resolved(int status, long latencyMs, String contentType, byte[] body,
-                 Map<String, String> headers) {
+                 Map<String, List<String>> headers) {
             this.status = status;
             this.latencyMs = latencyMs;
             this.contentType = contentType;
             this.body = body;
             this.headers = headers;
+        }
+    }
+
+    /**
+     * 把响应方案 / 代理回源的多值附加头写入交易所（审计 P1-2）：同名多枚全部落头，
+     * 首枚用 set 保持与旧语义一致（覆盖系统默认同名的 CORS 等），其余枚用 add。
+     */
+    private static void setResponseHeaders(Headers headers, Map<String, List<String>> extra) {
+        for (Map.Entry<String, List<String>> e : extra.entrySet()) {
+            if (e.getKey() == null || e.getValue() == null || e.getValue().isEmpty()) {
+                continue;
+            }
+            boolean first = true;
+            for (String value : e.getValue()) {
+                if (first) {
+                    headers.set(e.getKey(), value);
+                    first = false;
+                } else {
+                    headers.add(e.getKey(), value);
+                }
+            }
         }
     }
 
