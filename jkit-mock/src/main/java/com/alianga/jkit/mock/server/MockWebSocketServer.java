@@ -303,19 +303,23 @@ public final class MockWebSocketServer {
         Map<String, String> pathParams = MockHttpServer.matchPathParams(route.path, handshake.path);
         MockRequestContext ctx = MockRequestContext.of("WS", handshake.path, pathParams,
                 handshake.query, handshake.headers, new byte[0]);
-        Map<String, String> rendered = MockTemplateRenderer.renderHeaders(route.headers, ctx);
+        Map<String, java.util.List<String>> rendered =
+                MockTemplateRenderer.renderHeaders(route.headers, ctx);
         StringBuilder sb = new StringBuilder(400);
         sb.append("HTTP/1.1 101 Switching Protocols\r\n")
                 .append("Upgrade: websocket\r\n")
                 .append("Connection: Upgrade\r\n")
                 .append("Sec-WebSocket-Accept: ").append(accept).append("\r\n");
-        for (Map.Entry<String, String> e : rendered.entrySet()) {
+        for (Map.Entry<String, java.util.List<String>> e : rendered.entrySet()) {
             String name = e.getKey();
             if (isHopByHop(name)) {
                 continue;
             }
-            sb.append(name).append(": ").append(e.getValue() == null ? "" : e.getValue())
-                    .append("\r\n");
+            // 同名多枚逐一落头（审计 P1-2）
+            for (String value : e.getValue()) {
+                sb.append(name).append(": ").append(value == null ? "" : value)
+                        .append("\r\n");
+            }
         }
         sb.append("\r\n");
         out.write(sb.toString().getBytes(StandardCharsets.UTF_8));

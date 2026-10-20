@@ -1,5 +1,6 @@
 package com.alianga.jkit.mock.server;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -124,11 +125,19 @@ public final class MockTemplateRenderer {
         return value == null ? "" : value;
     }
 
-    /** 渲染路由的附加响应头（值支持占位符），返回保序副本。 */
-    static Map<String, String> renderHeaders(Map<String, String> headers, MockRequestContext ctx) {
-        java.util.LinkedHashMap<String, String> out = new java.util.LinkedHashMap<>();
-        for (Map.Entry<String, String> e : headers.entrySet()) {
-            out.put(e.getKey(), render(e.getValue(), ctx));
+    /** 渲染路由的附加响应头（值支持占位符；同名多枚逐一渲染，审计 P1-2），返回保序副本。 */
+    static Map<String, List<String>> renderHeaders(Map<String, List<String>> headers,
+                                                   MockRequestContext ctx) {
+        java.util.LinkedHashMap<String, List<String>> out = new java.util.LinkedHashMap<>();
+        for (Map.Entry<String, List<String>> e : headers.entrySet()) {
+            if (e.getValue() == null || e.getValue().isEmpty()) {
+                continue;
+            }
+            List<String> rendered = new java.util.ArrayList<>(e.getValue().size());
+            for (String value : e.getValue()) {
+                rendered.add(value == null ? "" : render(value, ctx));
+            }
+            out.put(e.getKey(), java.util.Collections.unmodifiableList(rendered));
         }
         return out;
     }

@@ -19,8 +19,8 @@ public final class MockResponse {
     public final long latencyMs;
     public final String contentType;
     public final String body;
-    /** 附加响应头（保序），值支持占位符。 */
-    public final Map<String, String> headers;
+    /** 附加响应头（保序），值支持占位符；同名可多枚（审计 P1-2，Set-Cookie 场景）。 */
+    public final Map<String, List<String>> headers;
     /** 激活规则；为空表示无条件（作为默认响应）。 */
     public final List<MockResponseRule> rules;
     /** 为 true 时 body 按 Mock.js 模板每次请求渲染。 */
@@ -33,10 +33,12 @@ public final class MockResponse {
         this.latencyMs = Math.max(0L, builder.latencyMs);
         this.contentType = builder.contentType;
         this.body = builder.body;
-        Map<String, String> headerCopy = new LinkedHashMap<>();
-        for (Map.Entry<String, String> e : builder.headers.entrySet()) {
-            if (e.getKey() != null && !e.getKey().trim().isEmpty()) {
-                headerCopy.put(e.getKey().trim(), e.getValue() == null ? "" : e.getValue());
+        Map<String, List<String>> headerCopy = new LinkedHashMap<>();
+        for (Map.Entry<String, List<String>> e : builder.headers.entrySet()) {
+            if (e.getKey() != null && !e.getKey().trim().isEmpty()
+                    && e.getValue() != null && !e.getValue().isEmpty()) {
+                headerCopy.put(e.getKey().trim(),
+                        Collections.unmodifiableList(new ArrayList<>(e.getValue())));
             }
         }
         this.headers = Collections.unmodifiableMap(headerCopy);
@@ -61,7 +63,7 @@ public final class MockResponse {
         private long latencyMs;
         private String contentType = "application/json; charset=utf-8";
         private String body = "";
-        private Map<String, String> headers = new LinkedHashMap<>();
+        private Map<String, List<String>> headers = new LinkedHashMap<>();
         private List<MockResponseRule> rules = new ArrayList<>();
         private boolean dynamicTemplate;
         private int weight = 1;
@@ -92,14 +94,35 @@ public final class MockResponse {
             return this;
         }
 
+        /** 追加一枚响应头；同名多次调用即多枚（审计 P1-2）。 */
         public Builder header(String name, String value) {
-            this.headers.put(name, value);
+            if (name != null && !name.trim().isEmpty()) {
+                this.headers.computeIfAbsent(name.trim(), k -> new ArrayList<>()).add(value == null ? "" : value);
+            }
             return this;
         }
 
+        /** 兼容单值 API。 */
         public Builder headers(Map<String, String> values) {
             if (values != null) {
-                this.headers.putAll(values);
+                for (Map.Entry<String, String> e : values.entrySet()) {
+                    header(e.getKey(), e.getValue());
+                }
+            }
+            return this;
+        }
+
+        /** 多值响应头（审计 P1-2）：同名多枚合一。 */
+        public Builder headersMulti(Map<String, List<String>> values) {
+            if (values != null) {
+                for (Map.Entry<String, List<String>> e : values.entrySet()) {
+                    if (e.getValue() == null || e.getValue().isEmpty()) {
+                        continue;
+                    }
+                    for (String v : e.getValue()) {
+                        header(e.getKey(), v);
+                    }
+                }
             }
             return this;
         }
