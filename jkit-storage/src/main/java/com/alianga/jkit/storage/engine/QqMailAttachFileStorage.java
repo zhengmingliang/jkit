@@ -95,6 +95,18 @@ public class QqMailAttachFileStorage implements FileStorage {
     private final String renewDs;
     /** 浏览器抓到的 /login/login 加密表单体（可选；无则无法静默续期）。 */
     private final byte[] renewBody;
+    /** localStorage ticket:&lt;uin&gt; 解码结果（可选；有则用 xmtls 助手静默续期）。 */
+    private final QqMailTicket ticket;
+    /** ticket 解码失败原因（不含原值）；续期时报给用户。 */
+    private final String ticketError;
+    private final String nodePath;
+    private final String xmtlsDir;
+    private final long xmtlsTimeoutMs;
+    private volatile QqMailXmtls xmtls;
+    private volatile String lastRenewError;
+    private final java.util.Random renewRandom = new java.security.SecureRandom();
+    /** -20047（登录校验冲突）最多重试次数，同网页。 */
+    static final int RENEW_CONFLICT_RETRIES = 3;
     private volatile long lastSessionOkAt = -1L;
     private final Object renewLock = new Object();
     private volatile boolean renewing;
@@ -138,7 +150,20 @@ public class QqMailAttachFileStorage implements FileStorage {
         this.requestIntervalMs = Math.max(0L, config.longOr("requestIntervalMs", 300L));
         this.authRetCodes = parseCodes(config.getOr("authRetCodes", "-3,-101,-102,-20002"));
         this.sessionCheckIntervalMs = Math.max(0L, config.longOr("sessionCheckIntervalMs", 600_000L));
-        this.renewDs = config.getOr("renewDs", "").trim();
+        String ds = config.getOr("ds", "").trim();
+        this.renewDs = ds.isEmpty() ? config.getOr("renewDs", "").trim() : ds;
+        QqMailTicket t = null;
+        String terr = null;
+        try {
+            t = QqMailTicket.parse(config.getOr("ticket", ""));
+        } catch (StorageException e) {
+            terr = e.getMessage();
+        }
+        this.ticket = t;
+        this.ticketError = terr;
+        this.nodePath = config.getOr("nodePath", "").trim();
+        this.xmtlsDir = config.getOr("xmtlsDir", "").trim();
+        this.xmtlsTimeoutMs = Math.max(1000L, config.longOr("xmtlsTimeoutMs", 15_000L));
         String renewBodyB64 = config.getOr("renewBodyBase64", "").trim();
         byte[] body = null;
         if (!renewBodyB64.isEmpty()) {
@@ -622,13 +647,14 @@ public class QqMailAttachFileStorage implements FileStorage {
             if (renewing) {
                 return false;
             }
-            if (renewBody == null || renewBody.length == 0) {
+            if (ticket == null && (renewBody == null || renewBody.length == 0)) {
+                lastRenewError = ticketError;
                 return false;
             }
             renewing = true;
         }
         try {
-            boolean ok = client.renewLogin(renewDs, renewBody);
+            boolean ok = ticket != null ? renewWithTicket() : client.renewLogin(renewDs, renewBody);
             if (ok) {
                 lastSessionOkAt = clock.getAsLong();
                 SessionUpdateListener sl = sessionListener;
@@ -640,6 +666,78 @@ public class QqMailAttachFileStorage implements FileStorage {
         } finally {
             renewing = false;
         }
+    }
+
+    /**
+     * 网页 refreshSid：xmtls 加密 /login/login；-20047 冲突时等 800–1500ms 重试，最多 3 次。
+     * 助手不可用（无 node 等）记入 {@link #lastRenewError}，最终仍按鉴权失败报给用户。
+     */
+    private boolean renewWithTicket() {
+        lastRenewError = null;
+        QqMailXmtls x;
+        try {
+            x = xmtls();
+        } catch (StorageException e) {
+            lastRenewError = e.getMessage();
+            return false;
+        }
+        for (int attempt = 0; ; attempt++) {
+            QqMailWebClient.RenewResult r;
+            try {
+                r = client.refreshLogin(x, ticket, renewDs, renewRandom);
+            } catch (StorageException e) {
+                lastRenewError = e.getMessage();
+                return false;
+            }
+            if (r.ok()) {
+                return true;
+            }
+            if (r.ret == -20047L && attempt < RENEW_CONFLICT_RETRIES) {
+                try {
+                    sleeper.sleep(800L + (long) (renewRandom.nextDouble() * 700L));
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return false;
+                }
+                continue;
+            }
+            lastRenewError = r.ret == QqMailWebClient.RenewResult.RET_BROKEN
+                    ? "续期响应无法解析"
+                    : "续期被拒绝 ret=" + r.ret + "（ticket 可能已失效，需重新扫码后再复制）";
+            return false;
+        }
+    }
+
+    private QqMailXmtls xmtls() {
+        QqMailXmtls x = xmtls;
+        if (x == null) {
+            synchronized (renewLock) {
+                x = xmtls;
+                if (x == null) {
+                    x = sharedXmtls(nodePath, xmtlsDir, xmtlsTimeoutMs);
+                    xmtls = x;
+                }
+            }
+        }
+        return x;
+    }
+
+    private static final Map<String, QqMailXmtls> SHARED_XMTLS = new ConcurrentHashMap<String, QqMailXmtls>();
+
+    /** 同一 node/目录共用一个助手进程。 */
+    private static QqMailXmtls sharedXmtls(String node, String dir, long timeout) {
+        return SHARED_XMTLS.computeIfAbsent(node + "\n" + dir + "\n" + timeout,
+                k -> new QqMailXmtlsNode(node, dir, timeout));
+    }
+
+    /** 测试注入（mock 助手）。 */
+    void setXmtls(QqMailXmtls x) {
+        this.xmtls = x;
+    }
+
+    /** @return 最近一次续期失败原因（不含秘密），无则 null */
+    public String lastRenewError() {
+        return lastRenewError;
     }
 
     /** 测试 / 运维：强制尝试续期。 */
@@ -654,8 +752,10 @@ public class QqMailAttachFileStorage implements FileStorage {
 
     StorageException mapRet(long ret, String path) {
         if (ret == -20002L) {
+            String why = lastRenewError;
             return new StorageException(StorageErrorCode.AUTH_FAILED,
-                    "登录态无效或 cookie 不完整（ret=-20002 " + path + "），请重新扫码登录", null);
+                    "登录态无效或 cookie 不完整（ret=-20002 " + path + "），请重新扫码登录"
+                            + (why != null ? "；自动续期失败：" + why : ""), null);
         }
         if (authRetCodes.contains(ret)) {
             return new StorageException(StorageErrorCode.AUTH_FAILED,

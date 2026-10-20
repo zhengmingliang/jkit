@@ -143,6 +143,14 @@ public final class StoragePresets {
                 Arrays.asList(
                         StorageField.secret("sid", "会话 sid", true),
                         StorageField.secret("cookie", "Cookie", true),
+                        StorageField.secret("ticket", "续期 ticket", false,
+                                "可选，用于登录态过期后自动续期：已登录 wx.mail.qq.com 的浏览器按 F12 → "
+                                        + "Application（应用）→ Local Storage → https://wx.mail.qq.com，"
+                                        + "复制键 ticket:<QQ号> 的整段值；需本机安装 Node.js 16+"),
+                        StorageField.secret("ds", "续期 ds", false,
+                                "可选，配合 ticket：F12 → Network 里任一 /login/login 请求 URL 的 ds 参数（32 位）"),
+                        StorageField.optional("nodePath", "Node 路径", "",
+                                "可选，node 可执行文件完整路径；留空自动在 PATH 中查找"),
                         StorageField.optional("sortType", "排序字段", "1", "1 时间 2 fileid 3 大小 4 ctime"),
                         StorageField.optional("sortDirection", "排序方向", "1", "1 降序 2 升序"),
                         StorageField.optional("pageSize", "分页大小", "100", null),

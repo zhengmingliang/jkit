@@ -83,6 +83,19 @@ public final class StorageField {
         return new StorageField(key, label, required, true, null, null);
     }
 
+    /**
+     * 带提示文案的密钥字段。
+     *
+     * @param key      键
+     * @param label    显示名
+     * @param required 是否必填
+     * @param hint     提示文案
+     * @return 字段描述
+     */
+    public static StorageField secret(String key, String label, boolean required, String hint) {
+        return new StorageField(key, label, required, true, null, hint);
+    }
+
     public String key() {
         return key;
     }

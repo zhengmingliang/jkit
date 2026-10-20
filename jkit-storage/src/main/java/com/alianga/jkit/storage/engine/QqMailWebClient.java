@@ -127,6 +127,122 @@ final class QqMailWebClient {
         }
     }
 
+    /** {@link #refreshLogin} 结果：ret=0 且 sid 非空才算成功；值不进日志。 */
+    static final class RenewResult {
+        /** 解不开响应 / 非 2xx / 格式不对。 */
+        static final long RET_BROKEN = Long.MIN_VALUE;
+        final long ret;
+        final String sid;
+
+        RenewResult(long ret, String sid) {
+            this.ret = ret;
+            this.sid = sid;
+        }
+
+        boolean ok() {
+            return ret == 0L && sid != null && !sid.isEmpty();
+        }
+
+        @Override
+        public String toString() {
+            return "RenewResult{ret=" + ret + ", sid=" + (sid == null ? "null" : "redacted") + "}";
+        }
+    }
+
+    private static final Pattern ONE_LINE_JSON = Pattern.compile("^\\{.+\\}$");
+
+    /**
+     * 网页 refreshSid 原样复刻（home-web.js 88113/89152）：明文
+     * {@code {auth_type,pwd_key,pwd_ticket_key,filter_param:{timestamp,nonce}}} 经 xmtls（pwd_key 为密钥）加密，
+     * POST {@code /login/login?xm_req_type=web-pwd&language=zh&r=..&sid=..&ds=..}，响应在同一会话里解密，
+     * 取 {@code body.sid}。Set-Cookie 照常进 Cookie 罐。
+     *
+     * @param xmtls  加解密
+     * @param ticket localStorage ticket 解码结果
+     * @param ds     设备指纹（FingerprintJS visitorId）；空则不发
+     * @param rnd    随机源（nonce、r）
+     */
+    RenewResult refreshLogin(QqMailXmtls xmtls, QqMailTicket ticket, String ds, java.util.Random rnd) {
+        long now = clock.getAsLong();
+        Map<String, Object> filter = new LinkedHashMap<String, Object>();
+        filter.put("timestamp", now);
+        filter.put("nonce", String.valueOf(1000000000000000L + (long) Math.ceil(rnd.nextDouble() * 999_999_999_999_999L)));
+        Map<String, Object> params = new LinkedHashMap<String, Object>();
+        params.put("auth_type", ticket.authType());
+        params.put("pwd_key", ticket.pwdKey);
+        params.put("pwd_ticket_key", ticket.pwdTicketKey);
+        params.put("filter_param", filter);
+        QqMailXmtls.Sealed sealed = xmtls.encrypt(ticket.pwdKey, JSON.toJsonString(params));
+        boolean released = false;
+        try {
+            Map<String, String> q = new LinkedHashMap<String, String>();
+            q.put("xm_req_type", "web-pwd");
+            q.put("language", "zh");
+            q.put("r", String.valueOf((long) (rnd.nextDouble() * 1e13)) + now);
+            q.put("sid", sid);
+            if (ds != null && !ds.trim().isEmpty()) {
+                q.put("ds", ds.trim());
+            }
+            String url = BASE_URL + "/login/login?" + encodeForm(q);
+            Map<String, String> headers = baseHeaders(url);
+            headers.put("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8");
+            headers.put("Accept", "application/json, text/plain, */*");
+            debug("POST", "/login/login", q, null, headers);
+            QqMailTransport.Response resp = transport.exchange("POST", url, headers,
+                    sealed.body.getBytes(StandardCharsets.UTF_8));
+            String text;
+            try {
+                jar.absorb(host(url), resp.all("Set-Cookie"));
+                if (resp.status < 200 || resp.status >= 300) {
+                    return new RenewResult(RenewResult.RET_BROKEN, null);
+                }
+                text = new String(readAll(resp.body), StandardCharsets.UTF_8).trim();
+            } finally {
+                resp.close();
+            }
+            Map<?, ?> plain;
+            if (ONE_LINE_JSON.matcher(text).matches()) {
+                plain = asMap(text); // 明文 JSON：错误头（网页同样不解密）
+            } else {
+                released = true;
+                String dec = text.isEmpty() ? null : xmtls.decrypt(sealed.handle, text);
+                plain = dec == null ? null : asMap(dec);
+            }
+            if (plain == null || !(plain.get("head") instanceof Map)) {
+                return new RenewResult(RenewResult.RET_BROKEN, null);
+            }
+            Object retObj = ((Map<?, ?>) plain.get("head")).get("ret");
+            long ret;
+            try {
+                ret = retObj == null ? 0L : Long.parseLong(String.valueOf(retObj));
+            } catch (NumberFormatException e) {
+                return new RenewResult(RenewResult.RET_BROKEN, null);
+            }
+            String newSid = null;
+            if (plain.get("body") instanceof Map) {
+                Object v = ((Map<?, ?>) plain.get("body")).get("sid");
+                newSid = v == null ? null : String.valueOf(v).trim();
+            }
+            if (ret == 0L && newSid != null && !newSid.isEmpty()) {
+                updateSid(newSid);
+            }
+            return new RenewResult(ret, newSid);
+        } finally {
+            if (!released) {
+                xmtls.release(sealed.handle);
+            }
+        }
+    }
+
+    private static Map<?, ?> asMap(String text) {
+        try {
+            Object o = JSON.parse(text);
+            return o instanceof Map ? (Map<?, ?>) o : null;
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
     /** 默认传输：HttpCore，单跳不跟随重定向。 */
     static QqMailTransport httpCoreTransport(final StorageConfig config) {
         return (method, url, headers, body) -> {
