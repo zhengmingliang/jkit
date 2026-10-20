@@ -1,6 +1,7 @@
 package com.alianga.jkit.storage;
 
 import com.alianga.jkit.storage.engine.AzureBlobFileStorage;
+import com.alianga.jkit.storage.engine.DogeFileStorage;
 import com.alianga.jkit.storage.engine.FtpFileStorage;
 import com.alianga.jkit.storage.engine.GoFastDfsFileStorage;
 import com.alianga.jkit.storage.engine.LocalFileStorage;
@@ -59,6 +60,7 @@ public final class FileStorages {
         ENGINES.put("oss", OssFileStorage::new);
         ENGINES.put("azure-blob", AzureBlobFileStorage::new);
         ENGINES.put("go-fastdfs", GoFastDfsFileStorage::new);
+        ENGINES.put("doge", DogeFileStorage::new);
         for (StoragePlatform platform : StoragePresets.builtin()) {
             PLATFORMS.put(platform.id(), platform);
         }

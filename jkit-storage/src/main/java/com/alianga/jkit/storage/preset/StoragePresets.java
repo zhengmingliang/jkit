@@ -13,7 +13,8 @@ import java.util.List;
  *
  * <p>支持策略分三档（详见模块 README 的平台支持矩阵）：</p>
  * <ul>
- *   <li>原生引擎：{@code local / oss / azure-blob / go-fastdfs}，按平台官方协议实现；</li>
+ *   <li>原生引擎：{@code local / oss / azure-blob / go-fastdfs / doge}，按平台官方协议实现
+ *       （doge 为管理 API + S3 兼容协议组合引擎）；</li>
  *   <li>S3 兼容引擎：{@code s3}（SigV4 / SigV2 双签名、虚拟主机与路径两种寻址、
  *       ListObjects V1/V2），覆盖 Amazon S3、MinIO、R2 及二十余家 S3 兼容云；</li>
  *   <li>规划中：{@code fastdfs / mongo-gridfs / qingstor}，注册了平台描述但引擎未实现，
@@ -68,6 +69,15 @@ public final class StoragePresets {
                 StorageField.required("accessKey", "AccessKeyId"),
                 StorageField.secret("secretKey", "AccessKeySecret", true),
                 StorageField.optional("basePath", "根前缀", "/", null)));
+        // 多吉云：控制台密钥对（tmp_token 换 STS 临时凭据）+ S3 兼容桶，付费桶与免费桶协议一致
+        platforms.add(new StoragePlatform("doge", "多吉云", "doge", "公有云",
+                StorageField.required("accessKey", "AccessKey", "多吉云控制台 → 密钥管理获取"),
+                StorageField.secret("secretKey", "SecretKey", true),
+                StorageField.required("bucket", "Bucket", "业务桶名（如 fee-standard）或 s3Bucket 全名"),
+                StorageField.optional("region", "Region", null, "SigV4 区域，留空从桶端点自动推导"),
+                StorageField.optional("basePath", "根前缀", "/", "对象 key 统一加该前缀"),
+                StorageField.optional("listVersion", "列表 API 版本", "2",
+                        "1=ListObjects V1，2=ListObjects V2")));
         platforms.add(s3("huawei-obs", "华为云 OBS", "https://obs.cn-north-4.myhuaweicloud.com",
                 "公有云", null));
         platforms.add(s3("tencent-cos", "腾讯云 COS", "https://cos.ap-guangzhou.myqcloud.com",

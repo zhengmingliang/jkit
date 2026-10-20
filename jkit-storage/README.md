@@ -1,6 +1,6 @@
 # jkit-storage — 统一多存储平台文件管理
 
-零第三方依赖的统一文件存储引擎：一套 `FileStorage` 接口读写 **本地文件系统、FTP、SFTP、WebDAV、Amazon S3 与三十余个 S3 兼容云**（阿里云 OSS、华为云 OBS、腾讯云 COS、七牛云 Kodo、百度云 BOS、又拍云 USS、MinIO、Google Cloud Storage、Azure Blob Storage、go-fastdfs、火山引擎 TOS、Cloudflare R2、金山云 KS3、京东云 OSS、天翼云 OOS、IBM COS 等），内置**跨存储内容对比、增量同步与全量迁移**引擎。除 SFTP 的可选 jsch 外，全部传输逻辑基于 JDK 标准库实现，引入本模块不会向宿主应用传递任何强制的外部依赖。
+零第三方依赖的统一文件存储引擎：一套 `FileStorage` 接口读写 **本地文件系统、FTP、SFTP、WebDAV、Amazon S3 与三十余个 S3 兼容云**（阿里云 OSS、华为云 OBS、腾讯云 COS、七牛云 Kodo、百度云 BOS、又拍云 USS、MinIO、Google Cloud Storage、Azure Blob Storage、go-fastdfs、多吉云、火山引擎 TOS、Cloudflare R2、金山云 KS3、京东云 OSS、天翼云 OOS、IBM COS 等），内置**跨存储内容对比、增量同步与全量迁移**引擎。除 SFTP 的可选 jsch 外，全部传输逻辑基于 JDK 标准库实现，引入本模块不会向宿主应用传递任何强制的外部依赖。
 
 ## 引入
 
@@ -64,12 +64,27 @@ SyncEngine.sync(local, "backup", oss, "backup", SyncOptions.incremental(), progr
 
 | 档位 | 平台 | 说明 |
 | --- | --- | --- |
-| 原生引擎 | 本地文件系统、阿里云 OSS、Azure Blob Storage、go-fastdfs | 按平台官方协议实现 |
+| 原生引擎 | 本地文件系统、阿里云 OSS、Azure Blob Storage、go-fastdfs、多吉云（`doge`） | 按平台官方协议实现（多吉云为管理 API + S3 兼容协议组合引擎，见下节） |
 | S3 兼容引擎（SigV4/SigV2 双签名、虚拟主机与路径寻址、ListObjects V1/V2） | Amazon S3、Amazon S3 V2、MinIO、华为云 OBS、腾讯云 COS、七牛云 Kodo、百度云 BOS、又拍云 USS、Google Cloud Storage、火山引擎 TOS、Cloudflare R2、金山云 KS3、京东云 OSS、天翼云 OOS、移动云 EOS、联通沃云 OSS、网易数帆 NOS、Ucloud US3、平安云 OBS、首云 OSS、IBM COS、美团云 MSS、其它任意 S3 兼容存储（`generic-s3`） | 兼容平台只需填 endpoint / bucket / AK / SK；`platforms()` 提供全部字段定义 |
 | 协议引擎 | FTP（内置纯 JDK 客户端，被动模式）、SFTP（可选 jsch）、WebDAV（PROPFIND/MKCOL/MOVE 全支持） | |
 | 规划中 | FastDFS、MongoDB GridFS、青云 QingStor | 平台已注册、引擎未实现，创建实例时抛 `UNSUPPORTED` 并提示（FastDFS / GridFS 的协议无统一列表能力，已在设计中单独规划） |
 
 云端 presets 的默认端点随版本内置（如 `qiniu-kodo → s3.cn-north-1.qiniucs.com`），自建 / 内网部署直接覆盖 `endpoint`。腾讯云 COS 走 S3 兼容 API 时 SecretKey 需 MD5 变换（`md5Secret=true` 已内置默认）。
+
+## 多吉云（doge）
+
+多吉云不发放长期 S3 密钥：控制台「密钥管理」里的是密钥对，引擎用它调管理 API 换取 STS 临时凭据（约 2 小时有效期，自动缓存与刷新），再用临时凭据按 S3 兼容协议访问桶。付费桶与免费桶（基础型）协议完全一致，同一引擎同时支持。
+
+```java
+FileStorage doge = FileStorages.of("doge", StorageConfig.empty()
+        .set("accessKey", "控制台密钥管理的 AccessKey")
+        .set("secretKey", "SecretKey")
+        .set("bucket", "fee-standard"));   // 业务桶名或 s3Bucket 全名
+```
+
+配置键：`accessKey` / `secretKey`（必填）、`bucket`（必填，业务桶名如 `fee-standard` 或 `s-bj-xxx-fee-standard-1258813047`）、`region`（默认从桶端点自动推导，如 `cos.ap-beijing.myqcloud.com → ap-beijing`）、`basePath`、`listVersion`（默认 2）。桶不存在时创建实例后的首次操作会抛 `INVALID_CONFIG` 并列出可用桶名。
+
+协议要点（2026-10-20 实测）：管理 API 签名为 `TOKEN {accessKey}:{HMAC-SHA1(secretKey, apiPath + "\n" + body)}`；`POST /auth/tmp_token.json`（JSON body，`channel=OSS_FULL`、`scopes=["*"]`）返回 `Credentials`（accessKeyId / secretAccessKey / sessionToken）、`ExpiredAt` 与 `Buckets`（name / s3Bucket / s3Endpoint）；桶访问走标准 SigV4 + `x-amz-security-token` 头 + 虚拟主机寻址（path-style 被服务端禁止）。
 
 ## 真实服务器集成测试
 
@@ -84,6 +99,16 @@ mvn -pl jkit-storage test -Dtest=CopypartyRealStorageTest
 ```
 
 任一前提不满足时对应用例自动跳过（JUnit Assume），不影响 CI。
+
+`DogeRealStorageTest` 用真实多吉云账号验证 `doge` 引擎的完整行为矩阵（上传下载含
+中文与 Unicode、列表、目录占位、复制重命名、Range 续传、递归删除、预签名下载）。
+本机运行前提（凭据三选一来源：系统属性 / 环境变量 / 不满足即跳过）：
+
+```bash
+mvn -pl jkit-storage test -Dtest=DogeRealStorageTest \
+  -Djkit.test.doge.accessKey=xxx -Djkit.test.doge.secretKey=xxx -Djkit.test.doge.bucket=xxx
+# 或环境变量 DOGE_ACCESS_KEY / DOGE_SECRET_KEY / DOGE_BUCKET
+```
 
 ## 自定义平台与引擎
 

@@ -111,14 +111,15 @@ public final class AwsSigners {
      * @param canonicalPath  规范路径（与实际 URL 路径逐字节一致）
      * @param accessKey      AccessKeyId
      * @param secretKey      SecretAccessKey
+     * @param sessionToken   STS 会话令牌（临时凭据预签名必须带上），null 表示长期密钥
      * @param region         区域
      * @param expiresSeconds 有效期（秒，AWS 上限 604800）
      * @param amzDate        签名时间（yyyyMMdd'T'HHmmss'Z'）
      * @return 查询串
      */
     public static String sigV4PresignQuery(String method, String host, String canonicalPath,
-                                           String accessKey, String secretKey, String region,
-                                           long expiresSeconds, String amzDate) {
+                                           String accessKey, String secretKey, String sessionToken,
+                                           String region, long expiresSeconds, String amzDate) {
         String dateStamp = amzDate.substring(0, 8);
         String scope = dateStamp + "/" + region + "/s3/aws4_request";
         java.util.TreeMap<String, String> query = new java.util.TreeMap<String, String>();
@@ -126,6 +127,10 @@ public final class AwsSigners {
         query.put("X-Amz-Credential", accessKey + "/" + scope);
         query.put("X-Amz-Date", amzDate);
         query.put("X-Amz-Expires", String.valueOf(expiresSeconds));
+        if (sessionToken != null && !sessionToken.isEmpty()) {
+            // STS 临时凭据预签名：令牌是必须的查询参数（且参与签名）
+            query.put("X-Amz-Security-Token", sessionToken);
+        }
         query.put("X-Amz-SignedHeaders", "host");
         StringBuilder queryBuilder = new StringBuilder();
         for (java.util.Map.Entry<String, String> entry : query.entrySet()) {
@@ -149,6 +154,17 @@ public final class AwsSigners {
                 region), "s3"), "aws4_request");
         String signature = hex(hmacSha256(signingKey, stringToSign));
         return queryBuilder + "&X-Amz-Signature=" + signature;
+    }
+
+    /**
+     * SigV4 预签名（长期密钥，无会话令牌）：等同
+     * {@code sessionToken=null} 的重载。
+     */
+    public static String sigV4PresignQuery(String method, String host, String canonicalPath,
+                                           String accessKey, String secretKey, String region,
+                                           long expiresSeconds, String amzDate) {
+        return sigV4PresignQuery(method, host, canonicalPath, accessKey, secretKey, null,
+                region, expiresSeconds, amzDate);
     }
 
     /**

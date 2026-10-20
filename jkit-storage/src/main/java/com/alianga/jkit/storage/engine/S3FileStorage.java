@@ -42,6 +42,8 @@ public class S3FileStorage implements FileStorage {
     private final String bucket;
     private final String accessKey;
     private final String secretKey;
+    /** 会话令牌（STS 临时凭据，如多吉云 tmp_token 换取的凭据）；null 表示长期密钥。 */
+    private final String sessionToken;
     private final String region;
     private final boolean pathStyle;
     private final String basePath;
@@ -54,7 +56,7 @@ public class S3FileStorage implements FileStorage {
 
     /**
      * 由配置创建（配置键：endpoint / bucket / accessKey / secretKey / region /
-     * pathStyle / basePath / listVersion / authStyle / md5Secret）。
+     * pathStyle / basePath / listVersion / authStyle / md5Secret / sessionToken）。
      *
      * @param config 连接配置
      */
@@ -70,6 +72,8 @@ public class S3FileStorage implements FileStorage {
         String secret = config.require("secretKey");
         this.secretKey = config.boolOr("md5Secret", false)
                 ? AwsSigners.md5Hex(secret.getBytes(java.nio.charset.StandardCharsets.UTF_8)) : secret;
+        String token = config.getOr("sessionToken", "");
+        this.sessionToken = token.isEmpty() ? null : token;
         this.region = config.getOr("region", "us-east-1");
         this.pathStyle = config.boolOr("pathStyle", false);
         this.basePath = StoragePaths.normalize(config.getOr("basePath", ""));
@@ -364,15 +368,15 @@ public class S3FileStorage implements FileStorage {
         long seconds = Math.min(7L * 24 * 3600, Math.max(60, ttl.getSeconds()));
         if (authPrefix == null) {
             String query = AwsSigners.sigV4PresignQuery("GET", host, urlPath,
-                    accessKey, secretKey, region, seconds, AwsSigners.amzDateNow());
-            return endpoint + urlPath + "?" + query;
+                    accessKey, secretKey, sessionToken, region, seconds, AwsSigners.amzDateNow());
+            return baseUrl() + urlPath + "?" + query;
         }
         // SigV2 家族（金山云等）：path style 的 CanonicalizedResource 恒为 /bucket/key
         long expires = System.currentTimeMillis() / 1000 + seconds;
         String keyPath = pathStyle ? bucket + "/" + key : key;
         String query = AwsSigners.sigV2PresignQuery(accessKey, secretKey, "GET",
                 expires, bucket, keyPath);
-        return endpoint + urlPath + "?" + query;
+        return baseUrl() + urlPath + "?" + query;
     }
 
     @Override
@@ -658,7 +662,10 @@ public class S3FileStorage implements FileStorage {
         String urlPath = pathStyle ? "/" + bucket + (encodedPath.isEmpty() ? "" : "/" + encodedPath)
                 : (encodedPath.isEmpty() ? "/" : "/" + encodedPath);
         String host = hostOf();
-        String url = endpoint + urlPath + buildQuery(query);
+        // URL 主机必须与签名 host 一致：JDK HttpURLConnection 忽略显式 Host 头（取 URL 主机），
+        // 虚拟主机寻址若仍用 endpoint 主机，服务端收到的 Host 就没有桶名——
+        // 宽松服务端（MinIO）容忍，腾讯 COS 等严格服务端按 Host 定位桶直接 NoSuchBucket
+        String url = baseUrl() + urlPath + buildQuery(query);
         Map<String, String> headers = new LinkedHashMap<String, String>();
         if (contentType != null) {
             headers.put("Content-Type", contentType);
@@ -677,6 +684,10 @@ public class S3FileStorage implements FileStorage {
                     ? AwsSigners.sha256Hex(body) : AwsSigners.UNSIGNED_PAYLOAD;
             headers.put("x-amz-date", amzDate);
             headers.put("x-amz-content-sha256", payloadHash);
+            if (sessionToken != null) {
+                // STS 临时凭据（多吉云 tmp_token 等）：令牌必须参与签名
+                headers.put("x-amz-security-token", sessionToken);
+            }
             // 规范 URI 必须与实际请求的路径逐字节一致（不能多出尾斜杠），
             // 否则真实 S3 服务端按收到的 URI 重算签名必然不匹配
             String authorization = AwsSigners.sigV4(method, host, urlPath, query,
@@ -723,6 +734,17 @@ public class S3FileStorage implements FileStorage {
             java.net.URL url = new java.net.URL(endpoint);
             String effectiveHost = pathStyle ? url.getHost() : bucket + "." + url.getHost();
             return url.getPort() > 0 ? effectiveHost + ":" + url.getPort() : effectiveHost;
+        } catch (java.net.MalformedURLException e) {
+            throw StorageException.invalidConfig("endpoint 非法: " + endpoint);
+        }
+    }
+
+    /** 请求基地址：scheme://host（含端口）。与签名 host 严格一致（含虚拟主机段）。 */
+    private String baseUrl() {
+        try {
+            java.net.URL url = new java.net.URL(endpoint);
+            String base = url.getProtocol() + "://" + hostOf();
+            return base;
         } catch (java.net.MalformedURLException e) {
             throw StorageException.invalidConfig("endpoint 非法: " + endpoint);
         }
