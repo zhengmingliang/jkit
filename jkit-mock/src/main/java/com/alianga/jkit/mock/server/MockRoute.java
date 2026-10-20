@@ -61,6 +61,15 @@ public final class MockRoute {
     public final MockEchoConfig echoRequest;
     /** SSE / WebSocket 推送策略；HTTP 路由忽略，为 null 时按「连接后推一次」。 */
     public final MockPushPolicy pushPolicy;
+    /** 多响应方案挑选策略；null 按 {@link MockPlanStrategy#FIRST}（历史行为）。 */
+    public final MockPlanStrategy responseStrategy;
+    /** 序贯命中的计数器（{@link MockPlanStrategy#SEQUENCE} 轮播用）；随路由对象生命周期，热更新即重置。 */
+    public final java.util.concurrent.atomic.AtomicLong planHitCounter = new java.util.concurrent.atomic.AtomicLong();
+
+    /** 序贯计数当前值（只读场景用；一般无需关心）。 */
+    public long planHitCount() {
+        return planHitCounter.get();
+    }
 
     public MockRoute(String method, String path, int statusCode, long latencyMs,
                      String contentType, String body) {
@@ -128,6 +137,23 @@ public final class MockRoute {
                      long latencyMaxMs, boolean crud, String name, String description,
                      String protocol, MockEchoConfig echoRequest, MockPushPolicy pushPolicy,
                      String tags) {
+        this(method, path, statusCode, latencyMs, contentType, body, responseSchema, dynamicSchema,
+                echo, enabled, dynamicTemplate, headers, responses, latencyMaxMs, crud,
+                name, description, protocol, echoRequest, pushPolicy, tags, null);
+    }
+
+    /**
+     * 全参构造（2.0.4 后增量：协议 / 请求回显 / 推送策略 / 标签 / 方案挑选策略）。
+     *
+     * @param responseStrategy 多方案挑选策略；null 按 FIRST（历史行为）
+     */
+    public MockRoute(String method, String path, int statusCode, long latencyMs,
+                     String contentType, String body, String responseSchema, boolean dynamicSchema,
+                     boolean echo, boolean enabled, boolean dynamicTemplate,
+                     Map<String, String> headers, List<MockResponse> responses,
+                     long latencyMaxMs, boolean crud, String name, String description,
+                     String protocol, MockEchoConfig echoRequest, MockPushPolicy pushPolicy,
+                     String tags, MockPlanStrategy responseStrategy) {
         this.method = method == null || method.trim().isEmpty() ? "*" : method.trim();
         this.path = path == null || path.trim().isEmpty() ? "/" : path.trim();
         this.statusCode = statusCode <= 0 ? 200 : statusCode;
@@ -165,6 +191,7 @@ public final class MockRoute {
         this.protocol = "SSE".equals(proto) || "WS".equals(proto) ? proto : "HTTP";
         this.echoRequest = echoRequest == null ? MockEchoConfig.disabled() : echoRequest;
         this.pushPolicy = pushPolicy;
+        this.responseStrategy = responseStrategy == null ? MockPlanStrategy.FIRST : responseStrategy;
     }
 
     /** 是否为 SSE 路由。 */
@@ -204,6 +231,15 @@ public final class MockRoute {
         private MockEchoConfig echoRequest = MockEchoConfig.disabled();
         private MockPushPolicy pushPolicy;
         private String tags = "";
+        private MockPlanStrategy responseStrategy;
+
+        /**
+         * 多响应方案挑选策略；null 按 {@link MockPlanStrategy#FIRST}。
+         */
+        public Builder responseStrategy(MockPlanStrategy value) {
+            this.responseStrategy = value;
+            return this;
+        }
 
         public Builder method(String value) {
             this.method = value;
@@ -334,7 +370,7 @@ public final class MockRoute {
             return new MockRoute(method, path, statusCode, latencyMs, contentType, body,
                     responseSchema, dynamicSchema, echo, enabled, dynamicTemplate,
                     headers, responses, latencyMaxMs, crud, name, description,
-                    protocol, echoRequest, pushPolicy, tags);
+                    protocol, echoRequest, pushPolicy, tags, responseStrategy);
         }
     }
 

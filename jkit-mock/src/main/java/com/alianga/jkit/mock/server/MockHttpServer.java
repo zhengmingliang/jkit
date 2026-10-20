@@ -672,7 +672,7 @@ public final class MockHttpServer {
                     body.getBytes(StandardCharsets.UTF_8),
                     renderHeadersSafe(route.headers, ctx));
         }
-        MockResponse picked = pickResponse(route.responses, ctx);
+        MockResponse picked = pickResponse(route, ctx);
         if (picked != null) {
             List<String> errors = new ArrayList<>();
             String body = MockBodyRenderer.render(picked.body, picked.dynamicTemplate, ctx,
@@ -868,12 +868,30 @@ public final class MockHttpServer {
     }
 
     /**
-     * 响应方案挑选：先按顺序评估带激活规则的方案，第一个规则全中的生效；
-     * 全不中回落到无规则的默认方案（没有默认方案则取第一条）。
+     * 响应方案挑选（审计 P0-5）。单方案直接命中；多方案按路由策略：
+     * <ul>
+     *   <li>FIRST：先按顺序评估带激活规则的方案，第一个规则全中的生效；全不中回落到
+     *       无规则的默认方案（没有默认方案则取第一条）。</li>
+     *   <li>SEQUENCE：按命中次数轮播（“第 1 次 200、之后 503”），激活规则忽略。
+     *       计数器挂在路由对象上，热更新换新路由实例即从 0 计。</li>
+     *   <li>RANDOM：按方案权重随机（“30% 失败率”），激活规则忽略。</li>
+     * </ul>
      */
-    private static MockResponse pickResponse(List<MockResponse> responses, MockRequestContext ctx) {
+    private static MockResponse pickResponse(MockRoute route, MockRequestContext ctx) {
+        List<MockResponse> responses = route.responses;
         if (responses == null || responses.isEmpty()) {
             return null;
+        }
+        if (responses.size() == 1) {
+            return responses.get(0);
+        }
+        MockPlanStrategy strategy = route.responseStrategy;
+        if (strategy == MockPlanStrategy.SEQUENCE) {
+            int index = (int) (route.planHitCounter.getAndIncrement() % responses.size());
+            return responses.get(index);
+        }
+        if (strategy == MockPlanStrategy.RANDOM) {
+            return pickWeighted(responses);
         }
         MockResponse fallback = null;
         for (MockResponse response : responses) {
@@ -888,6 +906,23 @@ public final class MockHttpServer {
             }
         }
         return fallback != null ? fallback : responses.get(0);
+    }
+
+    /** 按权重随机挑方案（权重下限 1，见 {@link MockResponse#weight}）。 */
+    private static MockResponse pickWeighted(List<MockResponse> responses) {
+        long total = 0L;
+        for (MockResponse response : responses) {
+            total += Math.max(1, response.weight);
+        }
+        long pick = ThreadLocalRandom.current().nextLong(Math.max(1L, total));
+        long acc = 0L;
+        for (MockResponse response : responses) {
+            acc += Math.max(1, response.weight);
+            if (pick < acc) {
+                return response;
+            }
+        }
+        return responses.get(responses.size() - 1);
     }
 
     private static boolean allRulesMatch(MockResponse response, MockRequestContext ctx) {

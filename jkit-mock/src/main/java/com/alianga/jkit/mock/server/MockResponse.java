@@ -25,6 +25,8 @@ public final class MockResponse {
     public final List<MockResponseRule> rules;
     /** 为 true 时 body 按 Mock.js 模板每次请求渲染。 */
     public final boolean dynamicTemplate;
+    /** 路由挑选策略为 {@link MockPlanStrategy#RANDOM} 时的权重（至少 1）。 */
+    public final int weight;
 
     private MockResponse(Builder builder) {
         this.statusCode = builder.statusCode;
@@ -41,6 +43,12 @@ public final class MockResponse {
         List<MockResponseRule> ruleCopy = new ArrayList<>(builder.rules);
         this.rules = Collections.unmodifiableList(ruleCopy);
         this.dynamicTemplate = builder.dynamicTemplate;
+        this.weight = Math.max(1, builder.weight);
+    }
+
+    /** 随机权重；未设置时为 1（等权重）。 */
+    public int getWeight() {
+        return weight;
     }
 
     public static Builder builder() {
@@ -56,6 +64,13 @@ public final class MockResponse {
         private Map<String, String> headers = new LinkedHashMap<>();
         private List<MockResponseRule> rules = new ArrayList<>();
         private boolean dynamicTemplate;
+        private int weight = 1;
+
+        /** 随机挑选权重（{@link MockPlanStrategy#RANDOM}），至少 1；默认 1。 */
+        public Builder weight(int value) {
+            this.weight = value;
+            return this;
+        }
 
         public Builder statusCode(int value) {
             this.statusCode = value;
