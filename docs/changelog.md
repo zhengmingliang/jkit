@@ -8,6 +8,12 @@
 
 ### 新增
 
+**jkit-mock**
+
+- 路由级网络层故障注入：`MockRoute` 新增 `fault`（`MockFault`）。五种模式模拟「状态码之外」的真实故障——`CONNECTION_CLOSE` 收到请求后不返回任何响应直接结束连接（JDK HttpServer 做不到精确 TCP RST，近似「拔线」）、`EMPTY_RESPONSE` 状态码与响应头正常但体为空、`TRUNCATED_BODY` 声明完整 Content-Length 只写出一部分就断流（按字节数或比例，字节数优先）、`SLOW_BODY` 分块输出且块间按配置延迟、`INVALID_JSON` 去掉结尾大括号刻意损坏（Content-Type 仍 JSON，客户端解析必失败）。命中概率 `probabilityPercent` 0–100（默认 100，0 视为关闭），随机源经 `MockHttpServer#setFaultProbabilitySource` 可注入以便复现；与既有延迟可叠加（先延迟再按模式写出）；SSE / WS / CRUD 路径不参与。触发时请求日志 `fault` 字段留痕（如 `SLOW_BODY(256B/200ms)`）；非法参数在构造层抛带字面的 `IllegalArgumentException`，不静默回落。
+- 响应模板变量：`MockRoute` 新增 `templated` 开关（默认关闭，行为与历史逐字一致）。开启后响应体与响应头值支持新占位符：请求类 <code v-pre>{{request.method}} / {{request.path}} / {{request.pathParams.名}} / {{request.query.名}} / {{request.headers.名}}（大小写不敏感） / {{request.body.路径}}（JSON 点分路径，数组用 `a[0].id`）；动态值 <code v-pre>{{uuid}} / {{now 格式}} / {{timestamp}} / {{randomInt 1 100}}；假数据 <code v-pre>{{faker.name}} / {{faker.phone}} / {{faker.email}} / {{faker.city}}（内置 zh-CN 小数据集）；全部支持 `seed=整数` 参数复现。取不到值的变量保留原文并把 `unknown-template-variable: 表达式` 经 `X-Mock-Warning` 头暴露；替换值一律 JSON 字符串转义；`{{ 字面量转义；模板解析结果缓存（容量 1024）。
+- 附加响应头支持同名多枚（审计 P1-2，Set-Cookie 场景）：`MockResponse.headers` 与渲染接口改为 `Map<String, List<String>>`，单值 API `headers(Map<String, String>)` 保持兼容；WS 握手响应头同步多枚展开。
+
 **jkit-storage**
 
 - 新增统一多存储平台文件管理模块 `jkit-storage`：一套 `FileStorage` 接口（`exists / stat / list / mkdir / upload / download / delete / copy / rename / readString / writeString / walk`）读写本地文件系统、FTP（纯 JDK 客户端）、SFTP（可选 jsch）、WebDAV 与 Amazon S3 及三十余个 S3 兼容云（阿里云 OSS 原生协议、Azure Blob、go-fastdfs 原生；华为 OBS / 腾讯 COS / 七牛 Kodo / 百度 BOS / 又拍 USS / MinIO / GCS / 火山 TOS / Cloudflare R2 / 金山 KS3 / 京东 OSS / 天翼 OOS / 移动 EOS / 沃云 OSS / 网易 NOS / Ucloud US3 / 平安 OBS / 首云 OSS / IBM COS / 美团 MSS / generic-s3 等走 S3 引擎，SigV4 / SigV2 / KSYUN 三种签名、虚拟主机与路径寻址、ListObjects V1/V2）。统一错误模型 `StorageException`（12 类错误码）与路径规范化 `StoragePaths`；`FileStorages` 门面支持平台预设、配置驱动创建、自定义平台 / 引擎注册；HTTP 层基于 JDK `HttpURLConnection`（任意方法、定长流式、未知长度落盘缓冲）并内置连接级失败自动重试与连接池归还治理。`sync` 包提供跨存储结构对比（`SyncEngine.diff`）、增量同步 / 镜像同步 / 全量迁移（`SyncEngine.sync`：SIZE / MTIME / ETAG 对比策略、试运行、并发、过滤、失败上限、进度回调）。FastDFS / MongoDB GridFS / 青云 QingStor 为规划中占位（创建实例抛 `UNSUPPORTED`）。
