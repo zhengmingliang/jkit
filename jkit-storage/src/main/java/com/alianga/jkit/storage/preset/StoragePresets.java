@@ -69,15 +69,22 @@ public final class StoragePresets {
                 StorageField.required("accessKey", "AccessKeyId"),
                 StorageField.secret("secretKey", "AccessKeySecret", true),
                 StorageField.optional("basePath", "根前缀", "/", null)));
-        // 多吉云：控制台密钥对（tmp_token 换 STS 临时凭据）+ S3 兼容桶，付费桶与免费桶协议一致
+        // 多吉云：付费桶（标准型，官方 API）+ 基础桶（基础型，控制台会话 API 适配）
+        // 付费桶：控制台密钥对换 STS 临时凭据 → S3 兼容协议；基础桶：控制台账号登录 → /v2/console/v1/oss/* 会话 API
         platforms.add(new StoragePlatform("doge", "多吉云", "doge", "公有云",
-                StorageField.required("accessKey", "AccessKey", "多吉云控制台 → 密钥管理获取"),
-                StorageField.secret("secretKey", "SecretKey", true),
-                StorageField.required("bucket", "Bucket", "业务桶名（如 fee-standard）或 s3Bucket 全名"),
-                StorageField.optional("region", "Region", null, "SigV4 区域，留空从桶端点自动推导"),
+                StorageField.optional("bucketType", "桶类型", "paid",
+                        "paid=标准型付费桶（官方 S3 兼容 API），free=基础型桶（控制台会话适配）"),
+                StorageField.required("bucket", "Bucket", "业务桶名（如 fee-standard 付费 / meitu、free 基础）"),
+                StorageField.optional("accessKey", "AccessKey", null, "付费桶必填：控制台 → 密钥管理获取"),
+                StorageField.secret("secretKey", "SecretKey", false, "付费桶必填"),
+                StorageField.optional("user", "控制台账号", null, "基础桶必填：多吉云登录手机号"),
+                StorageField.secret("password", "控制台密码", false, "基础桶必填"),
+                StorageField.optional("domain", "自定义域名", null,
+                        "可选：绑定的加速域名（如 cdn.example.com）；留空自动探测桶绑定的域名"),
+                StorageField.optional("region", "Region", null, "付费桶 SigV4 区域，留空自动推导"),
                 StorageField.optional("basePath", "根前缀", "/", "对象 key 统一加该前缀"),
                 StorageField.optional("listVersion", "列表 API 版本", "2",
-                        "1=ListObjects V1，2=ListObjects V2")));
+                        "付费桶：1=ListObjects V1，2=ListObjects V2；基础桶忽略")));
         platforms.add(s3("huawei-obs", "华为云 OBS", "https://obs.cn-north-4.myhuaweicloud.com",
                 "公有云", null));
         platforms.add(s3("tencent-cos", "腾讯云 COS", "https://cos.ap-guangzhou.myqcloud.com",

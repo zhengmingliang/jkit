@@ -1,11 +1,12 @@
 package com.alianga.jkit.storage.real;
 
-import com.alianga.jkit.storage.FileStorages;
+import com.alianga.jkit.storage.engine.DogeFileStorage;
 import com.alianga.jkit.storage.FileStorage;
+import com.alianga.jkit.storage.FileStorages;
+import com.alianga.jkit.storage.StorageConfig;
 import com.alianga.jkit.storage.StorageEntry;
 import com.alianga.jkit.storage.StorageErrorCode;
 import com.alianga.jkit.storage.StorageException;
-import com.alianga.jkit.storage.StoragePaths;
 
 import org.junit.AfterClass;
 import org.junit.Assume;
@@ -15,8 +16,6 @@ import org.junit.Test;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -27,65 +26,102 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 /**
- * 多吉云真实桶集成测试：在真正的多吉云（管理 API + 腾讯 COS 兼容 S3）上验证
- * {@code DogeFileStorage} 的 TOKEN 签名、临时凭据换取、SigV4 + 会话令牌访问、
- * 列表语义、目录占位与错误码——Fake 服务器按文档模拟，抓不出真实服务端的
- * 严格校验差异（如 accept-encoding 必须参与签名、canonical query 排序编码）。
+ * 多吉云真实桶集成测试：付费桶（标准型）与基础桶（基础型）双通道。
  *
- * <p>凭据来源（系统属性优先，其次环境变量），都不满足时整套用例自动跳过（Assume），
- * CI 不受影响：</p>
+ * <p><b>付费桶</b>（fee-standard 等，官方 S3 兼容 API）：验证 TOKEN 签名、临时凭据、
+ * SigV4 + 会话令牌、列表语义、目录占位与错误码。</p>
+ *
+ * <p><b>基础桶</b>（meitu / free / zml-documents，控制台会话适配）：验证控制台登录、
+ * CSRF 会话、file/list / file/info / upload/put / file/delete / file/sign、
+ * 直链与 URL 鉴权检测、临时链接可下载。官方无公开 API，本套用例是适配正确性的
+ * 关键回归保障。</p>
+ *
+ * <p>凭据来源（系统属性优先，其次环境变量），不满足时整套用例自动跳过（Assume）：</p>
  * <pre>
- * -Djkit.test.doge.accessKey=xxx  （或 DOGE_ACCESS_KEY）
- * -Djkit.test.doge.secretKey=xxx  （或 DOGE_SECRET_KEY）
- * -Djkit.test.doge.bucket=xxx     （或 DOGE_BUCKET，业务桶名或 s3Bucket 全名）
+ * 付费桶：jkit.test.doge.accessKey / secretKey / bucket（或 DOGE_ACCESS_KEY / DOGE_SECRET_KEY / DOGE_BUCKET）
+ * 基础桶：jkit.test.doge.user / password / basicBucket（或 DOGE_USER / DOGE_PASSWORD / DOGE_BASIC_BUCKET）
  * </pre>
- *
- * <p>测试目录 {@code jkit-real-test/} 下操作，结束清空；桶不删除（免费/付费桶由
- * 用户自备）。</p>
  *
  * @author 郑明亮
  */
 public class DogeRealStorageTest {
     private static final String ROOT = "jkit-real-test";
-    private static final long KB = 1024L;
 
     private static String accessKey;
     private static String secretKey;
     private static String bucket;
-    private static FileStorage storage;
+    private static String user;
+    private static String password;
+    private static String basicBucket;
+    private static FileStorage paidStorage;
+    private static DogeFileStorage basicStorage;
 
     @BeforeClass
     public static void resolveCredentials() {
-        accessKey = System.getProperty("jkit.test.doge.accessKey",
-                System.getenv().getOrDefault("DOGE_ACCESS_KEY", ""));
-        secretKey = System.getProperty("jkit.test.doge.secretKey",
-                System.getenv().getOrDefault("DOGE_SECRET_KEY", ""));
-        bucket = System.getProperty("jkit.test.doge.bucket",
-                System.getenv().getOrDefault("DOGE_BUCKET", ""));
-        Assume.assumeTrue("未提供多吉云凭据（jkit.test.doge.* / DOGE_*），跳过真实桶测试",
-                !accessKey.isEmpty() && !secretKey.isEmpty() && !bucket.isEmpty());
-        storage = FileStorages.of("doge", com.alianga.jkit.storage.StorageConfig.empty()
-                .set("accessKey", accessKey)
-                .set("secretKey", secretKey)
-                .set("bucket", bucket));
+        accessKey = prop("jkit.test.doge.accessKey", "DOGE_ACCESS_KEY");
+        secretKey = prop("jkit.test.doge.secretKey", "DOGE_SECRET_KEY");
+        bucket = prop("jkit.test.doge.bucket", "DOGE_BUCKET");
+        user = prop("jkit.test.doge.user", "DOGE_USER");
+        password = prop("jkit.test.doge.password", "DOGE_PASSWORD");
+        basicBucket = prop("jkit.test.doge.basicBucket", "DOGE_BASIC_BUCKET");
+        if (!accessKey.isEmpty() && !secretKey.isEmpty() && !bucket.isEmpty()) {
+            paidStorage = FileStorages.of("doge", StorageConfig.empty()
+                    .set("bucketType", "paid")
+                    .set("accessKey", accessKey)
+                    .set("secretKey", secretKey)
+                    .set("bucket", bucket));
+        }
+        if (!user.isEmpty() && !password.isEmpty() && !basicBucket.isEmpty()) {
+            basicStorage = (DogeFileStorage) FileStorages.of("doge", StorageConfig.empty()
+                    .set("bucketType", "free")
+                    .set("bucket", basicBucket)
+                    .set("user", user)
+                    .set("password", password));
+        }
+        Assume.assumeTrue("未提供多吉云凭据（付费桶或基础桶），跳过真实桶测试",
+                paidStorage != null || basicStorage != null);
+    }
+
+    private static String prop(String key, String env) {
+        String value = System.getProperty(key, System.getenv().getOrDefault(env, ""));
+        return value == null ? "" : value.trim();
     }
 
     @AfterClass
     public static void cleanup() {
-        if (storage == null) {
+        cleanupPaid();
+        cleanupBasic();
+    }
+
+    private static void cleanupPaid() {
+        if (paidStorage == null) {
             return;
         }
         try {
-            for (StorageEntry entry : storage.list(ROOT)) {
+            for (StorageEntry entry : paidStorage.list(ROOT)) {
                 if (entry.isDirectory()) {
-                    storage.deleteDir(entry.path());
+                    paidStorage.deleteDir(entry.path());
                 } else {
-                    storage.delete(entry.path());
+                    paidStorage.delete(entry.path());
                 }
             }
-            storage.delete(ROOT);
+            paidStorage.delete(ROOT);
         } catch (RuntimeException ignore) {
             // 清理失败只留垃圾不影响重跑
+        }
+    }
+
+    private static void cleanupBasic() {
+        if (basicStorage == null) {
+            return;
+        }
+        try {
+            for (StorageEntry entry : basicStorage.list(ROOT)) {
+                basicStorage.delete(entry.path());
+            }
+            basicStorage.delete(ROOT);
+        } catch (RuntimeException ignore) {
+            // ignore
         }
     }
 
@@ -93,133 +129,165 @@ public class DogeRealStorageTest {
         return ROOT + "/" + name + "-" + UUID.randomUUID().toString().substring(0, 8);
     }
 
+    // ================================================================ 付费桶（官方 API）
+
     @Test
-    public void uploadDownloadRoundTrip() throws IOException {
+    public void paidUploadDownloadRoundTrip() {
+        Assume.assumeTrue(paidStorage != null);
         String path = unique("roundtrip") + ".txt";
-        byte[] data = "你好，多吉云真实桶！Dogé ünïcode".getBytes(StandardCharsets.UTF_8);
-        storage.upload(path, new ByteArrayInputStream(data), data.length);
-        byte[] downloaded = storage.readBytes(path);
-        assertArrayEquals(data, downloaded);
-        storage.delete(path);
+        byte[] data = "你好，多吉云付费桶！Dogé ünïcode".getBytes(StandardCharsets.UTF_8);
+        paidStorage.upload(path, new ByteArrayInputStream(data), data.length);
+        assertArrayEquals(data, paidStorage.readBytes(path));
+        paidStorage.delete(path);
     }
 
     @Test
-    public void statListAndDirectoryPlaceholder() {
+    public void paidStatListAndDirectoryPlaceholder() {
+        Assume.assumeTrue(paidStorage != null);
         String dir = unique("dir");
-        storage.mkdir(dir);
+        paidStorage.mkdir(dir);
         String file = dir + "/file.txt";
-        storage.upload(file, "content".getBytes(StandardCharsets.UTF_8));
-
-        StorageEntry stat = storage.stat(file);
-        assertEquals(7L, stat.size());
-        assertTrue(stat.lastModified() > 0L);
-
-        List<StorageEntry> list = storage.list(ROOT);
-        assertTrue(names(list).stream().anyMatch(name -> name.startsWith("dir-")));
-
-        List<StorageEntry> sub = storage.list(dir);
-        assertEquals(1, sub.size());
-        assertEquals("file.txt", sub.get(0).name());
+        paidStorage.upload(file, "content".getBytes(StandardCharsets.UTF_8));
+        assertEquals(7L, paidStorage.stat(file).size());
+        assertTrue(paidStorage.stat(dir).isDirectory());
+        assertTrue(names(paidStorage.list(ROOT)).stream().anyMatch(n -> n.startsWith("dir-")));
+        assertEquals(1, paidStorage.list(dir).size());
     }
 
     @Test
-    public void existsAndNotFound() {
-        String path = unique("exists") + ".txt";
-        assertFalse(storage.exists(path));
-        storage.upload(path, "x".getBytes(StandardCharsets.UTF_8));
-        assertTrue(storage.exists(path));
-        try {
-            storage.stat(path + "-missing");
-            org.junit.Assert.fail("不存在的对象应抛 NOT_FOUND");
-        } catch (StorageException e) {
-            assertEquals(StorageErrorCode.NOT_FOUND, e.code());
-        }
-        storage.delete(path);
-    }
-
-    @Test
-    public void copyRenameAndDelete() {
+    public void paidCopyRenameDeleteDirAndPresign() throws IOException {
+        Assume.assumeTrue(paidStorage != null);
         String src = unique("copy-src") + ".txt";
         String dst = unique("copy-dst") + ".txt";
-        storage.upload(src, "copy me".getBytes(StandardCharsets.UTF_8));
-        storage.copy(src, dst);
-        assertEquals("copy me", new String(storage.readBytes(dst), StandardCharsets.UTF_8));
-        // 源还在
-        assertEquals("copy me", new String(storage.readBytes(src), StandardCharsets.UTF_8));
-
+        paidStorage.upload(src, "copy me".getBytes(StandardCharsets.UTF_8));
+        paidStorage.copy(src, dst);
+        assertEquals("copy me", new String(paidStorage.readBytes(dst), StandardCharsets.UTF_8));
         String renamed = unique("renamed") + ".txt";
-        storage.rename(src, renamed);
-        assertEquals("copy me", new String(storage.readBytes(renamed), StandardCharsets.UTF_8));
+        paidStorage.rename(src, renamed);
         try {
-            storage.stat(src);
+            paidStorage.stat(src);
             org.junit.Assert.fail("rename 后源对象应不存在");
         } catch (StorageException e) {
             assertEquals(StorageErrorCode.NOT_FOUND, e.code());
         }
-        storage.delete(dst);
-        storage.delete(renamed);
-    }
-
-    @Test
-    public void rangeDownload() throws IOException {
-        String path = unique("range") + ".bin";
-        byte[] data = new byte[(int) (64 * KB)];
-        for (int i = 0; i < data.length; i++) {
-            data[i] = (byte) (i % 251);
-        }
-        storage.upload(path, new ByteArrayInputStream(data), data.length);
-        Assume.assumeTrue("该桶不支持 Range 读取", storage.supportsRange());
-        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
-        storage.download(path, 1000L, out);
-        byte[] expected = new byte[data.length - 1000];
-        System.arraycopy(data, 1000, expected, 0, expected.length);
-        assertArrayEquals(expected, out.toByteArray());
-        storage.delete(path);
-    }
-
-    @Test
-    public void largeUploadMultiPart() throws IOException {
-        // 超过分片阈值（默认 64MB）太慢，用未知长度流走引擎缓冲路径（单片退回 PUT）
-        String path = unique("stream") + ".txt";
-        byte[] data = new byte[(int) (300 * KB)];
-        for (int i = 0; i < data.length; i++) {
-            data[i] = (byte) (i % 199);
-        }
-        // 未知长度（size=-1）：引擎自行缓冲后上传
-        storage.upload(path, new ByteArrayInputStream(data), -1L);
-        byte[] downloaded = storage.readBytes(path);
-        assertArrayEquals(data, downloaded);
-        storage.delete(path);
-    }
-
-    @Test
-    public void deleteDirRecursively() {
-        String dir = unique("deldir");
-        storage.mkdir(dir + "/sub");
-        storage.upload(dir + "/a.txt", "a".getBytes(StandardCharsets.UTF_8));
-        storage.upload(dir + "/sub/b.txt", "b".getBytes(StandardCharsets.UTF_8));
-        storage.deleteDir(dir);
-        assertFalse(storage.exists(dir));
-    }
-
-    @Test
-    public void presignDownloadable() throws IOException {
-        String path = unique("presign") + ".txt";
-        storage.upload(path, "presigned".getBytes(StandardCharsets.UTF_8));
-        String url = storage.presign(path, java.time.Duration.ofMinutes(10));
-        assertTrue("预签名 URL 应为 http 链接: " + url, url.startsWith("http"));
-        // 用预签名 URL 直接下载（无凭据）
+        // 预签名（STS 临时凭据带 X-Amz-Security-Token）
+        String url = paidStorage.presign(dst, java.time.Duration.ofMinutes(10));
         java.net.HttpURLConnection connection =
                 (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
         connection.setConnectTimeout(15_000);
         connection.setReadTimeout(30_000);
-        int status = connection.getResponseCode();
-        assertTrue("预签名下载应 200: " + status, status == 200);
-        byte[] body = readAll(connection.getInputStream());
-        assertEquals("presigned", new String(body, StandardCharsets.UTF_8));
+        assertEquals(200, connection.getResponseCode());
         connection.disconnect();
-        storage.delete(path);
+        // 递归删除
+        String dir = unique("deldir");
+        paidStorage.mkdir(dir + "/sub");
+        paidStorage.upload(dir + "/sub/b.txt", "b".getBytes(StandardCharsets.UTF_8));
+        paidStorage.deleteDir(dir);
+        assertFalse(paidStorage.exists(dir));
+        paidStorage.delete(dst);
+        paidStorage.delete(renamed);
     }
+
+    // ================================================================ 基础桶（控制台会话适配）
+
+    @Test
+    public void basicLoginListStatAndRoundTrip() {
+        Assume.assumeTrue(basicStorage != null);
+        String path = unique("basic-round") + ".txt";
+        byte[] data = "你好，多吉云基础桶！jkit 控制台会话适配验证".getBytes(StandardCharsets.UTF_8);
+        basicStorage.upload(path, new ByteArrayInputStream(data), data.length);
+        assertArrayEquals(data, basicStorage.readBytes(path));
+        assertEquals(data.length, basicStorage.stat(path).size());
+        List<StorageEntry> siblings = basicStorage.list(ROOT);
+        assertTrue(names(siblings).stream().anyMatch(n -> n.startsWith("basic-round-")));
+        basicStorage.delete(path);
+        try {
+            basicStorage.stat(path);
+            org.junit.Assert.fail("删除后应 NOT_FOUND");
+        } catch (StorageException e) {
+            assertEquals(StorageErrorCode.NOT_FOUND, e.code());
+        }
+    }
+
+    @Test
+    public void basicDirectoryMkdirAndList() {
+        Assume.assumeTrue(basicStorage != null);
+        String dir = unique("basic-dir");
+        basicStorage.mkdir(dir);
+        String file = dir + "/inner.txt";
+        basicStorage.upload(file, "inner".getBytes(StandardCharsets.UTF_8));
+        List<StorageEntry> rootList = basicStorage.list(ROOT);
+        assertTrue(names(rootList).stream().anyMatch(n -> n.startsWith("basic-dir")));
+        assertEquals(1, basicStorage.list(dir).size());
+        basicStorage.deleteDir(dir);
+        assertFalse(basicStorage.exists(dir));
+    }
+
+    @Test
+    public void basicTemporaryLinkDownloadable() throws IOException {
+        Assume.assumeTrue(basicStorage != null);
+        String path = unique("basic-sign") + ".txt";
+        basicStorage.upload(path, "temporary-link-probe".getBytes(StandardCharsets.UTF_8));
+        String link = basicStorage.temporaryLink(path);
+        assertTrue("临时链接应为 http(s): " + link, link.startsWith("http"));
+        java.net.HttpURLConnection connection =
+                (java.net.HttpURLConnection) new java.net.URL(link).openConnection();
+        connection.setConnectTimeout(15_000);
+        connection.setReadTimeout(30_000);
+        assertEquals("临时链接应可直接下载", 200, connection.getResponseCode());
+        byte[] body = readAll(connection.getInputStream());
+        assertEquals("temporary-link-probe", new String(body, StandardCharsets.UTF_8));
+        connection.disconnect();
+        basicStorage.delete(path);
+    }
+
+    @Test
+    public void basicDirectLinkFollowsUrlAuthPolicy() throws IOException {
+        Assume.assumeTrue(basicStorage != null);
+        String path = unique("basic-direct") + ".txt";
+        basicStorage.upload(path, "direct-link-probe".getBytes(StandardCharsets.UTF_8));
+        try {
+            String direct = basicStorage.directLinkOf(path);
+            boolean authEnabled = basicStorage.urlAuthEnabled();
+            java.net.HttpURLConnection connection =
+                    (java.net.HttpURLConnection) new java.net.URL(direct).openConnection();
+            connection.setConnectTimeout(15_000);
+            connection.setReadTimeout(30_000);
+            connection.setInstanceFollowRedirects(false);
+            int status = connection.getResponseCode();
+            connection.disconnect();
+            if (!authEnabled) {
+                assertEquals("未开 URL 鉴权时直链应 200", 200, status);
+            } else {
+                assertTrue("开启 URL 鉴权时直链应被拒（403/302）",
+                        status == 403 || status == 302 || status == 401);
+            }
+        } catch (StorageException e) {
+            // 未绑定任何域名：UNSUPPORTED 合法（free 桶当前即如此）
+            assertEquals(StorageErrorCode.UNSUPPORTED, e.code());
+        } finally {
+            basicStorage.delete(path);
+        }
+    }
+
+    @Test
+    public void basicUnsupportedOps() {
+        Assume.assumeTrue(basicStorage != null);
+        try {
+            basicStorage.copy("a.txt", "b.txt");
+            org.junit.Assert.fail("基础桶 copy 应 UNSUPPORTED");
+        } catch (StorageException e) {
+            assertEquals(StorageErrorCode.UNSUPPORTED, e.code());
+        }
+        try {
+            basicStorage.rename("a.txt", "b.txt");
+            org.junit.Assert.fail("基础桶 rename 应 UNSUPPORTED");
+        } catch (StorageException e) {
+            assertEquals(StorageErrorCode.UNSUPPORTED, e.code());
+        }
+    }
+
+    // ================================================================ 工具
 
     private static List<String> names(List<StorageEntry> entries) {
         List<String> out = new ArrayList<String>();

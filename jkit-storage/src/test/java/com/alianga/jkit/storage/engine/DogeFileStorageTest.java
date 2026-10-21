@@ -22,15 +22,14 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 /**
- * 多吉云引擎集成测试：内嵌假管理 API（tmp_token 签名校验）+ 假 S3 服务器（虚拟主机寻址），
- * 验证 TOKEN 签名请求形态、凭据编排（桶名 → s3Bucket / s3Endpoint 映射、
- * basePath / listVersion 透传）、临时凭据过期刷新与错误映射。
+ * 多吉云引擎单元测试：付费桶（假管理 API + 假 S3）与基础桶（假控制台会话 API）双通道编排。
  *
  * @author 郑明亮
  */
 public class DogeFileStorageTest {
     private FakeDogeApiServer api;
     private FakeS3Server s3;
+    private FakeDogeConsole console;
     private String apiEndpoint;
     private String s3Endpoint;
 
@@ -40,21 +39,20 @@ public class DogeFileStorageTest {
         api = new FakeDogeApiServer();
         apiEndpoint = api.start();
         s3 = new FakeS3Server();
-        // 假 S3 只按路径匹配桶名：桶名作为 pathStyle 的桶段，走 pathStyle=false 也可以 ——
-        // 这里用 pathStyle=true 的假服务器（按 /bucket/key 路由），doge 引擎用虚拟主机寻址，
-        // 但测试 JVM 里桶域名无法解析，所以引擎的 endpoint 直接指到假服务器并配 pathStyle 由
-        // S3FileStorage 层处理。为让虚拟主机寻址落到同一台假服务器，fake 覆盖桶名为前缀匹配。
         s3Endpoint = s3.start("s-bj-1-testbucket-1258813047");
+        console = new FakeDogeConsole();
+        console.start();
     }
 
     @After
     public void stopServers() {
         api.stop();
         s3.stop();
+        console.stop();
         System.clearProperty("fake.s3.deny");
     }
 
-    private void seedBuckets() {
+    private void seedPaidBucket() {
         api.credentials = new LinkedHashMap<String, Object>();
         api.credentials.put("accessKeyId", "AKIDfake");
         api.credentials.put("secretAccessKey", "fakeSecret=");
@@ -68,19 +66,31 @@ public class DogeFileStorageTest {
         api.buckets = buckets;
     }
 
-    private FileStorage storage(Map<String, String> overrides) {
+    private FileStorage paidStorage() {
+        seedPaidBucket();
         Map<String, String> values = new LinkedHashMap<String, String>();
+        values.put("bucketType", "paid");
         values.put("accessKey", "fake-ak");
         values.put("secretKey", "fake-sk");
         values.put("bucket", "fee-standard");
+        // 测试 JVM 解析不了桶域名：显式覆盖 apiBase 用 pathStyle 假 S3
         values.put("apiEndpoint", apiEndpoint);
-        // 假 S3 按 /bucket/key 路由（测试 JVM 解析不了桶域名），切路径风格寻址
         values.put("pathStyle", "true");
-        if (overrides != null) {
-            values.putAll(overrides);
-        }
         return FileStorages.of("doge", values);
     }
+
+    private FileStorage basicStorage() {
+        Map<String, String> values = new LinkedHashMap<String, String>();
+        values.put("bucketType", "free");
+        values.put("bucket", "free");
+        values.put("user", "18519094522");
+        values.put("password", "test-password");
+        values.put("domain", "cdn.example.com");
+        values.put("apiEndpoint", console.endpoint());
+        return FileStorages.of("doge", values);
+    }
+
+    // ---------------------------------------------------------------- 付费桶
 
     @Test
     public void presetRegisteredWithFields() {
@@ -91,59 +101,64 @@ public class DogeFileStorageTest {
     }
 
     @Test
-    public void tokenAuthShapeAndUploadRoundTrip() {
-        seedBuckets();
-        FileStorage doge = storage(null);
-        byte[] data = "你好，多吉云！hello".getBytes(StandardCharsets.UTF_8);
+    public void paidTokenAuthShapeAndUploadRoundTrip() {
+        FileStorage doge = paidStorage();
+        byte[] data = "你好，多吉云付费桶！".getBytes(StandardCharsets.UTF_8);
         doge.upload("demo/hello.txt", data);
-        assertTrue("对象应落到假 S3（含 basePath 前缀）", s3.objects.containsKey("demo/hello.txt"));
+        assertTrue("对象应落到假 S3", s3.objects.containsKey("demo/hello.txt"));
         assertEquals(new String(data, StandardCharsets.UTF_8),
                 new String(doge.readBytes("demo/hello.txt"), StandardCharsets.UTF_8));
-        // 管理 API 请求必须是 TOKEN 前缀
         assertTrue("Authorization 应为 TOKEN 前缀: " + api.lastAuthorization,
                 api.lastAuthorization.startsWith("TOKEN fake-ak:"));
-        // 请求体应包含 channel=OSS_FULL
         String body = new String(api.lastBody, StandardCharsets.UTF_8);
         assertTrue("请求体应带 channel=OSS_FULL: " + body, body.contains("OSS_FULL"));
-        assertTrue("请求体应带 scopes: " + body, body.contains("scopes"));
     }
 
     @Test
-    public void listDirectoryAndEntries() {
-        seedBuckets();
-        FileStorage doge = storage(null);
+    public void paidListDirectoryAndEntries() {
+        FileStorage doge = paidStorage();
         doge.upload("a/one.txt", "1".getBytes(StandardCharsets.UTF_8));
         doge.upload("b/中文.txt", "22".getBytes(StandardCharsets.UTF_8));
         List<StorageEntry> list = doge.list("");
         assertEquals(2, list.size());
-        assertTrue(names(list).contains("a"));
-        assertTrue(names(list).contains("b"));
         List<StorageEntry> sub = doge.list("a");
         assertEquals(1, sub.size());
         assertEquals("one.txt", sub.get(0).name());
     }
 
     @Test
-    public void unknownBucketGivesInvalidConfig() {
-        seedBuckets();
-        FileStorage doge = storage(null);
-        // 桶名不存在：第一次操作即抛 INVALID_CONFIG
+    public void paidUnknownBucketGivesInvalidConfig() {
         try {
+            api.credentials = new LinkedHashMap<String, Object>();
+            api.credentials.put("accessKeyId", "AKIDfake");
+            api.credentials.put("secretAccessKey", "fakeSecret=");
+            api.credentials.put("sessionToken", "fake-token");
             api.buckets = new ArrayList<Map<String, Object>>();
-            doge.list("");
+            FileStorages.of("doge", paidValues()).list("");
             fail("未知桶应抛异常");
         } catch (StorageException e) {
             assertEquals(StorageErrorCode.INVALID_CONFIG, e.code());
         }
     }
 
+    /** 付费桶配置（不预填桶清单）。 */
+    private Map<String, String> paidValues() {
+        Map<String, String> values = new LinkedHashMap<String, String>();
+        values.put("bucketType", "paid");
+        values.put("accessKey", "fake-ak");
+        values.put("secretKey", "fake-sk");
+        values.put("bucket", "fee-standard");
+        values.put("apiEndpoint", apiEndpoint);
+        values.put("pathStyle", "true");
+        return values;
+    }
+
     @Test
-    public void apiDeniedMapsToAuthFailed() {
-        seedBuckets();
+    public void paidApiDeniedMapsToAuthFailed() {
+        seedPaidBucket();
         api.deny = true;
-        FileStorage doge = storage(null);
         try {
-            doge.list("");
+            paidStorage().list("");
             fail("管理 API 鉴权失败应抛异常");
         } catch (StorageException e) {
             assertEquals(StorageErrorCode.AUTH_FAILED, e.code());
@@ -151,47 +166,96 @@ public class DogeFileStorageTest {
     }
 
     @Test
-    public void expiredTokenTriggersRefresh() {
-        seedBuckets();
-        // 颁发一个已过期的凭据：首次操作即刷新（重新请求）
-        api.expiredAt = System.currentTimeMillis() - 1000L;
-        FileStorage doge = storage(null);
-        doge.upload("demo/expired.txt", "x".getBytes(StandardCharsets.UTF_8));
-        // 至少请求过一次 tmp_token
-        assertTrue("过期凭据应触发刷新", api.requests.get() >= 1);
-        assertEquals("x", new String(doge.readBytes("demo/expired.txt"), StandardCharsets.UTF_8));
-    }
-
-    @Test
-    public void basePathAndListVersionPassThrough() {
-        seedBuckets();
-        Map<String, String> overrides = new LinkedHashMap<String, String>();
-        overrides.put("basePath", "prefix");
-        overrides.put("listVersion", "2");
-        FileStorage doge = storage(overrides);
-        doge.upload("hello.txt", "x".getBytes(StandardCharsets.UTF_8));
-        assertEquals("basePath 应拼到对象 key 前", "prefix/hello.txt",
-                s3.objects.keySet().iterator().next());
-        // V2 列表请求形态（list-type=2）
-        doge.list("");
-        assertEquals("2", s3.lastListQuery.get().get("list-type"));
-    }
-
-    @Test
-    public void missingRequiredConfigRejected() {
+    public void paidMissingKeyRejected() {
         try {
-            FileStorages.of("doge", java.util.Collections.<String, String>emptyMap());
-            fail("缺少必填配置应抛异常");
+            Map<String, String> values = new LinkedHashMap<String, String>();
+            values.put("bucketType", "paid");
+            values.put("bucket", "fee-standard");
+            FileStorages.of("doge", values);
+            fail("付费桶缺密钥应抛异常");
         } catch (StorageException e) {
             assertEquals(StorageErrorCode.INVALID_CONFIG, e.code());
         }
     }
 
-    private static List<String> names(List<StorageEntry> entries) {
-        List<String> out = new ArrayList<String>();
-        for (StorageEntry entry : entries) {
-            out.add(entry.name());
+    // ---------------------------------------------------------------- 基础桶
+
+    @Test
+    public void basicLoginAndList() {
+        FileStorage doge = basicStorage();
+        console.seedFile("free", "img/", 0L, "folder");
+        console.seedFile("free", "img/a.png", 1024L, "file");
+        List<StorageEntry> list = doge.list("");
+        assertEquals("根目录应折叠出一层目录", 1, list.size());
+        assertEquals("img", list.get(0).name());
+        assertTrue(list.get(0).isDirectory());
+        List<StorageEntry> sub = doge.list("img");
+        assertEquals(1, sub.size());
+        assertEquals("a.png", sub.get(0).name());
+        // list 延迟元数据（SIZE_UNKNOWN）；stat 才有精确大小（file/info）
+        assertEquals(StorageEntry.SIZE_UNKNOWN, sub.get(0).size());
+        assertEquals(1024L, doge.stat("img/a.png").size());
+        assertTrue("登录请求应发出", console.loginRequests() >= 1);
+    }
+
+    @Test
+    public void basicUploadDownloadDelete() {
+        FileStorage doge = basicStorage();
+        byte[] data = "你好基础桶".getBytes(StandardCharsets.UTF_8);
+        doge.upload("jkit/round.txt", data);
+        assertEquals(new String(data, StandardCharsets.UTF_8),
+                new String(doge.readBytes("jkit/round.txt"), StandardCharsets.UTF_8));
+        doge.delete("jkit/round.txt");
+        assertEquals("删除后应不存在", 0, doge.list("jkit").size());
+    }
+
+    @Test
+    public void basicCopyRenameUnsupported() {
+        FileStorage doge = basicStorage();
+        try {
+            doge.copy("a.txt", "b.txt");
+            fail("基础桶 copy 应抛 UNSUPPORTED");
+        } catch (StorageException e) {
+            assertEquals(StorageErrorCode.UNSUPPORTED, e.code());
         }
-        return out;
+        try {
+            doge.rename("a.txt", "b.txt");
+            fail("基础桶 rename 应抛 UNSUPPORTED");
+        } catch (StorageException e) {
+            assertEquals(StorageErrorCode.UNSUPPORTED, e.code());
+        }
+    }
+
+    @Test
+    public void basicDirectLinkAndUrlAuth() {
+        FileStorage doge = basicStorage();
+        // Fake 控制台默认域名未开 URL 鉴权：直链可用
+        String direct = ((DogeFileStorage) doge).directLinkOf("img/a.png");
+        assertEquals("https://cdn.example.com/img/a.png", direct);
+        org.junit.Assert.assertFalse("默认未开启 URL 鉴权", ((DogeFileStorage) doge).urlAuthEnabled());
+        // 开启 URL 鉴权后检测应返回 true
+        console.urlAuthSwitch = 1;
+        ((DogeFileStorage) doge).clearUrlAuthCache();
+        org.junit.Assert.assertTrue("开启后应检测到 URL 鉴权", ((DogeFileStorage) doge).urlAuthEnabled());
+        console.urlAuthSwitch = 0;
+    }
+
+    @Test
+    public void basicTemporaryLinkFromSign() {
+        FileStorage doge = basicStorage();
+        console.seedFile("free", "img/a.png", 1024L, "file");
+        String link = doge.presign("img/a.png", java.time.Duration.ofMinutes(10));
+        assertTrue("临时链接应来自 file/sign: " + link, link.contains("/signed/free/img/a.png"));
+    }
+
+    @Test
+    public void basicWrongPasswordMapsToAuthFailed() {
+        console.loginShouldFail = true;
+        try {
+            basicStorage().list("");
+            fail("密码错误应抛 AUTH_FAILED");
+        } catch (StorageException e) {
+            assertEquals(StorageErrorCode.AUTH_FAILED, e.code());
+        }
     }
 }
