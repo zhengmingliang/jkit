@@ -48,9 +48,9 @@ public class MarkdownThemeTest {
             cssSet.add(css);
             primarySet.add(MarkdownStyle.of(theme).primary());
         }
-        assertEquals("主题数量", 13, MarkdownTheme.values().length);
-        assertEquals("样式表应各不相同", 13, cssSet.size());
-        assertEquals("主色应各不相同", 13, primarySet.size());
+        assertEquals("主题数量", 14, MarkdownTheme.values().length);
+        assertEquals("样式表应各不相同", 14, cssSet.size());
+        assertEquals("主色应各不相同", 14, primarySet.size());
     }
 
     /**
@@ -87,6 +87,9 @@ public class MarkdownThemeTest {
         assertEquals(MarkdownTheme.LARK, MarkdownTheme.of("lark"));
         assertEquals(MarkdownTheme.ORANGE_HEART, MarkdownTheme.of("ORANGE-HEART"));
         assertEquals(MarkdownTheme.ORANGE_HEART, MarkdownTheme.of("orangeheart"));
+        assertEquals(MarkdownTheme.YAZI, MarkdownTheme.of("yazi"));
+        assertEquals(MarkdownTheme.YAZI, MarkdownTheme.of("quickref"));
+        assertEquals(MarkdownTheme.YAZI, MarkdownTheme.of("reference"));
         assertEquals(MarkdownTheme.DEFAULT, MarkdownTheme.of("not-a-theme"));
         assertEquals(MarkdownTheme.DEFAULT, MarkdownTheme.of(null));
         assertEquals(MarkdownTheme.DEFAULT, MarkdownTheme.of("  "));
@@ -277,6 +280,11 @@ public class MarkdownThemeTest {
             String block = theme.css();
             int mobile = block.indexOf("@media (max-width:480px)");
             assertTrue(theme.label() + " 缺少移动端媒体查询", mobile >= 0);
+            if (theme == MarkdownTheme.YAZI) {
+                // 速查主题是结构化版式，断点数值来自参考站点而不是通用令牌
+                assertTrue(block.contains(".jkit-yazi .h2wrap-body{display:grid"));
+                continue;
+            }
             String media = block.substring(mobile);
             assertTrue(theme.label() + " 移动端字号要能压过内联样式",
                     media.contains("h1{font-size:1.45em !important}"));

@@ -142,6 +142,13 @@ final class MarkdownStyle {
     private double lineHeight = 1.75;
     private int maxWidth = 820;
     private int radius = 6;
+    private String desktopPadding = DESKTOP_PADDING;
+    private String mobilePadding = MOBILE_PADDING;
+    private String containerPadding = "16px";
+    /**
+     * 结构化主题标记：版式由 {@link YaziLayout} 专用生成，通用逐标签内联映射不适用。
+     */
+    private boolean structural;
     private Title title = Title.UNDERLINE;
     private Quote quote = Quote.BAR;
     private Code code = Code.FLAT;
@@ -151,6 +158,11 @@ final class MarkdownStyle {
     private String codeString = "#0a3069";
     private String codeComment = "#6e7781";
     private String codeNumber = "#0550ae";
+    /**
+     * 代码高亮：函数名 / 实体色（GitHub Pretty Lights 的 entity）。
+     * {@code null} 时回退 {@link #codeKeyword}，不影响既有主题。
+     */
+    private String codeFunction;
     /**
      * 代码块（{@code <pre>}）底色，{@code null} 时回退 {@link #panel}。
      * 与行内码底色解耦：博客等主题可让代码块走深色、行内码走暖黄。
@@ -169,6 +181,10 @@ final class MarkdownStyle {
      */
     private String inlineCodeText;
     private String extraCss = "";
+    /**
+     * 只在 {@code responsive=true} 时追加的断点样式（结构化主题自带媒体查询）。
+     */
+    private String extraResponsiveCss = "";
 
     private MarkdownStyle() {
     }
@@ -219,6 +235,8 @@ final class MarkdownStyle {
                 return purple();
             case BLOG:
                 return blog();
+            case YAZI:
+                return yazi();
             default:
                 return base();
         }
@@ -472,6 +490,48 @@ final class MarkdownStyle {
     }
 
     /**
+     * 速查主题：复刻 quickref.cn（refs-cli + @wcj/markdown-to-html）的文档正文。
+     *
+     * <p>主题的视觉主体不是标题颜色，而是结构：H2 分区、H3 三列卡片网格、表格隐藏
+     * 表头、首列代码绿色、快捷键键帽、GitHub Pretty Lights 代码配色。令牌只负责
+     * 配色与字体，版式规则集中在 {@link YaziTheme#css()}；邮件模式由
+     * {@link YaziLayout} 直接生成内联样式。
+     */
+    private static MarkdownStyle yazi() {
+        MarkdownStyle s = base();
+        s.primary = "#228e6c";
+        s.accent = "#10b981";
+        s.text = "#24292f";
+        s.muted = "#6e7781";
+        s.background = "#f1f5f9";
+        s.panel = "#ffffff";
+        s.border = "#d0d7de";
+        s.font = SANS;
+        s.fontSize = 16;
+        // 参考站点正文 line-height 为 normal，卡片字号 0.925rem
+        s.lineHeight = -1;
+        s.maxWidth = 1320;
+        s.radius = 8;
+        s.desktopPadding = "12px";
+        s.mobilePadding = "8px";
+        s.containerPadding = "12px";
+        s.structural = true;
+        s.title = Title.PLAIN;
+        s.quote = Quote.BAR;
+        s.code = Code.FLAT;
+        s.table = Table.GRID;
+        s.codeText = "#24292f";
+        s.codeKeyword = "#cf222e";
+        s.codeString = "#0a3069";
+        s.codeComment = "#b1bac3";
+        s.codeNumber = "#0550ae";
+        s.codeFunction = "#8250df";
+        s.extraCss = YaziTheme.layoutCss();
+        s.extraResponsiveCss = YaziTheme.responsiveCss();
+        return s;
+    }
+
+    /**
      * 主色（标题、链接）。
      *
      * @return 十六进制颜色
@@ -580,6 +640,15 @@ final class MarkdownStyle {
     }
 
     /**
+     * 代码高亮：函数名 / 实体色，未配置时回退关键字色。
+     *
+     * @return 十六进制颜色
+     */
+    String codeFunction() {
+        return codeFunction != null ? codeFunction : codeKeyword;
+    }
+
+    /**
      * 代码块底色（回退 {@link #panel}）。
      *
      * @return 十六进制颜色
@@ -630,7 +699,7 @@ final class MarkdownStyle {
                 .append(";color:").append(text)
                 .append(";font-family:").append(font)
                 .append(";font-size:").append(fontSize).append("px")
-                .append(";line-height:").append(lineHeight).append("}");
+                .append(";line-height:").append(lineHeightCss()).append("}");
         // 邮件客户端（Gmail / QQ 邮箱等）普遍会剥掉 <body>，只把正文塞进自己的容器，
         // 所以栏宽、内边距、居中必须挂在这层 div 上
         css.append("div.").append(CONTAINER_CLASS).append("{").append(containerBase()).append("}");
@@ -650,7 +719,7 @@ final class MarkdownStyle {
         css.append("hr{border:0;border-top:1px solid ").append(border).append(";margin:1.6em 0}");
         css.append("img{display:block;max-width:100%;height:auto;margin:1.4em auto;")
                 .append("border-radius:").append(radius).append("px}");
-        if (responsive) {
+        if (responsive && !structural) {
             // 桌面端同样要 !important：内联模式下 pre 带 style 属性，普通规则压不过。
             // 容器的宽度与内边距不在这里写：它们由 containerInline() 内联给出（含主题自身的
             // maxWidth 令牌），硬编码会盖掉个别主题的宽度设定
@@ -664,7 +733,7 @@ final class MarkdownStyle {
             // pre 只改左右内边距：MAC 风格的 36px 上内边距要留给圆点，不能被简写 padding 覆盖。
             css.append("@media (max-width:480px){")
                     .append("div.").append(CONTAINER_CLASS)
-                    .append("{padding:").append(MOBILE_PADDING).append(" !important;font-size:")
+                    .append("{padding:").append(mobilePadding).append(" !important;font-size:")
                     .append(Math.max(fontSize - 1, 12)).append("px !important}")
                     .append("h1{font-size:1.45em !important}")
                     .append("h2{font-size:1.25em !important}")
@@ -681,7 +750,20 @@ final class MarkdownStyle {
                     .append("}");
         }
         css.append(extraCss);
+        if (responsive) {
+            css.append(extraResponsiveCss);
+        }
         return css.toString();
+    }
+
+    /**
+     * 行高的 CSS 取值。非正数表示 {@code normal}，用于需要保留浏览器默认行距的主题
+     * （速查主题的正文 line-height 就是 normal）。
+     *
+     * @return 数值或 {@code normal}
+     */
+    private String lineHeightCss() {
+        return lineHeight > 0 ? String.valueOf(lineHeight) : "normal";
     }
 
     /**
@@ -690,12 +772,12 @@ final class MarkdownStyle {
      * @return 样式声明，不含选择符与大括号
      */
     private String containerBase() {
-        return "margin:0 auto;padding:16px;max-width:" + maxWidth + "px;"
+        return "margin:0 auto;padding:" + containerPadding + ";max-width:" + maxWidth + "px;"
                 + "background:" + background + ";"
                 + "color:" + text + ";"
                 + "font-family:" + font + ";"
                 + "font-size:" + fontSize + "px;"
-                + "line-height:" + lineHeight + ";"
+                + "line-height:" + lineHeightCss() + ";"
                 + "word-wrap:break-word;overflow-wrap:anywhere";
     }
 
@@ -708,10 +790,10 @@ final class MarkdownStyle {
      * @return style 属性文本
      */
     String containerInline() {
-        return "max-width:" + maxWidth + "px;margin:0 auto;padding:" + DESKTOP_PADDING
+        return "max-width:" + maxWidth + "px;margin:0 auto;padding:" + desktopPadding
                 + ";background:" + background + ";color:" + text
                 + ";font-family:" + font + ";font-size:" + fontSize + "px;"
-                + "line-height:" + lineHeight
+                + "line-height:" + lineHeightCss()
                 + ";word-wrap:break-word;overflow-wrap:anywhere";
     }
 
@@ -825,6 +907,11 @@ final class MarkdownStyle {
      */
     Map<String, String> inlineStyles() {
         Map<String, String> styles = new LinkedHashMap<String, String>();
+        if (structural) {
+            // 结构化主题的版式由 YaziLayout 专门生成（含邮件内联模式），
+            // 通用标签映射会互相覆盖（卡片段落与页头段落无法按标签区分）。
+            return styles;
+        }
         styles.put("h1", headingInline("1.7em", true));
         styles.put("h2", headingInline("1.4em", true));
         styles.put("h3", headingInline("1.2em", false));

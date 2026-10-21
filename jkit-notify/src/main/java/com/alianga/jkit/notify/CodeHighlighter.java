@@ -7,8 +7,8 @@ package com.alianga.jkit.notify;
  * 因此不需要引入 highlight.js 之类的前端库，也不生成 class 依赖外部 CSS——直接输出
  * {@code <span style="color:...">}，配合内联模式可在邮件客户端与微信里正常显示。
  *
- * <p>支持 java、javascript/ts、go、python、sql、shell、yaml、properties、json、xml/html；
- * 未知语言或空语言退化为纯转义（与不加高亮时输出一致）。
+ * <p>支持 java、javascript/ts、go、python、sql、shell、powershell、yaml、toml、properties、
+ * json、xml/html；未知语言或空语言退化为纯转义（与不加高亮时输出一致）。
  *
  * @author 郑明亮
  * @since 2.0.2
@@ -70,6 +70,13 @@ final class CodeHighlighter {
 
     private static final String[] JSON_WORDS = {"true", "false", "null"};
 
+    private static final String[] PS_WORDS = {
+            "begin", "break", "catch", "class", "continue", "do", "else", "elseif", "end",
+            "exit", "false", "filter", "finally", "for", "foreach", "function", "if", "in",
+            "null", "param", "process", "return", "switch", "throw", "trap", "true", "try",
+            "until", "while"
+    };
+
     private static final Language JAVA = new Language(new String[]{"//"}, true, "\"'",
             JAVA_WORDS, false);
     private static final Language JS = new Language(new String[]{"//"}, true, "\"'`",
@@ -81,7 +88,10 @@ final class CodeHighlighter {
     private static final Language SQL = new Language(new String[]{"--"}, true, "'",
             SQL_WORDS, true);
     private static final Language SHELL = new Language(new String[]{"#"}, false, "\"'",
-            SHELL_WORDS, false);
+            SHELL_WORDS, false, false, true);
+    private static final Language POWERSHELL = new Language(new String[]{"#"}, false, "\"'",
+            PS_WORDS, true, true, false);
+    private static final Language TOML = Language.toml();
     private static final Language YAML = new Language(new String[]{"#"}, false, "\"'",
             YAML_WORDS, true);
     private static final Language JSON = new Language(NO_WORDS, false, "\"",
@@ -162,6 +172,12 @@ final class CodeHighlighter {
         if ("json".equals(key) || "jsonc".equals(key)) {
             return JSON;
         }
+        if ("toml".equals(key)) {
+            return TOML;
+        }
+        if ("powershell".equals(key) || "pwsh".equals(key) || "ps1".equals(key)) {
+            return POWERSHELL;
+        }
         if ("properties".equals(key) || "ini".equals(key) || "conf".equals(key)
                 || "env".equals(key)) {
             return PROPERTIES;
@@ -174,7 +190,8 @@ final class CodeHighlighter {
     }
 
     /**
-     * 语言配置：行注释前缀、是否支持块注释、字符串引号、关键字表、关键字是否忽略大小写。
+     * 语言配置：行注释前缀、是否支持块注释、字符串引号、关键字表、关键字是否忽略大小写，
+     * 以及 TOML / PowerShell 的少量专用规则。
      */
     private static final class Language {
         private final String[] lineComments;
@@ -183,15 +200,38 @@ final class CodeHighlighter {
         private final String[] keywords;
         private final boolean ignoreCase;
         private final boolean markup;
+        private final boolean toml;
+        private final boolean dollarVariable;
+        private final boolean shellFunction;
 
         Language(String[] lineComments, boolean blockComment, String quotes, String[] keywords,
                  boolean ignoreCase) {
+            this(lineComments, blockComment, quotes, keywords, ignoreCase, false, false);
+        }
+
+        Language(String[] lineComments, boolean blockComment, String quotes, String[] keywords,
+                 boolean ignoreCase, boolean dollarVariable, boolean shellFunction) {
             this.lineComments = lineComments;
             this.blockComment = blockComment;
             this.quotes = quotes;
             this.keywords = keywords;
             this.ignoreCase = ignoreCase;
             this.markup = false;
+            this.toml = false;
+            this.dollarVariable = dollarVariable;
+            this.shellFunction = shellFunction;
+        }
+
+        private Language(boolean toml) {
+            this.lineComments = new String[]{"#"};
+            this.blockComment = false;
+            this.quotes = "\"'";
+            this.keywords = NO_WORDS;
+            this.ignoreCase = false;
+            this.markup = false;
+            this.toml = toml;
+            this.dollarVariable = false;
+            this.shellFunction = false;
         }
 
         private Language() {
@@ -201,10 +241,17 @@ final class CodeHighlighter {
             this.keywords = NO_WORDS;
             this.ignoreCase = false;
             this.markup = true;
+            this.toml = false;
+            this.dollarVariable = false;
+            this.shellFunction = false;
         }
 
         static Language markup() {
             return new Language();
+        }
+
+        static Language toml() {
+            return new Language(true);
         }
 
         boolean isKeyword(String word) {
@@ -226,6 +273,7 @@ final class CodeHighlighter {
         private final MarkdownStyle style;
         private final StringBuilder out;
         private final StringBuilder plain = new StringBuilder();
+        private boolean expectFunctionName;
 
         Scanner(String code, Language lang, MarkdownStyle style) {
             this.code = code;
@@ -242,6 +290,10 @@ final class CodeHighlighter {
                     i = markupStep(i, n);
                     continue;
                 }
+                if (lang.toml) {
+                    i = tomlStep(i, n);
+                    continue;
+                }
                 int comment = commentLength(i, n);
                 if (comment > 0) {
                     emit(code.substring(i, i + comment), style.codeComment());
@@ -249,6 +301,13 @@ final class CodeHighlighter {
                     continue;
                 }
                 char c = code.charAt(i);
+                if (lang.dollarVariable && c == '$' && i + 1 < n
+                        && isIdentStart(code.charAt(i + 1))) {
+                    int length = 1 + identLength(i + 1, n);
+                    emit(code.substring(i, i + length), style.codeNumber());
+                    i += length;
+                    continue;
+                }
                 if (lang.quotes.indexOf(c) >= 0) {
                     int length = stringLength(i, n, c);
                     emit(code.substring(i, i + length), style.codeString());
@@ -264,8 +323,12 @@ final class CodeHighlighter {
                 if (isIdentStart(c)) {
                     int length = identLength(i, n);
                     String word = code.substring(i, i + length);
-                    if (lang.isKeyword(word)) {
+                    if (expectFunctionName) {
+                        emit(word, style.codeFunction());
+                        expectFunctionName = false;
+                    } else if (lang.isKeyword(word)) {
                         emit(word, style.codeKeyword());
+                        expectFunctionName = lang.shellFunction && "function".equals(word);
                     } else {
                         plain.append(word);
                     }
@@ -273,10 +336,62 @@ final class CodeHighlighter {
                     continue;
                 }
                 plain.append(c);
+                if (!Character.isWhitespace(c)) {
+                    expectFunctionName = false;
+                }
                 i++;
             }
             flushPlain();
             return out.toString();
+        }
+
+        /**
+         * TOML：注释、字符串、数字、表头 {@code [table]}、键名与布尔值着色。
+         */
+        private int tomlStep(int i, int n) {
+            char c = code.charAt(i);
+            if (c == '#') {
+                int end = code.indexOf('\n', i);
+                int stop = end < 0 ? n : end;
+                emit(code.substring(i, stop), style.codeComment());
+                return stop;
+            }
+            if (c == '"' || c == '\'') {
+                int length = stringLength(i, n, c);
+                emit(code.substring(i, i + length), style.codeString());
+                return i + length;
+            }
+            if (c == '[') {
+                boolean arrayTable = code.startsWith("[[", i);
+                int end = code.indexOf(arrayTable ? "]]" : "]", i + 1);
+                if (end > i) {
+                    int stop = end + (arrayTable ? 2 : 1);
+                    emit(code.substring(i, stop), style.codeString());
+                    return stop;
+                }
+            }
+            if (isDigit(c) && (i == 0 || !isIdentChar(code.charAt(i - 1)))) {
+                int length = numberLength(i, n);
+                emit(code.substring(i, i + length), style.codeNumber());
+                return i + length;
+            }
+            if (isIdentStart(c)) {
+                int length = identLength(i, n);
+                String word = code.substring(i, i + length);
+                int k = i + length;
+                while (k < n && (code.charAt(k) == ' ' || code.charAt(k) == '\t')) {
+                    k++;
+                }
+                boolean key = k < n && code.charAt(k) == '=';
+                if (key || "true".equals(word) || "false".equals(word)) {
+                    emit(word, style.codeNumber());
+                } else {
+                    plain.append(word);
+                }
+                return i + length;
+            }
+            plain.append(c);
+            return i + 1;
         }
 
         private int markupStep(int i, int n) {

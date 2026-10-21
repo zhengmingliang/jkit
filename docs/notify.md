@@ -318,7 +318,7 @@ NotificationManager.sendFailover("dingtalk", msg, Arrays.asList(a, b), policy);
 
 ### Markdown 渲染主题
 
-`MarkdownTheme` 提供 13 套主题（前 12 套命名与观感对齐 [doocs/md](https://github.com/doocs/md)，另加 `blog` 复刻 alianga.com / Sakura 正文），只改外观、不改 Markdown 解析结果，也不改变 Markdown 的解析子集。
+`MarkdownTheme` 提供 14 套主题（前 12 套命名与观感对齐 [doocs/md](https://github.com/doocs/md)，另加 `blog` 复刻 alianga.com / Sakura 正文，`yazi` 复刻 quickref.cn 速查文档）。`yazi` 是唯一会重排 HTML 结构的主题：H1 变页头、H2 变分区、H3 变三列卡片网格，文字与正文元素不变。
 
 #### 主题一览
 
@@ -337,8 +337,18 @@ NotificationManager.sendFailover("dingtalk", msg, Arrays.asList(a, b), policy);
 | `ayer` | 墨黑 | `#61afef`（深底 `#1f2430`） | 竖条 | 竖条 | **Mac 窗口** | 网格 | 大屏 / 夜间展示 |
 | `purple` | 姹紫 | `#7048e8` 紫 | 居中 | 引号装饰 | 描边 | 斑马纹 | 品牌色推送 |
 | `blog` | 博客 | `#e67474` 珊瑚红 | ¶/# 装饰 | 引号装饰 | 深色 One Dark | 网格 | 复刻 alianga.com |
+| `yazi` | 速查 | `#228e6c` / 强调 `#10b981` | H3 绿色标签 | 无底色 | 透明底 + Pretty Lights | 隐藏表头 | 复刻 quickref.cn 速查文档 |
 
-主题不是整段 CSS：每套主题只声明一组**令牌**（主色 / 强调色 / 正文色 / 底色 / 面板色 / 边框色 / 字体 / 字号 / 行高 / 圆角 / 标题样式 / 引用样式 / 代码块样式 / 表格样式 / 代码高亮配色），由 `MarkdownStyle` 统一生成 `<head><style>` 样式表与行内 `style` 映射。因此两种注入方式观感一致，加主题只需加令牌。
+主题不是整段 CSS：大多数主题只声明一组**令牌**（主色 / 强调色 / 正文色 / 底色 / 面板色 / 边框色 / 字体 / 字号 / 行高 / 圆角 / 标题样式 / 引用样式 / 代码块样式 / 表格样式 / 代码高亮配色），由 `MarkdownStyle` 统一生成 `<head><style>` 样式表与行内 `style` 映射。因此两种注入方式观感一致，加主题只需加令牌。
+
+`yazi` 是结构化主题的例外：版式依赖 H2/H3 分组、CSS Grid、伪元素与吸顶标签，`MarkdownStyle` 只提供配色令牌，结构由 `YaziLayout` 生成、样式由 `YaziTheme` 提供。它复刻参考站点的浅色方案，并支持以下参考源特有写法：
+
+- Setext 标题：`标题` 下一行写 `===` / `---`，分别生成 H1 / H2；
+- `<!--rehype:wrap-class=col-span-2 row-span-2-->`：给 H1/H2/H3 外层卡片追加类名；
+- `<!--rehype:className=show-header left-align-->`：给表格追加类名（`show-header` 显示表头，`shortcuts` 把首列代码渲染成键帽）；
+- `<!--rehype:ignore:start-->...<!--rehype:ignore:end-->`：整段不输出。
+
+`yazi` 的 `<style>` 模式复刻参考站点的完整版式（CSS Grid、伪元素、吸顶标签）。邮件客户端常会过滤 `class` 属性，导致类选择器失效，因此 `inlineStyle(true)` 会切换到**邮件安全版式**：H1/H2/H3、卡片、绿色标签、表格表头显隐、键帽、代码块全部写成 `style` 属性，用 flex 代替 Grid，长代码换行而不是横向裁切。通过 SMTP 发送 YAZI 主题时建议同时打开 `.inlineMarkdownStyle(true)`。
 
 #### 快速开始
 
@@ -351,6 +361,10 @@ String html = Markdown.toDocument(md,
 String fragment = Markdown.toHtml(md, MarkdownRenderOptions.create()
         .theme(MarkdownTheme.LARK)
         .inlineStyle(true));
+
+// 速查文档：H2 分区 + H3 三列卡片（使用 <style> 模式）
+String cheatsheet = Markdown.toDocument(md,
+        MarkdownRenderOptions.create().theme(MarkdownTheme.YAZI));
 
 // SMTP 渠道固定用某个主题
 NotificationManager.register(new SmtpChannel()
@@ -386,7 +400,7 @@ NotificationManager.register(new SmtpChannel()
 
 #### 代码高亮
 
-默认开启，自研零依赖（不引 highlight.js），支持 java / js / ts / go / python / sql / shell / yaml / properties / json / xml / html；不认识的语言退化为纯转义，不会报错。`.highlight(false)` 可关。
+默认开启，自研零依赖（不引 highlight.js），支持 java / js / ts / go / python / sql / shell / powershell / yaml / toml / properties / json / xml / html；不认识的语言退化为纯转义，不会报错。`.highlight(false)` 可关。
 
 高亮输出的是内联 `<span style="color:...">`，两种注入模式下都可见。着色在 HTML 转义**之前**完成，所以代码块里写 `<script>`、`"` 之类的字符既不会变成真标签，也不会破坏字符串识别。
 
@@ -425,7 +439,7 @@ new SmtpChannel().markdownImageBaseDir("/opt/docs/articles");
 #### 其他要点
 
 - **2.0.1 入口已过期**：`NotifyUtils.markdownToHtml(md)` / `markdownToDocument(md, true/false)` / `wrapHtmlDocument(fragment, true/false)` 仍可用，请改用 `Markdown.toHtml` / `toDocument` / `wrapDocument`。文档壳已改用经典主题生成样式表（五级标题字号、行高 1.75、表格与引用样式比旧版更完整）。
-- **主题解析容错**：`MarkdownTheme.of("lark")` 忽略大小写与 `-` / `_`（也认 `ORANGE_HEART` 这样的常量名），无法识别时回退 `default`，配置写错不会让告警发不出去。
+- **主题解析容错**：`MarkdownTheme.of("lark")` 忽略大小写与 `-` / `_`（也认 `ORANGE_HEART` 这样的常量名），无法识别时回退 `default`，配置写错不会让告警发不出去。`yazi` 还接受 `quickref` / `reference` 别名。
 - **零依赖**：主题、高亮、内联、图片内嵌全部自研，不引任何第三方库。
 
 ### 服务商实测速率与坑（来自本仓库历史项目的实测记录）

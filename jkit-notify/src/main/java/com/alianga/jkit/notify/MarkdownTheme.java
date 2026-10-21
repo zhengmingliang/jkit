@@ -9,9 +9,10 @@ import java.util.Locale;
  * {@link #DEFAULT} 经典、{@link #LARK} 蓝、{@link #ORANGE_HEART} 橙心、{@link #RAINBOW} 彩虹、
  * {@link #LAPIS} 兰青、{@link #PHYCAT} 嫩黄、{@link #BLUE} 碧蓝、{@link #VUE} Vue 绿、
  * {@link #GREEN} 绿意、{@link #WHEAT} 麦色、{@link #AYER} 墨黑、{@link #PURPLE} 姹紫、
- * {@link #BLOG} 博客。
+ * {@link #BLOG} 博客、{@link #YAZI} 速查。
  *
- * <p>主题只影响外观，不改变 Markdown 解析结果。用法：
+ * <p>主题只影响外观，不改变 Markdown 解析结果；{@link #YAZI} 是唯一例外：它会按参考站点
+ * 的规则把 H1/H2/H3 重排成页头、分区与卡片网格（正文元素与文字内容不变）。用法：
  * <pre>{@code
  * String html = Markdown.toDocument(md,
  *         MarkdownRenderOptions.create().theme(MarkdownTheme.LARK).inlineStyle(true));
@@ -88,7 +89,19 @@ public enum MarkdownTheme {
      * 博客：复刻 alianga.com（Halo · LIlGG_Sakura）的观感——珊瑚红强调、暖黄行内码、
      * 深色 One Dark 代码块、橙色引用引号、浅灰网格表格。
      */
-    BLOG("blog", "博客");
+    BLOG("blog", "博客"),
+
+    /**
+     * 速查：复刻 quickref.cn（jaywcjlove/reference + refs-cli）的备忘单版式——
+     * 浅灰页面、白色圆角卡片、绿色 H3 标签、按 H2 分区 / H3 三列网格重排标题，
+     * 表格默认隐藏表头、首列代码绿色、快捷键以键帽样式展示，代码块走 GitHub
+     * Pretty Lights 配色。
+     *
+     * <p>该主题会改变 HTML 结构（H1 页头、H2 分区、H3 卡片、标题锚点），不只是换色；
+     * 配置里也可以写 {@code quickref} / {@code reference} 作为别名。邮件场景请配合
+     * {@code inlineStyle(true)} 使用，该模式会生成不依赖类名的邮件安全版式。
+     */
+    YAZI("yazi", "速查");
 
     private final String id;
     private final String label;
@@ -145,6 +158,9 @@ public enum MarkdownTheme {
         }
         for (MarkdownTheme theme : values()) {
             if (theme.id.equals(key) || theme.name().equalsIgnoreCase(key)) {
+                return theme;
+            }
+            if (theme == YAZI && ("quickref".equals(key) || "reference".equals(key))) {
                 return theme;
             }
         }

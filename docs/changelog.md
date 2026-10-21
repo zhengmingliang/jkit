@@ -18,6 +18,10 @@
 
 - 新增统一多存储平台文件管理模块 `jkit-storage`：一套 `FileStorage` 接口（`exists / stat / list / mkdir / upload / download / delete / copy / rename / readString / writeString / walk`）读写本地文件系统、FTP（纯 JDK 客户端）、SFTP（可选 jsch）、WebDAV 与 Amazon S3 及三十余个 S3 兼容云（阿里云 OSS 原生协议、Azure Blob、go-fastdfs 原生；华为 OBS / 腾讯 COS / 七牛 Kodo / 百度 BOS / 又拍 USS / MinIO / GCS / 火山 TOS / Cloudflare R2 / 金山 KS3 / 京东 OSS / 天翼 OOS / 移动 EOS / 沃云 OSS / 网易 NOS / Ucloud US3 / 平安 OBS / 首云 OSS / IBM COS / 美团 MSS / generic-s3 等走 S3 引擎，SigV4 / SigV2 / KSYUN 三种签名、虚拟主机与路径寻址、ListObjects V1/V2）。统一错误模型 `StorageException`（12 类错误码）与路径规范化 `StoragePaths`；`FileStorages` 门面支持平台预设、配置驱动创建、自定义平台 / 引擎注册；HTTP 层基于 JDK `HttpURLConnection`（任意方法、定长流式、未知长度落盘缓冲）并内置连接级失败自动重试与连接池归还治理。`sync` 包提供跨存储结构对比（`SyncEngine.diff`）、增量同步 / 镜像同步 / 全量迁移（`SyncEngine.sync`：SIZE / MTIME / ETAG 对比策略、试运行、并发、过滤、失败上限、进度回调）。FastDFS / MongoDB GridFS / 青云 QingStor 为规划中占位（创建实例抛 `UNSUPPORTED`）。
 
+**jkit-notify**
+
+- 新增 Markdown 速查主题 `MarkdownTheme.YAZI`（配置值 `yazi`，别名 `quickref` / `reference`）：复刻 quickref.cn（jaywcjlove/reference + refs-cli）的文档正文。与既有主题只换配色不同，它会按参考站点规则重排 HTML——Setext/ATX 标题转成 H1 页头、H2 分区与 H3 三列卡片网格（支持 `col-span-*` / `row-span-*`），补齐 github-slugger 风格锚点；样式对齐参考 `style.css`：浅灰底 `#f1f5f9`、白色圆角卡片、绿色 H3 吸顶标签、表格默认隐藏表头（`show-header` 显示）、首列代码绿色、`shortcuts` 键帽、GitHub Pretty Lights 代码配色。`inlineStyle(true)` 会生成邮件安全版式：结构、卡片、标签、表格表头显隐与键帽全部内联，flex 代替 Grid，长代码自动换行，适配会过滤 `class` 的邮件客户端。Markdown 解析同步支持 Setext 标题、`<!--rehype:className=...-->` 表格类名、`<!--rehype:wrap-class=...-->` 卡片类名与 `<!--rehype:ignore:...-->` 忽略块；代码高亮新增 TOML 与 PowerShell。主题自查样例见 `jkit-notify/src/test/resources/markdown-samples/`。
+
 **文档站**
 
 - 新增在线工具「[Excel/CSV 转 JSON](/tools/excel2json/)」：浏览器本地运行的表格转换工具，文件不上传。支持上传 .xlsx/.xls/.csv（多工作表可切换）、粘贴 CSV / TSV（可从 Excel 直接粘贴）/ 单列文本，首行作表头、数字自动识别；输出 JSON 或 SQL Insert（表名可自定义），支持一键复制与下载，内置三组示例。功能对标 FeHelper 同名工具（MIT），Excel 解析使用 SheetJS 0.18.5（Apache-2.0），第三方版权声明见工具目录 `THIRD-PARTY-NOTICES.txt`。

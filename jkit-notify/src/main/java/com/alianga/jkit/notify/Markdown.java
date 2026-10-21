@@ -9,11 +9,12 @@ import java.util.Map;
 /**
  * 面向通知正文的 Markdown → HTML 转换（零依赖）。
  *
- * <p>覆盖告警 / 周报 / 技术文档常用子集：ATX 标题、段落（单换行变 {@code <br>}）、
+ * <p>覆盖告警 / 周报 / 技术文档常用子集：ATX 与 Setext 标题、段落（单换行变 {@code <br>}）、
  * 引用、有序/无序列表（列表项内可嵌套代码块、表格、子列表）、GFM 表格、
  * {@code |...|+...+} 形式的 CLI 宽表、围栏代码块（{@code ```}/{@code ~~~}，允许缩进）、
  * 分割线、链接、图片（含原文里的 HTML {@code <img>}）、加粗 / 斜体 / 删除线 / 行内代码。
- * 不是完整 CommonMark。
+ * 同时识别 refs-cli 的 {@code <!--rehype:...-->} 属性注释与忽略块，属性注释不会渲染成
+ * 可见文本，表格类名会落到 {@code <table>} 上。不是完整 CommonMark。
  *
  * <p>文本节点做 HTML 转义；原文 {@code <img>} 消毒后透传（只留 src/alt/width 等安全属性，
  * {@code onerror} 等事件丢掉）；{@code javascript:} 链接降为 {@code #}。
@@ -69,6 +70,7 @@ public final class Markdown {
             return "";
         }
         String normalized = markdown.replace("\r\n", "\n").replace('\r', '\n');
+        normalized = stripRehypeIgnore(normalized);
         return convertBlocks(normalized, renderer);
     }
 
@@ -81,6 +83,10 @@ public final class Markdown {
      * <p>设置 {@link MarkdownRenderOptions#imageBaseDir(String)} 后，Markdown 里引用本地相对路径的
      * 图片会内嵌成 {@code data:image/...;base64,...}，正文可脱离原文件独立展示。
      *
+     * <p>{@link MarkdownTheme#YAZI} 会重排 H1/H2/H3 结构。它的 {@code inlineStyle=true} 模式
+     * 会生成邮件安全的内联版式（flex 卡片、内联表格/代码样式），不依赖 {@code class}
+     * 与 {@code <style>}，适合会过滤类名的邮件客户端。
+     *
      * @param markdown 原文
      * @param options 渲染选项，{@code null} 时同 {@link #toHtml(String)}
      * @return HTML 片段（不含 html 文档壳）
@@ -92,8 +98,13 @@ public final class Markdown {
         }
         MarkdownStyle style = MarkdownStyle.of(options.theme());
         CodeRenderer renderer = options.highlight() ? new HighlightRenderer(style) : null;
-        String fragment = toHtml(markdown, renderer);
+        String fragment = options.theme() == MarkdownTheme.YAZI
+                ? YaziLayout.render(markdown, renderer, options.inlineStyle())
+                : toHtml(markdown, renderer);
         fragment = ImageInliner.apply(fragment, options);
+        if (options.theme() == MarkdownTheme.YAZI) {
+            return fragment;
+        }
         return options.inlineStyle() ? HtmlInliner.apply(fragment, style) : fragment;
     }
 
@@ -157,8 +168,11 @@ public final class Markdown {
             html.append("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">");
         }
         MarkdownStyle style = MarkdownStyle.of(opts.theme());
-        html.append("<style>").append(style.css(opts.responsive()))
-                .append("</style></head><body style=\"margin:0;padding:0;background:")
+        boolean inlineOnly = opts.inlineStyle() && opts.theme() == MarkdownTheme.YAZI;
+        if (!inlineOnly) {
+            html.append("<style>").append(style.css(opts.responsive())).append("</style>");
+        }
+        html.append("</head><body style=\"margin:0;padding:0;background:")
                 .append(style.background())
                 // 排版挂在这层 div 上：邮件客户端普遍会剥掉 <body>，只保留正文内容
                 .append("\"><div class=\"").append(MarkdownStyle.CONTAINER_CLASS)
@@ -197,6 +211,10 @@ public final class Markdown {
                 i++;
                 continue;
             }
+            if (isRehypeCommentLine(lines[i])) {
+                i++;
+                continue;
+            }
             if (html.length() > 0) {
                 html.append('\n');
             }
@@ -205,12 +223,10 @@ public final class Markdown {
             } else if (looksLikeTable(lines, i, to)) {
                 i = appendTable(html, lines, i, to);
             } else {
-                int heading = headingLevel(lines[i]);
+                int setext = setextHeadingLevel(lines, i, to);
+                int heading = setext > 0 ? setext : headingLevel(lines[i]);
                 if (heading > 0) {
-                    html.append("<h").append(heading).append('>')
-                            .append(renderInline(headingText(lines[i], heading)))
-                            .append("</h").append(heading).append('>');
-                    i++;
+                    i = appendHeading(html, lines, i, to, heading, setext > 0);
                 } else if (isHr(lines[i])) {
                     html.append("<hr>");
                     i++;
@@ -226,6 +242,44 @@ public final class Markdown {
             }
         }
         return html.toString();
+    }
+
+    /**
+     * 输出标题，并消费紧跟其后的 {@code <!--rehype:...-->} 属性注释。
+     *
+     * <p>属性以 {@code data-} 属性挂在标题上，交给结构化主题（如 YAZI）读取；
+     * 普通主题忽略这些属性，注释本身不再渲染成可见文本。
+     *
+     * @param setext {@code true} 表示标题文本与下划线占两行
+     */
+    private static int appendHeading(StringBuilder html, String[] lines, int start, int to,
+                                     int level, boolean setext) {
+        int next = start + (setext ? 2 : 1);
+        Map<String, String> attrs = new LinkedHashMap<String, String>();
+        while (next < to && isRehypeCommentLine(lines[next])) {
+            parseRehypeAttrs(lines[next], attrs);
+            next++;
+        }
+        String text = setext ? lines[start].trim() : headingText(lines[start], level);
+        html.append("<h").append(level);
+        String className = attrs.get("classname");
+        if (className != null && !className.isEmpty()) {
+            html.append(" class=\"").append(NotifyUtils.escapeHtml(className)).append('"');
+        }
+        String style = attrs.get("style");
+        if (style != null && !style.isEmpty()) {
+            html.append(" style=\"").append(NotifyUtils.escapeHtml(style)).append('"');
+        }
+        for (Map.Entry<String, String> attr : attrs.entrySet()) {
+            String key = attr.getKey();
+            if ("classname".equals(key) || "class".equals(key) || "style".equals(key)) {
+                continue;
+            }
+            html.append(" data-").append(key).append("=\"")
+                    .append(NotifyUtils.escapeHtml(attr.getValue())).append('"');
+        }
+        html.append('>').append(renderInline(text)).append("</h").append(level).append('>');
+        return next;
     }
 
     private static int appendFence(StringBuilder html, String[] lines, int start, int to,
@@ -297,7 +351,8 @@ public final class Markdown {
 
     private static boolean isParagraphLine(String[] lines, int i, int to) {
         String line = lines[i];
-        return !isBlank(line) && headingLevel(line) == 0 && !isFence(line) && !isHr(line)
+        return !isBlank(line) && !isRehypeCommentLine(line) && headingLevel(line) == 0
+                && !isFence(line) && !isHr(line)
                 && !isBlockquote(line) && ulMarkerEnd(line) < 0 && olMarkerEnd(line) < 0
                 && !looksLikeTable(lines, i, to);
     }
@@ -393,28 +448,50 @@ public final class Markdown {
     private static int appendTable(StringBuilder html, String[] lines, int start, int to) {
         String[] header = tableCells(lines[start]);
         String[] aligns = tableAlignments(lines[start + 1], header.length);
-        html.append("<table><thead><tr>");
+        int i = start + 2;
+        StringBuilder body = new StringBuilder();
+        body.append("<table");
+        int attrStart = i;
+        while (attrStart < to && !isBlank(lines[attrStart]) && lines[attrStart].indexOf('|') >= 0
+                && !isTableSeparator(lines[attrStart]) && !isFence(lines[attrStart])) {
+            attrStart++;
+        }
+        Map<String, String> attrs = new LinkedHashMap<String, String>();
+        int next = attrStart;
+        while (next < to && isRehypeCommentLine(lines[next])) {
+            parseRehypeAttrs(lines[next], attrs);
+            next++;
+        }
+        String className = attrs.get("classname");
+        if (className != null && !className.isEmpty()) {
+            body.append(" class=\"").append(NotifyUtils.escapeHtml(className)).append('"');
+        }
+        String style = attrs.get("style");
+        if (style != null && !style.isEmpty()) {
+            body.append(" style=\"").append(NotifyUtils.escapeHtml(style)).append('"');
+        }
+        body.append("><thead><tr>");
         for (int c = 0; c < header.length; c++) {
-            html.append("<th").append(alignAttr(aligns, c)).append('>')
+            body.append("<th").append(alignAttr(aligns, c)).append('>')
                     .append(renderInline(header[c])).append("</th>");
         }
-        html.append("</tr></thead><tbody>");
-        int i = start + 2;
+        body.append("</tr></thead><tbody>");
         while (i < to && !isBlank(lines[i]) && lines[i].indexOf('|') >= 0
                 && !isTableSeparator(lines[i]) && !isFence(lines[i])) {
             String[] cells = tableCells(lines[i]);
-            html.append("<tr>");
+            body.append("<tr>");
             int cols = Math.max(cells.length, header.length);
             for (int c = 0; c < cols; c++) {
                 String cell = c < cells.length ? cells[c] : "";
-                html.append("<td").append(alignAttr(aligns, c)).append('>')
+                body.append("<td").append(alignAttr(aligns, c)).append('>')
                         .append(renderInline(cell)).append("</td>");
             }
-            html.append("</tr>");
+            body.append("</tr>");
             i++;
         }
-        html.append("</tbody></table>");
-        return i;
+        body.append("</tbody></table>");
+        html.append(body);
+        return next;
     }
 
     private static String alignAttr(String[] aligns, int index) {
@@ -992,5 +1069,144 @@ public final class Markdown {
 
     private static boolean isBlank(String line) {
         return line.trim().isEmpty();
+    }
+
+    /**
+     * 去掉 refs-cli 的忽略块：{@code <!--rehype:ignore:start-->...<!--rehype:ignore:end-->}。
+     */
+    private static String stripRehypeIgnore(String text) {
+        String startTag = "<!--rehype:ignore:start-->";
+        String endTag = "<!--rehype:ignore:end-->";
+        int from = 0;
+        int start = text.indexOf(startTag);
+        if (start < 0) {
+            return text;
+        }
+        StringBuilder out = new StringBuilder(text.length());
+        while (start >= 0) {
+            int end = text.indexOf(endTag, start + startTag.length());
+            if (end < 0) {
+                break;
+            }
+            out.append(text, from, start);
+            from = end + endTag.length();
+            start = text.indexOf(startTag, from);
+        }
+        out.append(text, from, text.length());
+        return out.toString();
+    }
+
+    /**
+     * 是否为 refs-cli / rehype-attr 的属性注释行。
+     */
+    private static boolean isRehypeCommentLine(String line) {
+        String trimmed = line.trim();
+        return trimmed.startsWith("<!--rehype:") && trimmed.endsWith("-->");
+    }
+
+    /**
+     * 解析 {@code <!--rehype:className=foo bar-->} 形式的属性，合并进 {@code attrs}。
+     *
+     * <p>只接受 {@code key=value} 单键形式；类名做白名单过滤，避免配置里的标记把
+     * HTML 属性结构撑破。
+     */
+    private static void parseRehypeAttrs(String line, Map<String, String> attrs) {
+        String trimmed = line.trim();
+        int prefix = "<!--rehype:".length();
+        if (trimmed.length() <= prefix + 3 || !trimmed.startsWith("<!--rehype:")) {
+            return;
+        }
+        String body = trimmed.substring(prefix, trimmed.length() - 3).trim();
+        int eq = body.indexOf('=');
+        if (eq <= 0) {
+            return;
+        }
+        String rawKey = body.substring(0, eq).trim().toLowerCase(Locale.ROOT);
+        String value = body.substring(eq + 1).trim();
+        if (value.isEmpty()) {
+            return;
+        }
+        StringBuilder key = new StringBuilder(rawKey.length());
+        for (int i = 0; i < rawKey.length(); i++) {
+            char c = rawKey.charAt(i);
+            if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-') {
+                key.append(c);
+            } else {
+                key.append('-');
+            }
+        }
+        if (key.length() == 0) {
+            return;
+        }
+        String name = key.toString();
+        if ("class".equals(name) || "classname".equals(name) || "wrap-class".equals(name)
+                || "body-class".equals(name)) {
+            value = sanitizeClasses(value);
+            if (value.isEmpty()) {
+                return;
+            }
+            if ("class".equals(name)) {
+                name = "classname";
+            }
+        }
+        attrs.put(name, value);
+    }
+
+    private static String sanitizeClasses(String value) {
+        String[] parts = value.split("\\s+");
+        StringBuilder out = new StringBuilder(value.length());
+        for (int i = 0; i < parts.length; i++) {
+            StringBuilder token = new StringBuilder(parts[i].length());
+            for (int k = 0; k < parts[i].length(); k++) {
+                char c = parts[i].charAt(k);
+                if (isClassChar(c)) {
+                    token.append(c);
+                }
+            }
+            if (token.length() == 0) {
+                continue;
+            }
+            if (out.length() > 0) {
+                out.append(' ');
+            }
+            out.append(token);
+        }
+        return out.toString();
+    }
+
+    private static boolean isClassChar(char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+                || (c >= '0' && c <= '9') || c == '-' || c == '_';
+    }
+
+    /**
+     * Setext 标题（{@code 标题} 下一行 {@code ===} / {@code ---}）的级别。
+     *
+     * @return 1 / 2；不是 Setext 标题返回 0
+     */
+    private static int setextHeadingLevel(String[] lines, int i, int to) {
+        if (i + 1 >= to) {
+            return 0;
+        }
+        String text = lines[i].trim();
+        String underline = lines[i + 1].trim();
+        if (text.isEmpty() || underline.isEmpty()) {
+            return 0;
+        }
+        char marker = underline.charAt(0);
+        if (marker != '=' && marker != '-') {
+            return 0;
+        }
+        for (int k = 1; k < underline.length(); k++) {
+            if (underline.charAt(k) != marker) {
+                return 0;
+            }
+        }
+        if (headingLevel(lines[i]) > 0 || isFence(lines[i]) || isHr(lines[i])
+                || isBlockquote(lines[i]) || ulMarkerEnd(lines[i]) >= 0
+                || olMarkerEnd(lines[i]) >= 0 || looksLikeTable(lines, i, to)) {
+            return 0;
+        }
+        return marker == '=' ? 1 : 2;
     }
 }

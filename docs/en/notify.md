@@ -319,7 +319,7 @@ Swapping the two styles guarantees signature failure. DingTalk's signature goes 
 
 ### Markdown rendering themes
 
-`MarkdownTheme` ships 13 themes (the first 12 aligned with [doocs/md](https://github.com/doocs/md), plus `blog` which copies alianga.com / Sakura article styling). They only change appearance — the Markdown parsing result and the supported syntax subset stay the same.
+`MarkdownTheme` ships 14 themes (the first 12 aligned with [doocs/md](https://github.com/doocs/md), plus `blog` which copies alianga.com / Sakura article styling, and `yazi` which copies the quickref.cn cheat-sheet). `yazi` is the only theme that also restructures HTML: H1 becomes the page header, H2 sections and H3 cards are laid out in a three-column grid. Text and content elements are unchanged.
 
 #### Theme catalogue
 
@@ -338,8 +338,18 @@ Swapping the two styles guarantees signature failure. DingTalk's signature goes 
 | `ayer` | Ink black | `#61afef` on `#1f2430` | Bar | Bar | **macOS window** | Grid | Wall displays / night reading |
 | `purple` | Purple | `#7048e8` purple | Centered | Quote mark | Bordered | Striped | Brand-coloured pushes |
 | `blog` | Blog | `#e67474` coral | ¶/# marks | Quote mark | Dark One Dark | Grid | alianga.com replica |
+| `yazi` | Quick ref | `#228e6c` / accent `#10b981` | Green H3 badge | Plain | Transparent + Pretty Lights | Header hidden | quickref.cn replica |
 
-A theme is not a blob of CSS: it declares a set of **tokens** (primary / accent / text / muted / background / panel / border colour, font, size, line height, radius, heading style, quote style, code-block style, table style and the syntax-highlight palette). `MarkdownStyle` turns one token set into both the `<head><style>` sheet and the inline `style` map, so the two injection modes look the same and adding a theme means adding tokens only.
+A theme is not a blob of CSS: most themes declare a set of **tokens** (primary / accent / text / muted / background / panel / border colour, font, size, line height, radius, heading style, quote style, code-block style, table style and the syntax-highlight palette). `MarkdownStyle` turns one token set into both the `<head><style>` sheet and the inline `style` map, so the two injection modes look the same and adding a theme means adding tokens only.
+
+`yazi` is the exception for a structural theme: its layout needs H2/H3 grouping, CSS Grid, pseudo-elements and sticky badges. `MarkdownStyle` only carries the palette, `YaziLayout` builds the DOM and `YaziTheme` supplies the rules. It reproduces the reference site's light scheme and understands the reference-specific Markdown conventions:
+
+- Setext headings: `===` / `---` on the line after a title produce H1 / H2;
+- `<!--rehype:wrap-class=col-span-2 row-span-2-->`: adds classes to the H1/H2/H3 wrapper card;
+- `<!--rehype:className=show-header left-align-->`: adds classes to the preceding table (`show-header` reveals the header, `shortcuts` turns first-column code into keycaps);
+- `<!--rehype:ignore:start-->...<!--rehype:ignore:end-->`: drops the enclosed block.
+
+`yazi`'s `<style>` mode reproduces the reference site's full layout (CSS Grid, pseudo-elements, sticky badges). Email clients often drop `class` attributes, which kills class selectors, so `inlineStyle(true)` switches to an **email-safe layout**: H1/H2/H3, cards, green badges, table header visibility, keycaps and code blocks are all written as `style` attributes; flex replaces Grid and long code wraps instead of clipping. When sending YAZI through SMTP, enable `.inlineMarkdownStyle(true)`.
 
 #### Quick start
 
@@ -352,6 +362,10 @@ String html = Markdown.toDocument(md,
 String fragment = Markdown.toHtml(md, MarkdownRenderOptions.create()
         .theme(MarkdownTheme.LARK)
         .inlineStyle(true));
+
+// Quick-reference document: H2 sections + three-column H3 cards (stylesheet mode)
+String cheatsheet = Markdown.toDocument(md,
+        MarkdownRenderOptions.create().theme(MarkdownTheme.YAZI));
 
 // Pin a theme on the SMTP channel
 NotificationManager.register(new SmtpChannel()
@@ -387,7 +401,7 @@ The rule of thumb: if the client strips `<head><style>`, go inline; otherwise ke
 
 #### Code highlighting
 
-On by default, dependency-free (no highlight.js), covering java / js / ts / go / python / sql / shell / yaml / properties / json / xml / html; unknown languages fall back to plain escaping instead of failing. Disable with `.highlight(false)`.
+On by default, dependency-free (no highlight.js), covering java / js / ts / go / python / sql / shell / powershell / yaml / toml / properties / json / xml / html; unknown languages fall back to plain escaping instead of failing. Disable with `.highlight(false)`.
 
 Highlighting emits inline `<span style="color:...">`, so it is visible in both modes. Colouring happens **before** HTML escaping, so a code block containing `<script>` or `"` neither becomes a real tag nor breaks string detection.
 
@@ -426,7 +440,7 @@ Three implementation details matter when writing a custom theme:
 #### Other notes
 
 - **2.0.1 entry points are deprecated**: `NotifyUtils.markdownToHtml(md)` / `markdownToDocument(md, true/false)` / `wrapHtmlDocument(fragment, true/false)` still work; switch to `Markdown.toHtml` / `toDocument` / `wrapDocument`. The document shell now builds its stylesheet from the classic theme (five heading sizes, line height 1.75, richer table/quote styling).
-- **Lenient theme lookup**: `MarkdownTheme.of("lark")` ignores case and `-` / `_` (and also accepts constant names like `ORANGE_HEART`), falling back to `default` when unknown — a typo in configuration will never block an alert.
+- **Lenient theme lookup**: `MarkdownTheme.of("lark")` ignores case and `-` / `_` (and also accepts constant names like `ORANGE_HEART`), falling back to `default` when unknown — a typo in configuration will never block an alert. `yazi` also accepts the `quickref` / `reference` aliases.
 - **Zero dependencies**: themes, highlighting, inlining and image embedding are all hand-rolled.
 ### Field-tested provider rates and pitfalls (from real-world records in this repository's historical projects)
 
