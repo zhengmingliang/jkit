@@ -84,7 +84,9 @@ public final class StoragePresets {
                 StorageField.optional("region", "Region", null, "付费桶 SigV4 区域，留空自动推导"),
                 StorageField.optional("basePath", "根前缀", "/", "对象 key 统一加该前缀"),
                 StorageField.optional("listVersion", "列表 API 版本", "2",
-                        "付费桶：1=ListObjects V1，2=ListObjects V2；基础桶忽略")));
+                        "付费桶：1=ListObjects V1，2=ListObjects V2；基础桶忽略"),
+                StorageField.optional("temporaryLinkTtl", "临时链接时效(秒)", "600",
+                        "付费桶可配（60~604800，默认 600）；基础桶固定约 600 秒（官方不可配）")));
         platforms.add(s3("huawei-obs", "华为云 OBS", "https://obs.cn-north-4.myhuaweicloud.com",
                 "公有云", null));
         platforms.add(s3("tencent-cos", "腾讯云 COS", "https://cos.ap-guangzhou.myqcloud.com",

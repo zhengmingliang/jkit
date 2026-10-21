@@ -75,6 +75,8 @@ public class DogeFileStorage implements FileStorage {
     private final String domain;
     private final String basePath;
     private final String listVersion;
+    /** 临时链接时效（秒）：仅对 SigV4 预签名通道生效；基础桶 file/sign 官方固定约 10 分钟不可配。 */
+    private final long temporaryLinkTtlSeconds;
     /** API 基址（测试可覆盖；生产固定 https://api.dogecloud.com）。 */
     private final String apiBase;
     /** 付费桶 S3 寻址风格（测试假服务器用；生产恒为虚拟主机）。 */
@@ -110,6 +112,9 @@ public class DogeFileStorage implements FileStorage {
         this.listVersion = config.getOr("listVersion", "2");
         this.apiBase = config.getOr("apiEndpoint", "https://api.dogecloud.com");
         this.pathStyle = config.boolOr("pathStyle", false);
+        // 临时链接时效：60s ~ 7d（SigV4 X-Amz-Expires 上限）；基础桶 file/sign 固定 10 分钟，该配置不生效
+        this.temporaryLinkTtlSeconds = Math.min(7L * 24 * 3600,
+                Math.max(60, config.longOr("temporaryLinkTtl", 600)));
         if (basic) {
             if (user.isEmpty() || password.isEmpty()) {
                 throw StorageException.invalidConfig(
@@ -296,8 +301,9 @@ public class DogeFileStorage implements FileStorage {
     }
 
     /**
-     * 官方 {@code file/sign} 签发的临时访问链接（约 10 分钟有效，直接可下载）。
-     * 付费桶退回 SigV4 预签名（有效期取 min(ttl, 凭据剩余)）。
+     * 官方 {@code file/sign} 签发的临时访问链接。基础桶走官方接口（固定约 10 分钟，
+     * 官方不支持自定义时效）；付费桶走 SigV4 预签名，时效由 {@code temporaryLinkTtl}
+     * 配置控制（60 秒 ~ 7 天，默认 10 分钟）。
      *
      * @param path 对象路径
      * @return 临时链接
@@ -307,7 +313,37 @@ public class DogeFileStorage implements FileStorage {
         if (basic) {
             return basicSign(normalized);
         }
-        return delegate().presign(normalized, java.time.Duration.ofMinutes(10));
+        return delegate().presign(normalized, java.time.Duration.ofSeconds(temporaryLinkTtlSeconds));
+    }
+
+    /**
+     * 临时链接的实际有效秒数（界面提示用）：基础桶固定约 600 秒（官方不可配）；
+     * 付费桶为配置值（SigV4 presign 支持）。
+     *
+     * @return 有效秒数
+     */
+    public long temporaryLinkTtlSeconds() {
+        return basic ? 600L : temporaryLinkTtlSeconds;
+    }
+
+    /**
+     * 临时链接时效是否可由用户配置：基础桶 file/sign 官方固定不可配（false）；
+     * 付费桶 SigV4 presign 可配（true）。
+     *
+     * @return true 表示时效可配置
+     */
+    public boolean temporaryLinkTtlConfigurable() {
+        return !basic;
+    }
+
+    /**
+     * 当前桶是否具备「自定义域名直链」能力（复制链接按钮显隐用）：
+     * 显式配置了 domain，或（配置了控制台账号时）自动探测到绑定的加速域名。
+     *
+     * @return true 表示直链可用
+     */
+    public boolean directLinkAvailable() {
+        return linkDomain() != null && !linkDomain().isEmpty();
     }
 
     /**
