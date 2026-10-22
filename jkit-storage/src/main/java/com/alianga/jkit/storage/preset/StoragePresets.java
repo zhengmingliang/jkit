@@ -105,6 +105,26 @@ public final class StoragePresets {
                 StorageField.required("accessKey", "存储账户名"),
                 StorageField.secret("secretKey", "存储账户密钥", true),
                 StorageField.optional("basePath", "根前缀", "/", null)));
+        // Cloudreve V4：账号密码直连（程序自动完成 OAuth2 授权链）+ /api/v4 文件 API；
+        // OAuth2 应用凭据有内置默认值（内置桌面应用），自建应用在高级里覆盖
+        platforms.add(new StoragePlatform("cloudreve", "Cloudreve", "cloudreve", "协议",
+                StorageField.required("siteUrl", "站点地址", "如 https://pan.example.com"),
+                StorageField.required("user", "用户名", "登录邮箱"),
+                StorageField.secret("password", "密码", true),
+                StorageField.optional("basePath", "起始目录", "/", "留空或 / 从网盘根目录开始"),
+                StorageField.secret("oauthRefreshToken", "刷新令牌", false,
+                        "可选，已有令牌时填它免重新授权；授权成功后自动获取"),
+                StorageField.secret("oauthCode", "授权码", false,
+                        "可选，浏览器授权后填：<站点>/session/authorize?client_id=<id>"
+                                + "&response_type=code&redirect_uri=<回调地址>，"
+                                + "把回调地址里的 code 填进来"),
+                StorageField.optional("oauthClientId", "OAuth2 Client ID", null,
+                        "可选，自建 OAuth2 应用时填（站点管理 → OAuth2 应用）；留空用内置凭据"),
+                StorageField.secret("oauthClientSecret", "OAuth2 Client Secret", false,
+                        "可选，自建 OAuth2 应用时填；留空用内置凭据"),
+                StorageField.optional("oauthRedirectUri", "OAuth2 回调地址", null,
+                        "可选，自建应用时填注册的回调地址（须与应用注册值一致）；"
+                                + "留空用内置桌面应用的 <站点>/callback/desktop")));
         platforms.add(planned("fastdfs", "FastDFS"));
         platforms.add(planned("mongo-gridfs", "MongoDB GridFS"));
         platforms.add(new StoragePlatform("go-fastdfs", "go-fastdfs", "go-fastdfs", "其他",
