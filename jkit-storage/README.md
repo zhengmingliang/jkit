@@ -67,6 +67,7 @@ SyncEngine.sync(local, "backup", oss, "backup", SyncOptions.incremental(), progr
 | 原生引擎 | 本地文件系统、阿里云 OSS、Azure Blob Storage、go-fastdfs、多吉云（`doge`） | 按平台官方协议实现（多吉云为管理 API + S3 兼容协议组合引擎，见下节） |
 | S3 兼容引擎（SigV4/SigV2 双签名、虚拟主机与路径寻址、ListObjects V1/V2） | Amazon S3、Amazon S3 V2、MinIO、华为云 OBS、腾讯云 COS、七牛云 Kodo、百度云 BOS、又拍云 USS、Google Cloud Storage、火山引擎 TOS、Cloudflare R2、金山云 KS3、京东云 OSS、天翼云 OOS、移动云 EOS、联通沃云 OSS、网易数帆 NOS、Ucloud US3、平安云 OBS、首云 OSS、IBM COS、美团云 MSS、其它任意 S3 兼容存储（`generic-s3`） | 兼容平台只需填 endpoint / bucket / AK / SK；`platforms()` 提供全部字段定义 |
 | 协议引擎 | FTP（内置纯 JDK 客户端，被动模式）、SFTP（可选 jsch）、WebDAV（PROPFIND/MKCOL/MOVE 全支持） | |
+| 139 云盘引擎 | 中国移动云盘（`cmcloud`）、中国移动云盘（全量）（`yun139`）、QQ 邮箱附件（`qqmail-attach`）、Cloudreve（`cloudreve`） | `cmcloud` 走官方 IDaaS V3（扫码授权，写操作限智能体专属目录）；`yun139` 走网页版同款新个人云 Web API（Authorization + `Mcloud-Sign`，**全目录可读可写**，支持移动 / 重命名）；`qqmail-attach` 只读 |
 | 规划中 | FastDFS、MongoDB GridFS、青云 QingStor | 平台已注册、引擎未实现，创建实例时抛 `UNSUPPORTED` 并提示（FastDFS / GridFS 的协议无统一列表能力，已在设计中单独规划） |
 
 云端 presets 的默认端点随版本内置（如 `qiniu-kodo → s3.cn-north-1.qiniucs.com`），自建 / 内网部署直接覆盖 `endpoint`。腾讯云 COS 走 S3 兼容 API 时 SecretKey 需 MD5 变换（`md5Secret=true` 已内置默认）。

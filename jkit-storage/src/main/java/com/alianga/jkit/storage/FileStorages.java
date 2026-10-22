@@ -12,6 +12,10 @@ import com.alianga.jkit.storage.engine.QqMailAttachFileStorage;
 import com.alianga.jkit.storage.engine.S3FileStorage;
 import com.alianga.jkit.storage.engine.SftpFileStorage;
 import com.alianga.jkit.storage.engine.WebDavFileStorage;
+import com.alianga.jkit.storage.engine.cmcloud.CmCloudFileStorage;
+import com.alianga.jkit.storage.engine.cmcloud.CmCloudStorageSupport;
+import com.alianga.jkit.storage.engine.cmcloud.Yun139FileStorage;
+import com.alianga.jkit.storage.engine.cmcloud.Yun139StorageSupport;
 import com.alianga.jkit.storage.preset.StoragePresets;
 
 import java.util.ArrayList;
@@ -63,9 +67,15 @@ public final class FileStorages {
         ENGINES.put("go-fastdfs", GoFastDfsFileStorage::new);
         ENGINES.put("doge", DogeFileStorage::new);
         ENGINES.put("cloudreve", CloudreveFileStorage::new);
+        ENGINES.put("cmcloud", CmCloudFileStorage::new);
+        ENGINES.put("yun139", Yun139FileStorage::new);
         for (StoragePlatform platform : StoragePresets.builtin()) {
             PLATFORMS.put(platform.id(), platform);
         }
+        // 中国移动云盘两条路线：IDaaS 扫码授权（cmcloud，写操作受专属目录约束）与
+        // 网页版同款接口（yun139，全目录可读可写），平台与字段由各自 Support 注册
+        CmCloudStorageSupport.register();
+        Yun139StorageSupport.register();
     }
 
     private FileStorages() {
