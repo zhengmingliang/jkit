@@ -745,12 +745,40 @@ public final class SyncEngine {
         return dirs;
     }
 
+    /**
+     * 判定两侧文件是否相同。
+     *
+     * <p><b>大小未知的处理</b>：{@link StorageEntry#SIZE_UNKNOWN}（{@code -1}）表示「平台没给大小」，
+     * 与「大小真的是 -1」不是一回事。Gitee / 部分 WebDAV 的列表接口不返回 size，
+     * 若把 -1 与真实大小直接比较，两侧内容完全一致的文件也会被判成 DIFFERENT——
+     * 同步就退化成全量重传（实测 91 个文件全被判为不同）。因此任一侧大小未知时，
+     * 不再一律判不同，而是退到 ETag（两侧都有值时）再决定。</p>
+     *
+     * <p>两侧大小都已知时行为与原先完全一致：先比大小，不等即不同，不额外信 ETag。
+     * 这样对象存储分片上传 ETag 不可靠的场景不受影响。</p>
+     *
+     * @param left  左条目
+     * @param right 右条目
+     * @param mode  对比策略
+     * @return true 表示视为相同（可跳过）
+     */
     private static boolean isSame(StorageEntry left, StorageEntry right, CompareMode mode) {
         if (mode == CompareMode.ALWAYS) {
             return false;
         }
-        if (left.size() != right.size()) {
-            return false;
+        boolean sizeKnown = left.size() != StorageEntry.SIZE_UNKNOWN
+                && right.size() != StorageEntry.SIZE_UNKNOWN;
+        if (sizeKnown) {
+            // 两侧大小都已知：沿用原语义——先比大小，不等即不同。
+            // 刻意不看 ETag：S3 分片上传的 ETag 不是内容 MD5，拿它判等会漏同步。
+            if (left.size() != right.size()) {
+                return false;
+            }
+        } else {
+            // 至少一侧大小未知：-1 表示「平台没给」，不是真实大小，不能拿来判不等。
+            // 此时 ETag 是唯一可信的内容指纹（Git blob SHA 这类是内容寻址，等值即内容相同）。
+            // 两侧都没有 ETag 时保守判「不同」——漏同步会丢数据，重传一遍只是多花时间。
+            return haveBothEtags(left, right) && left.etag().equalsIgnoreCase(right.etag());
         }
         if (mode == CompareMode.SIZE_AND_ETAG) {
             if (left.etag() != null && right.etag() != null) {
@@ -766,5 +794,11 @@ public final class SyncEngine {
             return true;
         }
         return true;
+    }
+
+    /** 两侧是否都提供了非空 ETag。 */
+    private static boolean haveBothEtags(StorageEntry left, StorageEntry right) {
+        return left.etag() != null && !left.etag().isBlank()
+                && right.etag() != null && !right.etag().isBlank();
     }
 }
