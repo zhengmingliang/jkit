@@ -528,14 +528,25 @@ public class CloudreveFileStorage implements FileStorage {
 
     /** 用会话令牌自动「同意」授权申请（{@code POST /session/oauth/consent}），返回授权码。 */
     private String consentForCode(String sessionAccess) {
+        String code = consentOnce(sessionAccess, OAUTH_SCOPES);
+        if (code != null) {
+            return code;
+        }
+        // 应用只勾了 Read 权限（自建应用常见）：把 Files.Write 降级为 Files.Read 重试一次
+        return consentOnce(sessionAccess,
+                OAUTH_SCOPES.replace("Files.Write", "Files.Read"));
+    }
+
+    /** 一次 consent 调用；envelope code=0 时返回授权码，否则返回 null。 */
+    private String consentOnce(String sessionAccess, String scope) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("client_id", clientId);
         body.put("response_type", "code");
-        // 回调地址必须是应用注册的值：内置桌面应用为相对路径 /callback/desktop；
-        // 自建应用注册了完整 URL 时由 consent 接口按注册值校验（相对值也能匹配注册的绝对路径）
+        // 回调地址必须是应用注册的值：内置桌面应用为相对路径 /callback/desktop（实测
+        // 绝对 URL 会 40001）；自建应用注册完整 URL 时填 oauthRedirectUri
         body.put("redirect_uri", redirectUriOf());
         body.put("state", "jkit-auth");
-        body.put("scope", OAUTH_SCOPES);
+        body.put("scope", scope);
         HttpCore.Response response = HttpCore.execute(HttpCore.configured(
                 new HttpCore.Request("POST", siteUrl + API_PREFIX + "/session/oauth/consent")
                         .header("Content-Type", "application/json")
@@ -555,9 +566,14 @@ public class CloudreveFileStorage implements FileStorage {
                 throw StorageException.authFailed(
                         "Cloudreve 授权申请失败：站点上不存在 OAuth2 应用 "
                                 + clientId + "。请在站点管理 → OAuth2 应用里新建应用"
-                                + "（回调地址填 " + siteUrl + BUILTIN_REDIRECT_URI + "），"
+                                + "（回调地址填 " + BUILTIN_REDIRECT_URI + "），"
                                 + "把 Client ID / Secret 填进连接配置的高级选项；"
                                 + "或直接用账号密码 + 自建应用的凭据");
+            }
+            if (scope.equals(OAUTH_SCOPES)
+                    && (flat.contains("Invalid scope") || flat.contains("scope"))) {
+                // 交给降级重试
+                return null;
             }
             throw StorageException.authFailed("Cloudreve 授权申请失败（consent）: " + flat);
         }
@@ -570,13 +586,17 @@ public class CloudreveFileStorage implements FileStorage {
     }
 
     /**
-     * 授权申请用的回调地址：自建应用时填用户注册的 {@code oauthRedirectUri}（须与注册值一致）；
-     * 留空用内置桌面应用的 {@code siteUrl + /callback/desktop}。
+     * 授权申请用的回调地址：用户显式配置的 {@code oauthRedirectUri} 优先（须与注册值一致）；
+     * 未配置时按应用类型给默认值——内置桌面应用注册的是<b>相对路径</b> {@code /callback/desktop}
+     * （实测绝对 URL 会 40001），自建应用常注册完整 URL（{@code siteUrl + /callback/desktop}）。
      */
     private String redirectUriOf() {
         String configured = config.getOr("oauthRedirectUri", "");
         if (!configured.isEmpty()) {
             return configured;
+        }
+        if (BUILTIN_CLIENT_ID.equals(clientId)) {
+            return BUILTIN_REDIRECT_URI;
         }
         return siteUrl + BUILTIN_REDIRECT_URI;
     }
