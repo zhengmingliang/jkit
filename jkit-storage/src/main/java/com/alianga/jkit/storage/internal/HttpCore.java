@@ -45,6 +45,7 @@ public final class HttpCore {
         private Proxy proxy;
         private int connectTimeoutMs = CONNECT_TIMEOUT_DEFAULT_MS;
         private int readTimeoutMs = READ_TIMEOUT_DEFAULT_MS;
+        private javax.net.ssl.SSLSocketFactory sslSocketFactory;
 
         /**
          * 创建请求。
@@ -111,6 +112,19 @@ public final class HttpCore {
             if (readTimeoutMs > 0) {
                 this.readTimeoutMs = readTimeoutMs;
             }
+            return this;
+        }
+
+        /**
+         * 为 HTTPS 请求指定专属 {@code SSLSocketFactory}（不影响 JVM 全局默认）。
+         * 某些网关会掐断 JDK 默认 ClientHello（如 139 云盘对 TLS 1.3 握手直接断连），
+         * 需要按请求限定 TLS 版本时用这个。
+         *
+         * @param factory SSL 工厂，null 表示用默认
+         * @return 自身
+         */
+        public Request sslSocketFactory(javax.net.ssl.SSLSocketFactory factory) {
+            this.sslSocketFactory = factory;
             return this;
         }
     }
@@ -392,6 +406,9 @@ public final class HttpCore {
         connection.setReadTimeout(request.readTimeoutMs);
         connection.setInstanceFollowRedirects(false);
         connection.setUseCaches(false);
+        if (request.sslSocketFactory != null && connection instanceof javax.net.ssl.HttpsURLConnection) {
+            ((javax.net.ssl.HttpsURLConnection) connection).setSSLSocketFactory(request.sslSocketFactory);
+        }
         setMethod(connection, request.method);
         for (Map.Entry<String, String> header : request.headers.entrySet()) {
             connection.setRequestProperty(header.getKey(), header.getValue());

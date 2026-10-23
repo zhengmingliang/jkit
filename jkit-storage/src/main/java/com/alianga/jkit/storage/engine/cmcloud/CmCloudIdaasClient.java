@@ -155,6 +155,7 @@ public final class CmCloudIdaasClient {
                     .header("traceId", traceId)
                     .header("Content-Type", "application/json")
                     .body(CmCloudIdaasJson.toJson(body).getBytes(StandardCharsets.UTF_8))
+                    .sslSocketFactory(Tls12.socketFactory())
                     .timeouts(null, TIMEOUT_MS, TIMEOUT_MS);
             String text = send(request);
             Map<String, Object> result = CmCloudIdaasJson.parseMap(text);
@@ -221,6 +222,7 @@ public final class CmCloudIdaasClient {
                     .header("traceId", traceId)
                     .header("Content-Type", "application/json")
                     .body(CmCloudIdaasJson.toJson(body).getBytes(StandardCharsets.UTF_8))
+                    .sslSocketFactory(Tls12.socketFactory())
                     .timeouts(null, TIMEOUT_MS, TIMEOUT_MS);
             String text = send(request);
             Map<String, Object> result = CmCloudIdaasJson.parseMap(text);

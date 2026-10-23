@@ -8,6 +8,7 @@ import com.alianga.jkit.storage.StoragePaths;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * 139 云盘（全量）连接配置：网页版 Authorization + 登录账号 + 可选 API 地址 / 分片大小 /
@@ -47,16 +48,18 @@ final class Yun139Config {
      *                          API 地址非 https / 分片大小越界
      */
     static Yun139Config from(StorageConfig config) {
-        String authorization = trim(config.get(Yun139Profile.AUTHORIZATION));
-        // 容错：用户常把 "Basic " 前缀一起粘进来
-        if (authorization.regionMatches(true, 0, "Basic ", 0, 6)) {
-            authorization = trim(authorization.substring(6));
-        }
+        String authorization = extractAuthorizationToken(config.get(Yun139Profile.AUTHORIZATION));
         if (authorization.isEmpty()) {
             throw StorageException.invalidConfig(
                     "139 云盘连接缺少网页版 Authorization：登录 yun.139.com 后在开发者工具"
                             + "网络面板找 hcy/file/list 请求，复制请求头 Authorization 中"
-                            + " Basic 后面的内容");
+                            + " Basic 后面的内容（连接对话框的「获取教程」有分步说明）");
+        }
+        if (!authorization.matches("[A-Za-z0-9+/=_\\-]+")) {
+            throw StorageException.invalidConfig(
+                    "Authorization 内容不完整或混入了多余字符（token 是一整段不含空格的"
+                            + "编码串）：请只复制请求头 Authorization 中 Basic 后面那段，"
+                            + "不要带引号、换行或把同一段重复粘贴两次");
         }
         String account = trim(config.get(Yun139Profile.ACCOUNT));
         String baseUrl = trim(config.get(Yun139Profile.BASE_URL));
@@ -154,5 +157,41 @@ final class Yun139Config {
 
     private static String trim(String value) {
         return value == null ? "" : value.trim();
+    }
+
+    /**
+     * 从粘贴内容提取 token。用户常把 {@code Basic} 前缀一起粘进来（大小写不定），
+     * 甚至把同一段重复贴两次（{@code Basic X-Basic X}，两段之间未必有空格）。
+     * token 本身是一整段 base64（无空白）；出现第二个 {@code basic} 即视为重复粘贴，
+     * 取第一个分段——两段粘连处的分隔连字符按 base64 长度（合法 token 长度必为 4 的
+     * 倍数）判定归属。
+     *
+     * @param raw 粘贴原文，可为 null
+     * @return token（无 Basic 前缀、无重复段）；解析不出给空串
+     */
+    static String extractAuthorizationToken(String raw) {
+        String text = trim(raw);
+        int first = indexOfIgnoreCase(text, "basic");
+        if (first >= 0) {
+            text = text.substring(first + "basic".length());
+            // 去掉紧随的空白（"Basic xxx"）
+            while (!text.isEmpty() && Character.isWhitespace(text.charAt(0))) {
+                text = text.substring(1);
+            }
+        }
+        int second = indexOfIgnoreCase(text, "basic");
+        if (second > 0) {
+            String head = text.substring(0, second).trim();
+            // 粘连分隔符（"…Qt-Basic …"）：去掉尾部 '-' 后长度是 4 的倍数才是分隔符
+            if (head.endsWith("-") && head.length() % 4 != 0 && (head.length() - 1) % 4 == 0) {
+                head = head.substring(0, head.length() - 1);
+            }
+            text = head;
+        }
+        return trim(text);
+    }
+
+    private static int indexOfIgnoreCase(String text, String token) {
+        return text.toLowerCase(Locale.ROOT).indexOf(token);
     }
 }

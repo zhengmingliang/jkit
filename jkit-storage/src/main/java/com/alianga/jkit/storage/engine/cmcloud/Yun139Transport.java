@@ -125,6 +125,7 @@ final class Yun139Transport implements AutoCloseable {
         String sign = Yun139Sign.calc(json, ts, rand);
         HttpCore.Request request = signedRequest(url, ts, rand, sign)
                 .body(json.getBytes(StandardCharsets.UTF_8))
+                .sslSocketFactory(Tls12.socketFactory())
                 .timeouts(null, CONNECT_TIMEOUT_MS, REQUEST_TIMEOUT_MS);
         HttpCore.Response response = HttpCore.execute(HttpCore.configured(request, config.raw()));
         int status = response.status();
@@ -209,6 +210,7 @@ final class Yun139Transport implements AutoCloseable {
                 .header("Origin", Yun139Profile.ORIGIN)
                 .header("Referer", Yun139Profile.REFERER)
                 .body(data)
+                .sslSocketFactory(Tls12.socketFactory())
                 .timeouts(null, CONNECT_TIMEOUT_MS, UPLOAD_TIMEOUT_MS);
         HttpCore.Response response = HttpCore.execute(request);
         int status = response.status();
@@ -230,6 +232,7 @@ final class Yun139Transport implements AutoCloseable {
      */
     InputStream openDownload(String url, long offset, String path) {
         HttpCore.Request request = new HttpCore.Request("GET", url.trim())
+                .sslSocketFactory(Tls12.socketFactory())
                 .timeouts(null, CONNECT_TIMEOUT_MS, UPLOAD_TIMEOUT_MS);
         if (offset > 0) {
             request.header("Range", "bytes=" + offset + "-");

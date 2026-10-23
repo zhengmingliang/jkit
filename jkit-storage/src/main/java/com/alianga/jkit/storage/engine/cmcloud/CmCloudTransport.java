@@ -73,6 +73,7 @@ final class CmCloudTransport implements AutoCloseable {
                 .header("strategyId", config.strategyId())
                 .header("clawUid", config.clawUid())
                 .body(json.getBytes(StandardCharsets.UTF_8))
+                .sslSocketFactory(Tls12.socketFactory())
                 .timeouts(null, CONNECT_TIMEOUT_MS, REQUEST_TIMEOUT_MS);
         HttpCore.Response response = HttpCore.execute(HttpCore.configured(request, config.raw()));
         int status = response.status();
@@ -138,6 +139,7 @@ final class CmCloudTransport implements AutoCloseable {
                 .header("Content-Type", "application/octet-stream")
                 .header("Date", GMT_DATE.format(ZonedDateTime.now(ZoneOffset.UTC)))
                 .body(data)
+                .sslSocketFactory(Tls12.socketFactory())
                 .timeouts(null, CONNECT_TIMEOUT_MS, UPLOAD_TIMEOUT_MS);
         // body(byte[]) 由 HttpCore 按数组长度设定长 Content-Length（非 chunked）
         HttpCore.Response response = HttpCore.execute(request);
@@ -209,6 +211,7 @@ final class CmCloudTransport implements AutoCloseable {
      */
     InputStream openDownload(String url, long offset, String path) {
         HttpCore.Request request = new HttpCore.Request("GET", url.trim())
+                .sslSocketFactory(Tls12.socketFactory())
                 .timeouts(null, CONNECT_TIMEOUT_MS, UPLOAD_TIMEOUT_MS);
         if (offset > 0) {
             request.header("Range", "bytes=" + offset + "-");
