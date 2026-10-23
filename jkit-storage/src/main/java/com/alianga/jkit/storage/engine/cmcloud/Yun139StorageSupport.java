@@ -64,9 +64,9 @@ public final class Yun139StorageSupport {
                                 + "复制请求头 Authorization 中 Basic 后面的内容（整段粘贴也可以，"
                                 + "自动去掉 Basic 前缀）。网页版同款接口：全目录可读可写，"
                                 + "Authorization 过期后重新抓取更新即可"),
-                StorageField.optional(Yun139Profile.ACCOUNT, "登录账号", "",
-                        "手机号或 139 邮箱账号；用于按路由策略解析个人云 API 域名"
-                                + "（已填「个人云 API 地址」时可留空）"),
+                StorageField.required(Yun139Profile.ACCOUNT, "登录账号",
+                        "手机号或 139 邮箱账号；用于按路由策略解析个人云 API 域名，"
+                                + "补取分片上传地址也要带上它"),
                 StorageField.optional(Yun139Profile.BASE_URL, "个人云 API 地址", "",
                         "形如 https://personal-kd-njs.yun.139.com/hcy；留空则按账号经"
                                 + "路由策略自动解析"),
