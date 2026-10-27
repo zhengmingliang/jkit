@@ -416,23 +416,166 @@ public final class HttpCore {
         return connection;
     }
 
+    /** method 字段（java.net.HttpURLConnection 声明）；reflective 标记普通反射是否可用。 */
+    private static volatile Field methodField;
+    private static volatile boolean methodFieldReflective;
+    /** https 壳对象（HttpsURLConnectionImpl）持有的 delegate 字段；reflective 标记同上。 */
+    private static volatile Field delegateField;
+    private static volatile boolean delegateFieldReflective;
+    /** Unsafe 兜底通道的实例缓存（jdk.unsupported 对 sun.misc 开放，JDK 8~21 均可取出）。 */
+    private static volatile Object unsafeInstance;
+
     private static void setMethod(HttpURLConnection connection, String method) throws IOException {
         try {
             connection.setRequestMethod(method);
         } catch (IOException e) {
-            // JDK 只接受标准方法，PROPFIND / MKCOL / MOVE / REPORT 等走反射设置
+            // JDK 只接受标准方法，PROPFIND / MKCOL / MOVE / REPORT 等走反射或 Unsafe 设置
             forceMethod(connection, method);
         }
     }
 
-    private static void forceMethod(HttpURLConnection connection, String method) {
-        try {
-            Field field = HttpURLConnection.class.getDeclaredField("method");
-            field.setAccessible(true);
-            field.set(connection, method);
-        } catch (ReflectiveOperationException ignore) {
-            // 反射失败会在 getResponseCode 时以 ProtocolException 暴露，这里不吞请求
+    private static void forceMethod(HttpURLConnection connection, String method) throws IOException {
+        // https 连接是"壳 + 委托"双层对象：openConnection() 返回的 HttpsURLConnectionImpl 只是壳，
+        // 真正收发请求的是其内部 DelegateHttpsURLConnection，请求行取的是委托上的 method 字段。
+        // 只写壳上的同名继承字段不会进请求行，服务器收到的仍是 setRequestMethod 打底的 GET
+        //（表现为 405 Method Not Allowed），因此必须解析委托并写到它身上。
+        Object target = connection;
+        if (connection instanceof javax.net.ssl.HttpsURLConnection) {
+            Object delegate = readDelegate(connection);
+            if (delegate == null) {
+                throw StorageException.unsupported("当前 JVM 无法解析 https 连接的内部对象，"
+                        + "WebDAV 扩展方法（PROPFIND 等）设置不上：请为 JVM 追加参数 "
+                        + "--add-opens=java.base/java.net=ALL-UNNAMED 后重试");
+            }
+            target = delegate;
         }
+        if (setByReflection(target, method)) {
+            return;
+        }
+        if (setByUnsafe(target, method)) {
+            return;
+        }
+        // 两级都失败：请求发出去只会在响应里报一句含混的 405 / Invalid HTTP method，
+        // 不如直接抛出可行动的提示。
+        throw StorageException.unsupported("当前 JVM 禁止设置非标准 HTTP 方法（WebDAV 需要 "
+                + "PROPFIND 等扩展方法）：请为 JVM 追加参数 --add-opens=java.base/java.net=ALL-UNNAMED");
+    }
+
+    /** 读 https 壳对象里的 delegate；普通 http 没有壳返回 null，探不透也返回 null。 */
+    private static Object readDelegate(HttpURLConnection connection) {
+        Field field = delegateField;
+        if (field == null) {
+            field = findField(connection.getClass(), "delegate");
+            if (field == null) {
+                return null;
+            }
+            delegateField = field;
+            try {
+                field.setAccessible(true);
+                delegateFieldReflective = true;
+            } catch (RuntimeException ignore) {
+                // JDK 16+ 强封装：sun.net.www.protocol.https 未开放，后续走 Unsafe
+            }
+        }
+        if (delegateFieldReflective) {
+            try {
+                return field.get(connection);
+            } catch (IllegalAccessException | RuntimeException ignore) {
+                delegateFieldReflective = false;
+            }
+        }
+        try {
+            Object unsafe = unsafe();
+            if (unsafe == null) {
+                return null;
+            }
+            Object offset = unsafeCall(unsafe, "objectFieldOffset", new Class<?>[]{Field.class}, field);
+            return unsafeCall(unsafe, "getObject", new Class<?>[]{Object.class, long.class},
+                    connection, offset);
+        } catch (ReflectiveOperationException | RuntimeException ignore) {
+            return null;
+        }
+    }
+
+    private static boolean setByReflection(Object target, String method) {
+        Field field = methodField;
+        if (field == null) {
+            try {
+                field = HttpURLConnection.class.getDeclaredField("method");
+                field.setAccessible(true);
+                methodFieldReflective = true;
+            } catch (ReflectiveOperationException | RuntimeException ignore) {
+                // JDK 16+ 强封装下 InaccessibleObjectException 是 RuntimeException，一并接住
+                methodFieldReflective = false;
+            }
+            methodField = field;
+        }
+        if (field == null || !methodFieldReflective) {
+            return false;
+        }
+        try {
+            field.set(target, method);
+            return method.equals(field.get(target));
+        } catch (IllegalAccessException | RuntimeException ignore) {
+            return false;
+        }
+    }
+
+    private static boolean setByUnsafe(Object target, String method) {
+        try {
+            Object unsafe = unsafe();
+            if (unsafe == null) {
+                return false;
+            }
+            Field field = methodField;
+            if (field == null) {
+                field = HttpURLConnection.class.getDeclaredField("method");
+                methodField = field;
+            }
+            Object offset = unsafeCall(unsafe, "objectFieldOffset", new Class<?>[]{Field.class}, field);
+            unsafeCall(unsafe, "putObject", new Class<?>[]{Object.class, long.class, Object.class},
+                    target, offset, method);
+            Object written = unsafeCall(unsafe, "getObject",
+                    new Class<?>[]{Object.class, long.class}, target, offset);
+            return method.equals(written);
+        } catch (ReflectiveOperationException | RuntimeException ignore) {
+            return false;
+        }
+    }
+
+    /** 取 sun.misc.Unsafe 实例；取不到（极端 JVM / 安全策略）返回 null。 */
+    private static Object unsafe() {
+        Object cached = unsafeInstance;
+        if (cached != null) {
+            return cached;
+        }
+        try {
+            Class<?> type = Class.forName("sun.misc.Unsafe");
+            Field theUnsafe = type.getDeclaredField("theUnsafe");
+            theUnsafe.setAccessible(true);
+            Object instance = theUnsafe.get(null);
+            unsafeInstance = instance;
+            return instance;
+        } catch (ReflectiveOperationException | RuntimeException ignore) {
+            return null;
+        }
+    }
+
+    private static Object unsafeCall(Object unsafe, String action, Class<?>[] types, Object... args)
+            throws ReflectiveOperationException {
+        return Class.forName("sun.misc.Unsafe").getMethod(action, types).invoke(unsafe, args);
+    }
+
+    /** 沿继承链找字段（delegate 在壳类或其父类上声明，不同 JDK 子类不同）。 */
+    private static Field findField(Class<?> start, String name) {
+        for (Class<?> type = start; type != null && type != Object.class; type = type.getSuperclass()) {
+            try {
+                return type.getDeclaredField(name);
+            } catch (NoSuchFieldException ignore) {
+                // 继续向父类找
+            }
+        }
+        return null;
     }
 
     private static void writeBody(HttpURLConnection connection, Request request) throws IOException {
