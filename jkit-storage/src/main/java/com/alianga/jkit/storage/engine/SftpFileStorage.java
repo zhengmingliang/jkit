@@ -28,9 +28,12 @@ import java.util.Vector;
  * （同步引擎的多并发会在此排队，正确性优先）；
  * 缺依赖时构造成功、首次操作抛 {@link StorageErrorCode#UNSUPPORTED} 并给出明确提示。
  *
- * <p>连接：密码与私钥二选一（私钥可带口令）；StrictHostKeyChecking 默认关闭，
- * 开启后按 yes 交给 JSch 校验 known_hosts。Method / Field 反射句柄按名称缓存在
- * HashMap 中，列表条目逐个取 getFilename / getAttrs 时不再做反射查找。</p>
+ * <p>连接：密码与私钥二选一（私钥可带口令）；StrictHostKeyChecking 默认关闭
+ * （向后兼容，<b>存在中间人攻击风险</b>），开启后按 yes 交给 JSch 校验 known_hosts。
+ * 生产部署可通过 {@code -Djkit.storage.sftp.defaultStrictHostKeyChecking=true}
+ * 在 JVM 级别统一强制开启，或在每个 {@code StorageConfig} 显式把
+ * {@code strictHostKeyChecking} 设为 {@code true}。Method / Field 反射句柄按名称
+ * 缓存在 HashMap 中，列表条目逐个取 getFilename / getAttrs 时不再做反射查找。</p>
  *
  * <p>并发：单 Session 上维护一个按需扩展的 ChannelSftp 池（{@code channelPool}
  * 配置，默认 4），引擎操作各自借还通道，互不排队；JSch 连接级异常会把当前
@@ -48,8 +51,9 @@ import java.util.Vector;
  * <p>配置键：host（必填）、port（默认 22）、user（必填）、password、privateKey、
  * privateKeyPassphrase、basePath（起始目录，默认 {@code /} 即服务器根目录；
  * 留空同样从 {@code /} 开始，登录家目录请填 {@code /home/用户名}）、
- * strictHostKeyChecking（默认 false）。存储内相对路径统一映射到该根之下的
- * <b>服务器绝对路径</b>，{@link #absolutePathOf} 可直接取到。</p>
+ * strictHostKeyChecking（默认 false；<b>生产环境应开启</b>；未显式配置时
+ * 系统属性 {@code jkit.storage.sftp.defaultStrictHostKeyChecking=true} 可全局默认开启）。
+ * 存储内相对路径统一映射到该根之下的 <b>服务器绝对路径</b>，{@link #absolutePathOf} 可直接取到。</p>
  *
  * @author 郑明亮
  */
@@ -72,10 +76,25 @@ public class SftpFileStorage implements FileStorage {
     private volatile JschBridge bridge;
 
     /**
+     * 系统属性 {@code jkit.storage.sftp.defaultStrictHostKeyChecking}：当为 {@code true}
+     * 时，若 {@code StorageConfig} 未显式提供 {@code strictHostKeyChecking}，则默认
+     * 开启严格主机密钥校验。用于运维在部署级别统一强制开启（而不必逐配置修改）。
+     *
+     * <p>生产环境应优先开启此选项或显式把 {@code strictHostKeyChecking} 设为
+     * {@code true}：关闭校验时任何能劫持 DNS / 路由的中间人都能拿到明文密码与传输文件。</p>
+     */
+    static final String SYS_PROP_DEFAULT_STRICT_HOST_KEY_CHECKING =
+            "jkit.storage.sftp.defaultStrictHostKeyChecking";
+
+    /**
      * 由配置创建（配置键：host / port / user / password / privateKey /
      * privateKeyPassphrase / basePath / strictHostKeyChecking / channelPool）。
      * 缺 host / user 直接抛 {@link StorageErrorCode#INVALID_CONFIG}；
      * 缺 jsch 依赖不会在这里暴露。
+     *
+     * <p>{@code strictHostKeyChecking} 默认 false（向后兼容）；当系统属性
+     * {@code jkit.storage.sftp.defaultStrictHostKeyChecking=true} 时，未显式配置该项
+     * 的连接默认改为 true（生产部署可在 JVM 启动参数统一强制开启）。</p>
      *
      * @param config 连接配置
      */
@@ -87,8 +106,28 @@ public class SftpFileStorage implements FileStorage {
         this.privateKey = blankToNull(config.get("privateKey"));
         this.privateKeyPassphrase = blankToNull(config.get("privateKeyPassphrase"));
         this.root = rootOf(config.getOr("basePath", "/"));
-        this.strictHostKeyChecking = config.boolOr("strictHostKeyChecking", false);
+        this.strictHostKeyChecking = resolveStrictHostKeyChecking(config);
         this.poolSize = Math.max(1, Math.min(16, config.intOr("channelPool", 4)));
+    }
+
+    /**
+     * 解析 strictHostKeyChecking：显式配置 &gt; 系统属性 &gt; 默认 false。
+     *
+     * <p>默认 false 是历史行为（向后兼容）；生产部署可通过
+     * {@code -Djkit.storage.sftp.defaultStrictHostKeyChecking=true} 在 JVM 级别
+     * 统一强制开启。</p>
+     *
+     * @param config 连接配置
+     * @return 是否开启严格主机密钥校验
+     */
+    private static boolean resolveStrictHostKeyChecking(StorageConfig config) {
+        String explicit = config.get("strictHostKeyChecking");
+        if (explicit != null && !explicit.trim().isEmpty()) {
+            return "true".equalsIgnoreCase(explicit.trim())
+                    || "1".equals(explicit.trim())
+                    || "yes".equalsIgnoreCase(explicit.trim());
+        }
+        return Boolean.getBoolean(SYS_PROP_DEFAULT_STRICT_HOST_KEY_CHECKING);
     }
 
     @Override
