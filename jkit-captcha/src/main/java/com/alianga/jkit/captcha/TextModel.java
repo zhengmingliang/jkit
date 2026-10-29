@@ -20,8 +20,12 @@ import java.util.List;
  * ddddocr 的两个 ONNX 模型（Apache-2.0）。高度缩到 64，灰度后做 CTC 解码。
  * {@code common_old.onnx} 偏小写，大小写交给 {@link CaseAlign}。
  * {@code common.onnx} 用在窄幅蓝字上，大小写留在模型结果里。
+ *
+ * <p>实现 {@link AutoCloseable}：OrtSession / OrtEnvironment 持有的是 native 内存指针，
+ * 没有显式 close 就只能等 GC Finalizer 释放，长寿命服务里会积累 native memory 压力。
+ * 使用方（如 {@link CaptchaRecognizer}）应在 shutdown 时调用 {@link #close()}。</p>
  */
-final class TextModel {
+final class TextModel implements AutoCloseable {
     private static final int TARGET_HEIGHT = 64;
     private static final int LANCZOS_A = 3;
 
@@ -144,11 +148,12 @@ final class TextModel {
             byte[] model = readResource("ocr/common_old.onnx");
             charset = readCharset(readResource("ocr/charset.txt"));
             environment = OrtEnvironment.getEnvironment(OrtLoggingLevel.ORT_LOGGING_LEVEL_ERROR);
-            OrtSession.SessionOptions options = new OrtSession.SessionOptions();
-            options.setIntraOpNumThreads(1);
-            session = environment.createSession(model, options);
+            // 用 try-with-resources 确保 createSession 抛异常时 SessionOptions 也被关闭。
+            try (OrtSession.SessionOptions options = new OrtSession.SessionOptions()) {
+                options.setIntraOpNumThreads(1);
+                session = environment.createSession(model, options);
+            }
             inputName = session.getInputNames().iterator().next();
-            options.close();
             return true;
         } catch (OrtException ex) {
             failed = true;
@@ -166,11 +171,12 @@ final class TextModel {
             if (environment == null) {
                 environment = OrtEnvironment.getEnvironment(OrtLoggingLevel.ORT_LOGGING_LEVEL_ERROR);
             }
-            OrtSession.SessionOptions options = new OrtSession.SessionOptions();
-            options.setIntraOpNumThreads(1);
-            betaSession = environment.createSession(model, options);
+            // 用 try-with-resources 确保 createSession 抛异常时 SessionOptions 也被关闭。
+            try (OrtSession.SessionOptions options = new OrtSession.SessionOptions()) {
+                options.setIntraOpNumThreads(1);
+                betaSession = environment.createSession(model, options);
+            }
             betaInputName = betaSession.getInputNames().iterator().next();
-            options.close();
             return true;
         } catch (OrtException ex) {
             betaFailed = true;
@@ -178,6 +184,38 @@ final class TextModel {
         } catch (IOException ex) {
             betaFailed = true;
             return false;
+        }
+    }
+
+    /**
+     * 释放 ONNX Runtime 的 native 资源。多次调用幂等；调用后本实例不再可用。
+     *
+     * <p>OrtSession / OrtEnvironment 持有 C/C++ 堆指针，不 close 只能等 GC Finalizer，
+     * 在长寿命服务（如常驻识别服务）里会积累 native memory 压力。</p>
+     */
+    @Override
+    public void close() {
+        synchronized (lock) {
+            closeQuietly(session);
+            session = null;
+            closeQuietly(betaSession);
+            betaSession = null;
+            // OrtEnvironment 是 JVM 级单例（getEnvironment 返回共享实例），
+            // 这里不关闭它以免影响同 JVM 内其它使用 ONNX Runtime 的组件。
+            environment = null;
+            failed = true;
+            betaFailed = true;
+        }
+    }
+
+    private static void closeQuietly(OrtSession s) {
+        if (s == null) {
+            return;
+        }
+        try {
+            s.close();
+        } catch (Exception ignore) {
+            // close 失败不影响上层；native 资源在 JVM 退出时统一释放。
         }
     }
 

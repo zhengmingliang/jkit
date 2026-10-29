@@ -19,8 +19,12 @@ import java.util.Locale;
  * 四字和三目算式也用这套字形。对不上再用 {@code common.onnx}：四帧按字位投票读常用汉字，五帧读字母和数字，
  * 算式先盖住右侧再计算。浅色大图先拉开对比度，整串都是字母时按大写输出。
  * 需要替换整条链路时，实现 {@link CaptchaSolver} 并 {@link #register(CaptchaSolver)}。
+ *
+ * <p>本类实现 {@link AutoCloseable}：{@link TextModel} 内部持有 ONNX Runtime 的
+ * OrtSession（native 内存指针），不关闭会随 GC Finalizer 延迟释放，在长寿命服务里
+ * 会积累 native memory 压力。使用方应在 shutdown 时调用 {@link #close()}。</p>
  */
-public final class CaptchaRecognizer {
+public final class CaptchaRecognizer implements AutoCloseable {
     private static final int PASTEL_MIN_WIDTH = 200;
     private static final int PASTEL_MIN_HEIGHT = 80;
     private static final int PASTEL_MIN_INK = 100;
@@ -465,5 +469,16 @@ public final class CaptchaRecognizer {
             }
         }
         return best;
+    }
+
+    /**
+     * 释放 {@link TextModel} 持有的 ONNX Runtime native 资源。
+     *
+     * <p>多次调用幂等。调用后本识别器仍可使用（再次识别时 {@link TextModel} 会重新加载
+     * 模型），但 native 内存被释放；如果不关闭，长寿命服务里 native memory 会持续累积。</p>
+     */
+    @Override
+    public void close() {
+        textModel.close();
     }
 }
