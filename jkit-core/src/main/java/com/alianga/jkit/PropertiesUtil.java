@@ -6,15 +6,17 @@ import com.alianga.jkit.log.Log;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Created by 郑明亮 on 2017/11/26 20:57.
@@ -52,12 +54,11 @@ public final class PropertiesUtil {
         throw new UnsupportedOperationException("you cannot instant me");
     }
 
-    private static final HashMap<String, Properties> propertiesMap = new HashMap<>();
-
     /**
-     * 对加载的配置文件计数
+     * 已加载配置文件缓存。{@link ConcurrentHashMap} 保证 {@code load*} 与 {@code get*} 并发安全；
+     * 读多写少场景下 {@link ConcurrentHashMap} 性能优于 {@code Collections.synchronizedMap}。
      */
-    private static int propertySize;
+    private static final ConcurrentHashMap<String, Properties> propertiesMap = new ConcurrentHashMap<>();
 
     /**
      * 通过文件名加载classpath下的配置文件
@@ -88,9 +89,8 @@ public final class PropertiesUtil {
                     return false;
                 }
                 fill(properties, resourceAsStream, fileName);
-                flag = true;
                 propertiesMap.put(fileName, properties);
-                propertySize = propertiesMap.keySet().size();
+                flag = true;
             } catch (IOException e) {
                 log.warn("从classpath下未找到执行配置文件，开始通过绝对路径寻找配置文件", e);
                 flag = loadFromPath(fileName);
@@ -129,7 +129,6 @@ public final class PropertiesUtil {
                 fill(properties, fis, path);
                 propertiesMap.put(path, properties);
                 flag = true;
-                propertySize = propertiesMap.size();
             } catch (IOException e) {
                 log.warn("通过绝对路径未找到配置文件", e);
             }
@@ -376,9 +375,18 @@ public final class PropertiesUtil {
                                      String comment,
                                      Map.Entry<String, Properties> propertiesEntry,
                                      String... filePath) throws FileNotFoundException {
-        Properties properties = new SafeProperties(); //采用自定义Properties，读取配置文件时，记录注释等信息
+        // 采用自定义 SafeProperties，读取配置文件时记录注释信息。
+        // 使用独立的局部变量并在读取完成后才打开输出流，避免文件被提前截断。
+        Properties properties = new SafeProperties();
         String fileName = propertiesEntry.getKey();
-        String path = PropertiesUtil.class.getResource(File.separator + fileName).getPath();
+        String path;
+        java.net.URL resourceUrl = PropertiesUtil.class.getResource(File.separator + fileName);
+        if (resourceUrl != null) {
+            path = resourceUrl.getPath();
+        } else {
+            // classpath 下找不到时（例如 fileName 是绝对路径），直接尝试按文件名取 File
+            path = fileName;
+        }
         if (filePath != null && filePath.length > 0) {
             path = filePath[0];
         }
@@ -392,13 +400,53 @@ public final class PropertiesUtil {
             }
         }
 
-        try (FileInputStream fis = new FileInputStream(file);
-             FileOutputStream fos = new FileOutputStream(file)) {
+        // 先读完全部内容再写回，避免在同一 try 块里打开同一文件的 fis+fos（FileOutputStream
+        // 构造时会立即把文件截断为 0 字节，导致 properties.load(fis) 读到空数据后丢失原有配置）。
+        try (FileInputStream fis = new FileInputStream(file)) {
             properties.load(fis);
-            properties.setProperty(key, value);
-            properties.store(fos, comment);
         } catch (IOException e) {
-            log.error("更新配置文件发生异常", e);
+            log.error("读取配置文件发生异常", e);
+            throw new FileNotFoundException("读取配置文件发生异常：" + e.getMessage());
+        }
+        properties.setProperty(key, value);
+
+        // 原子写回：先写同目录临时文件，再 move 覆盖目标，避免进程崩溃时原文件被写坏
+        // 造成数据丢失。
+        File tmp = new File(file.getParentFile(), file.getName() + ".jkit-tmp");
+        try (OutputStream out = Files.newOutputStream(tmp.toPath())) {
+            properties.store(out, comment);
+        } catch (IOException e) {
+            log.error("写回配置文件发生异常", e);
+            try {
+                Files.deleteIfExists(tmp.toPath());
+            } catch (IOException cleanupFailed) {
+                // 清理失败保留 tmp，便于人工恢复
+                log.warn("清理临时文件失败：{}", tmp.getAbsolutePath());
+            }
+            return;
+        }
+        try {
+            Files.move(tmp.toPath(), file.toPath(),
+                    StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        } catch (IOException atomicMoveFailed) {
+            // ATOMIC_MOVE 在某些文件系统（如 NFS）不支持，回退到普通 move
+            try {
+                Files.move(tmp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING);
+            } catch (IOException e) {
+                log.error("写回配置文件发生异常", e);
+                try {
+                    Files.deleteIfExists(tmp.toPath());
+                } catch (IOException ignore) {
+                    // 清理失败保留 tmp，便于人工恢复
+                }
+            }
+        } catch (RuntimeException e) {
+            log.error("写回配置文件发生未知异常", e);
+            try {
+                Files.deleteIfExists(tmp.toPath());
+            } catch (IOException ignore) {
+                // 清理失败保留 tmp，便于人工恢复
+            }
         }
     }
 
@@ -412,12 +460,7 @@ public final class PropertiesUtil {
     public static Set<String> getAllKeys() {
         Set<String> stringPropertyNames = new HashSet<>();
         for (Properties properties : propertiesMap.values()) {
-            if (propertySize == 1) {
-                return properties.stringPropertyNames();
-            } else {
-                stringPropertyNames.addAll(properties.stringPropertyNames());
-            }
-
+            stringPropertyNames.addAll(properties.stringPropertyNames());
         }
         return stringPropertyNames;
     }
