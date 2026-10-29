@@ -41,7 +41,22 @@ public final class SqlAutoLock {
     }
 
     /**
+     * PG 轮询间隔毫秒（{@link #acquire} 在 PG 分支用 {@code pg_try_advisory_lock}
+     * 立即返回 + 客户端轮询实现 timeout 语义）。
+     */
+    private static final long PG_POLL_INTERVAL_MS = 200L;
+
+    /**
      * 在连接上取锁。
+     *
+     * <p>MySQL 分支：{@code SELECT GET_LOCK(key, timeoutSeconds)}，服务器端超时。</p>
+     *
+     * <p>PostgreSQL 分支：原实现用 {@code pg_advisory_lock(hashtext(...))} 是无限等待，
+     * 完全忽略 {@code timeoutSeconds}，导致锁被异常持有的实例上启动线程会永久阻塞，
+     * 调用方拿到的 {@code false} 永远不会触发。本实现改用
+     * {@code pg_try_advisory_lock(hashtext(...))}（立即返回 true/false）+ 客户端轮询，
+     * 在 {@code timeoutSeconds} 内最多尝试 {@code timeoutSeconds * 1000 / PG_POLL_INTERVAL_MS}
+     * 次；任何一次成功即返回 true，超时返回 false。</p>
      *
      * @param connection 连接（应与后续执行 DDL 的连接相同）
      * @param dialect 方言
@@ -52,14 +67,36 @@ public final class SqlAutoLock {
         if (connection == null || !supports(dialect)) {
             return false;
         }
-        String sql = dialect == SqlDialect.MYSQL
-                ? "SELECT GET_LOCK('" + LOCK_KEY + "', " + timeoutSeconds + ")"
-                : "SELECT pg_advisory_lock(hashtext('" + LOCK_KEY + "'))";
-        try {
-            return queryOne(connection, sql);
-        } catch (SQLException e) {
-            LOG.warn("acquire metadata lock failed: {}", e.getMessage());
-            return false;
+        if (dialect == SqlDialect.MYSQL) {
+            String sql = "SELECT GET_LOCK('" + LOCK_KEY + "', " + timeoutSeconds + ")";
+            try {
+                return queryOne(connection, sql);
+            } catch (SQLException e) {
+                LOG.warn("acquire metadata lock failed: {}", e.getMessage());
+                return false;
+            }
+        }
+        // PostgreSQL：pg_try_advisory_lock 立即返回，客户端轮询实现 timeout
+        String sql = "SELECT pg_try_advisory_lock(hashtext('" + LOCK_KEY + "'))";
+        long deadline = System.currentTimeMillis() + Math.max(0, timeoutSeconds) * 1000L;
+        while (true) {
+            try {
+                if (queryOne(connection, sql)) {
+                    return true;
+                }
+            } catch (SQLException e) {
+                LOG.warn("acquire metadata lock failed: {}", e.getMessage());
+                return false;
+            }
+            if (System.currentTimeMillis() >= deadline) {
+                return false;
+            }
+            try {
+                Thread.sleep(PG_POLL_INTERVAL_MS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
         }
     }
 
