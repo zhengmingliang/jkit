@@ -196,14 +196,8 @@ public class FileUtils {
      * @param fileName :压缩后文件的名称
      * @return 生成的压缩文件名称；无法压缩时返回空字符串
      */
-    @SuppressWarnings("resource")
     public static String fileToZip(String sourceFilePath, String zipFilePath, String fileName) {
-        File sourceFile = new File(sourceFilePath);
-        FileInputStream fis = null;
-
-        BufferedInputStream bis = null;
-        FileOutputStream fos = null;
-        ZipOutputStream zos = null;
+        File sourceFile = new File(sourceFilePath);   // 与原实现一致：sourceFilePath=null 时抛 NPE
         String zipName = "";
 
         if (!sourceFile.exists()) {
@@ -218,35 +212,33 @@ public class FileUtils {
                     if (null == sourceFiles || sourceFiles.length < 1) {
                         log.debug("待压缩的文件目录：{} 里面不存在文件，无需压缩.", sourceFilePath);
                     } else {
-                        fos = new FileOutputStream(zipFile);
-                        zos = new ZipOutputStream(new BufferedOutputStream(fos));
-                        byte[] bufs = new byte[DEFAULT_BUFFER_SIZE];
-                        for (int i = 0; i < sourceFiles.length; i++) {
-                            //创建ZIP实体，并添加进压缩包
-                            ZipEntry zipEntry = new ZipEntry(sourceFiles[i].getName());
-                            zos.putNextEntry(zipEntry);
-                            //读取待压缩的文件并写进压缩包里
-                            fis = new FileInputStream(sourceFiles[i]);
-                            //fixme 这里需要对流关闭一下，不然可能会因为文件过大，导致内存溢出
-                            bis = new BufferedInputStream(fis, DEFAULT_BUFFER_SIZE);
-                            int read = 0;
-                            while ((read = bis.read(bufs, 0, DEFAULT_BUFFER_SIZE)) != -1) {
-                                zos.write(bufs, 0, read);
+                        try (FileOutputStream fos = new FileOutputStream(zipFile);
+                             ZipOutputStream zos = new ZipOutputStream(new BufferedOutputStream(fos))) {
+                            byte[] bufs = new byte[DEFAULT_BUFFER_SIZE];
+                            for (File source : sourceFiles) {
+                                if (source == null || !source.isFile()) {
+                                    continue;
+                                }
+                                zos.putNextEntry(new ZipEntry(source.getName()));
+                                // 每个文件一条流，循环内关闭（修复原"fis/bis 引用被覆盖只关最后一个"的泄漏）；
+                                // 读完必须 closeEntry，否则 ZipOutputStream 会把后续 entry 当成错位的 zip 结构。
+                                try (FileInputStream fis = new FileInputStream(source);
+                                     BufferedInputStream bis = new BufferedInputStream(fis, DEFAULT_BUFFER_SIZE)) {
+                                    int read;
+                                    while ((read = bis.read(bufs, 0, DEFAULT_BUFFER_SIZE)) != -1) {
+                                        zos.write(bufs, 0, read);
+                                    }
+                                }
+                                zos.closeEntry();
                             }
+                            zos.finish();
                         }
                     }
                 }
+                // 与原实现一致：无论是否真的执行了压缩，只要走到这里就返回 zipFile.getName()。
                 zipName = zipFile.getName();
-            } catch (FileNotFoundException e) {
-                e.printStackTrace();
             } catch (IOException e) {
-                e.printStackTrace();
-            } finally {
-                //关闭流
-                IOUtils.close(zos);
-                IOUtils.close(bis);
-                IOUtils.close(fis);
-                IOUtils.close(fos);
+                log.error("打包文件为zip时发生异常", e);
             }
         }
         return zipName;
