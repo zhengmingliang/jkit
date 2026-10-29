@@ -81,7 +81,7 @@ public final class SqlAutoDialects {
      * <p>产品名通常是<b>展示名</b>而非短名：{@code "PostgreSQL"}、{@code "Microsoft SQL Server"}、
      * {@code "KingbaseES"}、{@code "OceanBase"}、{@code "Oracle"}、{@code "H2"} 等。与
      * {@link SqlDialect#fromName(String)}（只认精确短名）不同，这里会先做归一化
-     * （小写、去空格与常见后缀），再做包含匹配，避免把 {@code "KingbaseES"} 这类合法产品名
+     * （小写、折叠空白与下划线），再做包含匹配，避免把 {@code "KingbaseES"} 这类合法产品名
      * 误判成 MySQL 后生成 {@code AUTO_INCREMENT}/{@code ENGINE=InnoDB} 等 MySQL 专有 DDL。</p>
      *
      * <p>无法识别时按历史行为回落 {@link SqlDialect#MYSQL}。需要"无法识别即失败"的调用方请用
@@ -121,8 +121,10 @@ public final class SqlAutoDialects {
         }
         // 归一化：小写 + 折叠连续空白，便于 "Microsoft  SQL Server" 之类也能命中。
         String raw = product.trim().toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
-        // 紧凑形式：去掉空格，处理 "kingbase es" / "open gauss" / "sql server" 等写法差异。
-        String compact = raw.replace(" ", "");
+        // 紧凑形式：去掉空格与下划线，处理 "kingbase es" / "open gauss" /
+        // "oceanbase_oracle" / "sql_server" 等写法差异。下划线必须一并折叠，
+        // 否则 compact.contains("oceanbaseoracle") 这类分支永远匹配不到。
+        String compact = raw.replace(" ", "").replace("_", "");
 
         if (compact.contains("dameng") || raw.contains("dm dbms") || raw.contains("dm database")) {
             return SqlDialect.DAMENG;

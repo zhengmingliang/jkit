@@ -74,6 +74,18 @@ public class SqlAutoDialectsTest {
     @Test
     public void fromProductOceanBaseOracleIsOracle() {
         assertEquals(SqlDialect.ORACLE, SqlAutoDialects.fromProduct("OceanBase_Oracle"));
+        // 归一化需折叠下划线与空格：这些形态必须走 Oracle 专有分支而不是
+        // 被通用 oracle 分支或 MYSQL 分支的 oceanbase 抢走（strict 下同样成立）
+        assertEquals(SqlDialect.ORACLE, SqlAutoDialects.fromProductStrict("OceanBase Oracle"));
+        assertEquals(SqlDialect.ORACLE, SqlAutoDialects.fromProductStrict("oceanbase_oracle"));
+        assertEquals(SqlDialect.ORACLE, SqlAutoDialects.fromProductStrict("OceanBase_Oracle_4.2"));
+    }
+
+    @Test
+    public void fromProductNormalizesUnderscores() {
+        assertEquals(SqlDialect.SQLSERVER, SqlAutoDialects.fromProduct("sql_server"));
+        assertEquals(SqlDialect.POSTGRES, SqlAutoDialects.fromProduct("open_gauss"));
+        assertEquals(SqlDialect.MYSQL, SqlAutoDialects.fromProduct("great_sql"));
     }
 
     @Test
