@@ -949,9 +949,10 @@ public class EncryptUtils {
             mac.init(keySpec);
             bs = mac.doFinal(message.getBytes());
         } catch (NoSuchAlgorithmException e) {
-            e.printStackTrace();
+            // JVM 必带 SHA-256，这里理论不可达；log.error 仅兜底可观测性
+            log.error("sha256_HMAC 失败：算法不可用", e);
         } catch (InvalidKeyException e) {
-            e.printStackTrace();
+            log.error("sha256_HMAC 失败：密钥非法", e);
         }
         return ByteUtils.toHexStringLower(bs);
     }

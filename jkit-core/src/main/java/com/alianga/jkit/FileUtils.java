@@ -394,11 +394,11 @@ public class FileUtils {
                 sb = null;
             }
         } catch (FileNotFoundException e) {
-            e.printStackTrace();
+            log.error("readLargeFile 失败：{}", file.getAbsolutePath(), e);
         } catch (UnsupportedEncodingException e) {
-            e.printStackTrace();
+            log.error("readLargeFile 编码不支持：{}", encoding, e);
         } catch (IOException e) {
-            e.printStackTrace();
+            log.error("readLargeFile 失败：{}", file.getAbsolutePath(), e);
         }
     }
 
@@ -421,11 +421,11 @@ public class FileUtils {
                 callback.apply(line);
             }
         } catch (FileNotFoundException e) {
-            e.printStackTrace();
+            log.error("readLargeFileByLine 失败：{}", file.getAbsolutePath(), e);
         } catch (UnsupportedEncodingException e) {
-            e.printStackTrace();
+            log.error("readLargeFileByLine 编码不支持：{}", encoding, e);
         } catch (IOException e) {
-            e.printStackTrace();
+            log.error("readLargeFileByLine 失败：{}", file.getAbsolutePath(), e);
         }
     }
 
@@ -446,11 +446,11 @@ public class FileUtils {
                 callback.apply(iterator.next());
             }
         } catch (FileNotFoundException e) {
-            e.printStackTrace();
+            log.error("readLargeFileByLineNIO 失败：{}", path, e);
         } catch (UnsupportedEncodingException e) {
-            e.printStackTrace();
+            log.error("readLargeFileByLineNIO 编码不支持：{}", encoding, e);
         } catch (IOException e) {
-            e.printStackTrace();
+            log.error("readLargeFileByLineNIO 失败：{}", path, e);
         }
     }
 
@@ -533,9 +533,9 @@ public class FileUtils {
             }
 
         } catch (FileNotFoundException e) {
-            e.printStackTrace();
+            log.error("cutFile 失败：{}", sourceFileName, e);
         } catch (IOException e) {
-            e.printStackTrace();
+            log.error("cutFile 失败：{}", sourceFileName, e);
         } finally {
             IOUtils.flush(bos);
             IOUtils.close(bos);
@@ -607,9 +607,9 @@ public class FileUtils {
             }
 
         } catch (FileNotFoundException e) {
-            e.printStackTrace();
+            log.error("cutFile 失败：{}", sourceFileName, e);
         } catch (IOException e) {
-            e.printStackTrace();
+            log.error("cutFile 失败：{}", sourceFileName, e);
         } finally {
             IOUtils.flush(writer);
             IOUtils.close(writer);
@@ -876,7 +876,7 @@ public class FileUtils {
         try {
             fileName = URLDecoder.decode(url.substring(url.lastIndexOf('/') + 1), "utf-8");
         } catch (Exception e) {
-            e.printStackTrace();
+            log.error("getFileNameFromUrl URL 解码失败：{}", url, e);
         }
         log.info("从URL中截取到的文件名：{}", fileName);
         return fileName;
