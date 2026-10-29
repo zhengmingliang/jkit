@@ -260,7 +260,19 @@ public final class SqlAuto {
                 plan = plan(types, connection, dialect, opt);
             }
             writeExport(plan, opt);
-            List<SqlAutoChange> applied = SqlAutoExecutor.execute(connection, plan, opt);
+            SqlAutoExecutor.SqlAutoExecuteResult result =
+                    SqlAutoExecutor.executeDetailed(connection, plan, opt);
+            List<SqlAutoChange> applied = result.succeeded;
+            // failFast=false 且存在失败时显式告警：history 表只记录成功的，失败项被静默忽略，
+            // 运维查 history 会误以为"模式同步完整"，必须至少留下 WARN 痕迹。
+            if (result.hasFailures()) {
+                LOG.warn("sql-auto executed with {} succeeded, {} failed (failFast=false, failures skipped)",
+                        result.succeeded.size(), result.failed.size());
+                for (int i = 0; i < result.failed.size(); i++) {
+                    SqlAutoChange f = result.failed.get(i);
+                    LOG.warn("  failed: kind={} table={} sql={}", f.kind(), f.table(), f.sql());
+                }
+            }
             if (opt.history()) {
                 SqlAutoHistory.record(connection, dialect, opt.historyTable(), opt.mode().name(), applied);
             }
