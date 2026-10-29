@@ -375,9 +375,6 @@ public final class PropertiesUtil {
                                      String comment,
                                      Map.Entry<String, Properties> propertiesEntry,
                                      String... filePath) throws FileNotFoundException {
-        // 采用自定义 SafeProperties，读取配置文件时记录注释信息。
-        // 使用独立的局部变量并在读取完成后才打开输出流，避免文件被提前截断。
-        Properties properties = new SafeProperties();
         String fileName = propertiesEntry.getKey();
         String path;
         java.net.URL resourceUrl = PropertiesUtil.class.getResource(File.separator + fileName);
@@ -400,52 +397,89 @@ public final class PropertiesUtil {
             }
         }
 
-        // 先读完全部内容再写回，避免在同一 try 块里打开同一文件的 fis+fos（FileOutputStream
-        // 构造时会立即把文件截断为 0 字节，导致 properties.load(fis) 读到空数据后丢失原有配置）。
-        try (FileInputStream fis = new FileInputStream(file)) {
-            properties.load(fis);
-        } catch (IOException e) {
-            log.error("读取配置文件发生异常", e);
-            throw new FileNotFoundException("读取配置文件发生异常：" + e.getMessage());
-        }
-        properties.setProperty(key, value);
+        // 先读完全部内容再写回（读取、修改、落盘在 rewriteFile 内按文件粒度串行）
+        rewriteFile(file, key, value, comment);
+    }
 
-        // 原子写回：先写同目录临时文件，再 move 覆盖目标，避免进程崩溃时原文件被写坏
-        // 造成数据丢失。
-        File tmp = new File(file.getParentFile(), file.getName() + ".jkit-tmp");
-        try (OutputStream out = Files.newOutputStream(tmp.toPath())) {
-            properties.store(out, comment);
-        } catch (IOException e) {
-            log.error("写回配置文件发生异常", e);
-            try {
-                Files.deleteIfExists(tmp.toPath());
-            } catch (IOException cleanupFailed) {
-                // 清理失败保留 tmp，便于人工恢复
-                log.warn("清理临时文件失败：{}", tmp.getAbsolutePath());
+    /**
+     * 按配置文件绝对路径粒度的回写锁：「读文件 → setProperty → 写 tmp → move」
+     * 必须对同一文件串行执行，否则并发回写会在同一个 tmp 上交错写坏文件，
+     * 或后写方用旧快照覆盖先写方的变更（lost update），磁盘与内存缓存从此不一致。
+     */
+    private static final ConcurrentHashMap<String, Object> FILE_WRITE_LOCKS =
+            new ConcurrentHashMap<String, Object>();
+
+    private static Object lockFor(File file) {
+        return FILE_WRITE_LOCKS.computeIfAbsent(file.getAbsolutePath(), new java.util.function.Function<String, Object>() {
+            @Override
+            public Object apply(String k) {
+                return new Object();
             }
-            return;
-        }
-        try {
-            Files.move(tmp.toPath(), file.toPath(),
-                    StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-        } catch (IOException atomicMoveFailed) {
-            // ATOMIC_MOVE 在某些文件系统（如 NFS）不支持，回退到普通 move
-            try {
-                Files.move(tmp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING);
+        });
+    }
+
+    /**
+     * 串行化地重写配置文件：读原文件、套用本次修改、经同目录唯一命名临时文件原子替换。
+     *
+     * @param file    目标配置文件（必须已存在）
+     * @param key     本次更新的配置项名称
+     * @param value   新值
+     * @param comment 写入文件时附带的注释说明
+     * @throws FileNotFoundException 读取配置文件失败时抛出
+     */
+    private static void rewriteFile(File file, String key, String value, String comment)
+            throws FileNotFoundException {
+        synchronized (lockFor(file)) {
+            // 采用自定义 SafeProperties，读取配置文件时记录注释信息
+            Properties properties = new SafeProperties();
+            // 先读完全部内容再写回，避免在同一 try 块里打开同一文件的 fis+fos（FileOutputStream
+            // 构造时会立即把文件截断为 0 字节，导致 properties.load(fis) 读到空数据后丢失原有配置）。
+            try (FileInputStream fis = new FileInputStream(file)) {
+                properties.load(fis);
+            } catch (IOException e) {
+                log.error("读取配置文件发生异常", e);
+                throw new FileNotFoundException("读取配置文件发生异常：" + e.getMessage());
+            }
+            properties.setProperty(key, value);
+
+            // 原子写回：先写同目录临时文件，再 move 覆盖目标，避免进程崩溃时原文件被写坏
+            // 造成数据丢失。tmp 名带 nanoTime：即使锁失效场景（如多进程）也不会互踩同一个 tmp。
+            File tmp = new File(file.getParentFile(),
+                    file.getName() + "." + System.nanoTime() + ".jkit-tmp");
+            try (OutputStream out = Files.newOutputStream(tmp.toPath())) {
+                properties.store(out, comment);
             } catch (IOException e) {
                 log.error("写回配置文件发生异常", e);
+                try {
+                    Files.deleteIfExists(tmp.toPath());
+                } catch (IOException cleanupFailed) {
+                    // 清理失败保留 tmp，便于人工恢复
+                    log.warn("清理临时文件失败：{}", tmp.getAbsolutePath());
+                }
+                return;
+            }
+            try {
+                Files.move(tmp.toPath(), file.toPath(),
+                        StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (IOException atomicMoveFailed) {
+                // ATOMIC_MOVE 在某些文件系统（如 NFS）不支持，回退到普通 move
+                try {
+                    Files.move(tmp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                } catch (IOException e) {
+                    log.error("写回配置文件发生异常", e);
+                    try {
+                        Files.deleteIfExists(tmp.toPath());
+                    } catch (IOException ignore) {
+                        // 清理失败保留 tmp，便于人工恢复
+                    }
+                }
+            } catch (RuntimeException e) {
+                log.error("写回配置文件发生未知异常", e);
                 try {
                     Files.deleteIfExists(tmp.toPath());
                 } catch (IOException ignore) {
                     // 清理失败保留 tmp，便于人工恢复
                 }
-            }
-        } catch (RuntimeException e) {
-            log.error("写回配置文件发生未知异常", e);
-            try {
-                Files.deleteIfExists(tmp.toPath());
-            } catch (IOException ignore) {
-                // 清理失败保留 tmp，便于人工恢复
             }
         }
     }

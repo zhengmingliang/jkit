@@ -217,4 +217,59 @@ public class PropertiesUtilTest {
         assertEquals(Integer.valueOf(7), PropertiesUtil.getInteger("missing-int", 7));
         assertEquals(Boolean.TRUE, PropertiesUtil.getBoolean("missing-bool", true));
     }
+
+    /**
+     * 并发回写同一文件：updateToFile 的「读→改→写」按文件粒度串行后，
+     * 最终文件必须包含所有线程的更新（无 lost update），且不留 tmp 残留。
+     * 修复前两个线程同时回写会在同一个固定名 tmp 上交错写坏，或后写方
+     * 用旧快照覆盖先写方的 key。
+     */
+    @Test
+    public void concurrentUpdateToSameFileKeepsAllWrites() throws Exception {
+        String[] lines = new String[9];
+        lines[0] = "# concurrent";
+        for (int i = 0; i < 8; i++) {
+            lines[i + 1] = "key" + i + "=old" + i;
+        }
+        Path file = writeProps("conc.properties", lines);
+        String path = file.toString();
+        assertTrue(PropertiesUtil.loadFromPath(path, false));
+        loadedFiles.add(path);
+
+        int threads = 8;
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
+        CountDownLatch start = new CountDownLatch(1);
+        AtomicInteger errors = new AtomicInteger();
+        for (int i = 0; i < threads; i++) {
+            final int idx = i;
+            pool.submit(() -> {
+                try {
+                    start.await();
+                    for (int r = 0; r < 20; r++) {
+                        PropertiesUtil.update("key" + idx, "new" + idx + "_" + r, "c", true, path);
+                    }
+                } catch (Throwable th) {
+                    errors.incrementAndGet();
+                    th.printStackTrace();
+                }
+            });
+        }
+        start.countDown();
+        pool.shutdown();
+        assertTrue("workers did not finish", pool.awaitTermination(60, TimeUnit.SECONDS));
+        assertEquals("concurrent update errors", 0, errors.get());
+
+        Properties reRead = new Properties();
+        try (FileInputStream in = new FileInputStream(file.toFile())) {
+            reRead.load(in);
+        }
+        for (int i = 0; i < threads; i++) {
+            assertEquals("key" + i + " lost update", "new" + i + "_19", reRead.getProperty("key" + i));
+        }
+        // 不能留下 tmp 残留
+        try (java.util.stream.Stream<Path> list = Files.list(tempDir)) {
+            long tmpCount = list.filter(p -> p.getFileName().toString().endsWith(".jkit-tmp")).count();
+            assertEquals("tmp files left behind", 0, tmpCount);
+        }
+    }
 }
