@@ -256,7 +256,7 @@ for (SqlAutoChange change : plan.changes()) {
 | `username` | `spring.datasource.username` | 用户名 |
 | `password` | `spring.datasource.password` | 密码 |
 | `driver` | 按 URL 猜 | 驱动类；也认 `driver-class-name` |
-| `fail-fast` | `true` | 一条 DDL 失败是否立即抛错 |
+| `fail-fast` | `true` | 一条 DDL 失败是否立即抛错；设 `false` 时失败项被跳过（`executeDetailed` 返回失败列表，history 只记成功项），执行结束会打汇总与逐条 WARN |
 | `alter-column` | `false` | 类型不一致时是否 `ALTER`/`MODIFY` |
 | `drop-extra-columns` | `false` | 是否删除实体里没有的列 |
 | `create-index` | `true` | 是否补 `CREATE INDEX` |
@@ -266,7 +266,7 @@ for (SqlAutoChange change : plan.changes()) {
 | `foreign-keys` | `true` | 是否在 CREATE TABLE 里写 FOREIGN KEY；GBase 8a 等不支持时设 `false` |
 | `auto-increment` | `true` | 是否生成自增子句；DuckDB 等不认 IDENTITY 时设 `false` |
 | `postgres-identity-style` | `identity` | PG / OpenGauss 自增写法：`identity` 或 `serial`（老版 OpenGauss 不认 GENERATED…IDENTITY） |
-| `lock` | `true` | 执行前在当前连接上取元数据锁（MySQL `GET_LOCK` / PG `pg_advisory_lock`），多实例并发冷启动串行化；不支持的方言自动跳过。取锁失败（默认等 60s）打 WARN 后无锁继续 |
+| `lock` | `true` | 执行前在当前连接上取元数据锁（MySQL `GET_LOCK` 服务端超时 / PG `pg_try_advisory_lock` 客户端 200ms 轮询直至超时），多实例并发冷启动串行化；不支持的方言自动跳过。取锁失败（默认等 60s）打 WARN 后无锁继续 |
 | `history` | `false` | 把已应用的变更写入历史表（审计用），行含时间 / 主机 / 模式 / 语句 |
 | `history-table` | `jkit_schema_history` | 历史表名，不存在自动创建 |
 | `export` | （空） | 每次规划后把将执行的 DDL 写入该文件（UTF-8，每条一行分号结尾），配合 `dry-run` 可当 schema 生成器用 |

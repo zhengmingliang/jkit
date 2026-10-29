@@ -104,6 +104,7 @@ public final class SqlAutoDialects {
      *
      * @param product 产品名
      * @return 方言，无法识别时 null
+     * @since 2.0.5
      */
     public static SqlDialect fromProductStrict(String product) {
         return matchProduct(product);

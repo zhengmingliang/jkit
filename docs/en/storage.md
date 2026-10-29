@@ -54,7 +54,7 @@ Path convention: `/` separated, no leading `/`, empty string for root; `..` segm
 
 - **Native engines**: local filesystem, Aliyun OSS, Azure Blob Storage, go-fastdfs
 - **S3-compatible engine** (SigV4/SigV2, virtual-host and path addressing, ListObjects V1/V2): Amazon S3, MinIO, Huawei OBS, Tencent COS, Qiniu Kodo, Baidu BOS, Upyun USS, Google Cloud Storage, Volcano TOS, Cloudflare R2, Kingsoft KS3, JD OSS, Tianyi OOS, China Mobile EOS, Woyun OSS, NetEase NOS, Ucloud US3, Pingan OBS, Shouyun OSS, IBM COS, Meituan MSS, plus `generic-s3` for any compatible service
-- **Protocol engines**: FTP (pure-JDK client), SFTP (optional jsch dependency), WebDAV
+- **Protocol engines**: FTP (pure-JDK client), SFTP (optional jsch dependency; `-Djkit.storage.sftp.defaultStrictHostKeyChecking=true` turns on host-key verification by default at deployment level, explicit config wins over the system property, default `false` for backward compatibility), WebDAV
 - **Planned**: FastDFS, MongoDB GridFS, QingStor (platform registered; instance creation throws `UNSUPPORTED`)
 
 `FileStorages.platforms()` returns all platform descriptors with field definitions (labels, required, secret, defaults) — enough to drive dynamic GUI forms; `register(...)` / `registerEngine(...)` accept custom platforms and engines.

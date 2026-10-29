@@ -39,6 +39,7 @@ public final class SqlAutoExecutor {
      * @param plan 计划
      * @param options 选项
      * @return 详细执行结果
+     * @since 2.0.5
      */
     public static SqlAutoExecuteResult executeDetailed(Connection connection, SqlAutoPlan plan,
                                                        SqlAutoOptions options) {

@@ -54,7 +54,7 @@ FileStorage local = FileStorages.of(props);
 
 - **原生引擎**：本地文件系统、阿里云 OSS、Azure Blob Storage、go-fastdfs
 - **S3 兼容引擎**（SigV4/SigV2、虚拟主机与路径寻址、ListObjects V1/V2）：Amazon S3、MinIO、华为云 OBS、腾讯云 COS、七牛 Kodo、百度 BOS、又拍 USS、Google Cloud Storage、火山 TOS、Cloudflare R2、金山 KS3、京东 OSS、天翼 OOS、移动 EOS、沃云 OSS、网易 NOS、Ucloud US3、平安 OBS、首云 OSS、IBM COS、美团 MSS、以及 `generic-s3` 接入任意兼容存储
-- **协议引擎**：FTP（纯 JDK 客户端）、SFTP（可选 jsch 依赖）、WebDAV
+- **协议引擎**：FTP（纯 JDK 客户端）、SFTP（可选 jsch 依赖，支持 `-Djkit.storage.sftp.defaultStrictHostKeyChecking=true` 在部署级默认开启主机指纹校验，显式配置优先于系统属性，默认 false 保持向后兼容）、WebDAV
 - **规划中**：FastDFS、MongoDB GridFS、青云 QingStor（已注册平台，创建实例抛 `UNSUPPORTED`）
 
 `FileStorages.platforms()` 返回全部平台描述与配置字段定义（含显示名、必填、密钥、默认值），可直接驱动图形界面动态表单；`FileStorages.register(...)` / `registerEngine(...)` 支持自定义平台与引擎。

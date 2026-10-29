@@ -28,6 +28,53 @@
 
 - 新增在线工具「[正则表达式速查](/tools/regexp/)」：浏览器本地运行的正则调试与速查，测试文本不上传。支持 /pattern/flags 可视化输入与 g/i/m/s/u/y 标志开关，实时高亮全部命中、逐处展示位置与捕获组（含命名组），零宽匹配不死循环；内置 93 条覆盖验证、表单、提取、替换、HTML、浏览器 UA 等场景的常用正则，按分类检索，卡片提供 JavaScript / Python / PHP / Java 四种写法并一键回填调试器，另附语法速查表。功能与常用正则数据对标 FeHelper 正则工具（MIT），收录时逐条通过双引擎编译与样本校验，修正了上游 19 条因转义错误而语义损坏的正则。
 
+**jkit-sql**
+
+- `SqlWall` 新增 `denyMysqlExecutableComment` 开关（默认 `false` 保持兼容）：开启后拒绝 `/*! ... */` 形式的 MySQL 可执行注释（词法扫描会跳过字符串字面量，不误伤正常 SQL 内容）；`SqlBuilder.literal` 改为复用与注入防护一致的 `quoteSqlString` 转义实现，行为不变。
+
+**jkit-sql-auto**
+
+- `SqlAutoDialects.fromProduct` 识别 KingbaseES / openGauss / GaussDB / Greenplum / HighGo / Vastbase / MogDB 等 PG 系产品名（归一化大小写、空白与下划线后包含匹配，避免误判成 MySQL 生成专有 DDL）；新增 `fromProductStrict`，无法识别时返回 `null` 而不是静默回落 MySQL，供 DDL 规划 / 执行方 fail-fast。
+- `SqlAutoExecutor.executeDetailed` 返回 `SqlAutoExecuteResult`（成功 + 失败列表），`failFast=false` 时失败项不再静默；两条执行路径在存在失败时输出汇总与逐条 WARN（history 仍只记成功项）。
+
+**jkit-storage**
+
+- SFTP `strictHostKeyChecking` 支持系统属性 `-Djkit.storage.sftp.defaultStrictHostKeyChecking=true` 在部署级默认开启主机指纹校验；解析顺序为显式配置 > 系统属性 > 默认 `false`（向后兼容）。
+
+**jkit-captcha**
+
+- `TextModel` / `CaptchaRecognizer` 实现 `AutoCloseable`：`close()` 释放 ONNX Runtime native 资源（幂等），close 后再次识别会延迟重新加载模型；支持 try-with-resources。
+
+### 修复
+
+**jkit-core**
+
+- `PropertiesUtil.update` 回写三连修：原实现 `FileOutputStream` 构造即截断文件，`load` 读空后回写只剩一行（配置文件被清空），改为先读后写 + 同目录临时文件原子替换；并发回写按文件粒度加锁并给临时文件加唯一后缀（防 tmp 互踩与 lost update）；写回失败不再静默返回 `true` 而是抛 `FileNotFoundException`；`.yml` / `.yaml` 拒绝回写（抛 `IllegalArgumentException`），防止文件被重写成 properties 格式。
+- `FileUtils.fileToZip`：修复循环内流引用被覆盖只关最后一个的 fd 泄漏与缺 `closeEntry()` 导致的 zip 结构错位；打包中途失败清理半截 zip（此前坏 zip 会因 `exists()` 短路永久残留）；跳过子目录时补 debug 日志。
+- `RegexUtils.getPattern`：不再对入参字符串（常量池共享对象）加锁，改用缓存自身私有锁 + `computeIfAbsent`，消除与业务代码 `synchronized` 同一字面量的跨模块死锁风险；Pattern 缓存改为有界 LRU（512），防外部输入撑爆内存。
+- `FileUtils` / `EncryptUtils` 异常路径的 `printStackTrace` 全部收敛到 `log.error`（共 22 处），写失败、读取失败等可被日志系统采集监控。
+
+**jkit-mock**
+
+- `MockWebSocketServer` 单帧与聚合帧总量均受 4 MiB 上限约束（此前 continuation 聚合帧可无限 append 导致 OOM），超限关闭帧携带 RFC 6455 1009（Message Too Big）状态码。
+
+**jkit-notify**
+
+- SMTP 4xx/5xx 错误响应进日志前净化 ≥24 位连续 Base64 片段，`SmtpReplyException` 不再把 AUTH 凭证写入日志。
+
+**jkit-storage**
+
+- `StorageConfig.toString()` 对敏感键输出 `"***"`（子串规则 + `sid` / `ticket` / `ds` / `oauthCode` 等精确键，大小写不敏感），`log.info("config={}", config)` 不再泄漏凭证。
+
+**jkit-sql-auto**
+
+- PG 元数据锁改用 `pg_try_advisory_lock` + 200ms 客户端轮询，修复原 `pg_advisory_lock` 无限等待、`timeoutSeconds` 完全失效的问题；中断正确恢复标志位。
+- `SqlAuto.run(SqlAutoOptions)` 主入口同样接入失败列表与 WARN（此前只有 Connection 重载接入，自建连接的常用路径失败无告警）。
+
+**jkit-captcha**
+
+- `TextModel.close()` 不再把「已关闭」当成「加载失败」将模型永久禁用、`recognize()` 静默降级为纯模板结果；close 与加载失败语义分离，close 后再次识别按契约延迟重载模型。
+
 ## 2.0.4 - 2026-10-10
 
 ### 新增
