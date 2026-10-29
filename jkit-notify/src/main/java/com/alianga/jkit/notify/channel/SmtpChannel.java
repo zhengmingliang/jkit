@@ -442,14 +442,14 @@ public class SmtpChannel implements NotificationChannel {
         private final FailureType failureType;
 
         SmtpReplyException(String reply, int code, FailureType failureType) {
-            super("smtp error: " + reply);
-            this.reply = reply;
+            super("smtp error: " + sanitizeForLog(reply));
+            this.reply = sanitizeForLog(reply);
             this.code = code;
             this.failureType = failureType;
         }
 
         /**
-         * @return 原始响应行
+         * @return 脱敏后的原始响应行
          */
         public String reply() {
             return reply;
@@ -468,6 +468,31 @@ public class SmtpChannel implements NotificationChannel {
         public FailureType failureType() {
             return failureType;
         }
+    }
+
+    /**
+     * SMTP 响应净化：把可能的凭证痕迹（base64 串、超长连续 token）替换为 "***"。
+     *
+     * <p>部分 SMTP 服务器（如 QQ 邮箱、自建 Exim/Postfix）在 535/530 认证失败响应里会把
+     * AUTH PLAIN / AUTH LOGIN 阶段的 base64 用户名/密码回显在响应文本里；这些原文一旦
+     * 进日志一行 base64 解码即可还原凭证。这里做保守净化：
+     * <ul>
+     *   <li>长度 >= 24 且只含 base64 字符表（{@code A–Z a–z 0–9 + / = - _}）的连续串；
+     *       SMTP 里短的英文错误短语通常不会触发（会有空格/标点），base64 凭证几乎必然命中。</li>
+     *   <li>长度 >= 48 的任意无空白连续串（保守兜底，保护非 base64 的长 token）。</li>
+     * </ul>
+     * 不影响 SMTP 响应码（数字前缀）与常见英文错误短语的可读性。</p>
+     *
+     * @param raw 原始 SMTP 响应
+     * @return 净化后字符串；raw 为 null 返回 null
+     */
+    static String sanitizeForLog(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        // base64 字符表：A–Z a–z 0–9 + / = - _
+        return raw.replaceAll("[A-Za-z0-9+/=\\-_]{24,}", "***")
+                  .replaceAll("\\S{48,}", "***");
     }
 
     /**
