@@ -182,4 +182,31 @@ public class FileUtilsFileToZipTest {
     public void zipNullDirThrowsNpe() {
         FileUtils.fileToZip(null, tempDir.resolve("out6").toString(), "n");
     }
+
+    /**
+     * 打包中途失败（源文件不可读）不得留下半截 zip：fileToZip 顶部
+     * zipFile.exists() 短路，坏 zip 一旦留下，后续调用永远跳过重建。
+     */
+    @org.junit.Test
+    public void zipFailureCleansUpPartialZipFile() throws Exception {
+        org.junit.Assume.assumeFalse("root".equals(System.getProperty("user.name")));
+        Path zipDir = tempDir.resolve("zipout");
+        Files.createDirectories(zipDir);
+        writeFile("srcdir", "a.txt", "aaa");
+        Path unreadable = writeFile("srcdir", "locked.txt", "secret");
+        writeFile("srcdir", "b.txt", "bbb");
+        Files.setPosixFilePermissions(unreadable,
+                java.nio.file.attribute.PosixFilePermissions.fromString("---------"));
+
+        String zipName = FileUtils.fileToZip(
+                tempDir.resolve("srcdir").toString(),
+                zipDir.toString(), "broken");
+
+        assertEquals("failure must not report a zip name", "", zipName);
+        java.util.List<Path> zips = new java.util.ArrayList<Path>();
+        try (java.util.stream.Stream<Path> list = Files.list(zipDir)) {
+            list.filter(p -> p.toString().endsWith(".zip")).forEach(zips::add);
+        }
+        assertTrue("partial zip must be cleaned up: " + zips, zips.isEmpty());
+    }
 }

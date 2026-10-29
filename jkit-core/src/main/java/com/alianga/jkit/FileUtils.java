@@ -207,8 +207,9 @@ public class FileUtils {
         if (!sourceFile.exists()) {
             log.debug("待压缩的文件目录：{}不存在.", sourceFilePath);
         } else {
+            // zipFile 提到 try 外：catch 里需要按它清理中途失败留下的半截 zip
+            File zipFile = new File(zipFilePath, fileName + ".zip");
             try {
-                File zipFile = new File(zipFilePath + "/" + fileName + ".zip");
                 if (zipFile.exists()) {
                     log.debug("{}目录下存在名字为:{}.zip 打包文件.", zipFilePath, fileName);
                 } else {
@@ -221,6 +222,9 @@ public class FileUtils {
                             byte[] bufs = new byte[DEFAULT_BUFFER_SIZE];
                             for (File source : sourceFiles) {
                                 if (source == null || !source.isFile()) {
+                                    // 仅打包顶层普通文件，不递归；子目录内容静默丢弃会误导调用方，至少留 debug
+                                    log.debug("fileToZip 跳过非普通文件：{}",
+                                            source == null ? "null" : source.getAbsolutePath());
                                     continue;
                                 }
                                 zos.putNextEntry(new ZipEntry(source.getName()));
@@ -243,6 +247,13 @@ public class FileUtils {
                 zipName = zipFile.getName();
             } catch (IOException e) {
                 log.error("打包文件为zip时发生异常", e);
+                // 中途失败会留下半截 zip，而上方 zipFile.exists() 短路会让后续调用
+                // 永远跳过重建——坏 zip 一旦留下就永久存在，必须清掉
+                try {
+                    java.nio.file.Files.deleteIfExists(zipFile.toPath());
+                } catch (IOException deleteFailed) {
+                    log.warn("清理损坏的zip文件失败：{}", zipFile.getAbsolutePath(), deleteFailed);
+                }
             }
         }
         return zipName;
