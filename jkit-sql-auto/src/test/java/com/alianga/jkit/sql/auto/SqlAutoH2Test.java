@@ -111,6 +111,56 @@ public class SqlAutoH2Test {
         assertTrue(plan.toString(), !plan.ofKind(SqlAutoChange.Kind.ADD_COLUMN).isEmpty());
     }
 
+    /**
+     * 主入口 {@code run(SqlAutoOptions)} 在 failFast=false 且有失败项时必须留下 WARN：
+     * 预建只有 ID 列的表并插入一行，实体新增的 NOT NULL 列（USER_NAME）在非空表上
+     * ADD COLUMN 必然失败，history 又只记成功项，运维只能靠 WARN 感知。
+     */
+    @Test
+    public void runByOptionsWarnsOnFailures() throws SQLException {
+        exec("CREATE TABLE AUTO_USER (ID BIGINT PRIMARY KEY)");
+        exec("INSERT INTO AUTO_USER (ID) VALUES (1)");
+
+        java.util.logging.Logger jul = java.util.logging.Logger.getLogger(SqlAuto.class.getName());
+        final List<String> warnings = new java.util.ArrayList<String>();
+        java.util.logging.Handler capture = new java.util.logging.Handler() {
+            @Override
+            public void publish(java.util.logging.LogRecord record) {
+                if (record.getLevel() == java.util.logging.Level.WARNING) {
+                    warnings.add(String.valueOf(record.getMessage()));
+                }
+            }
+
+            @Override
+            public void flush() {
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+        jul.addHandler(capture);
+        SqlAutoPlan plan;
+        try {
+            plan = SqlAuto.run(options().entities(AutoUser.class).failFast(false).history(false));
+        } finally {
+            jul.removeHandler(capture);
+        }
+        assertTrue(plan.toString(), !plan.ofKind(SqlAutoChange.Kind.ADD_COLUMN).isEmpty());
+        boolean sawSummary = false;
+        boolean sawDetail = false;
+        for (String w : warnings) {
+            if (w.contains("sql-auto executed with") && w.contains("failed")) {
+                sawSummary = true;
+            }
+            if (w.contains("failed: kind=")) {
+                sawDetail = true;
+            }
+        }
+        assertTrue("expected failure WARN from run(SqlAutoOptions), got: " + warnings, sawSummary);
+        assertTrue("expected per-item failure detail WARN, got: " + warnings, sawDetail);
+    }
+
     @Test
     public void validateMissingTableThrows() {
         try {
