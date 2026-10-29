@@ -167,6 +167,49 @@ public class StorageConfigTest {
     }
 
     /**
+     * StorageField.secret 声明但不含常见凭证子串的精确键（sid / ticket / ds /
+     * oauthCode，见 StoragePresets QQ 邮箱附件平台与 Cloudreve）必须被脱敏——
+     * 否则扫码登录态 sid、续期 ticket、OAuth2 授权码会经 log.info 原样落盘。
+     */
+    @Test
+    public void toStringMasksExactSecretKeys() {
+        Map<String, String> values = new LinkedHashMap<>();
+        values.put("sid", "abc123_SESSION_SID");
+        values.put("ticket", "renewal_ticket_value");
+        values.put("ds", "renewal_ds_value");
+        values.put("oauthCode", "oauth_code_value");
+        values.put("SID", "uppercase-key-value");
+        values.put("endpoint", "https://mail.example.com");
+
+        StorageConfig config = StorageConfig.of(values);
+        String s = config.toString();
+
+        assertTrue(s.contains("sid=\"***\""));
+        assertTrue(s.contains("ticket=\"***\""));
+        assertTrue(s.contains("ds=\"***\""));
+        assertTrue(s.contains("oauthCode=\"***\""));
+        assertTrue("exact match should be case-insensitive", s.contains("SID=\"***\""));
+        assertTrue(s.contains("endpoint=\"https://mail.example.com\""));
+
+        assertFalse("sid value leaked: " + s, s.contains("abc123_SESSION_SID"));
+        assertFalse("ticket value leaked: " + s, s.contains("renewal_ticket_value"));
+        assertFalse("ds value leaked: " + s, s.contains("renewal_ds_value"));
+        assertFalse("oauthCode value leaked: " + s, s.contains("oauth_code_value"));
+    }
+
+    /**
+     * 精确名单只做全等匹配：包含 sid/ticket/ds 字样的较长键不能被子串误伤。
+     * （注意 sessionid 含 session 子串，走子串规则，不属于本用例范畴。）
+     */
+    @Test
+    public void exactSecretKeysDoNotOverMatch() {
+        assertFalse(StorageConfig.isSensitiveKey("cider"));
+        assertFalse(StorageConfig.isSensitiveKey("dataset"));
+        assertFalse(StorageConfig.isSensitiveKey("ticketCount"));
+        assertFalse(StorageConfig.isSensitiveKey("sidebar"));
+    }
+
+    /**
      * toString 调用多次结果一致（幂等）。
      */
     @Test

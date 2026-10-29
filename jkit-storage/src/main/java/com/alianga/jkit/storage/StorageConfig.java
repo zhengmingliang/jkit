@@ -188,7 +188,9 @@ public final class StorageConfig {
      *
      * <p>判定规则：键名小写后，包含 password / passwd / secret / token / credential /
      * apikey / api_key / accesskey / access_key / privatekey / private_key /
-     * authorization / cookie / session 中任意一个子串即视为敏感键。</p>
+     * authorization / cookie / session 中任意一个子串，或精确命中
+     * {@link #SENSITIVE_EXACT_KEYS} 名单（sid / ticket / ds / oauthcode，来自
+     * StorageField.secret 声明但不含上述子串的键），即视为敏感键。</p>
      */
     @Override
     public String toString() {
@@ -216,13 +218,29 @@ public final class StorageConfig {
     }
 
     /**
-     * 键名是否含敏感子串。匹配是大小写不敏感的。
+     * StorageField.secret 声明、但不落入 {@link #isSensitiveKey(String)} 子串规则的
+     * 精确键名（小写比较）：sid / ticket / ds 来自 QQ 邮箱附件平台的扫码登录态与
+     * 续期凭据，oauthCode 是 Cloudreve 的 OAuth2 授权码。新增 secret 字段时若键名
+     * 不含常见凭证子串，需要同步补到这里。
+     */
+    private static final String[] SENSITIVE_EXACT_KEYS = {
+            "sid", "ticket", "ds", "oauthcode"
+    };
+
+    /**
+     * 键名是否含敏感子串，或命中 {@link #SENSITIVE_EXACT_KEYS} 精确名单。
+     * 匹配是大小写不敏感的。
      */
     static boolean isSensitiveKey(String key) {
         if (key == null) {
             return false;
         }
         String k = key.toLowerCase(java.util.Locale.ROOT);
+        for (int i = 0; i < SENSITIVE_EXACT_KEYS.length; i++) {
+            if (k.equals(SENSITIVE_EXACT_KEYS[i])) {
+                return true;
+            }
+        }
         return k.contains("password") || k.contains("passwd")
                 || k.contains("secret") || k.contains("token")
                 || k.contains("credential") || k.contains("apikey") || k.contains("api_key")
