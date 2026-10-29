@@ -52,6 +52,13 @@ public final class MockWebSocketServer {
     private static final int OP_CLOSE = 0x8;
     private static final int OP_PING = 0x9;
     private static final int OP_PONG = 0xA;
+    /**
+     * 单帧 payload 上限（4 MiB），防止恶意 / 异常客户端声明超大 frame length 让服务端
+     * 一次性 {@code new byte[]} 预占堆内存（OOM）。
+     *
+     * <p>package-private 以便测试直接引用。</p>
+     */
+    static final long MAX_FRAME_PAYLOAD = 4L * 1024 * 1024;
 
     private final List<Session> sessions = new CopyOnWriteArrayList<>();
     private final List<Consumer<WsEvent>> eventListeners = new CopyOnWriteArrayList<>();
@@ -460,12 +467,19 @@ public final class MockWebSocketServer {
                         length = (length << 8) | (in.read() & 0xFF);
                     }
                 }
+                // 单帧上限防 OOM：恶意 / 异常客户端可声明超大 frame length（如 0x7FFF_FFFF）
+                // 让服务端一次性 new byte[] 预占 2 GB 堆，宿主 JVM 直接 OutOfMemoryError。
+                // 8 字节无符号长度最高位为 1 时 (int) 强转会变负，这里一并拒绝。
+                if (length < 0 || length > MAX_FRAME_PAYLOAD) {
+                    sendControl(OP_CLOSE, new byte[0]);
+                    break;
+                }
                 byte[] mask = null;
                 if (masked) {
                     mask = new byte[4];
                     readFully(in, mask);
                 }
-                byte[] payload = new byte[(int) Math.min(length, Integer.MAX_VALUE)];
+                byte[] payload = new byte[(int) length];
                 readFully(in, payload);
                 if (masked) {
                     for (int i = 0; i < payload.length; i++) {
