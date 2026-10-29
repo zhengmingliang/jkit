@@ -732,6 +732,20 @@ public final class SqlBuilder {
     /**
      * Java 值 → 字面量表达式。
      *
+     * <p><b>安全警告</b>：本方法仅做单引号转义（{@code '} → {@code ''}），这是 ANSI
+     * SQL 标准转义；<b>不能可靠防御 SQL 注入</b>，因为：
+     * <ul>
+     *   <li>MySQL 默认 {@code backslash_escapes=1} 时 {@code \'} 会被解释为字面单引号，
+     *       转义后的 {@code \\'} 仍可能被服务器解析为 {@code '} + 字符串结束；</li>
+     *   <li>LIKE 模式中的 {@code %} 与 {@code _} 通配符不会被转义；</li>
+     *   <li>不同方言（Oracle {@code E'...'}、MySQL {@code NO_BACKSLASH_ESCAPES} 切换）
+     *       转义规则各不相同。</li>
+     * </ul>
+     *
+     * <p>处理用户输入请优先使用参数绑定（JDBC {@code PreparedStatement}）或
+     * {@code SQL.parameterize(...)}。本方法仅用于可信值（配置、枚举、常量），或调用方
+     * 已先经 {@link SqlWall#check(String)} 过滤的场景。</p>
+     *
      * @param value 值，null → NULL
      * @return 字面量
      */
@@ -748,9 +762,9 @@ public final class SqlBuilder {
         if (value instanceof Boolean) {
             return SqlLiteral.of(SqlLiteral.Kind.BOOLEAN, ((Boolean) value).booleanValue() ? "true" : "false");
         }
-        String raw = String.valueOf(value);
-        String escaped = raw.replace("'", "''");
-        return SqlLiteral.of(SqlLiteral.Kind.STRING, "'" + escaped + "'");
+        // 与 SqlInjectRewriter.literalValue 共用转义实现，避免两处逻辑漂移。
+        // 注意 quoteSqlString 只转义单引号（ANSI），完整安全说明见本方法 javadoc。
+        return SqlLiteral.of(SqlLiteral.Kind.STRING, SqlInjectRewriter.quoteSqlString(String.valueOf(value)));
     }
 
     /**

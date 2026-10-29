@@ -28,6 +28,7 @@ public final class SqlWallConfig {
     private boolean denyUnion;
     private boolean denyInformationSchema;
     private boolean selectOnly;
+    private boolean denyMysqlExecutableComment;
     private List<String> denyTables = Collections.emptyList();
     private List<String> allowTables = Collections.emptyList();
     private List<String> requireWhereColumns = Collections.emptyList();
@@ -82,6 +83,31 @@ public final class SqlWallConfig {
     /** @param denyCommentBypass 注释绕过 @return this */
     public SqlWallConfig denyCommentBypass(boolean denyCommentBypass) {
         this.denyCommentBypass = denyCommentBypass;
+        return this;
+    }
+
+    /**
+     * 拒绝 MySQL 可执行注释（以 "斜杠 星号 感叹号" 开头的块注释）：MySQL 版本条件注释
+     * 在满足版本时会真正执行其内部 SQL，可被用来绕过 wall 关键字黑名单
+     * （例如把 SELECT 藏在版本号后面，普通 lexer 会整块当注释跳过）。
+     *
+     * <p>默认 {@code false} 保持向后兼容（GoldenCorpus 含合法 MySQL dump 语句，如
+     * 带版本号前缀的 SET NAMES）；开启后所有该类块一律视为 {@code comment-bypass}。</p>
+     *
+     * @return 是否拒绝 MySQL 可执行注释
+     * @since 2.0.5
+     */
+    public boolean denyMysqlExecutableComment() {
+        return denyMysqlExecutableComment;
+    }
+
+    /**
+     * @param denyMysqlExecutableComment 是否拒绝 MySQL 可执行注释
+     * @return this
+     * @since 2.0.5
+     */
+    public SqlWallConfig denyMysqlExecutableComment(boolean denyMysqlExecutableComment) {
+        this.denyMysqlExecutableComment = denyMysqlExecutableComment;
         return this;
     }
 

@@ -71,7 +71,7 @@ public final class SqlWall {
             return new SqlWallResult(violations.codes());
         }
         if (cfg.denyCommentBypass()) {
-            checkCommentBypass(sql, violations);
+            checkCommentBypass(sql, violations, cfg.denyMysqlExecutableComment());
         }
         SqlDialectSpec d = dialect == null ? SqlDialect.MYSQL : dialect;
         List<SqlStatement> all;
@@ -513,6 +513,22 @@ public final class SqlWall {
      * 检测可能用于截断后续条件的行/块注释（在字符串外）。
      */
     static void checkCommentBypass(String sql, SqlWallViolations violations) {
+        checkCommentBypass(sql, violations, false);
+    }
+
+    /**
+     * 与 {@link #checkCommentBypass(String, SqlWallViolations)} 相同，但可显式启用
+     * "拒绝 MySQL 可执行注释"（以 "斜杠 星号 感叹号" 开头的块注释）。
+     *
+     * <p>Oracle hint（以 "斜杠 星号 加号" 开头的块注释）保持放行：它是优化提示，
+     * 不含可执行语句。</p>
+     *
+     * @param sql SQL 文本
+     * @param violations 违规收集器
+     * @param denyMysqlExecutableComment 是否拒绝 MySQL 可执行注释
+     */
+    static void checkCommentBypass(String sql, SqlWallViolations violations,
+                                   boolean denyMysqlExecutableComment) {
         boolean inSingle = false;
         boolean inDouble = false;
         boolean inBacktick = false;
@@ -575,7 +591,20 @@ public final class SqlWall {
             if (c == '/' && i + 1 < n && sql.charAt(i + 1) == '*') {
                 if (i + 2 < n) {
                     char third = sql.charAt(i + 2);
-                    if (third == '!' || third == '+') {
+                    // Oracle 优化器 hint，不是可执行语句，放行
+                    if (third == '+') {
+                        int end = sql.indexOf("*/", i + 3);
+                        i = end < 0 ? n : end + 2;
+                        continue;
+                    }
+                    // MySQL 可执行注释：满足版本时其内部会被真正执行。
+                    // 默认 denyMysqlExecutableComment=false 保持向后兼容；
+                    // 设为 true 时按 comment-bypass 拒绝（可被注入者用来绕过关键字黑名单）。
+                    if (third == '!') {
+                        if (denyMysqlExecutableComment) {
+                            violations.add("comment-bypass");
+                            return;
+                        }
                         int end = sql.indexOf("*/", i + 3);
                         i = end < 0 ? n : end + 2;
                         continue;
