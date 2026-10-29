@@ -60,7 +60,7 @@
 
 **jkit-notify**
 
-- SMTP 4xx/5xx 错误响应进日志前净化 ≥24 位连续 Base64 片段，`SmtpReplyException` 不再把 AUTH 凭证写入日志。
+- SMTP 4xx/5xx 错误响应经 `sanitizeForLog` 净化 ≥24 位连续 Base64 片段后才进本库日志：`SmtpReplyException.reply()` / `getMessage()` 保持携带服务器原始响应（向后兼容契约），凭证净化发生在库自身的日志边界，`SendResult` 亦恢复返回原始响应（与 2.0.4 行为一致）；依赖原始响应做协议排查的调用方不受影响，调用方自行记录响应时请自行脱敏。
 
 **jkit-storage**
 

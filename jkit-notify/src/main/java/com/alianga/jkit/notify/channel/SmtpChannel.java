@@ -318,7 +318,7 @@ public class SmtpChannel implements NotificationChannel {
                     readReply(in);
                 } catch (SmtpReplyException e) {
                     rejected.add(rcpt);
-                    LOG.warn("[{}] rcpt rejected: {} ({})", id(), rcpt, e.reply());
+                    LOG.warn("[{}] rcpt rejected: {} ({})", id(), rcpt, sanitizeForLog(e.reply()));
                 }
             }
             if (rejected.size() == recipients.size()) {
@@ -350,7 +350,7 @@ public class SmtpChannel implements NotificationChannel {
         } catch (IllegalArgumentException e) {
             throw e;
         } catch (SmtpReplyException e) {
-            LOG.warn("[{}] smtp rejected({}): {}", id(), e.failureType(), e.getMessage());
+            LOG.warn("[{}] smtp rejected({}): {}", id(), e.failureType(), sanitizeForLog(e.getMessage()));
             return SendResult.fail(id(), e.code(), e.reply(), e.getMessage(),
                     System.currentTimeMillis() - start, e.failureType());
         } catch (Exception e) {
@@ -433,6 +433,10 @@ public class SmtpChannel implements NotificationChannel {
 
     /**
      * SMTP 协议级拒绝，携带响应码与失败类别。
+     *
+     * <p>{@link #reply()} 与 {@link #getMessage()} 携带<b>服务器原始响应</b>（向后兼容契约，
+     * 调用方可能依赖它做协议级排查）；本库自身的日志边界（{@code LOG.warn}）负责在输出前
+     * 调用 {@link #sanitizeForLog} 净化凭证，调用方如何记录则由调用方自行决定。</p>
      */
     protected static final class SmtpReplyException extends IOException {
         private static final long serialVersionUID = 1L;
@@ -442,14 +446,14 @@ public class SmtpChannel implements NotificationChannel {
         private final FailureType failureType;
 
         SmtpReplyException(String reply, int code, FailureType failureType) {
-            super("smtp error: " + sanitizeForLog(reply));
-            this.reply = sanitizeForLog(reply);
+            super("smtp error: " + reply);
+            this.reply = reply;
             this.code = code;
             this.failureType = failureType;
         }
 
         /**
-         * @return 脱敏后的原始响应行
+         * @return 原始响应行（未脱敏；本库日志输出前会经 {@link #sanitizeForLog} 净化）
          */
         public String reply() {
             return reply;

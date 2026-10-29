@@ -106,10 +106,12 @@ public class SmtpSanitizeForLogTest {
     }
 
     /**
-     * SmtpReplyException 的 message 与 reply 字段都应被净化（防止意外打印）。
+     * SmtpReplyException 携带<b>原始响应</b>（向后兼容契约：reply()/getMessage()
+     * 与 2.0.4 及之前一致，调用方可能依赖原始响应做协议排查）；净化由本库的
+     * 日志边界（LOG.warn 处 sanitizeForLog）负责，而不是改写异常数据。
      */
     @Test
-    public void smtpReplyExceptionCarriesSanitized() throws Exception {
+    public void smtpReplyExceptionCarriesRawReply() throws Exception {
         String longToken = java.util.Base64.getEncoder()
                 .encodeToString("0123456789abcdef0123456789abcdef".getBytes());
         String raw = "535 5.7.8 auth failed: " + longToken;
@@ -125,13 +127,15 @@ public class SmtpSanitizeForLogTest {
 
         java.lang.reflect.Method replyMethod = cls.getMethod("reply");
         String reply = (String) replyMethod.invoke(ex);
-        org.junit.Assert.assertFalse("reply() leaked: " + reply, reply.contains(longToken));
-        org.junit.Assert.assertTrue(reply.contains("535 5.7.8 auth failed: ***"));
+        org.junit.Assert.assertEquals("reply() must carry the raw server response", raw, reply);
 
-        // message 也应净化
         String msg = ((Throwable) ex).getMessage();
-        org.junit.Assert.assertFalse("getMessage() leaked: " + msg, msg.contains(longToken));
-        org.junit.Assert.assertTrue(msg.contains("535 5.7.8 auth failed: ***"));
+        org.junit.Assert.assertEquals("smtp error: " + raw, msg);
+
+        // 日志边界：sanitizeForLog 应能把同一响应净化到可安全落盘
+        String forLog = SmtpChannel.sanitizeForLog(raw);
+        org.junit.Assert.assertFalse("log form leaked token: " + forLog, forLog.contains(longToken));
+        org.junit.Assert.assertTrue(forLog.contains("535 5.7.8 auth failed: ***"));
     }
 
     /**
