@@ -60,6 +60,9 @@ public final class MockWebSocketServer {
      */
     static final long MAX_FRAME_PAYLOAD = 4L * 1024 * 1024;
 
+    /** RFC 6455 §7.4.1 1009 Message Too Big */
+    private static final int CLOSE_MESSAGE_TOO_BIG = 1009;
+
     private final List<Session> sessions = new CopyOnWriteArrayList<>();
     private final List<Consumer<WsEvent>> eventListeners = new CopyOnWriteArrayList<>();
     private final AtomicBoolean running = new AtomicBoolean(false);
@@ -471,7 +474,7 @@ public final class MockWebSocketServer {
                 // 让服务端一次性 new byte[] 预占 2 GB 堆，宿主 JVM 直接 OutOfMemoryError。
                 // 8 字节无符号长度最高位为 1 时 (int) 强转会变负，这里一并拒绝。
                 if (length < 0 || length > MAX_FRAME_PAYLOAD) {
-                    sendControl(OP_CLOSE, new byte[0]);
+                    sendControl(OP_CLOSE, closePayload(CLOSE_MESSAGE_TOO_BIG));
                     break;
                 }
                 byte[] mask = null;
@@ -498,6 +501,12 @@ public final class MockWebSocketServer {
                     continue;
                 }
                 if (opcode == OP_TEXT || opcode == OP_CONTINUATION) {
+                    // 聚合总量同受上限约束：客户端可发送任意多帧长合法的 continuation 帧，
+                    // 只在单帧级别设限挡不住 fragmented 一直 append 直到 OOM
+                    if (fragmented.size() + payload.length > MAX_FRAME_PAYLOAD) {
+                        sendControl(OP_CLOSE, closePayload(CLOSE_MESSAGE_TOO_BIG));
+                        break;
+                    }
                     fragmented.write(payload);
                 }
                 if (fin && fragmented.size() > 0) {
@@ -551,6 +560,14 @@ public final class MockWebSocketServer {
                     // 控制帧写出失败，连接即将关闭
                 }
             }
+        }
+
+        /** 关闭帧 payload：2 字节大端状态码（RFC 6455 §5.5.1）。 */
+        private byte[] closePayload(int statusCode) {
+            return new byte[]{
+                    (byte) ((statusCode >> 8) & 0xFF),
+                    (byte) (statusCode & 0xFF)
+            };
         }
 
         /** 服务端帧不打掩码（RFC 6455 §5.1）；调用方已持有 {@link #writeLock}。 */

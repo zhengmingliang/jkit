@@ -93,7 +93,56 @@ public class MockWebSocketFrameLimitTest {
             int b = in.read();
             assertTrue("expected some response, got EOF=" + b, b >= 0);
             assertEquals("expect OP_CLOSE first byte", 0x88, b);
+            int len = in.read() & 0x7F;
+            assertEquals("close payload = 2 byte status code", 2, len);
+            int code = ((in.read() & 0xFF) << 8) | (in.read() & 0xFF);
+            assertEquals("expect close code 1009 Message Too Big", 1009, code);
         }
+    }
+
+    /**
+     * 聚合帧总量上限：多帧各自长度均合法（各 3 MiB < 4 MiB）的 continuation 帧累计
+     * 超 4 MiB 时，服务端应发送带 1009（Message Too Big）状态码的 OP_CLOSE 断连，
+     * 而不是在 fragmented 缓冲上无限 append 直至 OOM。
+     */
+    @Test(timeout = 20000)
+    public void fragmentedFramesOverTotalCapClosedWith1009() throws Exception {
+        try (Socket sock = handshake(wsPort)) {
+            OutputStream out = sock.getOutputStream();
+            int chunk = 3 * 1024 * 1024;
+            byte[] payload = new byte[chunk];
+            // 第一帧：FIN=0 opcode=TEXT，长度合法，被聚合
+            writeExtendedLengthFrame(out, 0x01, payload);
+            // 第二帧：FIN=0 opcode=CONTINUATION，累计 6 MiB 超限
+            writeExtendedLengthFrame(out, 0x00, payload);
+            out.flush();
+
+            sock.setSoTimeout(10000);
+            InputStream in = sock.getInputStream();
+            int b0 = in.read();
+            assertEquals("expect OP_CLOSE", 0x88, b0);
+            int len = in.read() & 0x7F;
+            assertEquals("close payload = 2 byte status code", 2, len);
+            int code = ((in.read() & 0xFF) << 8) | (in.read() & 0xFF);
+            assertEquals("expect close code 1009 Message Too Big", 1009, code);
+        }
+    }
+
+    /** 写一个 8 字节扩展长度、MASK=0 的帧（payload 全零）。 */
+    private static void writeExtendedLengthFrame(OutputStream out, int b0, byte[] payload) throws IOException {
+        out.write(b0);
+        out.write(0x7F);                    // 8 字节扩展长度，MASK=0
+        long len = payload.length;
+        out.write((int) ((len >> 56) & 0xFF));
+        out.write((int) ((len >> 48) & 0xFF));
+        out.write((int) ((len >> 40) & 0xFF));
+        out.write((int) ((len >> 32) & 0xFF));
+        out.write((int) ((len >> 24) & 0xFF));
+        out.write((int) ((len >> 16) & 0xFF));
+        out.write((int) ((len >> 8) & 0xFF));
+        out.write((int) (len & 0xFF));
+        out.write(payload);
+        out.flush();
     }
 
     /**
