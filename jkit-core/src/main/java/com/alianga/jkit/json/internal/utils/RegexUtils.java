@@ -16,24 +16,24 @@ public class RegexUtils {
     private static Map<String, Pattern> cachePatterns = new ConcurrentHashMap<String, Pattern>();
 
     /**
-     * 获取正则表达式对应的 {@link Pattern}，编译结果会被缓存复用
+     * 获取正则表达式对应的 {@link Pattern}，编译结果会被缓存复用。
+     *
+     * <p>用 {@link ConcurrentHashMap#computeIfAbsent} 实现原子"查-编-存"，不再对
+     * 字符串字面量加 {@code synchronized}。原实现对 {@code regSource}（String）加锁
+     * 有两个隐患：
+     * <ul>
+     *   <li>字符串常量池让锁对象被 JVM 全局共享，业务代码或其它库若也
+     *       {@code synchronized} 同一字面量会发生跨模块死锁；</li>
+     *   <li>{@code putIfAbsent} 语义不对（"后写覆盖"），高并发下两个线程可能都编译一次。</li>
+     * </ul>
      *
      * @param regSource 正则表达式源串
      * @return 该正则表达式编译后的 {@link Pattern} 实例
      */
     public static Pattern getPattern(String regSource) {
-        Pattern pattern = cachePatterns.get(regSource);
-        if (pattern != null) {
-            return pattern;
-        }
-        synchronized (regSource) {
-            pattern = cachePatterns.get(regSource);
-            if (pattern == null) {
-                pattern = Pattern.compile(regSource);
-                cachePatterns.put(regSource, pattern);
-            }
-            return pattern;
-        }
+        // computeIfAbsent 对同一 key 的 mapping function 只会被调用一次（原子语义），
+        // 且不需要对 key 加锁，避免与业务代码 synchronized 同一字符串字面量时跨模块死锁。
+        return cachePatterns.computeIfAbsent(regSource, Pattern::compile);
     }
 
     /**
