@@ -39,6 +39,8 @@ final class TextModel implements AutoCloseable {
     private String betaInputName;
     private String[] betaCharset;
     private boolean betaFailed;
+    /** close 已释放 native 资源；与 {@code failed}（模型加载失败）语义不同，再次使用时允许重载。 */
+    private boolean closed;
 
     String read(BufferedImage image) {
         return read(image, null);
@@ -125,6 +127,13 @@ final class TextModel implements AutoCloseable {
     }
 
     private OrtSession open(boolean beta) {
+        if (closed) {
+            // close 释放过 native 资源：按 CaptchaRecognizer.close 的契约延迟重载，
+            // 而不是把"已关闭"当成"加载失败"把模型永久禁用
+            closed = false;
+            failed = false;
+            betaFailed = false;
+        }
         if (beta) {
             if (betaFailed) {
                 return null;
@@ -188,14 +197,18 @@ final class TextModel implements AutoCloseable {
     }
 
     /**
-     * 释放 ONNX Runtime 的 native 资源。多次调用幂等；调用后本实例不再可用。
+     * 释放 ONNX Runtime 的 native 资源。多次调用幂等。
      *
      * <p>OrtSession / OrtEnvironment 持有 C/C++ 堆指针，不 close 只能等 GC Finalizer，
      * 在长寿命服务（如常驻识别服务）里会积累 native memory 压力。</p>
+     *
+     * <p>close 后再次使用时模型会延迟重新加载（{@link #open(boolean)} 清除 closed
+     * 与加载失败标志），识别功能不因 close 而永久失效。</p>
      */
     @Override
     public void close() {
         synchronized (lock) {
+            closed = true;
             closeQuietly(session);
             session = null;
             closeQuietly(betaSession);
@@ -203,8 +216,6 @@ final class TextModel implements AutoCloseable {
             // OrtEnvironment 是 JVM 级单例（getEnvironment 返回共享实例），
             // 这里不关闭它以免影响同 JVM 内其它使用 ONNX Runtime 的组件。
             environment = null;
-            failed = true;
-            betaFailed = true;
         }
     }
 

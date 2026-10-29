@@ -60,19 +60,21 @@ public class TextModelCloseTest {
     }
 
     /**
-     * close 后 TextModel 内部状态：failed/betaFailed 标志位置位，session 置 null。
+     * close 后再次 read：模型延迟重新加载，结果与 close 前一致（而不是被
+     * "已关闭"标志永久禁用、静默降级为空串）。
      */
     @Test
-    public void textModelCloseResetsState() {
+    public void textModelCloseThenReadReloadsModel() throws Exception {
         TextModel model = new TextModel();
-        // close 即使未加载过模型也应正常工作（幂等）
+        BufferedImage image = loadSample("14+8.jpeg");
+        String before = model.read(image);
+        assertNotNull(before);
+        assertFalse("model output should not be empty", before.isEmpty());
+
         model.close();
-        // 此时 read 应返回空串（failed=true）
-        BufferedImage img = new BufferedImage(100, 40, BufferedImage.TYPE_INT_RGB);
-        String result = model.read(img);
-        assertNotNull(result);
-        // failed=true 时 read 返回空串
-        assertEquals("", result);
+        String after = model.read(image);
+        assertNotNull(after);
+        assertEquals(before, after);
     }
 
     /**
@@ -101,15 +103,16 @@ public class TextModelCloseTest {
     }
 
     /**
-     * close 后再 read，返回空串（而不是 NPE），这是设计预期。
+     * close 后再 read 不抛 NPE：native 资源已释放，read 触发模型延迟重载并正常返回。
      */
     @Test
-    public void readAfterCloseReturnsEmptyNotNpe() {
+    public void readAfterCloseReloadsNotNpe() throws Exception {
         TextModel model = new TextModel();
+        BufferedImage img = loadSample("14+8.jpeg");
+        String before = model.read(img);
         model.close();
-        BufferedImage img = new BufferedImage(50, 30, BufferedImage.TYPE_INT_RGB);
-        String s = model.read(img);
-        assertNotNull(s);
-        assertEquals("", s);
+        String after = model.read(img);
+        assertNotNull(after);
+        assertEquals(before, after);
     }
 }
