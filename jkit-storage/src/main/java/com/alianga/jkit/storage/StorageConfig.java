@@ -177,8 +177,58 @@ public final class StorageConfig {
         return Collections.unmodifiableMap(values);
     }
 
+    /**
+     * 诊断输出：把疑似凭证的键脱敏为 "***"，其它键原样保留。
+     *
+     * <p>本类承载 password / secretKey / accessToken / refreshToken / sessionToken /
+     * authorization / cookie / apiKey / privateKey 等敏感配置；任何一次意外的
+     * {@code log.info("config={}", config)} / {@code new RuntimeException("cfg=" + config)} /
+     * assert 失败消息都会原样泄漏。脱敏是 in-place 的键级掩码，不影响 {@link #asMap()}
+     * 返回的完整数据。</p>
+     *
+     * <p>判定规则：键名小写后，包含 password / passwd / secret / token / credential /
+     * apikey / api_key / accesskey / access_key / privatekey / private_key /
+     * authorization / cookie / session 中任意一个子串即视为敏感键。</p>
+     */
     @Override
     public String toString() {
-        return values.toString();
+        if (values.isEmpty()) {
+            return "{}";
+        }
+        StringBuilder sb = new StringBuilder("{");
+        boolean first = true;
+        for (Map.Entry<String, String> e : values.entrySet()) {
+            if (!first) {
+                sb.append(", ");
+            }
+            first = false;
+            sb.append(e.getKey()).append('=');
+            if (e.getValue() == null) {
+                sb.append("null");
+            } else if (isSensitiveKey(e.getKey())) {
+                sb.append("\"***\"");
+            } else {
+                sb.append('"').append(e.getValue()).append('"');
+            }
+        }
+        sb.append('}');
+        return sb.toString();
+    }
+
+    /**
+     * 键名是否含敏感子串。匹配是大小写不敏感的。
+     */
+    static boolean isSensitiveKey(String key) {
+        if (key == null) {
+            return false;
+        }
+        String k = key.toLowerCase(java.util.Locale.ROOT);
+        return k.contains("password") || k.contains("passwd")
+                || k.contains("secret") || k.contains("token")
+                || k.contains("credential") || k.contains("apikey") || k.contains("api_key")
+                || k.contains("accesskey") || k.contains("access_key")
+                || k.contains("privatekey") || k.contains("private_key")
+                || k.contains("authorization") || k.contains("cookie")
+                || k.contains("session");
     }
 }
