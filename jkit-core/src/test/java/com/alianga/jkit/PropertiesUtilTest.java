@@ -272,4 +272,62 @@ public class PropertiesUtilTest {
             assertEquals("tmp files left behind", 0, tmpCount);
         }
     }
+
+    /**
+     * 对 .yml 配置回写必须拒绝：rewriteFile 走 properties 格式 store，会把 yml
+     * 整体重写成 properties 格式、结构损坏。修复前静默写坏，修复后抛
+     * IllegalArgumentException 且文件保持原样。
+     */
+    @Test
+    public void updateRejectsYamlWriteBack() throws Exception {
+        Path file = writeProps("app.yml", "spring:", "  mode: online");
+        String path = file.toString();
+        assertTrue(PropertiesUtil.loadFromPath(path, false));
+        loadedFiles.add(path);
+
+        try {
+            PropertiesUtil.update("spring.mode", "offline", "c", true, path);
+            fail("expected IllegalArgumentException for yaml write-back");
+        } catch (IllegalArgumentException expected) {
+            // OK
+        }
+        // 文件内容必须原样保留
+        String content = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
+        assertTrue("yaml must stay untouched", content.contains("spring:"));
+        assertTrue(content.contains("mode: online"));
+    }
+
+    /**
+     * 写回失败不再静默：目录只读时 update(..., true) 必须抛 FileNotFoundException
+     * （本类声明的唯一受检异常），而不是返回 true 让调用方误以为落盘成功。
+     */
+    @Test
+    public void updateThrowsWhenWriteBackFails() throws Exception {
+        org.junit.Assume.assumeFalse("root".equals(System.getProperty("user.name")));
+        Path file = writeProps("ro.properties", "k=v");
+        String path = file.toString();
+        assertTrue(PropertiesUtil.loadFromPath(path, false));
+        loadedFiles.add(path);
+
+        java.util.Set<java.nio.file.attribute.PosixFilePermission> original =
+                Files.getPosixFilePermissions(file.getParent());
+        Files.setPosixFilePermissions(file.getParent(),
+                java.nio.file.attribute.PosixFilePermissions.fromString("r-xr-xr-x"));
+        try {
+            try {
+                PropertiesUtil.update("k", "v2", "c", true, path);
+                fail("expected FileNotFoundException when directory is read-only");
+            } catch (java.io.FileNotFoundException expected) {
+                // OK
+            }
+        } finally {
+            Files.setPosixFilePermissions(file.getParent(), original);
+        }
+        // 原文件内容不被破坏
+        Properties reRead = new Properties();
+        try (FileInputStream in = new FileInputStream(file.toFile())) {
+            reRead.load(in);
+        }
+        assertEquals("v", reRead.getProperty("k"));
+    }
 }

@@ -341,7 +341,9 @@ public final class PropertiesUtil {
      * @param updateToFile 是否同时把修改写回配置文件
      * @param path 可选的配置文件路径，传入时取第一个元素作为回写目标文件
      * @return 在已加载的配置中找到该 key 并成功更新旧值时返回 {@code true}，否则返回 {@code false}
-     * @throws FileNotFoundException 需要回写文件但目标配置文件不存在时抛出
+     * @throws FileNotFoundException 需要回写文件但目标配置文件不存在，或读取 / 写回
+     *         失败时抛出（写失败不再静默返回 true）；对 .yml/.yaml 文件回写抛
+     *         {@link IllegalArgumentException}
      */
     public static boolean update(String key, String value, String comment, boolean updateToFile, String... path)
             throws FileNotFoundException {
@@ -397,6 +399,16 @@ public final class PropertiesUtil {
             }
         }
 
+        // YAML 不允许回写：rewriteFile 走 SafeProperties 的 properties 格式 store，
+        // 会把 yml 文件整体重写成 properties 格式，结构从此损坏
+        String lowerName = file.getName().toLowerCase(java.util.Locale.ROOT);
+        if (lowerName.endsWith(".yml") || lowerName.endsWith(".yaml")) {
+            throw new IllegalArgumentException(
+                    "PropertiesUtil.update 不支持回写 YAML 配置文件（回写会把文件重写为 "
+                            + "properties 格式）：仅 updateToFile=false 更新内存，或改用 "
+                            + "ConfigPropertyResolver。文件：" + file.getName());
+        }
+
         // 先读完全部内容再写回（读取、修改、落盘在 rewriteFile 内按文件粒度串行）
         rewriteFile(file, key, value, comment);
     }
@@ -418,6 +430,26 @@ public final class PropertiesUtil {
         });
     }
 
+    private static void cleanupTmpQuietly(File tmp) {
+        try {
+            Files.deleteIfExists(tmp.toPath());
+        } catch (IOException cleanupFailed) {
+            // 清理失败保留 tmp，便于人工恢复
+            log.warn("清理临时文件失败：{}", tmp.getAbsolutePath());
+        }
+    }
+
+    /**
+     * 写回失败统一抛 {@link FileNotFoundException}（本类对外声明的唯一受检异常，
+     * 是 {@link java.io.IOException} 子类，既有按 IOException 处理的调用方不受影响），
+     * 避免「update 返回 true 但落盘失败」的静默数据丢失。
+     */
+    private static FileNotFoundException writeFailure(String message, IOException cause) {
+        FileNotFoundException fnfe = new FileNotFoundException(message);
+        fnfe.initCause(cause);
+        return fnfe;
+    }
+
     /**
      * 串行化地重写配置文件：读原文件、套用本次修改、经同目录唯一命名临时文件原子替换。
      *
@@ -425,7 +457,7 @@ public final class PropertiesUtil {
      * @param key     本次更新的配置项名称
      * @param value   新值
      * @param comment 写入文件时附带的注释说明
-     * @throws FileNotFoundException 读取配置文件失败时抛出
+     * @throws FileNotFoundException 读取或写回配置文件失败时抛出
      */
     private static void rewriteFile(File file, String key, String value, String comment)
             throws FileNotFoundException {
@@ -450,13 +482,8 @@ public final class PropertiesUtil {
                 properties.store(out, comment);
             } catch (IOException e) {
                 log.error("写回配置文件发生异常", e);
-                try {
-                    Files.deleteIfExists(tmp.toPath());
-                } catch (IOException cleanupFailed) {
-                    // 清理失败保留 tmp，便于人工恢复
-                    log.warn("清理临时文件失败：{}", tmp.getAbsolutePath());
-                }
-                return;
+                cleanupTmpQuietly(tmp);
+                throw writeFailure("写回配置文件失败：" + e.getMessage(), e);
             }
             try {
                 Files.move(tmp.toPath(), file.toPath(),
@@ -467,19 +494,13 @@ public final class PropertiesUtil {
                     Files.move(tmp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING);
                 } catch (IOException e) {
                     log.error("写回配置文件发生异常", e);
-                    try {
-                        Files.deleteIfExists(tmp.toPath());
-                    } catch (IOException ignore) {
-                        // 清理失败保留 tmp，便于人工恢复
-                    }
+                    cleanupTmpQuietly(tmp);
+                    throw writeFailure("写回配置文件失败：" + e.getMessage(), e);
                 }
             } catch (RuntimeException e) {
                 log.error("写回配置文件发生未知异常", e);
-                try {
-                    Files.deleteIfExists(tmp.toPath());
-                } catch (IOException ignore) {
-                    // 清理失败保留 tmp，便于人工恢复
-                }
+                cleanupTmpQuietly(tmp);
+                throw e;
             }
         }
     }
