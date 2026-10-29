@@ -49,4 +49,115 @@ public class SqlAutoDialectsTest {
         SqlAutoOptions opt = SqlAutoOptions.defaults().url("jdbc:h2:mem:x");
         assertEquals(SqlDialect.H2, SqlAutoDialects.resolve(opt, null));
     }
+
+    // ============ P0-11: fromProduct / fromProductStrict 不再误判为 MySQL ============
+
+    @Test
+    public void fromProductKingbaseIsPostgresNotMysql() {
+        assertEquals(SqlDialect.POSTGRES, SqlAutoDialects.fromProduct("KingbaseES"));
+        assertEquals(SqlDialect.POSTGRES, SqlAutoDialects.fromProduct("kingbasees"));
+        assertEquals(SqlDialect.POSTGRES, SqlAutoDialects.fromProduct("KingBase ES"));
+    }
+
+    @Test
+    public void fromProductOpenGaussIsPostgresNotMysql() {
+        assertEquals(SqlDialect.POSTGRES, SqlAutoDialects.fromProduct("openGauss"));
+        assertEquals(SqlDialect.POSTGRES, SqlAutoDialects.fromProduct("GaussDB"));
+    }
+
+    @Test
+    public void fromProductOceanBaseIsMysql() {
+        assertEquals(SqlDialect.MYSQL, SqlAutoDialects.fromProduct("OceanBase"));
+        assertEquals(SqlDialect.MYSQL, SqlAutoDialects.fromProduct("oceanbase"));
+    }
+
+    @Test
+    public void fromProductOceanBaseOracleIsOracle() {
+        assertEquals(SqlDialect.ORACLE, SqlAutoDialects.fromProduct("OceanBase_Oracle"));
+    }
+
+    @Test
+    public void fromProductSqlServer() {
+        assertEquals(SqlDialect.SQLSERVER, SqlAutoDialects.fromProduct("Microsoft SQL Server"));
+        assertEquals(SqlDialect.SQLSERVER, SqlAutoDialects.fromProduct("SQLServer"));
+    }
+
+    @Test
+    public void fromProductKnownLegacyMysql() {
+        assertEquals(SqlDialect.MYSQL, SqlAutoDialects.fromProduct("MySQL"));
+        assertEquals(SqlDialect.MYSQL, SqlAutoDialects.fromProduct("MariaDB"));
+        assertEquals(SqlDialect.MYSQL, SqlAutoDialects.fromProduct("TiDB"));
+        assertEquals(SqlDialect.MYSQL, SqlAutoDialects.fromProduct("PolarDB"));
+    }
+
+    @Test
+    public void fromProductClassic() {
+        assertEquals(SqlDialect.ORACLE, SqlAutoDialects.fromProduct("Oracle"));
+        assertEquals(SqlDialect.DB2, SqlAutoDialects.fromProduct("DB2/LINUXX8664"));
+        assertEquals(SqlDialect.H2, SqlAutoDialects.fromProduct("H2"));
+        assertEquals(SqlDialect.CLICKHOUSE, SqlAutoDialects.fromProduct("ClickHouse"));
+        assertEquals(SqlDialect.DAMENG, SqlAutoDialects.fromProduct("DM DBMS"));
+    }
+
+    /**
+     * 未知产品名仍回落 MySQL（向后兼容）。
+     */
+    @Test
+    public void fromProductUnknownFallsBackToMysql() {
+        assertEquals(SqlDialect.MYSQL, SqlAutoDialects.fromProduct("NotARealDatabase"));
+        assertEquals(SqlDialect.MYSQL, SqlAutoDialects.fromProduct("some-new-future-db"));
+    }
+
+    /**
+     * null / 空字符串产品名回落 MySQL（向后兼容）。
+     */
+    @Test
+    public void fromProductNullAndEmptyFallsBackToMysql() {
+        assertEquals(SqlDialect.MYSQL, SqlAutoDialects.fromProduct(null));
+        assertEquals(SqlDialect.MYSQL, SqlAutoDialects.fromProduct(""));
+        assertEquals(SqlDialect.MYSQL, SqlAutoDialects.fromProduct("   "));
+    }
+
+    /**
+     * 严格变体：无法识别时返回 null 而不是 MySQL。
+     */
+    @Test
+    public void fromProductStrictReturnsNullForUnknown() {
+        org.junit.Assert.assertNull(SqlAutoDialects.fromProductStrict("NotARealDatabase"));
+        org.junit.Assert.assertNull(SqlAutoDialects.fromProductStrict(null));
+        org.junit.Assert.assertNull(SqlAutoDialects.fromProductStrict(""));
+        org.junit.Assert.assertNull(SqlAutoDialects.fromProductStrict("   "));
+    }
+
+    /**
+     * 严格变体：识别到的产品名与非严格一致。
+     */
+    @Test
+    public void fromProductStrictMatchesIdentified() {
+        assertEquals(SqlDialect.POSTGRES, SqlAutoDialects.fromProductStrict("KingbaseES"));
+        assertEquals(SqlDialect.POSTGRES, SqlAutoDialects.fromProductStrict("openGauss"));
+        assertEquals(SqlDialect.SQLSERVER, SqlAutoDialects.fromProductStrict("Microsoft SQL Server"));
+        assertEquals(SqlDialect.ORACLE, SqlAutoDialects.fromProductStrict("Oracle"));
+        assertEquals(SqlDialect.MYSQL, SqlAutoDialects.fromProductStrict("MySQL"));
+        assertEquals(SqlDialect.H2, SqlAutoDialects.fromProductStrict("H2"));
+        assertEquals(SqlDialect.DAMENG, SqlAutoDialects.fromProductStrict("DM DBMS"));
+    }
+
+    /**
+     * fromProduct 必须与 fromProductStrict 识别路径一致：同一识别能命中的输入，
+     * 两者应得到同一方言；只有"不识别"才会有 MySQL vs null 的差异。
+     */
+    @Test
+    public void fromProductAndStrictAreConsistentWhenIdentified() {
+        String[] products = {
+                "MySQL", "KingbaseES", "openGauss", "OceanBase",
+                "Microsoft SQL Server", "Oracle", "H2", "ClickHouse",
+                "DM DBMS", "MariaDB", "PolarDB", "TiDB", "greenplum",
+        };
+        for (String p : products) {
+            SqlDialect a = SqlAutoDialects.fromProduct(p);
+            SqlDialect b = SqlAutoDialects.fromProductStrict(p);
+            assertEquals("mismatch for " + p, a, b);
+        }
+    }
 }
