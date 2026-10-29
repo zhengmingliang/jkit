@@ -161,4 +161,29 @@ public class RegexUtilsTest {
         List<String> groups = RegexUtils.getMatcherGroups("abc", "\\d+");
         assertTrue(groups.isEmpty());
     }
+
+    /**
+     * 缓存必须有上限：public API 的 key 是任意字符串，无界缓存在 regSource 可由
+     * 外部输入构造时构成内存 DoS 面。写入超过上限的不同正则后，缓存大小不得
+     * 超过 PATTERN_CACHE_MAX（512），且淘汰后新旧正则都能正常编译使用。
+     */
+    @SuppressWarnings("unchecked")
+    @org.junit.Test
+    public void patternCacheIsBounded() throws Exception {
+        int total = 700;
+        for (int i = 0; i < total; i++) {
+            org.junit.Assert.assertNotNull(RegexUtils.getPattern("bounded" + i + "\\d+"));
+        }
+        java.lang.reflect.Field field = RegexUtils.class.getDeclaredField("cachePatterns");
+        field.setAccessible(true);
+        java.util.Map<String, ?> cache = (java.util.Map<String, ?>) field.get(null);
+        org.junit.Assert.assertTrue("cache should be bounded, got " + cache.size(),
+                cache.size() <= 512);
+
+        // 淘汰后功能不受影响
+        org.junit.Assert.assertTrue(
+                RegexUtils.getPattern("abc\\d+").matcher("abc123").matches());
+        org.junit.Assert.assertTrue(
+                RegexUtils.getPattern("xyz[0-9]{2}").matcher("xyz42").matches());
+    }
 }

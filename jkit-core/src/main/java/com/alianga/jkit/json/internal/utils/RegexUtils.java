@@ -1,9 +1,10 @@
 package com.alianga.jkit.json.internal.utils;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -13,27 +14,44 @@ import java.util.regex.Pattern;
  * @time 2020/3/11 21:33
  */
 public class RegexUtils {
-    private static Map<String, Pattern> cachePatterns = new ConcurrentHashMap<String, Pattern>();
+    /**
+     * 编译缓存上限。Pattern 对象较大，而本方法又是 public API、key 是任意调用方
+     * 字符串：无界缓存在 regSource 可由外部输入构造时（如模板渲染路径）构成
+     * 内存 DoS 面。LRU 淘汰只影响缓存命中率，不影响任何已返回的 Pattern 实例。
+     */
+    private static final int PATTERN_CACHE_MAX = 512;
+
+    private static final Map<String, Pattern> cachePatterns =
+            Collections.synchronizedMap(new LinkedHashMap<String, Pattern>(64, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<String, Pattern> eldest) {
+                    return size() > PATTERN_CACHE_MAX;
+                }
+            });
 
     /**
-     * 获取正则表达式对应的 {@link Pattern}，编译结果会被缓存复用。
+     * 获取正则表达式对应的 {@link Pattern}，编译结果会被缓存复用（有界 LRU，见
+     * {@link #PATTERN_CACHE_MAX}）。
      *
-     * <p>用 {@link ConcurrentHashMap#computeIfAbsent} 实现原子"查-编-存"，不再对
-     * 字符串字面量加 {@code synchronized}。原实现对 {@code regSource}（String）加锁
-     * 有两个隐患：
+     * <p>用 {@link Map#computeIfAbsent} 实现原子"查-编-存"，不对入参字符串加锁。
+     * 原实现对 {@code regSource}（String）加锁有两个隐患：
      * <ul>
      *   <li>字符串常量池让锁对象被 JVM 全局共享，业务代码或其它库若也
      *       {@code synchronized} 同一字面量会发生跨模块死锁；</li>
      *   <li>{@code putIfAbsent} 语义不对（"后写覆盖"），高并发下两个线程可能都编译一次。</li>
      * </ul>
      *
+     * <p>锁对象是缓存自身的包装器（私有的，不会暴露给调用方），外层同步让
+     * {@code computeIfAbsent} 在 JDK 8 的 {@code Collections.synchronizedMap} 上
+     * 也保持原子；锁内嵌的 get/put 对同一监视器可重入。</p>
+     *
      * @param regSource 正则表达式源串
      * @return 该正则表达式编译后的 {@link Pattern} 实例
      */
     public static Pattern getPattern(String regSource) {
-        // computeIfAbsent 对同一 key 的 mapping function 只会被调用一次（原子语义），
-        // 且不需要对 key 加锁，避免与业务代码 synchronized 同一字符串字面量时跨模块死锁。
-        return cachePatterns.computeIfAbsent(regSource, Pattern::compile);
+        synchronized (cachePatterns) {
+            return cachePatterns.computeIfAbsent(regSource, Pattern::compile);
+        }
     }
 
     /**
