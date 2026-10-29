@@ -1126,7 +1126,9 @@ public class EncryptUtils {
                 byte[] encrypt = encrypt(content.getBytes(), getPublicKey(publicKey));
                 encodeString = new String(encrypt);
             } catch (Exception e) {
-                e.printStackTrace();
+                // 保留"失败返回空串"的原有契约（向后兼容），但异常必须进入日志监控；
+                // 之前是 printStackTrace，写到 stderr 后无论容器/日志框架都无法采集。
+                log.error("RSA 加密失败（publicKey 解析或加密过程异常）", e);
             }
 
             return encodeString;
@@ -1145,7 +1147,9 @@ public class EncryptUtils {
                 byte[] decrypt = decrypt(content.getBytes(), getPrivateKey(privateKey));
                 decodeString = new String(decrypt);
             } catch (Exception e) {
-                e.printStackTrace();
+                // 保留"失败返回空串"的原有契约；但解密失败若悄悄发生会导致数据被误读为空串，
+                // 必须从 stderr 移到 log.error 让监控能捕获。
+                log.error("RSA 解密失败（privateKey 解析或解密过程异常）", e);
             }
             return decodeString;
         }
@@ -1162,10 +1166,9 @@ public class EncryptUtils {
                 X509EncodedKeySpec keySpec = new X509EncodedKeySpec(keyBytes);
                 KeyFactory keyFactory = KeyFactory.getInstance(RSA);
                 return keyFactory.generatePublic(keySpec);
-            } catch (NoSuchAlgorithmException e) {
-                e.printStackTrace();
-            } catch (InvalidKeySpecException e) {
-                e.printStackTrace();
+            } catch (NoSuchAlgorithmException | InvalidKeySpecException e) {
+                // 保留"失败返回 null"的原有契约；但密钥解析失败（base64 错/格式错）必须可观测。
+                log.error("getPublicKey 失败：公钥格式非法或算法不可用", e);
             }
             return null;
         }
@@ -1182,10 +1185,9 @@ public class EncryptUtils {
                 PKCS8EncodedKeySpec keySpec = new PKCS8EncodedKeySpec(keyBytes);
                 KeyFactory keyFactory = KeyFactory.getInstance(RSA);
                 return keyFactory.generatePrivate(keySpec);
-            } catch (NoSuchAlgorithmException e) {
-                e.printStackTrace();
-            } catch (InvalidKeySpecException e) {
-                e.printStackTrace();
+            } catch (NoSuchAlgorithmException | InvalidKeySpecException e) {
+                // 保留"失败返回 null"的原有契约；但密钥解析失败（base64 错/格式错）必须可观测。
+                log.error("getPrivateKey 失败：私钥格式非法或算法不可用", e);
             }
             return null;
         }

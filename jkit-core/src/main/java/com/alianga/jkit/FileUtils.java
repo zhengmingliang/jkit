@@ -99,7 +99,9 @@ public class FileUtils {
             }
             flag = file.createNewFile();
         } catch (IOException e) {
-            e.printStackTrace();
+            // 保留原"返回 false"语义（很多调用方靠返回值判断是否已存在），但用 log.error 替代
+            // printStackTrace，让磁盘满/权限错误能被监控捕捉，而不是 stderr 一闪而过。
+            log.error("createFile 失败：{}", file == null ? "null" : file.getAbsolutePath(), e);
         }
         return flag;
     }
@@ -118,7 +120,7 @@ public class FileUtils {
             }
             dir.mkdir();
         } catch (Exception exception) {
-            exception.printStackTrace();
+            log.error("makeDir 失败：{}", dir == null ? "null" : dir.getAbsolutePath(), exception);
         }
     }
 
@@ -149,11 +151,11 @@ public class FileUtils {
             }
 
             fw = new FileOutputStream(writefile, append);
-            log.debug("###content:{}", content);
             fw.write(content.getBytes());
             fw.flush();
         } catch (Exception ex) {
-            ex.printStackTrace();
+            // 不再静默 printStackTrace：写文件失败必须能进监控，但不能改签名（向后兼容）。
+            log.error("writeFile 失败：{}", path, ex);
         } finally {
             IOUtils.close(fw);
         }
@@ -179,7 +181,9 @@ public class FileUtils {
             in.transferTo(0, in.size(), out);
 
         } catch (IOException e) {
-            e.printStackTrace();
+            log.error("nioTransferCopyFile 失败：{} -> {}",
+                    source == null ? "null" : source.getAbsolutePath(),
+                    target == null ? "null" : target.getAbsolutePath(), e);
         } finally {
             IOUtils.close(outStream);
             IOUtils.close(inStream);
