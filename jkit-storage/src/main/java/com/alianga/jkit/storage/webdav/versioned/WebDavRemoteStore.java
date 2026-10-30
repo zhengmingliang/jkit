@@ -92,7 +92,8 @@ public final class WebDavRemoteStore implements RemoteStore {
                 return new ArrayList<RemoteObject>();
             }
             if (code != 207 && code != 200) {
-                throw new IOException("PROPFIND failed: HTTP " + code + " " + safeBody(response));
+                String body = safeBody(response);
+                throw new WebDavHttpException(code, "PROPFIND failed: HTTP " + code + " " + body, body);
             }
             String body = response.bodyText();
             response = null;
@@ -156,7 +157,8 @@ public final class WebDavRemoteStore implements RemoteStore {
             response = send(base("GET", target));
             int code = response.status();
             if (code != 200) {
-                throw new IOException("GET failed: HTTP " + code + " " + safeBody(response));
+                String body = safeBody(response);
+                throw new WebDavHttpException(code, "GET failed: HTTP " + code + " " + body, body);
             }
             Path parent = localFile.getParent();
             if (parent != null) {
@@ -198,7 +200,8 @@ public final class WebDavRemoteStore implements RemoteStore {
             if (code == 200 || code == 204 || code == 404) {
                 return;
             }
-            throw new IOException("DELETE failed: HTTP " + code + " " + safeBody(response));
+            String body = safeBody(response);
+            throw new WebDavHttpException(code, "DELETE failed: HTTP " + code + " " + body, body);
         } finally {
             if (response != null) {
                 response.close();
@@ -477,7 +480,7 @@ public final class WebDavRemoteStore implements RemoteStore {
                 return;
             }
             if (code == 403) {
-                throw new IOException("MKCOL forbidden: " + dir);
+                throw new WebDavHttpException(403, "MKCOL forbidden: " + dir, null);
             }
             response.close();
             response = null;
@@ -487,7 +490,7 @@ public final class WebDavRemoteStore implements RemoteStore {
                 if (check.status() == 207 || check.status() == 200) {
                     return;
                 }
-                throw new IOException("MKCOL failed: HTTP " + code);
+                throw new WebDavHttpException(code, "MKCOL failed: HTTP " + code, null);
             } finally {
                 if (check != null) {
                     check.close();
