@@ -18,6 +18,7 @@ import java.util.Map;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 /**
  * WebDAV 引擎测试：内嵌内存版 WebDAV 服务器，验证 PROPFIND 列表 / PUT / GET /
@@ -151,5 +152,38 @@ public class WebDavFileStorageTest {
         dav.upload("edit.txt", "v2".getBytes(StandardCharsets.UTF_8));
         assertEquals("v2", new String(dav.readBytes("edit.txt"), StandardCharsets.UTF_8));
         assertEquals(1, dav.list("").size());
+    }
+
+    @Test
+    public void overwriteWithReplaceAndDeletePermissionKeepsSinglePath() {
+        server.renameOnConflict = true;
+        server.honorReplace = true;
+        server.allowDelete = true;
+        FileStorage dav = storage();
+        dav.upload("keep.txt", "v1".getBytes(StandardCharsets.UTF_8));
+        dav.upload("keep.txt", "v2".getBytes(StandardCharsets.UTF_8));
+        assertEquals("v2", new String(dav.readBytes("keep.txt"), StandardCharsets.UTF_8));
+        assertEquals(1, dav.list("").size());
+    }
+
+    /**
+     * 对齐真实 copyparty {@code rwma}（无 d）：replace:1 被忽略并改名另存，
+     * MOVE/DELETE 恢复路径亦因无删权失败，最终 CONFLICT。
+     */
+    @Test
+    public void overwriteWithoutDeletePermissionRaisesConflict() {
+        server.renameOnConflict = true;
+        server.honorReplace = true;
+        server.allowDelete = false;
+        FileStorage dav = storage();
+        dav.upload("nodel.txt", "v1".getBytes(StandardCharsets.UTF_8));
+        try {
+            dav.upload("nodel.txt", "v2".getBytes(StandardCharsets.UTF_8));
+            fail("expected CONFLICT without delete permission");
+        } catch (StorageException e) {
+            assertEquals(StorageErrorCode.CONFLICT, e.code());
+        }
+        // 原文件仍为 v1；改名副本可能残留或已被清理
+        assertEquals("v1", new String(dav.readBytes("nodel.txt"), StandardCharsets.UTF_8));
     }
 }

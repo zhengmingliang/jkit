@@ -39,6 +39,8 @@ final class FakeDavServer {
     volatile boolean renameOnConflict = false;
     /** 配合 renameOnConflict：带 replace 头时是否照常覆盖。 */
     volatile boolean honorReplace = true;
+    /** false 时模拟无删除权限（DELETE/覆盖型 MOVE 返回 403），且忽略 replace 头（对齐 copyparty rwma）。 */
+    volatile boolean allowDelete = true;
     private int renameSeq = 0;
     private HttpServer server;
     private String user;
@@ -184,7 +186,8 @@ final class FakeDavServer {
         }
         String stored = path;
         Entity existing = tree.get(path);
-        boolean replace = honorReplace && exchange.getRequestHeaders().getFirst("replace") != null;
+        boolean replace = allowDelete && honorReplace
+                && exchange.getRequestHeaders().getFirst("replace") != null;
         if (renameOnConflict && existing != null && !existing.directory && !replace) {
             stored = path + "-" + (++renameSeq) + "-renamed.txt";
         }
@@ -246,6 +249,10 @@ final class FakeDavServer {
     }
 
     private void handleDelete(HttpExchange exchange, String path) throws IOException {
+        if (!allowDelete) {
+            respond(exchange, 403, "");
+            return;
+        }
         Entity entity = tree.remove(path);
         if (entity == null) {
             respond(exchange, 404, "");
@@ -272,6 +279,11 @@ final class FakeDavServer {
         Entity entity = tree.get(path);
         if (entity == null) {
             respond(exchange, 404, "");
+            return;
+        }
+        // 无删权：禁止覆盖目标，且 MOVE 需删源 → 一律 403（对齐无 d 权限的 copyparty）
+        if (!allowDelete) {
+            respond(exchange, 403, "");
             return;
         }
         if (entity.directory) {
