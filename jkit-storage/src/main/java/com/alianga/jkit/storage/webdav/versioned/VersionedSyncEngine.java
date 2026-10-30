@@ -97,6 +97,11 @@ public final class VersionedSyncEngine {
      * <p>冲突判定：远端 head.seq &gt; localBase.seq，或 head 文件名与 localBase 不一致。</p>
      *
      * @param zip        本机备份包
+     * <p>对 {@link StoreCapabilities.OverwritePolicy#RENAMES_ON_EXISTS}，
+     * {@code putIfAbsent} 发带 {@code If-None-Match:*} 的 PUT；若 {@code Location} 改名则删除残留并冲突。
+     * 对静默覆盖服务器，无条件写时先 STAT 再 {@code putReplace}，存在 TOCTOU 窗口，
+     * 由版本文件名中的 host+hash 缓解。</p>
+     *
      * @param localBase  本机基线
      * @param onConflict 冲突回调；返回决策
      * @return 上传结果
@@ -151,7 +156,9 @@ public final class VersionedSyncEngine {
 
         PutResult put = store.putIfAbsent(next.fileName(), zip);
         if (put.unsupported()) {
-            // 无条件写能力：名称已 STAT 为空，使用 putReplace 创建（TOCTOU 由重试/冲突路径消化）
+            // 仅静默覆盖 / 未知策略会走到这里：名称已 STAT 为空后 putReplace。
+            // 仍有 check-then-write 窗口（STAT→PUT 非原子）；版本名含 host+hash 降低碰撞，
+            // 冲突由后续 renamed / preconditionFailed / 重试路径消化。
             put = store.putReplace(next.fileName(), zip);
         }
         if (put.renamed()) {

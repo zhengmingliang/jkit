@@ -94,6 +94,36 @@ public class WebDavRemoteStoreTest {
         assertTrue(caps.replaceHeader());
         Path tmp = Files.createTempFile("p-", ".bin");
         Files.write(tmp, "x".getBytes(StandardCharsets.UTF_8));
-        assertTrue(store.putIfAbsent("n.bin", tmp).unsupported());
+        // RENAMES：恢复 If-None-Match 原子 PUT，新名应成功且不改名
+        PutResult fresh = store.putIfAbsent("n.bin", tmp);
+        assertTrue(fresh.success());
+        assertFalse(fresh.renamed());
+        assertFalse(fresh.unsupported());
+    }
+
+    @Test
+    public void putIfAbsentOnRenameModeDetectsConflictViaLocation() throws Exception {
+        fake.setMode(FakeWebDavServer.Mode.RENAME_ON_EXISTS);
+        store = new WebDavRemoteStore(fake.config("data"));
+        store.probeCapabilities();
+        Path tmp = Files.createTempFile("p-", ".bin");
+        Files.write(tmp, "v1".getBytes(StandardCharsets.UTF_8));
+        assertTrue(store.putReplace("race.bin", tmp).success());
+        Files.write(tmp, "v2".getBytes(StandardCharsets.UTF_8));
+        PutResult r = store.putIfAbsent("race.bin", tmp);
+        assertTrue(r.renamed());
+        assertFalse(r.unsupported());
+        assertTrue(r.effectiveName() != null && !r.effectiveName().equals("race.bin"));
+    }
+
+    @Test
+    public void putIfAbsentUnsupportedOnSilentOverwrite() throws Exception {
+        fake.setMode(FakeWebDavServer.Mode.IGNORE_HEADERS_OVERWRITE);
+        store = new WebDavRemoteStore(fake.config("data"));
+        store.probeCapabilities();
+        Path tmp = Files.createTempFile("p-", ".bin");
+        Files.write(tmp, "x".getBytes(StandardCharsets.UTF_8));
+        PutResult r = store.putIfAbsent("fresh-silent.bin", tmp);
+        assertTrue(r.unsupported());
     }
 }

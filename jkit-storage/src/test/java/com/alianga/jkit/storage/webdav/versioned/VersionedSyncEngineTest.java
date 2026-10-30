@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -146,13 +147,25 @@ public class VersionedSyncEngineTest {
     }
 
     @Test
-    public void putIfAbsentReturnsUnsupportedWithoutConditionalWrite() throws Exception {
+    public void putIfAbsentUsesAtomicPutOnRenameServer() throws Exception {
         fake.setMode(FakeWebDavServer.Mode.RENAME_ON_EXISTS);
         store = new WebDavRemoteStore(fake.config("backups"));
         store.probeCapabilities();
         Path tmp = Files.createTempFile("u-", ".bin");
         Files.write(tmp, "x".getBytes(StandardCharsets.UTF_8));
         PutResult r = store.putIfAbsent("fresh.bin", tmp);
-        assertTrue(r.unsupported());
+        assertTrue(r.success());
+        assertFalse(r.renamed());
+        assertFalse(r.unsupported());
+    }
+
+    @Test
+    public void putIfAbsentUnsupportedOnlyOnSilentOverwrite() throws Exception {
+        fake.setMode(FakeWebDavServer.Mode.IGNORE_HEADERS_OVERWRITE);
+        store = new WebDavRemoteStore(fake.config("backups"));
+        store.probeCapabilities();
+        Path tmp = Files.createTempFile("u-", ".bin");
+        Files.write(tmp, "x".getBytes(StandardCharsets.UTF_8));
+        assertTrue(store.putIfAbsent("fresh.bin", tmp).unsupported());
     }
 }

@@ -28,8 +28,11 @@ import java.util.regex.Pattern;
  * <p>能力探测通用分类：supports-412 / overwrites-silently / renames-on-exists / no-etag；
  * 另探测 {@code replace: 1}。弱 ETag（{@code W/}）视为不可用。</p>
  *
- * <p>{@link #putIfAbsent} / {@link #putIfMatch} 在已探测到不支持条件写时返回
- * {@link PutResult#unsupported(String)}，禁止静默降级为普通 PUT。</p>
+ * <p>{@link #putIfAbsent} / {@link #putIfMatch}：已探测为
+ * {@link StoreCapabilities.OverwritePolicy#OVERWRITES_SILENTLY} / {@code UNKNOWN} 且无条件写时
+ * 返回 {@link PutResult#unsupported(String)}，禁止静默普通 PUT。
+ * {@link StoreCapabilities.OverwritePolicy#RENAMES_ON_EXISTS} 仍发 {@code If-None-Match:*}，
+ * 由 {@code Location ≠ 请求路径} 判定冲突（上层删除改名残留）。</p>
  *
  * @author 郑明亮
  */
@@ -332,8 +335,15 @@ public final class WebDavRemoteStore implements RemoteStore {
         ensureRemoteDir();
         String safe = sanitize(name);
         if (mode == PutMode.IF_ABSENT) {
-            // 已探测且不支持条件写：显式 unsupported，禁止静默普通 PUT
             if (cachedCaps != null && !cachedCaps.conditionalPut()) {
+                StoreCapabilities.OverwritePolicy policy = cachedCaps.overwritePolicy();
+                // 改名服务器：恢复原子路径——带 If-None-Match:* 的 PUT；
+                // Location ≠ 请求名 → 上层按冲突处理并尽力 DELETE 残留。
+                if (policy == StoreCapabilities.OverwritePolicy.RENAMES_ON_EXISTS) {
+                    return putRaw(safe, localFile, "*", null, false);
+                }
+                // 静默覆盖 / 未知：STAT 后显式 unsupported，禁止静默普通 PUT。
+                // 仍有 check-then-write 窗口，由版本文件名中的 host+hash 降低碰撞。
                 if (stat(safe).isPresent()) {
                     return new PutResult(412, "", "", safe, safe, false);
                 }
