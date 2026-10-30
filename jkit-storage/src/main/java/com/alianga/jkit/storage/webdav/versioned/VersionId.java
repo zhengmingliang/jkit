@@ -9,11 +9,16 @@ import java.util.regex.Pattern;
 /**
  * 不可变版本包文件名：{@code reqdesk-v&lt;seq6&gt;-&lt;host&gt;-&lt;hash8&gt;.zip}。
  *
+ * <p>全锚点模式 {@code ^reqdesk-v(\d+)-([a-z0-9_-]+)-([a-f0-9]{8})\.zip$}：
+ * copyparty 改名残留 {@code name.zip-&lt;ts&gt;-&lt;rand&gt;.zip} 因中间含 {@code .zip.} 无法匹配。
+ * host 段在生成时已将点号替换为 {@code -}（见 {@link #normalizeHost}）。</p>
+ *
  * <p>seq 为零填充十进制；host 已规范化（仅 [a-z0-9_-]）；hash8 为内容 SHA-256 前 8 位小写十六进制。</p>
  *
  * @author 郑明亮
  */
 public final class VersionId {
+    /** 版本包文件名全锚点模式（单一事实源；勿放宽）。 */
     private static final Pattern PATTERN = Pattern.compile(
             "^reqdesk-v(\\d+)-([a-z0-9_-]+)-([a-f0-9]{8})\\.zip$",
             Pattern.CASE_INSENSITIVE);
@@ -90,6 +95,16 @@ public final class VersionId {
         String hash = normalizeHash8(m.group(3));
         String canonical = String.format(Locale.ROOT, "reqdesk-v%06d-%s-%s.zip", seq, host, hash);
         return Optional.of(new VersionId(seq, host, hash, canonical));
+    }
+
+    /**
+     * 是否为合法版本包名（委托 {@link #parse}）。
+     *
+     * @param fileName 文件名
+     * @return 是否匹配
+     */
+    public static boolean isVersionFileName(String fileName) {
+        return parse(fileName).isPresent();
     }
 
     /**

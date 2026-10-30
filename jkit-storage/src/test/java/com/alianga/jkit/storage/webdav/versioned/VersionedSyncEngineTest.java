@@ -168,4 +168,81 @@ public class VersionedSyncEngineTest {
         Files.write(tmp, "x".getBytes(StandardCharsets.UTF_8));
         assertTrue(store.putIfAbsent("fresh.bin", tmp).unsupported());
     }
+
+    @Test
+    public void versionIdRejectsCopypartyRenamedStray() {
+        // 中间含 .zip. 的 copyparty 残留不得解析为版本
+        assertFalse(VersionId.parse(
+                "reqdesk-v000002-hosta-abcdef01.zip-1730250000-abcdef.zip").isPresent());
+        assertFalse(VersionId.isVersionFileName(
+                "reqdesk-v000002-hosta-abcdef01.zip-20261030-abcdef.zip"));
+        // host 点号在 normalize 前无法通过 [a-z0-9_-]+ 段
+        assertFalse(VersionId.parse("reqdesk-v000002-host.with.dots-abcdef01.zip").isPresent());
+        assertTrue(VersionId.parse("reqdesk-v000002-hosta-abcdef01.zip").isPresent());
+        assertTrue(VersionId.isVersionFileName("reqdesk-v1-hosta-abcdef01.zip"));
+    }
+
+    @Test
+    public void copypartyRenamedStrayExcludedFromListAndMaxSeq() throws Exception {
+        VersionedSyncEngine eng = new VersionedSyncEngine(store, "hostA", 20);
+        Path zip1 = Files.createTempFile("v1-", ".zip");
+        Files.write(zip1, "content-one-aaaa".getBytes(StandardCharsets.UTF_8));
+        VersionedSyncEngine.UploadOutcome o1 = eng.uploadNewVersion(zip1, LocalBase.EMPTY, null);
+        assertEquals(1L, o1.version().seq());
+
+        String stray = "reqdesk-v000002-hosta-abcdef01.zip-20261030-abcdef.zip";
+        fake.putFile("/backups/" + stray, "poison".getBytes(StandardCharsets.UTF_8));
+
+        List<VersionId> all = eng.listVersions();
+        assertEquals(1, all.size());
+        assertEquals(1L, all.get(0).seq());
+        assertEquals(1L, eng.resolveHead().get().seq());
+        assertFalse(VersionId.parse(stray).isPresent());
+
+        Path zip2 = Files.createTempFile("v2-", ".zip");
+        Files.write(zip2, "content-two-bbbb".getBytes(StandardCharsets.UTF_8));
+        VersionedSyncEngine.UploadOutcome o2 = eng.uploadNewVersion(
+                zip2, LocalBase.of(o1.version(), o1.contentHash()), null);
+        assertEquals(2L, o2.version().seq());
+        assertEquals(2, eng.listVersions().size());
+    }
+
+    @Test
+    public void noDeletePermStrayRemainsButNextSeqStillCorrect() throws Exception {
+        fake.setMode(FakeWebDavServer.Mode.RENAME_ON_EXISTS);
+        store = new WebDavRemoteStore(fake.config("backups"));
+        store.probeCapabilities();
+        VersionedSyncEngine eng = new VersionedSyncEngine(store, "hostA", 20);
+
+        Path zip1 = Files.createTempFile("v1-", ".zip");
+        Files.write(zip1, "first-payload-xx".getBytes(StandardCharsets.UTF_8));
+        VersionedSyncEngine.UploadOutcome o1 = eng.uploadNewVersion(zip1, LocalBase.EMPTY, null);
+        assertEquals(1L, o1.version().seq());
+
+        // 模拟 copyparty 改名残留（全 hex rand）；随后无删权使残留无法清理
+        String strayName = o1.version().fileName() + "-20261030-abcdef.zip";
+        fake.putFile("/backups/" + strayName, "stray-bytes".getBytes(StandardCharsets.UTF_8));
+        fake.setRefuseAllDeletes(true);
+        try {
+            store.delete(strayName);
+            fail("无删权应拒绝 DELETE");
+        } catch (Exception expected) {
+            // 403
+        }
+        assertTrue(store.stat(strayName).isPresent());
+        assertFalse(VersionId.parse(strayName).isPresent());
+        assertEquals(1, eng.listVersions().size());
+        assertEquals(1L, eng.resolveHead().get().seq());
+
+        Path zip2 = Files.createTempFile("v2-", ".zip");
+        Files.write(zip2, "second-payload-yy".getBytes(StandardCharsets.UTF_8));
+        VersionedSyncEngine.UploadOutcome o2 = eng.uploadNewVersion(
+                zip2, LocalBase.of(o1.version(), o1.contentHash()), null);
+        assertEquals(2L, o2.version().seq());
+        assertEquals(2L, eng.resolveHead().get().seq());
+        for (VersionId v : eng.listVersions()) {
+            assertFalse(v.fileName().contains(".zip-"));
+        }
+        assertTrue(store.stat(strayName).isPresent());
+    }
 }

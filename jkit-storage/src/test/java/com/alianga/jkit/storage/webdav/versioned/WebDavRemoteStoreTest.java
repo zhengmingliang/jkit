@@ -126,4 +126,31 @@ public class WebDavRemoteStoreTest {
         PutResult r = store.putIfAbsent("fresh-silent.bin", tmp);
         assertTrue(r.unsupported());
     }
+
+    @Test
+    public void renamePathMatchesCopypartyFormat() {
+        String out = FakeWebDavServer.renamePath("/data/x.zip");
+        assertTrue(out.matches("^/data/x\\.zip-\\d+-[0-9a-f]{6}\\.zip$"));
+        String ver = FakeWebDavServer.renamePath(
+                "/backups/reqdesk-v000002-hosta-abcdef01.zip");
+        assertTrue(ver.matches(
+                "^/backups/reqdesk-v000002-hosta-abcdef01\\.zip-\\d+-[0-9a-f]{6}\\.zip$"));
+        assertFalse(VersionId.parse(ver.substring(ver.lastIndexOf('/') + 1)).isPresent());
+    }
+
+    @Test
+    public void putIfAbsentRenameLocationUsesCopypartyShape() throws Exception {
+        fake.setMode(FakeWebDavServer.Mode.RENAME_ON_EXISTS);
+        store = new WebDavRemoteStore(fake.config("data"));
+        store.probeCapabilities();
+        Path tmp = Files.createTempFile("p-", ".zip");
+        Files.write(tmp, "v1".getBytes(StandardCharsets.UTF_8));
+        assertTrue(store.putReplace("probe.zip", tmp).success());
+        Files.write(tmp, "v2".getBytes(StandardCharsets.UTF_8));
+        PutResult r = store.putIfAbsent("probe.zip", tmp);
+        assertTrue(r.renamed());
+        String eff = r.effectiveName();
+        assertTrue(eff, eff.matches("(?i)probe\\.zip-\\d+-[0-9a-f]{6}\\.zip"));
+    }
+
 }

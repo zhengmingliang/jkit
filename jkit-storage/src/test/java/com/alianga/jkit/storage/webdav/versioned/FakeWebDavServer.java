@@ -27,7 +27,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * <ul>
  *   <li>{@link Mode#STRICT_412} — 尊重 If-None-Match / If-Match，冲突 412；返回强 ETag</li>
  *   <li>{@link Mode#IGNORE_HEADERS_OVERWRITE} — 忽略条件头，静默覆盖；返回强 ETag</li>
- *   <li>{@link Mode#RENAME_ON_EXISTS} — 忽略条件头；已存在则改名另存（201 + Location）；无 ETag；
+ *   <li>{@link Mode#RENAME_ON_EXISTS} — 忽略条件头；已存在则按 copyparty 改名另存（{@code <orig>-<ts>-<rand><ext>}，201 + Location）；无 ETag；
  *       {@code replace: 1} 可强制覆盖</li>
  * </ul>
  *
@@ -50,6 +50,8 @@ public final class FakeWebDavServer implements AutoCloseable {
     private final Map<String, FileEntry> store = new ConcurrentHashMap<>();
     private volatile Mode mode = Mode.STRICT_412;
     private volatile boolean refuseProbeDelete;
+    /** 模拟无删权：所有 DELETE 返回 403（残留改名文件会留在远端）。 */
+    private volatile boolean refuseAllDeletes;
     private volatile String readOnlyPrefix = "/readonly";
     private volatile String noMethodPrefix = "/nomethod";
     private final AtomicLong clockMs = new AtomicLong(System.currentTimeMillis());
@@ -143,6 +145,10 @@ public final class FakeWebDavServer implements AutoCloseable {
         this.refuseProbeDelete = refuse;
     }
 
+    public void setRefuseAllDeletes(boolean refuse) {
+        this.refuseAllDeletes = refuse;
+    }
+
     public WebDavEndpoint config(String remoteDirectory) {
         return new WebDavEndpoint("http://127.0.0.1:" + port + "/", user, password, remoteDirectory);
     }
@@ -150,6 +156,7 @@ public final class FakeWebDavServer implements AutoCloseable {
     public void clear() {
         store.clear();
         refuseProbeDelete = false;
+        refuseAllDeletes = false;
         mode = Mode.STRICT_412;
     }
 
@@ -239,6 +246,14 @@ public final class FakeWebDavServer implements AutoCloseable {
             return;
         }
         if ("DELETE".equalsIgnoreCase(method)) {
+            if (refuseAllDeletes) {
+                byte[] body = "delete-forbidden".getBytes(StandardCharsets.UTF_8);
+                ex.sendResponseHeaders(403, body.length);
+                try (OutputStream os = ex.getResponseBody()) {
+                    os.write(body);
+                }
+                return;
+            }
             // 无删权：探测文件（Client 的 .reqdesk-probe-* / Store 的 .reqdesk-cap-*）一律 403
             if (refuseProbeDelete && (path.contains(".reqdesk-probe-")
                     || path.contains(".reqdesk-cap-")
@@ -404,16 +419,30 @@ public final class FakeWebDavServer implements AutoCloseable {
         }
     }
 
-    private static String renamePath(String path) {
+    /**
+     * copyparty 风格：{@code <orig>-<ts>-<rand><origExt>}，
+     * 例如 {@code x.zip-1730250000-a1b2c3.zip}（保留原名含扩展名再追加；rand 为全十六进制）。
+     */
+    static String renamePath(String path) {
         int slash = path.lastIndexOf('/');
         String dir = slash >= 0 ? path.substring(0, slash + 1) : "/";
         String name = slash >= 0 ? path.substring(slash + 1) : path;
         int dot = name.lastIndexOf('.');
-        String stem = dot > 0 ? name.substring(0, dot) : name;
         String ext = dot > 0 ? name.substring(dot) : "";
-        String stamp = Long.toString(System.currentTimeMillis(), 36);
-        String rand = UUID.randomUUID().toString().substring(0, 6);
-        return dir + stem + "-" + stamp + "-" + rand + ext;
+        long ts = System.currentTimeMillis() / 1000L;
+        // UUID 去横线后本身即为 [0-9a-f]；再过滤确保全 hex
+        String hex = UUID.randomUUID().toString().replace("-", "");
+        StringBuilder sb = new StringBuilder(6);
+        for (int i = 0; i < hex.length() && sb.length() < 6; i++) {
+            char c = hex.charAt(i);
+            if ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+                sb.append(c);
+            }
+        }
+        while (sb.length() < 6) {
+            sb.append('0');
+        }
+        return dir + name + "-" + ts + "-" + sb + ext;
     }
 
     private static String strongEtag(byte[] data) {
