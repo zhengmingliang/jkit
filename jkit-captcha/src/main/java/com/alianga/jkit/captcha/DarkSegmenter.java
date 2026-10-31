@@ -16,6 +16,18 @@ final class DarkSegmenter {
     private static final int MIN_CLUSTER = 25;
     /** 聚类中心上限。抗锯齿过渡色会各自成簇，封顶保证 O(像素数 × 上限) 的最坏耗时。 */
     private static final int MAX_CENTERS = 512;
+    /** 被干扰线切断的字要拼回去：跨度超过这个值就不算同一个字。 */
+    private static final int MERGE_MAX_SPAN_X = 38;
+    private static final int MERGE_MAX_SPAN_Y = 40;
+    /** 投影桥点：桥上墨量不超过 4，两侧都站着至少 10 像素高的实块。 */
+    private static final int BRIDGE_MAX_INK = 4;
+    private static final int BRIDGE_MIN_SIDE = 10;
+    /** 合法字符块的形状门限。1 被干扰线切开后只剩六像素宽，也必须留得住。 */
+    private static final int CHAR_MIN_HEIGHT = 16;
+    private static final int CHAR_MIN_WIDTH = 5;
+    private static final int CHAR_MAX_WIDTH = 40;
+    private static final double CHAR_MIN_DENSITY = 0.2;
+    private static final int CHAR_MIN_AREA = 50;
 
     List<RawGlyph> segment(RgbImage image) {
         int[] labels = cluster(image);
@@ -160,7 +172,7 @@ final class DarkSegmenter {
     }
 
     private static boolean isBridge(int[] columns, int x) {
-        if (columns[x] > 4) {
+        if (columns[x] > BRIDGE_MAX_INK) {
             return false;
         }
         int left = 0;
@@ -175,7 +187,7 @@ final class DarkSegmenter {
                 right = columns[i];
             }
         }
-        return left >= 10 && right >= 10;
+        return left >= BRIDGE_MIN_SIDE && right >= BRIDGE_MIN_SIDE;
     }
 
     /**
@@ -236,7 +248,7 @@ final class DarkSegmenter {
         }
         int spanX = Math.max(left.x + left.width - 1, right.x + right.width - 1) - Math.min(left.x, right.x);
         int spanY = Math.max(left.y + left.height - 1, right.y + right.height - 1) - Math.min(left.y, right.y);
-        return spanX <= 38 && spanY <= 40;
+        return spanX <= MERGE_MAX_SPAN_X && spanY <= MERGE_MAX_SPAN_Y;
     }
 
     private static int gap(int origin, int size, int otherOrigin, int otherSize) {
@@ -264,7 +276,9 @@ final class DarkSegmenter {
             return glyph;
         }
         // 这种字的 1 被干扰线切开后只剩六像素宽。
-        if (glyph.height >= 16 && glyph.width >= 5 && glyph.width <= 40 && density >= 0.2 && glyph.area >= 50) {
+        if (glyph.height >= CHAR_MIN_HEIGHT && glyph.width >= CHAR_MIN_WIDTH
+                && glyph.width <= CHAR_MAX_WIDTH && density >= CHAR_MIN_DENSITY
+                && glyph.area >= CHAR_MIN_AREA) {
             return glyph;
         }
         return null;

@@ -10,6 +10,13 @@ import java.util.List;
  * 被细线粘连的宽块按垂直投影切开。
  */
 final class LightSegmenter {
+    /** 暗墨：亮度明显压过边框中位数才算前景。 */
+    private static final int DARK_MAX_LUMINANCE = 168;
+    private static final int DARK_MARGIN = 25;
+    /** 彩色字：饱和度够高、通道总和不过亮、亮度不贴白底。 */
+    private static final int COLOR_MIN_SATURATION = 45;
+    private static final int COLOR_MAX_SUM = 680;
+    private static final int COLOR_MAX_LUMINANCE = 245;
     /** 这次分割是否切开了粘连字符，供类型判断使用。 */
     boolean splitWideComponent;
 
@@ -77,10 +84,11 @@ final class LightSegmenter {
             int luminance = RgbImage.luminance(image.pixels[i]);
             int saturation = RgbImage.saturation(red, green, blue);
             int sum = red + green + blue;
-            if (luminance <= 168 && luminance < background - 25) {
+            if (luminance <= DARK_MAX_LUMINANCE && luminance < background - DARK_MARGIN) {
                 dark[i] = true;
                 darkCount++;
-            } else if (saturation >= 45 && sum < 680 && luminance < 245) {
+            } else if (saturation >= COLOR_MIN_SATURATION && sum < COLOR_MAX_SUM
+                    && luminance < COLOR_MAX_LUMINANCE) {
                 color[i] = true;
                 colorCount++;
             }
