@@ -100,6 +100,10 @@ public final class CaptchaRecognizer implements AutoCloseable {
         if (image == null) {
             throw new IllegalArgumentException("image");
         }
+        if (image.getWidth() <= 0 || image.getHeight() <= 0) {
+            // 不拦住的话，深处的 borderMedianLuminance 会以数组越界的形式报错。
+            throw new IllegalArgumentException("image size");
+        }
         RecognizeOptions effective = options == null ? RecognizeOptions.auto() : options;
         List<CaptchaSolver> candidates;
         synchronized (solvers) {
@@ -368,6 +372,9 @@ public final class CaptchaRecognizer implements AutoCloseable {
     public void learn(BufferedImage image, char label) {
         if (image == null) {
             throw new IllegalArgumentException("image");
+        }
+        if (image.getWidth() <= 0 || image.getHeight() <= 0) {
+            throw new IllegalArgumentException("image size");
         }
         RgbImage rgb = RgbImage.from(image);
         RawGlyph glyph = largest(segmentForLearn(rgb));

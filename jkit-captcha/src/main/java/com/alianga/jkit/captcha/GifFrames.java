@@ -78,18 +78,28 @@ final class GifFrames {
     static BufferedImage composite(List<BufferedImage> frames) {
         int width = frames.get(0).getWidth();
         int height = frames.get(0).getHeight();
-        BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                int dark = 0;
-                for (int i = 0; i < frames.size(); i++) {
-                    if (RgbImage.luminance(frames.get(i).getRGB(x, y)) < 200) {
-                        dark++;
-                    }
-                }
-                image.setRGB(x, y, dark >= 2 ? 0x202020 : 0xffffff);
+        // 与 WhitePlate.matches 同口径：尺寸与首帧不符的帧不参与合成，
+        // GIF 子矩形帧不会再造成逐像素 getRGB 越界。
+        List<int[]> pixels = new ArrayList<int[]>(frames.size());
+        for (int i = 0; i < frames.size(); i++) {
+            BufferedImage frame = frames.get(i);
+            if (frame.getWidth() != width || frame.getHeight() != height) {
+                continue;
             }
+            pixels.add(frame.getRGB(0, 0, width, height, null, 0, width));
         }
+        int[] result = new int[width * height];
+        for (int i = 0; i < result.length; i++) {
+            int dark = 0;
+            for (int f = 0; f < pixels.size(); f++) {
+                if (RgbImage.luminance(pixels.get(f)[i]) < 200) {
+                    dark++;
+                }
+            }
+            result[i] = dark >= 2 ? 0x202020 : 0xffffff;
+        }
+        BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+        image.setRGB(0, 0, width, height, result, 0, width);
         return image;
     }
 
