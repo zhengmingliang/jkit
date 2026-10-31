@@ -354,7 +354,8 @@ public class CaptchaRecognitionTest {
         assertGroup(trials, "distorted", 0.25);
         assertGroup(trials, "outline", 0.75);
         double mean = meanMillis(trials, false);
-        Assert.assertTrue("单张平均耗时应低于 50ms，实际 " + mean, mean < 50);
+        // 门槛只防数量级回退（如模型反复加载）。慢 CI/容器限流下均值会抖，准确率门槛才是防线。
+        Assert.assertTrue("单张平均耗时应低于 100ms，实际 " + mean, mean < 100);
         assertOverall(trials, 0.80);
     }
 
