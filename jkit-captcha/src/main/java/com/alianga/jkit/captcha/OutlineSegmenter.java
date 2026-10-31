@@ -114,32 +114,6 @@ final class OutlineSegmenter {
         return new RawGlyph(glyph.x, glyph.y, glyph.width, glyph.height, closed, area);
     }
 
-    private static RawGlyph fillHoles(RawGlyph glyph) {
-        byte[] closed = closeStroke(glyph.pixels, glyph.width, glyph.height);
-        int width = glyph.width + 2;
-        int height = glyph.height + 2;
-        byte[] mask = new byte[width * height];
-        for (int y = 0; y < glyph.height; y++) {
-            for (int x = 0; x < glyph.width; x++) {
-                mask[(y + 1) * width + (x + 1)] = closed[y * glyph.width + x];
-            }
-        }
-        byte[] reached = new byte[mask.length];
-        floodBackground(mask, reached, width, height);
-        byte[] filled = new byte[glyph.width * glyph.height];
-        int area = 0;
-        for (int y = 0; y < glyph.height; y++) {
-            for (int x = 0; x < glyph.width; x++) {
-                int index = (y + 1) * width + (x + 1);
-                if (mask[index] != 0 || reached[index] == 0) {
-                    filled[y * glyph.width + x] = 1;
-                    area++;
-                }
-            }
-        }
-        return new RawGlyph(glyph.x, glyph.y, glyph.width, glyph.height, filled, area);
-    }
-
     private static byte[] closeStroke(byte[] pixels, int width, int height) {
         return erode(dilate(pixels, width, height), width, height);
     }
@@ -201,58 +175,5 @@ final class OutlineSegmenter {
             }
         }
         return false;
-    }
-
-    private static void floodBackground(byte[] mask, byte[] reached, int width, int height) {
-        int[] stackX = new int[mask.length];
-        int[] stackY = new int[mask.length];
-        int top = -1;
-        top = seedRow(mask, reached, stackX, stackY, top, width, 0);
-        top = seedRow(mask, reached, stackX, stackY, top, width, height - 1);
-        top = seedColumn(mask, reached, stackX, stackY, top, height, width, 0);
-        top = seedColumn(mask, reached, stackX, stackY, top, height, width, width - 1);
-        while (top >= 0) {
-            int x = stackX[top];
-            int y = stackY[top];
-            top--;
-            top = open(mask, reached, stackX, stackY, top, width, height, x + 1, y);
-            top = open(mask, reached, stackX, stackY, top, width, height, x - 1, y);
-            top = open(mask, reached, stackX, stackY, top, width, height, x, y + 1);
-            top = open(mask, reached, stackX, stackY, top, width, height, x, y - 1);
-        }
-    }
-
-    private static int seedRow(byte[] mask, byte[] reached, int[] stackX, int[] stackY,
-                               int top, int width, int y) {
-        int next = top;
-        for (int x = 0; x < width; x++) {
-            next = open(mask, reached, stackX, stackY, next, width, reached.length / width, x, y);
-        }
-        return next;
-    }
-
-    private static int seedColumn(byte[] mask, byte[] reached, int[] stackX, int[] stackY,
-                                  int top, int height, int width, int x) {
-        int next = top;
-        for (int y = 0; y < height; y++) {
-            next = open(mask, reached, stackX, stackY, next, width, height, x, y);
-        }
-        return next;
-    }
-
-    private static int open(byte[] mask, byte[] reached, int[] stackX, int[] stackY,
-                            int top, int width, int height, int x, int y) {
-        if (x < 0 || y < 0 || x >= width || y >= height) {
-            return top;
-        }
-        int index = y * width + x;
-        if (reached[index] != 0 || mask[index] != 0) {
-            return top;
-        }
-        reached[index] = 1;
-        top++;
-        stackX[top] = x;
-        stackY[top] = y;
-        return top;
     }
 }

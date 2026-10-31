@@ -68,14 +68,6 @@ final class TemplateBank {
         templates.add(new Template(label, grid));
     }
 
-    synchronized List<Scored> rank(byte[] grid, String alphabet, int limit) {
-        return rank(grid, alphabet, limit, false);
-    }
-
-    synchronized List<Scored> rank(byte[] grid, String alphabet, int limit, boolean plainOnly) {
-        return rank(grid, alphabet, limit, plainOnly, false);
-    }
-
     /**
      * @param strokeOnly 为 true 时只和空心描边模板比，实心字不会走到这里
      */

@@ -54,13 +54,6 @@ final class TextModel implements AutoCloseable {
     }
 
     /**
-     * 用 {@code common.onnx} 读图。加载失败时返回空串。
-     */
-    String readBeta(BufferedImage image) {
-        return readBeta(image, null);
-    }
-
-    /**
      * 用 {@code common.onnx} 读图，并限制在给定字符集内。加载失败时返回空串。
      */
     String readBeta(BufferedImage image, String alphabet) {
