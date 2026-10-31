@@ -41,6 +41,8 @@ final class TextModel implements AutoCloseable {
     private boolean betaFailed;
     /** close 已释放 native 资源；与 {@code failed}（模型加载失败）语义不同，再次使用时允许重载。 */
     private boolean closed;
+    /** 最近一次模型加载失败的异常，加载成功后清空。识别对加载失败静默降级，这里留诊断口。 */
+    private Exception loadError;
 
     String read(BufferedImage image) {
         return read(image, null);
@@ -163,12 +165,16 @@ final class TextModel implements AutoCloseable {
                 session = environment.createSession(model, options);
             }
             inputName = session.getInputNames().iterator().next();
+            failed = false;
+            loadError = null;
             return true;
         } catch (OrtException ex) {
             failed = true;
+            loadError = ex;
             return false;
         } catch (IOException ex) {
             failed = true;
+            loadError = ex;
             return false;
         }
     }
@@ -186,14 +192,33 @@ final class TextModel implements AutoCloseable {
                 betaSession = environment.createSession(model, options);
             }
             betaInputName = betaSession.getInputNames().iterator().next();
+            betaFailed = false;
+            loadError = null;
             return true;
         } catch (OrtException ex) {
             betaFailed = true;
+            loadError = ex;
             return false;
         } catch (IOException ex) {
             betaFailed = true;
+            loadError = ex;
             return false;
         }
+    }
+
+    /** 诊断探针：主模型是否处于加载失败状态。失败时识别静默退回纯模板结果。 */
+    synchronized boolean primaryAvailable() {
+        return !failed;
+    }
+
+    /** 诊断探针：beta 模型是否处于加载失败状态。 */
+    synchronized boolean betaAvailable() {
+        return !betaFailed;
+    }
+
+    /** 诊断探针：最近一次模型加载失败的异常；加载成功后为 null。 */
+    synchronized Exception lastLoadError() {
+        return loadError;
     }
 
     /**

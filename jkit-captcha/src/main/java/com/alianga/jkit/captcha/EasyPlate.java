@@ -472,6 +472,11 @@ final class EasyPlate {
         }
     }
 
+    /** 诊断探针：easy 字形表是否加载成功。失败时 easy-captcha 槽位比对被跳过。 */
+    static synchronized boolean banksAvailable() {
+        return ensure();
+    }
+
     private static Glyph[] readGlyphs(DataInputStream data, String alphabet) throws IOException {
         Glyph[] glyphs = new Glyph[alphabet.length()];
         for (int i = 0; i < alphabet.length(); i++) {

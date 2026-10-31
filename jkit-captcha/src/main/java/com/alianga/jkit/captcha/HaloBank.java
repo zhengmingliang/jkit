@@ -126,10 +126,11 @@ final class HaloBank {
         if (loaded) {
             return;
         }
-        loaded = true;
         for (int i = 0; i < NAMES.length; i++) {
             loadOne(NAMES[i]);
         }
+        // 全部样例处理完才置位：中途出错不会把半载状态永久缓存。
+        loaded = true;
     }
 
     private void loadOne(String name) {
@@ -155,6 +156,8 @@ final class HaloBank {
             }
         } catch (IOException ex) {
             // 某一张样例读失败时跳过，其余样例继续用。
+        } catch (RuntimeException ex) {
+            // 同上：单张样例的分割/归一化异常不拖垮整个样例库。
         } finally {
             close(input);
         }

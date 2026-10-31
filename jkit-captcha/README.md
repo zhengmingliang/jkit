@@ -130,6 +130,7 @@ recognizer.learn(oneGlyph, 'Y');
 - `GifCaptcha` 每个字符只在部分帧里足够深。多帧里都偏暗的像素会合成一张图；合成结果短于 3 个字符时，改按各帧投票。这一次 5/6，漏 `wkkU`→`wVkU`。
 - 130×48 的 `samples/spec` 和 `samples/gif` 整串大小写分别是 5/100 和 4/100。忽略大小写后都是 100/100。actionj 没有把大小写画出来。
 - `samples/font/ransom/arithmetic` 整式 39/100。这套字体的 `+` 和 `-` 轮廓为空，图上没有运算符；两个数字是 100/100，画出来的乘号能对上。
+- 模型与资源加载失败时全部静默降级：`common_old.onnx` 读不了就退回纯模板结果，`common.onnx` 读不了就跳过蓝字与 easy-captcha 的模型补字，`easy-plate.bin` 读不了就跳过槽位比对，`easy-han.txt` 读不了就关掉汉字链路。接口行为不变，`CaptchaRecognizer.isModelAvailable()` 可诊断主模型是否处于降级状态。模型和字形都随 jar 打包在 `ocr/` 下，出现降级先确认打包没有把 `ocr/` 资源过滤掉。
 
 ## 测试
 

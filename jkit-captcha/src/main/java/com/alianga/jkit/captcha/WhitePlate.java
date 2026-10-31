@@ -303,6 +303,11 @@ final class WhitePlate {
         return hanChars;
     }
 
+    /** 诊断探针：汉字字符集是否加载成功。失败时四帧汉字投票链路关闭。 */
+    static boolean hanCharsetAvailable() {
+        return !hanCharset().isEmpty();
+    }
+
     private static String loadHan() {
         InputStream input = WhitePlate.class.getResourceAsStream("ocr/easy-han.txt");
         if (input == null) {

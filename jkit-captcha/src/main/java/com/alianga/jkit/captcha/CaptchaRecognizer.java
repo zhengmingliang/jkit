@@ -495,4 +495,13 @@ public final class CaptchaRecognizer implements AutoCloseable {
     public void close() {
         textModel.close();
     }
+
+    /**
+     * 主模型（{@code common_old.onnx}）当前是否可用。加载失败时识别会静默退回
+     * 纯模板结果，接口行为不变，这个方法用于部署环境的诊断。close 不算失败：
+     * 下次识别会延迟重新加载。
+     */
+    public boolean isModelAvailable() {
+        return textModel.primaryAvailable();
+    }
 }
