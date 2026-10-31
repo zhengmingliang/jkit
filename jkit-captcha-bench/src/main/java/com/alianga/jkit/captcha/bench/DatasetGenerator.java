@@ -159,8 +159,11 @@ public final class DatasetGenerator {
     }
 
     /**
-     * 按类别取样一种风格。算术题固定深色底，与真实算术验证码一致；
-     * 其余类别在版面、纹理、干扰线等维度上自由组合。
+     * 按类别取样一种风格。
+     *
+     * <p>干扰项不再各自独立随机叠加：那样会同时叠出旋转+扭曲+密集噪点+网格纹理，
+     * 真实验证码不会长成那样，图上连人都读不出来。这里改成先定"这一张有几个干扰项"
+     * （0 到 2 个），再从中挑几项上，且旋转与扭曲不同时出现，字距也不压到字符重叠。
      */
     private CaptchaStyle styleFor(Sample.Category category, Random random) {
         CaptchaStyle.Builder builder = new CaptchaStyle.Builder()
@@ -168,20 +171,58 @@ public final class DatasetGenerator {
                 .fontStyle(FONT_STYLES[random.nextInt(FONT_STYLES.length)])
                 .fontSize(FONT_SIZES[random.nextInt(FONT_SIZES.length)])
                 .surface(SURFACES[random.nextInt(SURFACES.length)])
-                .lines(LINE_KINDS[random.nextInt(LINE_KINDS.length)])
-                .texture(TEXTURES[random.nextInt(TEXTURES.length)])
-                .noise(NOISE_LEVELS[random.nextInt(NOISE_LEVELS.length)])
-                .rotation(ROTATIONS[random.nextInt(ROTATIONS.length)])
+                .lines(CaptchaStyle.Lines.NONE)
+                .texture(CaptchaStyle.Texture.NONE)
+                .noise(0f)
+                .rotation(0f)
                 .spacing(SPACINGS[random.nextInt(SPACINGS.length)])
                 .scaleX(SCALES[random.nextInt(SCALES.length)])
                 .shear(SHEARS[random.nextInt(SHEARS.length)])
-                .wave(WAVES[random.nextInt(WAVES.length)])
-                .outline(category != Sample.Category.ARITHMETIC && random.nextInt(10) == 0)
+                .wave(0f)
+                .outline(category != Sample.Category.ARITHMETIC && random.nextInt(12) == 0)
                 .alphaBlend(random.nextInt(3) == 0)
                 .colorPerChar(random.nextInt(2) == 0);
         if (category == Sample.Category.ARITHMETIC) {
-            // 真实算术验证码几乎都是深色底彩色字，且运算符不能被描边吃掉。
+            // 真实算术验证码几乎都是深色底彩色字，运算符不能被描边吃掉。
             builder.surface(CaptchaStyle.Surface.DARK).outline(false).colorPerChar(true);
+        }
+        int budget = random.nextInt(3);
+        if (budget > 0) {
+            // 候选干扰项：噪点、干扰线、纹理、旋转、扭曲。挑 budget 个上。
+            java.util.List<Integer> pool = new java.util.ArrayList<Integer>(
+                    java.util.Arrays.asList(Integer.valueOf(0), Integer.valueOf(1),
+                            Integer.valueOf(2), Integer.valueOf(3), Integer.valueOf(4)));
+            java.util.Collections.shuffle(pool, random);
+            boolean rotated = false;
+            for (int i = 0; i < budget; i++) {
+                switch (pool.get(i).intValue()) {
+                    case 0:
+                        builder.noise(NOISE_LEVELS[1 + random.nextInt(NOISE_LEVELS.length - 1)]);
+                        break;
+                    case 1:
+                        builder.lines(LINE_KINDS[1 + random.nextInt(LINE_KINDS.length - 1)]);
+                        break;
+                    case 2:
+                        builder.texture(TEXTURES[1 + random.nextInt(TEXTURES.length - 1)]);
+                        break;
+                    case 3:
+                        builder.rotation(ROTATIONS[1 + random.nextInt(ROTATIONS.length - 1)]);
+                        rotated = true;
+                        break;
+                    case 4:
+                        // 旋转和扭曲不同时上：真实验证码基本不会两者叠满。
+                        if (!rotated) {
+                            builder.wave(WAVES[2 + random.nextInt(WAVES.length - 2)]);
+                        }
+                        break;
+                    default:
+                        break;
+                }
+            }
+        }
+        // 字距不压到字符重叠，否则连笔后任何算法都切不开。
+        if (builder.build().getSpacing() < 1f) {
+            builder.spacing(1f);
         }
         return builder.build();
     }

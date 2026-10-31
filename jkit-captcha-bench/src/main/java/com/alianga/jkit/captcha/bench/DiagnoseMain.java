@@ -26,7 +26,6 @@ import java.util.concurrent.Future;
  * </pre>
  */
 public final class DiagnoseMain {
-
     private DiagnoseMain() {
     }
 

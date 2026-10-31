@@ -7,7 +7,6 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 
 /**
  * 常规图片验证码识别入口。
@@ -128,49 +127,6 @@ public final class CaptchaRecognizer implements AutoCloseable {
         return refine(image, result, effective);
     }
 
-    /**
-     * 深色蓝字按版式读。其余单帧图用模型补字，大小写仍沿用模板。模型只输出当前字符集里的字。
-     */
-    private RecognizeResult refine(BufferedImage image, RecognizeResult result, RecognizeOptions options) {
-        String alphabet = modelAlphabet(options);
-        String plate = BluePlate.read(image, textModel, alphabet);
-        if (plate != null) {
-            return rewrite(result, plate);
-        }
-        String model = textModel.read(image, alphabet);
-        if (model.isEmpty()) {
-            return result;
-        }
-        // 单字学习样本要以模板为准。模型把没见过的实心块读成另一个单字时不覆盖。
-        if (result.getText().length() == 1 && model.length() == 1
-                && !result.getText().equalsIgnoreCase(model)) {
-            return result;
-        }
-        String merged = CaseAlign.align(result.getText(), model);
-        if (merged.equals(result.getText())) {
-            return result;
-        }
-        // 模型几乎总输出小写，大小写这一位由字形和几何另行判定。
-        // 只有字数与单字个数对得上时才判，避免错位把大小写安到别的字上。
-        merged = CaseResolver.resolve(segments(image), merged);
-        return rewrite(result, merged);
-    }
-
-    /** 按与模板链路同样的规则取一次单字，仅供大小写判定使用。 */
-    private static List<RawGlyph> segments(BufferedImage image) {
-        RgbImage rgb = RgbImage.from(image);
-        if (HaloBank.matches(rgb)) {
-            return HaloBank.segment(rgb);
-        }
-        if (rgb.borderMedianLuminance() < 80) {
-            return new DarkSegmenter().segment(rgb);
-        }
-        if (OutlineSegmenter.matches(rgb)) {
-            return new OutlineSegmenter().segment(rgb);
-        }
-        return new LightSegmenter().segment(rgb);
-    }
-
     /** 调用方没有限定字符集、结果又全是字母时，浅色大图按大写输出。 */
     private static RecognizeResult liftLetters(RecognizeResult result, RecognizeOptions options) {
         if (result.getValue() != null) {
@@ -190,7 +146,7 @@ public final class CaptchaRecognizer implements AutoCloseable {
                 return result;
             }
         }
-        String upper = text.toUpperCase(Locale.ROOT);
+        String upper = text.toUpperCase(java.util.Locale.ROOT);
         if (upper.equals(text)) {
             return result;
         }
@@ -216,6 +172,31 @@ public final class CaptchaRecognizer implements AutoCloseable {
             return TemplateBank.ALPHANUMERIC;
         }
         return chosen;
+    }
+
+    /**
+     * 深色蓝字按版式读。其余单帧图用模型补字，大小写仍沿用模板。模型只输出当前字符集里的字。
+     */
+    private RecognizeResult refine(BufferedImage image, RecognizeResult result, RecognizeOptions options) {
+        String alphabet = modelAlphabet(options);
+        String plate = BluePlate.read(image, textModel, alphabet);
+        if (plate != null) {
+            return rewrite(result, plate);
+        }
+        String model = textModel.read(image, alphabet);
+        if (model.isEmpty()) {
+            return result;
+        }
+        // 单字学习样本要以模板为准。模型把没见过的实心块读成另一个单字时不覆盖。
+        if (result.getText().length() == 1 && model.length() == 1
+                && !result.getText().equalsIgnoreCase(model)) {
+            return result;
+        }
+        String merged = CaseAlign.align(result.getText(), model);
+        if (merged.equals(result.getText())) {
+            return result;
+        }
+        return rewrite(result, merged);
     }
 
     private static RecognizeResult rewrite(RecognizeResult result, String text) {
