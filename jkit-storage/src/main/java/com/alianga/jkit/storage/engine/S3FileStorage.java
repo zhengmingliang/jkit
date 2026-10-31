@@ -360,6 +360,24 @@ public class S3FileStorage implements FileStorage {
 
     @Override
     public String presign(String path, java.time.Duration ttl) {
+        return presignedUrl("GET", path, ttl);
+    }
+
+    @Override
+    public String presignUpload(String path, java.time.Duration ttl) {
+        return presignedUrl("PUT", path, ttl);
+    }
+
+    /**
+     * 生成指定 HTTP 方法的预签名 URL：预签名查询签名不覆盖请求体
+     * （canonical request 固定 UNSIGNED-PAYLOAD），PUT 直传任意内容均可。
+     *
+     * @param httpMethod GET（下载分享）/ PUT（直传）
+     * @param path       对象路径
+     * @param ttl        有效期
+     * @return 预签名 URL
+     */
+    private String presignedUrl(String httpMethod, String path, java.time.Duration ttl) {
         String normalized = requireFile(path);
         String key = objectKey(normalized);
         String encodedPath = Urls.encodePath(key);
@@ -367,14 +385,14 @@ public class S3FileStorage implements FileStorage {
         String host = hostOf();
         long seconds = Math.min(7L * 24 * 3600, Math.max(60, ttl.getSeconds()));
         if (authPrefix == null) {
-            String query = AwsSigners.sigV4PresignQuery("GET", host, urlPath,
+            String query = AwsSigners.sigV4PresignQuery(httpMethod, host, urlPath,
                     accessKey, secretKey, sessionToken, region, seconds, AwsSigners.amzDateNow());
             return baseUrl() + urlPath + "?" + query;
         }
         // SigV2 家族（金山云等）：path style 的 CanonicalizedResource 恒为 /bucket/key
         long expires = System.currentTimeMillis() / 1000 + seconds;
         String keyPath = pathStyle ? bucket + "/" + key : key;
-        String query = AwsSigners.sigV2PresignQuery(accessKey, secretKey, "GET",
+        String query = AwsSigners.sigV2PresignQuery(accessKey, secretKey, httpMethod,
                 expires, bucket, keyPath);
         return baseUrl() + urlPath + "?" + query;
     }

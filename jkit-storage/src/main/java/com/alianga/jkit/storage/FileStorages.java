@@ -114,6 +114,12 @@ public final class FileStorages {
         CAPABILITIES.put("git",
                 com.alianga.jkit.storage.cap.StorageCapabilities.standard()
                         .withMaxUploadBytes(20L * 1024L * 1024L));
+        CAPABILITIES.put("s3",
+                com.alianga.jkit.storage.cap.StorageCapabilities.standard().withPresignUpload());
+        CAPABILITIES.put("oss",
+                com.alianga.jkit.storage.cap.StorageCapabilities.standard().withPresignUpload());
+        CAPABILITIES.put("doge",
+                com.alianga.jkit.storage.cap.StorageCapabilities.standard().withPresignUpload());
     }
 
     private FileStorages() {

@@ -327,6 +327,29 @@ public class MinioRealStorageTest {
         exercise(engine(0L));
     }
 
+    /** 预签名 PUT 直传（真实服务端验证 SigV4 签名）：URL 直传 → 引擎读回字节一致。 */
+    @Test
+    public void presignUploadRealRoundTrip() throws Exception {
+        FileStorage fs = engine(0L);
+        String url = fs.presignUpload("presign/real.txt", java.time.Duration.ofMinutes(5));
+        byte[] payload = "presigned-put-payload".getBytes(StandardCharsets.UTF_8);
+        java.net.HttpURLConnection connection =
+                (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+        connection.setRequestMethod("PUT");
+        connection.setDoOutput(true);
+        connection.setFixedLengthStreamingMode(payload.length);
+        connection.getOutputStream().write(payload);
+        connection.getOutputStream().close();
+        int status = connection.getResponseCode();
+        try {
+            assertEquals("预签名 PUT 应被真实服务端接受", 200, status);
+        } finally {
+            connection.getInputStream().close();
+        }
+        assertArrayEquals(payload, fs.readBytes("presign/real.txt"));
+        fs.delete("presign/real.txt");
+    }
+
     /** ListObjectsV2 + fetch-owner：文件条目应带对象 owner（MinIO/RustFS/AWS 行为一致）。 */
     @Test
     public void listV2ReturnsObjectOwner() {

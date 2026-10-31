@@ -267,6 +267,16 @@ public class DogeFileStorage implements FileStorage {
     }
 
     @Override
+    public String presignUpload(String path, java.time.Duration ttl) {
+        requireFile(path);
+        if (basic) {
+            // 基础桶走控制台会话 API，没有可签发的直传凭据
+            throw StorageException.unsupported("基础桶不支持预签名上传链接: " + bucket);
+        }
+        return delegate().presignUpload(path, ttl);
+    }
+
+    @Override
     public void close() {
         S3FileStorage current = delegate;
         if (current != null) {

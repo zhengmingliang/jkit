@@ -129,6 +129,19 @@ public interface FileStorage extends AutoCloseable {
     }
 
     /**
+     * 生成对象的预签名<b>上传</b>链接（直传用）：任何拿到链接的人在有效期内都可以
+     * 用 HTTP PUT 向该对象写入内容，无需持有访问密钥。与 {@link #presign} 一样属于
+     * 授权凭据，注意泄露风险。默认不支持。
+     *
+     * @param path 对象路径
+     * @param ttl  链接有效期
+     * @return 预签名 PUT URL
+     */
+    default String presignUpload(String path, java.time.Duration ttl) {
+        throw StorageException.unsupported("该平台不支持预签名上传链接");
+    }
+
+    /**
      * 删除文件或空目录。删除不存在的对象视为成功（幂等）。
      *
      * @param path 对象路径

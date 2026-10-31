@@ -304,12 +304,29 @@ public class OssFileStorage implements FileStorage {
 
     @Override
     public String presign(String path, java.time.Duration ttl) {
+        return presignedUrl("GET", path, ttl);
+    }
+
+    @Override
+    public String presignUpload(String path, java.time.Duration ttl) {
+        return presignedUrl("PUT", path, ttl);
+    }
+
+    /**
+     * 生成指定 HTTP 方法的 OSS V1 预签名 URL：stringToSign = VERB\n\n\nExpires\n/bucket/key，
+     * 预签名不覆盖请求头与请求体。
+     *
+     * @param httpMethod GET（下载分享）/ PUT（直传）
+     * @param path       对象路径
+     * @param ttl        有效期
+     * @return 预签名 URL
+     */
+    private String presignedUrl(String httpMethod, String path, java.time.Duration ttl) {
         String normalized = requireFile(path);
         String key = objectKey(normalized);
         long seconds = Math.max(60, ttl.getSeconds());
         long expires = System.currentTimeMillis() / 1000 + seconds;
-        // OSS V1 预签名：stringToSign = GET\n\n\nExpires\n/bucket/key
-        String toSign = "GET\n\n\n" + expires + "\n/" + bucket + "/" + key;
+        String toSign = httpMethod + "\n\n\n" + expires + "\n/" + bucket + "/" + key;
         String signature = AwsSigners.base64(AwsSigners.hmacSha1(
                 secretKey.getBytes(java.nio.charset.StandardCharsets.UTF_8), toSign));
         String encodedKey = Urls.encodePath(key);

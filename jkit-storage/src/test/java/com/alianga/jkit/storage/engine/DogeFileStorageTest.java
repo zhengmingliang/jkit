@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
@@ -258,4 +259,15 @@ public class DogeFileStorageTest {
             assertEquals(StorageErrorCode.AUTH_FAILED, e.code());
         }
     }
+    @Test
+    public void basicBucketRejectsPresignUpload() {
+        FileStorage storage = basicStorage();
+        try {
+            assertThrows(StorageException.class,
+                    () -> storage.presignUpload("demo/x.txt", java.time.Duration.ofMinutes(5)));
+        } finally {
+            storage.close();
+        }
+    }
+
 }
