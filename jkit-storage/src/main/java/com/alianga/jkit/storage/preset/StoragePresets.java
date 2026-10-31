@@ -17,8 +17,8 @@ import java.util.List;
  *       （doge 为管理 API + S3 兼容协议组合引擎）；</li>
  *   <li>S3 兼容引擎：{@code s3}（SigV4 / SigV2 双签名、虚拟主机与路径两种寻址、
  *       ListObjects V1/V2），覆盖 Amazon S3、MinIO、R2 及二十余家 S3 兼容云；</li>
- *   <li>规划中：{@code fastdfs / mongo-gridfs / qingstor}，注册了平台描述但引擎未实现，
- *       创建实例时抛 {@code UNSUPPORTED} 并提示。</li>
+ *   <li>规划中：{@code fastdfs / mongo-gridfs}，注册了平台描述但引擎未实现，
+ *       创建实例时抛 {@code UNSUPPORTED} 并提示（qingstor 已挂 s3 引擎）。</li>
  * </ul>
  *
  * @author 郑明亮
@@ -159,7 +159,15 @@ public final class StoragePresets {
         platforms.add(s3("woyun-oss", "联通沃云 OSS", null, "公有云", null));
         platforms.add(s3("netease-nos", "网易数帆 NOS", "https://nos-eastchina1.126.net", "公有云", null));
         platforms.add(s3("ucloud-us3", "Ucloud US3", null, "公有云", null));
-        platforms.add(planned("qingstor", "青云 QingStor"));
+        // 青云 QingStor：S3 兼容协议，直接挂 s3 引擎（zone 化域名虚拟主机寻址）
+        platforms.add(new StoragePlatform("qingstor", "青云 QingStor", "s3", "S3 兼容",
+                StorageField.required("endpoint", "服务地址",
+                        "如 https://s3.pek3a.qsstor.com（含桶所在 zone）"),
+                StorageField.required("bucket", "Bucket", "桶名"),
+                StorageField.required("accessKey", "AccessKey", null),
+                StorageField.secret("secretKey", "SecretKey", false),
+                StorageField.optional("pathStyle", "寻址风格", "false",
+                        "QingStor 为虚拟主机寻址（bucket.zone 域名）")));
         platforms.add(s3("pingan-obs", "平安云 OBS", null, "公有云", null));
         platforms.add(s3("shouyun-oss", "首云 OSS", null, "公有云", null));
         platforms.add(s3("ibm-cos", "IBM COS", "https://s3.us.cloud-object-storage.appdomain.cloud",
