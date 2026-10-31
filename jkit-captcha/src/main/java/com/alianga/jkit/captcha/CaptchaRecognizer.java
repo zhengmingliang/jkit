@@ -24,12 +24,6 @@ import java.util.Locale;
  * 会积累 native memory 压力。使用方应在 shutdown 时调用 {@link #close()}。</p>
  */
 public final class CaptchaRecognizer implements AutoCloseable {
-    private static final int PASTEL_MIN_WIDTH = 200;
-    private static final int PASTEL_MIN_HEIGHT = 80;
-    private static final int PASTEL_MIN_INK = 100;
-    private static final int PASTEL_CHANNEL = 80;
-    private static final int PASTEL_INK = 40;
-
     private final TemplateBank bank;
     private final DefaultCaptchaSolver fallback;
     private final TextModel textModel = new TextModel();
@@ -116,8 +110,8 @@ public final class CaptchaRecognizer implements AutoCloseable {
             }
         }
         // 浅色大图笔画和背景挤在一起，拉开对比度后再走原来的链路。拉伸后必有暗通道，不会再次进入这里。
-        if (refine && pastel(image)) {
-            return liftLetters(recognize(stretch(image), effective, true), effective);
+        if (refine && PastelLift.matches(image)) {
+            return liftLetters(recognize(PastelLift.stretch(image), effective, true), effective);
         }
         // 白底 130×48 的彩色字走 common.onnx。模板会把粘连的笔画整块丢掉，也会把算式尾巴读成数字。
         if (refine && WhitePlate.matches(image)) {
@@ -157,83 +151,6 @@ public final class CaptchaRecognizer implements AutoCloseable {
             return result;
         }
         return rewrite(result, merged);
-    }
-
-    /**
-     * 宽高都够大、墨迹不少于 100、并且没有一个墨迹通道低于 80，才算浅色大图。
-     * 饱和的政务图和 130×48 的彩色字都有深色通道，不会被拉开。
-     */
-    private static boolean pastel(BufferedImage image) {
-        int width = image.getWidth();
-        int height = image.getHeight();
-        if (width < PASTEL_MIN_WIDTH || height < PASTEL_MIN_HEIGHT) {
-            return false;
-        }
-        int ink = 0;
-        int limit = PASTEL_INK * PASTEL_INK;
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                int rgb = image.getRGB(x, y);
-                int red = (rgb >> 16) & 255;
-                int green = (rgb >> 8) & 255;
-                int blue = rgb & 255;
-                int dr = 255 - red;
-                int dg = 255 - green;
-                int db = 255 - blue;
-                if (dr * dr + dg * dg + db * db < limit) {
-                    continue;
-                }
-                if (red < PASTEL_CHANNEL || green < PASTEL_CHANNEL || blue < PASTEL_CHANNEL) {
-                    return false;
-                }
-                ink++;
-            }
-        }
-        return ink >= PASTEL_MIN_INK;
-    }
-
-    /** 按亮度的最小最大把每个通道拉开。公式和测过 FGIP 的那次拉伸一致。 */
-    private static BufferedImage stretch(BufferedImage src) {
-        int width = src.getWidth();
-        int height = src.getHeight();
-        BufferedImage out = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
-        int min = 255;
-        int max = 0;
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                int rgb = src.getRGB(x, y);
-                int luminance = ((rgb >> 16) & 255) * 3 + ((rgb >> 8) & 255) * 6 + (rgb & 255);
-                luminance /= 10;
-                if (luminance < min) {
-                    min = luminance;
-                }
-                if (luminance > max) {
-                    max = luminance;
-                }
-            }
-        }
-        int span = Math.max(1, max - min);
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                int rgb = src.getRGB(x, y);
-                int red = scaleChannel((rgb >> 16) & 255, min, span);
-                int green = scaleChannel((rgb >> 8) & 255, min, span);
-                int blue = scaleChannel(rgb & 255, min, span);
-                out.setRGB(x, y, (red << 16) | (green << 8) | blue);
-            }
-        }
-        return out;
-    }
-
-    private static int scaleChannel(int value, int min, int span) {
-        int scaled = (value - min) * 255 / span;
-        if (scaled < 0) {
-            return 0;
-        }
-        if (scaled > 255) {
-            return 255;
-        }
-        return scaled;
     }
 
     /** 调用方没有限定字符集、结果又全是字母时，浅色大图按大写输出。 */
