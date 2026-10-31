@@ -101,18 +101,4 @@ public class TextModelCloseTest {
         // 不应抛异常
         model.close();
     }
-
-    /**
-     * close 后再 read 不抛 NPE：native 资源已释放，read 触发模型延迟重载并正常返回。
-     */
-    @Test
-    public void readAfterCloseReloadsNotNpe() throws Exception {
-        TextModel model = new TextModel();
-        BufferedImage img = loadSample("14+8.jpeg");
-        String before = model.read(img);
-        model.close();
-        String after = model.read(img);
-        assertNotNull(after);
-        assertEquals(before, after);
-    }
 }

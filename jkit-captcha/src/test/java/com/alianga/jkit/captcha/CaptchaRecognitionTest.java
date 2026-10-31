@@ -34,7 +34,7 @@ import java.util.Random;
 public class CaptchaRecognitionTest {
 
     private static final String SAFE_ALPHABET =
-            "ABCDEFGHGKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+            "ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
     private static final int[][] PALETTE = {
             {255, 48, 48},
             {48, 210, 48},
