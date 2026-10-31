@@ -41,19 +41,19 @@ final class DefaultCaptchaSolver implements CaptchaSolver {
         List<GlyphHit> hits = segmented.halo
                 ? classifyHalo(segmented.glyphs, alphabet)
                 : classify(segmented.glyphs, alphabet, segmented.stroke, segmented.narrow);
-        String text = textOf(hits);
+        String text = GlyphHit.textOf(hits);
         if (!segmented.halo && options.getType() == CaptchaType.AUTO && type == CaptchaType.ARITHMETIC
                 && options.getAlphabet() == null && ArithmeticEvaluator.evaluate(text) == null) {
             type = CaptchaType.ALPHANUMERIC;
             hits = classify(segmented.glyphs, alphabetFor(type, options, segmented.narrow), segmented.stroke,
                     segmented.narrow);
-            text = textOf(hits);
+            text = GlyphHit.textOf(hits);
         }
         ArithmeticEvaluator.Value value = ArithmeticEvaluator.evaluate(text);
         String expression = value == null ? null : value.expression;
         Integer number = value == null ? null : Integer.valueOf(value.result);
         long elapsed = (System.nanoTime() - started) / 1000000L;
-        return new RecognizeResult(text, expression, number, confidence(hits), type, elapsed,
+        return new RecognizeResult(text, expression, number, GlyphHit.confidence(hits), type, elapsed,
                 RecognizeResult.freeze(hits));
     }
 
@@ -416,25 +416,6 @@ final class DefaultCaptchaSolver implements CaptchaSolver {
 
     private static GlyphHit hit(RawGlyph glyph, char label, double score) {
         return new GlyphHit(label, score, glyph.x, glyph.y, glyph.width, glyph.height);
-    }
-
-    private static String textOf(List<GlyphHit> hits) {
-        StringBuilder builder = new StringBuilder(hits.size());
-        for (int i = 0; i < hits.size(); i++) {
-            builder.append(hits.get(i).getValue());
-        }
-        return builder.toString();
-    }
-
-    private static double confidence(List<GlyphHit> hits) {
-        if (hits.isEmpty()) {
-            return 0;
-        }
-        double sum = 0;
-        for (int i = 0; i < hits.size(); i++) {
-            sum += hits.get(i).getConfidence();
-        }
-        return sum / hits.size();
     }
 
     private static final class Segmented {

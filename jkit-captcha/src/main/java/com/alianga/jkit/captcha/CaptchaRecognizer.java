@@ -1,7 +1,6 @@
 package com.alianga.jkit.captcha;
 
 import java.awt.image.BufferedImage;
-import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
@@ -360,7 +359,7 @@ public final class CaptchaRecognizer implements AutoCloseable {
         if (input == null) {
             throw new IllegalArgumentException("input");
         }
-        return recognize(readBytes(input), RecognizeOptions.auto());
+        return recognize(Io.readAll(input), RecognizeOptions.auto());
     }
 
     /**
@@ -404,13 +403,13 @@ public final class CaptchaRecognizer implements AutoCloseable {
             hits.addAll(recognize(frames.get(i), options, false).getGlyphs());
         }
         List<GlyphHit> merged = GifFrames.merge(hits, frames.get(0).getHeight());
-        String text = textOf(merged);
+        String text = GlyphHit.textOf(merged);
         CaptchaType type = options.getType() == CaptchaType.AUTO ? CaptchaType.ALPHANUMERIC : options.getType();
         ArithmeticEvaluator.Value value = ArithmeticEvaluator.evaluate(text);
         String expression = value == null ? null : value.expression;
         Integer number = value == null ? null : Integer.valueOf(value.result);
         long elapsed = (System.nanoTime() - started) / 1000000L;
-        return new RecognizeResult(text, expression, number, confidence(merged), type, elapsed,
+        return new RecognizeResult(text, expression, number, GlyphHit.confidence(merged), type, elapsed,
                 RecognizeResult.freeze(merged));
     }
 
@@ -418,38 +417,6 @@ public final class CaptchaRecognizer implements AutoCloseable {
         long elapsed = (System.nanoTime() - started) / 1000000L;
         return new RecognizeResult(result.getText(), result.getExpression(), result.getValue(),
                 result.getConfidence(), result.getType(), elapsed, result.getGlyphs());
-    }
-
-    private static String textOf(List<GlyphHit> hits) {
-        StringBuilder builder = new StringBuilder(hits.size());
-        for (int i = 0; i < hits.size(); i++) {
-            builder.append(hits.get(i).getValue());
-        }
-        return builder.toString();
-    }
-
-    private static double confidence(List<GlyphHit> hits) {
-        if (hits.isEmpty()) {
-            return 0;
-        }
-        double sum = 0;
-        for (int i = 0; i < hits.size(); i++) {
-            sum += hits.get(i).getConfidence();
-        }
-        return sum / hits.size();
-    }
-
-    private static byte[] readBytes(InputStream input) throws IOException {
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        byte[] buffer = new byte[4096];
-        int read = input.read(buffer);
-        while (read >= 0) {
-            if (read > 0) {
-                out.write(buffer, 0, read);
-            }
-            read = input.read(buffer);
-        }
-        return out.toByteArray();
     }
 
     private static List<RawGlyph> segmentForLearn(RgbImage rgb) {

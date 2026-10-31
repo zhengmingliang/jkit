@@ -3,7 +3,6 @@ package com.alianga.jkit.captcha;
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -315,16 +314,7 @@ final class WhitePlate {
             return "";
         }
         try {
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            byte[] buffer = new byte[1024];
-            int read = input.read(buffer);
-            while (read >= 0) {
-                if (read > 0) {
-                    out.write(buffer, 0, read);
-                }
-                read = input.read(buffer);
-            }
-            return new String(out.toByteArray(), StandardCharsets.UTF_8).trim();
+            return new String(Io.readAll(input), StandardCharsets.UTF_8).trim();
         } catch (IOException ex) {
             return "";
         } finally {

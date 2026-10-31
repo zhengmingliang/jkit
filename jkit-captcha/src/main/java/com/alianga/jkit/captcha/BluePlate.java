@@ -1,7 +1,6 @@
 package com.alianga.jkit.captcha;
 
 import java.awt.image.BufferedImage;
-import java.util.Arrays;
 
 /**
  * 深色底上的蓝色印刷字。模板切不开这种笔画，交给通用模型读一张对比度拉开的图。
@@ -52,34 +51,7 @@ final class BluePlate {
             return false;
         }
         int[] argb = image.getRGB(0, 0, width, height, null, 0, width);
-        return borderMedian(argb, width, height) < 80 && countBlue(argb) >= MIN_BLUE;
-    }
-
-    private static int borderMedian(int[] argb, int width, int height) {
-        int count = width * 2 + height * 2;
-        int[] samples = new int[count];
-        int index = 0;
-        for (int x = 0; x < width; x++) {
-            samples[index] = luminance(argb[x]);
-            index++;
-            samples[index] = luminance(argb[(height - 1) * width + x]);
-            index++;
-        }
-        for (int y = 0; y < height; y++) {
-            samples[index] = luminance(argb[y * width]);
-            index++;
-            samples[index] = luminance(argb[y * width + width - 1]);
-            index++;
-        }
-        Arrays.sort(samples);
-        return samples[samples.length / 2];
-    }
-
-    private static int luminance(int packed) {
-        int red = (packed >> 16) & 0xff;
-        int green = (packed >> 8) & 0xff;
-        int blue = packed & 0xff;
-        return (red * 299 + green * 587 + blue * 114) / 1000;
+        return RgbImage.borderMedian(argb, width, height) < 80 && countBlue(argb) >= MIN_BLUE;
     }
 
     private static int countBlue(int[] argb) {

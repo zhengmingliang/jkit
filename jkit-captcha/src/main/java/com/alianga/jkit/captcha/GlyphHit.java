@@ -1,5 +1,6 @@
 package com.alianga.jkit.captcha;
 
+import java.util.List;
 import java.util.Locale;
 
 /**
@@ -74,6 +75,27 @@ public final class GlyphHit {
      */
     public int getHeight() {
         return height;
+    }
+
+    /** 按顺序拼接一串命中的字符，作为识别文本。 */
+    static String textOf(List<GlyphHit> hits) {
+        StringBuilder builder = new StringBuilder(hits.size());
+        for (int i = 0; i < hits.size(); i++) {
+            builder.append(hits.get(i).getValue());
+        }
+        return builder.toString();
+    }
+
+    /** 命中分数的算术平均，空列表记 0。 */
+    static double confidence(List<GlyphHit> hits) {
+        if (hits.isEmpty()) {
+            return 0;
+        }
+        double sum = 0;
+        for (int i = 0; i < hits.size(); i++) {
+            sum += hits.get(i).getConfidence();
+        }
+        return sum / hits.size();
     }
 
     @Override

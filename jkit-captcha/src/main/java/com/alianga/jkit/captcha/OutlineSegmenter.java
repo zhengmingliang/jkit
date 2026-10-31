@@ -70,39 +70,13 @@ final class OutlineSegmenter {
                 if (gap > 4 || span > 34) {
                     continue;
                 }
-                merged.set(i, union(left, right));
+                merged.set(i, GlyphGeometry.union(left, right));
                 merged.remove(i + 1);
                 changed = true;
                 break;
             }
         }
         return merged;
-    }
-
-    private static RawGlyph union(RawGlyph left, RawGlyph right) {
-        int x = Math.min(left.x, right.x);
-        int y = Math.min(left.y, right.y);
-        int width = Math.max(left.x + left.width, right.x + right.width) - x;
-        int height = Math.max(left.y + left.height, right.y + right.height) - y;
-        byte[] pixels = new byte[width * height];
-        stamp(pixels, width, x, y, left);
-        stamp(pixels, width, x, y, right);
-        int area = 0;
-        for (int i = 0; i < pixels.length; i++) {
-            area += pixels[i];
-        }
-        return new RawGlyph(x, y, width, height, pixels, area);
-    }
-
-    private static void stamp(byte[] pixels, int width, int originX, int originY, RawGlyph glyph) {
-        for (int y = 0; y < glyph.height; y++) {
-            for (int x = 0; x < glyph.width; x++) {
-                if (glyph.pixels[y * glyph.width + x] == 0) {
-                    continue;
-                }
-                pixels[(glyph.y - originY + y) * width + (glyph.x - originX + x)] = 1;
-            }
-        }
     }
 
     private static RawGlyph withClosedStroke(RawGlyph glyph) {

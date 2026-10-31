@@ -7,7 +7,6 @@ import ai.onnxruntime.OrtLoggingLevel;
 import ai.onnxruntime.OrtSession;
 
 import java.awt.image.BufferedImage;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.FloatBuffer;
@@ -470,16 +469,7 @@ final class TextModel implements AutoCloseable {
             throw new IOException(name);
         }
         try {
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            byte[] buffer = new byte[8192];
-            int read = input.read(buffer);
-            while (read >= 0) {
-                if (read > 0) {
-                    out.write(buffer, 0, read);
-                }
-                read = input.read(buffer);
-            }
-            return out.toByteArray();
+            return Io.readAll(input);
         } finally {
             input.close();
         }

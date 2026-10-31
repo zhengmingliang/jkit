@@ -61,6 +61,11 @@ final class RgbImage {
     }
 
     int borderMedianLuminance() {
+        return borderMedian(pixels, width, height);
+    }
+
+    /** 边框像素亮度中位数。角点被计两次，与各调用方的历史行为一致。 */
+    static int borderMedian(int[] pixels, int width, int height) {
         int count = width * 2 + height * 2;
         int[] samples = new int[count];
         int index = 0;

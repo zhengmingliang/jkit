@@ -180,7 +180,7 @@ final class LightSegmenter {
             if (to - from + 1 < 4) {
                 continue;
             }
-            RawGlyph piece = cropColumns(glyph, from, to);
+            RawGlyph piece = GlyphGeometry.cropColumns(glyph, from, to);
             if (piece == null || piece.area < minArea || piece.height < 8) {
                 continue;
             }
@@ -190,38 +190,6 @@ final class LightSegmenter {
             pieces.add(piece);
         }
         return pieces;
-    }
-
-    private static RawGlyph cropColumns(RawGlyph glyph, int from, int to) {
-        int top = glyph.height;
-        int bottom = -1;
-        int area = 0;
-        for (int y = 0; y < glyph.height; y++) {
-            for (int x = from; x <= to; x++) {
-                if (glyph.pixels[y * glyph.width + x] == 0) {
-                    continue;
-                }
-                area++;
-                if (y < top) {
-                    top = y;
-                }
-                if (y > bottom) {
-                    bottom = y;
-                }
-            }
-        }
-        if (bottom < top) {
-            return null;
-        }
-        int width = to - from + 1;
-        int height = bottom - top + 1;
-        byte[] pixels = new byte[width * height];
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                pixels[y * width + x] = glyph.pixels[(top + y) * glyph.width + from + x];
-            }
-        }
-        return new RawGlyph(glyph.x + from, glyph.y + top, width, height, pixels, area);
     }
 
     private static List<RawGlyph> mergeDots(List<RawGlyph> glyphs) {
@@ -241,7 +209,7 @@ final class LightSegmenter {
             }
             used[i] = true;
             used[host] = true;
-            merged.add(union(glyph, glyphs.get(host)));
+            merged.add(GlyphGeometry.union(glyph, glyphs.get(host)));
         }
         for (int i = 0; i < glyphs.size(); i++) {
             if (!used[i]) {
@@ -302,31 +270,5 @@ final class LightSegmenter {
             }
         }
         return best;
-    }
-
-    private static RawGlyph union(RawGlyph left, RawGlyph right) {
-        int minX = Math.min(left.x, right.x);
-        int minY = Math.min(left.y, right.y);
-        int width = Math.max(left.x + left.width, right.x + right.width) - minX;
-        int height = Math.max(left.y + left.height, right.y + right.height) - minY;
-        byte[] pixels = new byte[width * height];
-        blit(pixels, width, minX, minY, left);
-        blit(pixels, width, minX, minY, right);
-        int area = 0;
-        for (int i = 0; i < pixels.length; i++) {
-            area += pixels[i];
-        }
-        return new RawGlyph(minX, minY, width, height, pixels, area);
-    }
-
-    private static void blit(byte[] target, int targetWidth, int minX, int minY, RawGlyph glyph) {
-        for (int y = 0; y < glyph.height; y++) {
-            for (int x = 0; x < glyph.width; x++) {
-                if (glyph.pixels[y * glyph.width + x] == 0) {
-                    continue;
-                }
-                target[(glyph.y - minY + y) * targetWidth + glyph.x - minX + x] = 1;
-            }
-        }
     }
 }
