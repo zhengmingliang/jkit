@@ -152,16 +152,24 @@ public final class GitStorageSupport {
                 tokenHint(host)));
         fields.add(StorageField.optional(GitSourceConfig.ROOT_PATH, "起始目录", "",
                 "仓库内子目录，如 docs；留空为仓库根"));
-        fields.add(StorageField.optional(GitSourceConfig.COMMIT_MODE, "提交信息",
+        fields.add(StorageField.choice(GitSourceConfig.COMMIT_MODE, "提交信息",
                 GitSourceConfig.MODE_AUTO,
-                "auto = 按模板自动生成；manual = 每次上传 / 删除前弹窗填写"));
+                "auto = 按模板自动生成；manual = 每次上传 / 删除前弹窗填写",
+                false,
+                new StorageField.Option(GitSourceConfig.MODE_AUTO, "自动（按模板生成）"),
+                new StorageField.Option(GitSourceConfig.MODE_MANUAL, "手动（每次上传 / 删除前弹窗填写）")));
         fields.add(StorageField.optional(GitSourceConfig.COMMIT_TEMPLATE, "提交信息模板",
                 GitSourceConfig.DEFAULT_TEMPLATE,
                 "占位符：{filename} {path} {time} {op} {branch}"));
         // CDN 加速：Gitee 没有可用加速站点，不给这一项（配了也不生效）
         if (supportsCdn(host)) {
-            fields.add(StorageField.optional(GitSourceConfig.CDN_BASE, "CDN 加速域名",
-                    cdnDefault(host), cdnHint(host)));
+            fields.add(StorageField.choice(GitSourceConfig.CDN_BASE, "CDN 加速域名",
+                    cdnDefault(host), cdnHint(host),
+                    true,
+                    new StorageField.Option(GitSourceConfig.CDN_JSDELIVR, "jsDelivr（cdn.jsdelivr.net）"),
+                    new StorageField.Option("https://fastly.jsdelivr.net", "jsDelivr · Fastly（fastly.jsdelivr.net）"),
+                    new StorageField.Option("https://raw.githubusercontent.com", "GitHub raw（不加速，直连）"),
+                    new StorageField.Option("", "不启用（留空）")));
         }
         return Collections.unmodifiableList(fields);
     }

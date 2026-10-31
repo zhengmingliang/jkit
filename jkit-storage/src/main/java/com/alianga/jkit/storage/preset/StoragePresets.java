@@ -72,8 +72,11 @@ public final class StoragePresets {
         // 多吉云：付费桶（标准型，官方 API）+ 基础桶（基础型，控制台会话 API 适配）
         // 付费桶：控制台密钥对换 STS 临时凭据 → S3 兼容协议；基础桶：控制台账号登录 → /v2/console/v1/oss/* 会话 API
         platforms.add(new StoragePlatform("doge", "多吉云", "doge", "公有云",
-                StorageField.optional("bucketType", "桶类型", "paid",
-                        "paid=标准型付费桶（官方 S3 兼容 API），free=基础型桶（控制台会话适配）"),
+                StorageField.choice("bucketType", "桶类型", "paid",
+                        "paid=标准型付费桶（官方 S3 兼容 API），free=基础型桶（控制台会话适配）",
+                        false,
+                        new StorageField.Option("paid", "标准型（付费桶，官方 S3 兼容 API）"),
+                        new StorageField.Option("free", "基础型（免费桶，控制台会话适配）")),
                 StorageField.required("bucket", "Bucket", "业务桶名（如 fee-standard 付费 / meitu、free 基础）"),
                 StorageField.optional("accessKey", "AccessKey", null, "付费桶必填：控制台 → 密钥管理获取"),
                 StorageField.secret("secretKey", "SecretKey", false, "付费桶必填"),

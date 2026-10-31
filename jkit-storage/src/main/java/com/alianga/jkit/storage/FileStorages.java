@@ -54,6 +54,32 @@ public final class FileStorages {
     /** 平台注册表：平台 id → 平台描述。 */
     private static final Map<String, StoragePlatform> PLATFORMS = new LinkedHashMap<String, StoragePlatform>();
 
+    /** 引擎能力注册表：引擎 id → 能力声明（未注册引擎为 standard）。 */
+    private static final Map<String, com.alianga.jkit.storage.cap.StorageCapabilities> CAPABILITIES =
+            new java.util.concurrent.ConcurrentHashMap<String, com.alianga.jkit.storage.cap.StorageCapabilities>();
+
+    /**
+     * 注册引擎级能力声明（幂等，后注册覆盖先注册）。
+     *
+     * @param engineId    引擎 id
+     * @param capabilities 能力声明
+     */
+    public static void registerCapabilities(String engineId,
+                                            com.alianga.jkit.storage.cap.StorageCapabilities capabilities) {
+        CAPABILITIES.put(engineId, capabilities);
+    }
+
+    /**
+     * 取引擎级能力声明。
+     *
+     * @param engineId 引擎 id
+     * @return 能力声明；未注册返回 {@link com.alianga.jkit.storage.cap.StorageCapabilities#standard()}
+     */
+    public static com.alianga.jkit.storage.cap.StorageCapabilities capabilitiesOf(String engineId) {
+        com.alianga.jkit.storage.cap.StorageCapabilities caps = CAPABILITIES.get(engineId);
+        return caps == null ? com.alianga.jkit.storage.cap.StorageCapabilities.standard() : caps;
+    }
+
     static {
         ENGINES.put("local", LocalFileStorage::new);
         ENGINES.put("mail", MailFileStorage::new);
@@ -78,6 +104,16 @@ public final class FileStorages {
         Yun139StorageSupport.register();
         // Git 托管四平台（github / gitee / gitea / gogs 共用 git 引擎，纯 JDK 实现）
         com.alianga.jkit.storage.git.GitStorageSupport.register();
+        // 引擎级能力注册：界面按能力渲染，不按平台 id 写 if
+        CAPABILITIES.put("qqmail-attach",
+                com.alianga.jkit.storage.cap.StorageCapabilities.standard().withReadOnly());
+        CAPABILITIES.put("yun139",
+                com.alianga.jkit.storage.cap.StorageCapabilities.standard().withNativeRecycleBin());
+        CAPABILITIES.put("cmcloud",
+                com.alianga.jkit.storage.cap.StorageCapabilities.standard().withNativeRecycleBin());
+        CAPABILITIES.put("git",
+                com.alianga.jkit.storage.cap.StorageCapabilities.standard()
+                        .withMaxUploadBytes(20L * 1024L * 1024L));
     }
 
     private FileStorages() {

@@ -107,6 +107,16 @@ public interface FileStorage extends AutoCloseable {
     }
 
     /**
+     * 能力声明：默认取引擎注册值并叠加实例级 {@link #supportsRange()}。
+     *
+     * @return 能力元数据
+     */
+    default com.alianga.jkit.storage.cap.StorageCapabilities capabilities() {
+        return com.alianga.jkit.storage.FileStorages.capabilitiesOf(platform())
+                .withSupportsRange(supportsRange());
+    }
+
+    /**
      * 生成对象的预签名下载链接（分享用）：任何拿到链接的人在有效期内都可下载，
      * 请注意泄露风险。默认不支持（本地 / 协议类平台没有可分享的 HTTP 链接）。
      *
