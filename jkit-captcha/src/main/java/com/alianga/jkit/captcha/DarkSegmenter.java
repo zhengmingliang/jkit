@@ -14,6 +14,8 @@ final class DarkSegmenter {
     /** 聚类中心会越吸越偏。和种子差这么远的像素另开一簇，避免加号吃掉旁边的 0。 */
     private static final int SEED_DISTANCE = 32 * 32;
     private static final int MIN_CLUSTER = 25;
+    /** 聚类中心上限。抗锯齿过渡色会各自成簇，封顶保证 O(像素数 × 上限) 的最坏耗时。 */
+    private static final int MAX_CENTERS = 512;
 
     List<RawGlyph> segment(RgbImage image) {
         int[] labels = cluster(image);
@@ -23,9 +25,16 @@ final class DarkSegmenter {
                 clusterCount = labels[i] + 1;
             }
         }
+        // 一次遍历统计各簇像素数，避免每个簇都全图扫一遍。
+        int[] counts = new int[clusterCount];
+        for (int i = 0; i < labels.length; i++) {
+            if (labels[i] >= 0) {
+                counts[labels[i]]++;
+            }
+        }
         List<RawGlyph> glyphs = new ArrayList<RawGlyph>();
         for (int cluster = 0; cluster < clusterCount; cluster++) {
-            if (countLabel(labels, cluster) < MIN_CLUSTER) {
+            if (counts[cluster] < MIN_CLUSTER) {
                 continue;
             }
             byte[] mask = maskOf(labels, image.width, image.height, cluster);
@@ -65,6 +74,11 @@ final class DarkSegmenter {
                     && seedDistance(red, green, blue, centers.get(best)) <= SEED_DISTANCE) {
                 absorb(centers.get(best), red, green, blue);
                 labels[i] = best;
+            } else if (centers.size() >= MAX_CENTERS) {
+                // 中心数封顶：极端噪点的图不再新建簇，就近归入，分割耗时保持可预期。
+                // 常规验证码到不了这个上限，走到这里说明簇已经失去语义。
+                absorb(centers.get(best), red, green, blue);
+                labels[i] = best;
             } else {
                 centers.add(new double[] {red, green, blue, 1, red, green, blue});
                 labels[i] = centers.size() - 1;
@@ -94,16 +108,6 @@ final class DarkSegmenter {
         double dg = green - center[5];
         double db = blue - center[6];
         return (int) (dr * dr + dg * dg + db * db);
-    }
-
-    private static int countLabel(int[] labels, int cluster) {
-        int count = 0;
-        for (int i = 0; i < labels.length; i++) {
-            if (labels[i] == cluster) {
-                count++;
-            }
-        }
-        return count;
     }
 
     private static byte[] maskOf(int[] labels, int width, int height, int cluster) {
