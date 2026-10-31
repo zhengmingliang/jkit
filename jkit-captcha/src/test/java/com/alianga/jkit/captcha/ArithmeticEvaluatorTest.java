@@ -49,4 +49,24 @@ public class ArithmeticEvaluatorTest {
         Assert.assertNull(ArithmeticEvaluator.evaluate("a+1"));
         Assert.assertNull(ArithmeticEvaluator.evaluate("=?"));
     }
+
+    @Test
+    public void testRejectsOverflowAndStrayMarks() {
+        Assert.assertNull(ArithmeticEvaluator.evaluate("2147483648+1"));
+        Assert.assertNull(ArithmeticEvaluator.evaluate("99999999999+1"));
+        Assert.assertNull(ArithmeticEvaluator.evaluate("99999x99999"));
+        Assert.assertNull(ArithmeticEvaluator.evaluate("2000000000+2000000000"));
+        // 式子中间的等号不再剥掉两侧数字拼接求值。
+        Assert.assertNull(ArithmeticEvaluator.evaluate("1=2+3"));
+        Assert.assertNull(ArithmeticEvaluator.evaluate("=5+3"));
+        // 全角数字是非法输入。
+        Assert.assertNull(ArithmeticEvaluator.evaluate("１２+３"));
+    }
+
+    @Test
+    public void testNegativeResultsAndFullWidthQuestion() {
+        Assert.assertEquals(-9, ArithmeticEvaluator.evaluate("0-9").result);
+        Assert.assertEquals(-4, ArithmeticEvaluator.evaluate("0-9/2").result);
+        Assert.assertEquals(22, ArithmeticEvaluator.evaluate("14+8=？").result);
+    }
 }

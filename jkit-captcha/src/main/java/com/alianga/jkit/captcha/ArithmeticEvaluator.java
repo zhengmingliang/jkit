@@ -78,11 +78,24 @@ final class ArithmeticEvaluator {
         return new Value(expression.toString(), result.intValue());
     }
 
+    /**
+     * 去掉空格和末尾的等号问号。式子中间的等号问号保留，交给解析按非法输入拒绝：
+     * {@code 1=2+3} 不再剥成 {@code 12+3} 算出错误值。
+     */
     private static String stripTail(String text) {
-        StringBuilder builder = new StringBuilder(text.length());
-        for (int i = 0; i < text.length(); i++) {
-            char ch = text.charAt(i);
+        int end = text.length();
+        while (end > 0) {
+            char ch = text.charAt(end - 1);
             if (ch == ' ' || ch == '=' || ch == '?' || ch == '？') {
+                end--;
+            } else {
+                break;
+            }
+        }
+        StringBuilder builder = new StringBuilder(end);
+        for (int i = 0; i < end; i++) {
+            char ch = text.charAt(i);
+            if (ch == ' ') {
                 continue;
             }
             builder.append(ch);
@@ -139,26 +152,29 @@ final class ArithmeticEvaluator {
         if (text.isEmpty()) {
             return null;
         }
-        int value = 0;
+        long value = 0;
         for (int i = 0; i < text.length(); i++) {
             char ch = text.charAt(i);
             if (ch < '0' || ch > '9') {
                 return null;
             }
             value = value * 10 + (ch - '0');
+            if (value > Integer.MAX_VALUE) {
+                return null;
+            }
         }
-        return Integer.valueOf(value);
+        return Integer.valueOf((int) value);
     }
 
     private static Integer apply(int left, char operator, int right) {
         if (operator == '+') {
-            return Integer.valueOf(left + right);
+            return rangeChecked((long) left + right);
         }
         if (operator == '-') {
-            return Integer.valueOf(left - right);
+            return rangeChecked((long) left - right);
         }
         if (operator == '*' || operator == 'x' || operator == 'X' || operator == '×') {
-            return Integer.valueOf(left * right);
+            return rangeChecked((long) left * right);
         }
         if (operator == '/') {
             if (right == 0) {
@@ -167,5 +183,13 @@ final class ArithmeticEvaluator {
             return Integer.valueOf(left / right);
         }
         return null;
+    }
+
+    /** 结果超出 int 范围按失败处理，不再静默回绕成错误值。 */
+    private static Integer rangeChecked(long value) {
+        if (value > Integer.MAX_VALUE || value < Integer.MIN_VALUE) {
+            return null;
+        }
+        return Integer.valueOf((int) value);
     }
 }
