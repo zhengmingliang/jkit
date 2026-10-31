@@ -1,15 +1,12 @@
 package com.alianga.jkit.storage.engine;
 
-import com.alianga.jkit.notify.Attachment;
-import com.alianga.jkit.notify.ChannelConfig;
-import com.alianga.jkit.notify.MailMime;
-import com.alianga.jkit.notify.Message;
 import com.alianga.jkit.storage.FileStorage;
 import com.alianga.jkit.storage.StorageConfig;
 import com.alianga.jkit.storage.StorageEntry;
 import com.alianga.jkit.storage.StorageErrorCode;
 import com.alianga.jkit.storage.StorageException;
 import com.alianga.jkit.storage.StoragePaths;
+import com.alianga.jkit.storage.internal.StoredMime;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -39,7 +36,7 @@ import java.util.regex.Pattern;
  * 上传此类路径会 {@link StorageErrorCode#INVALID_CONFIG}。若底层已误存为 {@code foo.partN}，
  * 则按逻辑名 {@code foo} 的分卷片处理，不再当作独立文件名。</p>
  *
- * <p><b>分卷</b>：超过 {@code maxAttachmentBytes} 时用 {@link Attachment#slice} 拆分；
+ * <p><b>分卷</b>：超过 {@code maxAttachmentBytes} 时按字节切片拆分；
  * {@code list} 隐藏 part、对外逻辑名与合计大小；{@code download} 按序合成前先校验
  * part 从 1 起连续无缺口，缺片/有缺口时 {@link StorageErrorCode#CONFLICT}，不向输出流写入；
  * {@code delete} 清掉所有已发现的 part（含残缺分卷）。</p>
@@ -52,9 +49,9 @@ import java.util.regex.Pattern;
  * list/stat 大小取 {@code X-Jkit-Size}（遗留邮件按 Base64 段估算），不用 RFC822.SIZE
  * （QQ 实测对大邮件也只报约 900B）。</p>
  *
- * <p><b>已知限制</b>：宿主若使用 jkit-notify 2.0.4，纯 ASCII Subject 仍会被 RFC2047 编码
- * （2.0.5 起不编码）；读取侧已解码 encoded-word，按明文路径查找不受影响，但在邮箱客户端里
- * 看到的原始 Subject 为编码形式。</p>
+ * <p><b>已知限制</b>：Subject 编码规则为「纯可打印 ASCII 原样、非 ASCII 走 RFC2047
+ * encoded-word」（由 {@link StoredMime} 保证，与 jkit-notify SmtpChannel 一致）；读取侧已解码
+ * encoded-word，按明文路径查找不受影响。</p>
  *
  * @author 郑明亮
  */
@@ -197,7 +194,6 @@ public class MailFileStorage implements FileStorage {
                 appendMime(name, payload, -1L);
                 return;
             }
-            Attachment whole = Attachment.of(name, payload);
             List<String> written = new ArrayList<String>();
             long offset = 0L;
             int partNo = 1;
@@ -205,8 +201,9 @@ public class MailFileStorage implements FileStorage {
                 while (offset < payload.length) {
                     long chunk = Math.min(partRaw, payload.length - offset);
                     String partName = name + ".part" + partNo;
-                    Attachment part = whole.slice(offset, chunk, partName);
-                    appendMime(partName, part.content(), payload.length);
+                    byte[] part = new byte[(int) chunk];
+                    System.arraycopy(payload, (int) offset, part, 0, (int) chunk);
+                    appendMime(partName, part, payload.length);
                     written.add(partName);
                     offset += chunk;
                     partNo++;
@@ -770,7 +767,7 @@ public class MailFileStorage implements FileStorage {
     }
 
     /**
-     * 经 jkit-notify {@link Attachment} + {@link MailMime} 组装存储用 RFC822。
+     * 经内部 {@link StoredMime} 组装存储用 RFC822（格式与 jkit-notify SmtpChannel 一致）。
      * Subject/附件名为路径最后一段（不含目录前缀）。
      *
      * @param fileName 逻辑文件名
@@ -787,13 +784,7 @@ public class MailFileStorage implements FileStorage {
      */
     static byte[] buildStoredMime(String fileName, byte[] payload, long totalRaw) {
         byte[] data = payload == null ? new byte[0] : payload;
-        Attachment attachment = Attachment.of(fileName, data);
-        Message message = Message.text(fileName, "Stored by jkit-storage MailFileStorage.")
-                .attachment(attachment);
-        ChannelConfig mimeCfg = ChannelConfig.smtp("127.0.0.1", 25)
-                .from("jkit-storage@localhost")
-                .to("jkit-storage@localhost");
-        byte[] rendered = MailMime.render(message, "jkit-storage@localhost", mimeCfg);
+        byte[] rendered = StoredMime.render(fileName, data);
         StringBuilder extra = new StringBuilder();
         extra.append("X-Jkit-Size: ").append(data.length).append("\r\n");
         if (totalRaw >= 0L) {
