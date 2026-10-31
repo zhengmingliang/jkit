@@ -71,11 +71,16 @@ final class TemplateBank {
     /**
      * @param strokeOnly 为 true 时只和空心描边模板比，实心字不会走到这里
      */
-    synchronized List<Scored> rank(byte[] grid, String alphabet, int limit, boolean plainOnly, boolean strokeOnly) {
-        ensureBuilt();
+    List<Scored> rank(byte[] grid, String alphabet, int limit, boolean plainOnly, boolean strokeOnly) {
+        // 比对是纯只读计算，锁内只取快照；learn 并发追加时本次识别用旧列表，下次生效。
+        List<Template> snapshot;
+        synchronized (this) {
+            ensureBuilt();
+            snapshot = new ArrayList<Template>(templates);
+        }
         Map<Character, Double> best = new HashMap<Character, Double>();
-        for (int i = 0; i < templates.size(); i++) {
-            Template template = templates.get(i);
+        for (int i = 0; i < snapshot.size(); i++) {
+            Template template = snapshot.get(i);
             if (strokeOnly != template.stroke) {
                 continue;
             }

@@ -3,7 +3,9 @@ package com.alianga.jkit.captcha;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -18,7 +20,7 @@ import org.junit.Test;
 /**
  * 长寿命服务里多线程共用一个识别器是预期用法。
  * 冒烟覆盖各链路静态缓存的并发首调：模板库、ONNX 会话、easy 字形表、白板汉字字符集。
- * 并发下不抛异常、结果非空即为通过，不断言具体识别内容。
+ * 并发下不抛异常、结果非空且同一输入跨线程结果一致即为通过，不断言具体识别内容。
  */
 public class CaptchaConcurrencyTest {
 
@@ -38,9 +40,12 @@ public class CaptchaConcurrencyTest {
             ExecutorService pool = Executors.newFixedThreadPool(8);
             try {
                 List<Future<RecognizeResult>> futures = new ArrayList<Future<RecognizeResult>>();
+                List<Integer> inputIndex = new ArrayList<Integer>();
                 for (int t = 0; t < 8; t++) {
                     for (int round = 0; round < 4; round++) {
-                        final Object input = inputs.get((t + round) % inputs.size());
+                        final int index = (t + round) % inputs.size();
+                        final Object input = inputs.get(index);
+                        inputIndex.add(Integer.valueOf(index));
                         futures.add(pool.submit(new Callable<RecognizeResult>() {
                             @Override
                             public RecognizeResult call() throws Exception {
@@ -52,9 +57,18 @@ public class CaptchaConcurrencyTest {
                         }));
                     }
                 }
-                for (Future<RecognizeResult> future : futures) {
-                    RecognizeResult result = future.get(60, TimeUnit.SECONDS);
+                Map<Integer, String> seen = new HashMap<Integer, String>();
+                for (int i = 0; i < futures.size(); i++) {
+                    RecognizeResult result = futures.get(i).get(60, TimeUnit.SECONDS);
                     Assert.assertNotNull(result);
+                    Integer key = inputIndex.get(i);
+                    String previous = seen.get(key);
+                    String text = result.getText();
+                    if (previous == null) {
+                        seen.put(key, text);
+                    } else {
+                        Assert.assertEquals("同一输入跨线程结果应一致", previous, text);
+                    }
                 }
             } finally {
                 pool.shutdownNow();

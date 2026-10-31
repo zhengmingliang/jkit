@@ -96,26 +96,33 @@ final class TextModel implements AutoCloseable {
     }
 
     private float[][] logits(BufferedImage image, boolean beta) throws OrtException {
+        OrtSession used;
+        OrtEnvironment env;
+        String name;
         synchronized (lock) {
-            OrtSession used = open(beta);
+            used = open(beta);
             if (used == null) {
                 return null;
             }
-            String name = beta ? betaInputName : inputName;
-            float[] input = pixels(image);
-            int width = input.length / TARGET_HEIGHT;
-            long[] shape = new long[] {1L, 1L, TARGET_HEIGHT, width};
-            OnnxTensor tensor = OnnxTensor.createTensor(environment, FloatBuffer.wrap(input), shape);
+            env = environment;
+            name = beta ? betaInputName : inputName;
+        }
+        // session.run 线程安全，推理放在锁外，多线程识别不在这里串行。
+        // 并发 close 只会让本次 run 抛 OrtException，调用方按"模型不可用"退回模板结果，
+        // 下次调用经 open 的延迟重载恢复。
+        float[] input = pixels(image);
+        int width = input.length / TARGET_HEIGHT;
+        long[] shape = new long[] {1L, 1L, TARGET_HEIGHT, width};
+        OnnxTensor tensor = OnnxTensor.createTensor(env, FloatBuffer.wrap(input), shape);
+        try {
+            OrtSession.Result result = used.run(Collections.singletonMap(name, tensor));
             try {
-                OrtSession.Result result = used.run(Collections.singletonMap(name, tensor));
-                try {
-                    return rows(result.get(0).getValue());
-                } finally {
-                    result.close();
-                }
+                return rows(result.get(0).getValue());
             } finally {
-                tensor.close();
+                result.close();
             }
+        } finally {
+            tensor.close();
         }
     }
 

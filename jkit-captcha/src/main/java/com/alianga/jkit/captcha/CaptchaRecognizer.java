@@ -101,12 +101,15 @@ public final class CaptchaRecognizer implements AutoCloseable {
             throw new IllegalArgumentException("image");
         }
         RecognizeOptions effective = options == null ? RecognizeOptions.auto() : options;
+        List<CaptchaSolver> candidates;
         synchronized (solvers) {
-            for (int i = 0; i < solvers.size(); i++) {
-                CaptchaSolver solver = solvers.get(i);
-                if (solver.supports(effective.getType())) {
-                    return solver.recognize(image, effective);
-                }
+            candidates = new ArrayList<CaptchaSolver>(solvers);
+        }
+        // 第三方 solver 的识别耗时不可控，快照后在锁外遍历，register 不被它卡住。
+        for (int i = 0; i < candidates.size(); i++) {
+            CaptchaSolver solver = candidates.get(i);
+            if (solver.supports(effective.getType())) {
+                return solver.recognize(image, effective);
             }
         }
         // 浅色大图笔画和背景挤在一起，拉开对比度后再走原来的链路。拉伸后必有暗通道，不会再次进入这里。
