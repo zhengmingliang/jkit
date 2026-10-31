@@ -2,6 +2,7 @@ package com.alianga.jkit.captcha;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * 一次识别的结果。
@@ -109,7 +110,7 @@ public final class RecognizeResult {
         if (value != null) {
             builder.append(" value=").append(value);
         }
-        builder.append(" confidence=").append(String.format("%.2f", Double.valueOf(confidence)));
+        builder.append(" confidence=").append(String.format(Locale.ROOT, "%.2f", Double.valueOf(confidence)));
         builder.append(" elapsedMs=").append(elapsedMillis);
         return builder.toString();
     }

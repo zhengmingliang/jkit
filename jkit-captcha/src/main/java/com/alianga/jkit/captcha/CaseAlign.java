@@ -1,5 +1,7 @@
 package com.alianga.jkit.captcha;
 
+import java.util.Locale;
+
 /**
  * 把模板识别的大小写套到通用模型的字符上。
  * 两边忽略大小写能对上的位置用模板的大小写；对不上的位置用模型字符，并借用模板这一位的大小写。
@@ -71,7 +73,7 @@ final class CaseAlign {
     }
 
     private static boolean duplicates(String template, StringBuilder deleted) {
-        String lower = template.toLowerCase();
+        String lower = template.toLowerCase(Locale.ROOT);
         for (int d = 0; d < deleted.length(); d++) {
             char ch = Character.toLowerCase(deleted.charAt(d));
             int at = lower.indexOf(ch);

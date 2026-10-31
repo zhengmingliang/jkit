@@ -96,6 +96,7 @@ final class WhitePlate {
     }
 
     static RecognizeResult readFrames(List<BufferedImage> frames, TextModel model, RecognizeOptions options) {
+        long started = System.nanoTime();
         RecognizeResult fonts = EasyPlate.readFrames(frames, options);
         if (fonts != null) {
             return fonts;
@@ -128,9 +129,9 @@ final class WhitePlate {
             return null;
         }
         if (arithmetic) {
-            return arithmeticResult(reading.text, reading.confidence, System.nanoTime());
+            return arithmeticResult(reading.text, reading.confidence, started);
         }
-        return textResult(reading.text, reading.confidence, System.nanoTime());
+        return textResult(reading.text, reading.confidence, started);
     }
 
     private static TextModel.Reading tryExpression(BufferedImage image, TextModel model) {

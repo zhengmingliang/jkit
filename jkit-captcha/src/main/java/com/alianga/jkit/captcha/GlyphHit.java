@@ -1,5 +1,7 @@
 package com.alianga.jkit.captcha;
 
+import java.util.Locale;
+
 /**
  * 一个已识别字符及其在原图中的位置。
  */
@@ -77,6 +79,6 @@ public final class GlyphHit {
     @Override
     public String toString() {
         return value + "@" + x + "," + y + " " + width + "x" + height
-                + " " + String.format("%.2f", Double.valueOf(confidence));
+                + " " + String.format(Locale.ROOT, "%.2f", Double.valueOf(confidence));
     }
 }

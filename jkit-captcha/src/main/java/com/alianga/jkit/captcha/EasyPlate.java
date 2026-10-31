@@ -27,6 +27,10 @@ final class EasyPlate {
     private static final double HIT_DICE = 0.70;
     private static final double EIGHT_DICE = 0.80;
     private static final double EIGHT_GAP = 0.04;
+    /** colors() 里按色相归类的门限：色距幅度低于 45 的像素当背景。 */
+    private static final int MIN_SATURATION = 45;
+    /** colors() 里色相余弦下限。数值与 MIN_DICE 相同但语义无关，别混用。 */
+    private static final double MIN_COSINE = 0.72;
     private static final String[] ARITH_SLOTS = {"0123456789", "+-x", "0123456789", "=", "?"};
     private static final String[] ARITH7_SLOTS = {
         "0123456789", "+-x", "0123456789", "+-x", "0123456789", "=", "?"
@@ -389,7 +393,7 @@ final class EasyPlate {
                 int dg = 255 - ((rgb >> 8) & 0xff);
                 int db = 255 - (rgb & 0xff);
                 int mag = dr * dr + dg * dg + db * db;
-                if (mag < 45 * 45) {
+                if (mag < MIN_SATURATION * MIN_SATURATION) {
                     continue;
                 }
                 double scale = Math.sqrt(mag);
@@ -403,7 +407,7 @@ final class EasyPlate {
                         best = c;
                     }
                 }
-                if (bestCos >= 0.72) {
+                if (bestCos >= MIN_COSINE) {
                     ink[y * WIDTH + x] = (byte) best;
                 }
             }
