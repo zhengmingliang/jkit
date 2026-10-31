@@ -76,6 +76,8 @@ public final class FileStorages {
         // 网页版同款接口（yun139，全目录可读可写），平台与字段由各自 Support 注册
         CmCloudStorageSupport.register();
         Yun139StorageSupport.register();
+        // Git 托管四平台（github / gitee / gitea / gogs 共用 git 引擎，纯 JDK 实现）
+        com.alianga.jkit.storage.git.GitStorageSupport.register();
     }
 
     private FileStorages() {

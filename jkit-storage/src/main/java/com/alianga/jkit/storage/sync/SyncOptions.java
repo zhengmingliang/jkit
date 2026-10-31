@@ -26,6 +26,7 @@ public final class SyncOptions {
     private int concurrency = 4;
     private long maxErrors = 100;
     private Predicate<String> filter;
+    private List<String> excludePrefixes = java.util.Collections.emptyList();
     private SyncCancel cancelToken;
     private boolean preserveMtime = true;
     private Direction direction = Direction.ONE_WAY;
@@ -130,6 +131,33 @@ public final class SyncOptions {
     public SyncOptions filter(Predicate<String> filter) {
         this.filter = filter;
         return this;
+    }
+
+    /**
+     * 排除前缀清单（逗号分隔，段边界匹配）：命中自身或其子孙的相对路径不参与同步。
+     *
+     * <p>排除 {@code tmp} 只会排除 {@code tmp} 与 {@code tmp/...}，不会误伤
+     * {@code tmp2/} 或 {@code tmpfile.txt}；带不带尾随 {@code /} 写法等效。
+     * 与 {@link #filter(Predicate)} 可叠加（两者都通过才参与）。</p>
+     *
+     * @param raw 用户输入（如 {@code "logs/, tmp,node_modules"}）；null / 空表示不排除
+     * @return 自身
+     */
+    public SyncOptions excludePrefixes(String raw) {
+        List<String> parsed = SyncExcludes.parse(raw);
+        this.excludePrefixes = parsed.isEmpty()
+                ? java.util.Collections.<String>emptyList()
+                : java.util.Collections.unmodifiableList(parsed);
+        return this;
+    }
+
+    /**
+     * 当前排除前缀清单（只读）。
+     *
+     * @return 规范化后的前缀清单
+     */
+    public List<String> excludePrefixes() {
+        return excludePrefixes;
     }
 
     /**
@@ -260,6 +288,9 @@ public final class SyncOptions {
      * @return true 参与
      */
     public boolean accepts(String relativePath) {
+        if (!excludePrefixes.isEmpty() && SyncExcludes.anyMatch(relativePath, excludePrefixes)) {
+            return false;
+        }
         return filter == null || filter.test(relativePath);
     }
 
