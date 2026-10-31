@@ -52,7 +52,17 @@ public final class StoragePresets {
                 StorageField.optional("privateKey", "私钥文件路径", null, "密码与私钥二选一"),
                 StorageField.secret("privateKeyPassphrase", "私钥口令", false),
                 StorageField.optional("basePath", "起始目录", "/", null),
-                StorageField.optional("strictHostKeyChecking", "严格主机指纹校验", "false", null),
+                StorageField.choice("strictHostKeyChecking", "严格主机指纹校验", "true",
+                        "默认开启（安全）：首连确认一次指纹后写入 known_hosts 长期免打扰；"
+                                + "关闭等于接受中间人可截获密码与文件",
+                        false,
+                        new StorageField.Option("true", "开启（推荐）"),
+                        new StorageField.Option("false", "关闭（不安全）")),
+                StorageField.optional("hostKeyFingerprint", "主机指纹", null,
+                        "首连确认用：把连接报错里带出的指纹（SHA256:… 或冒号十六进制）粘进这里，"
+                                + "匹配才接受并写入 known_hosts"),
+                StorageField.optional("knownHosts", "known_hosts 路径", null,
+                        "留空用默认 ~/.jkit-storage/known_hosts"),
                 StorageField.optional("channelPool", "并发通道数", "4", "SFTP 通道池上限，1 为串行")));
         platforms.add(new StoragePlatform("webdav", "WebDAV", "webdav", "协议",
                 StorageField.required("endpoint", "服务地址", "如 https://dav.example.com/dav"),

@@ -70,6 +70,11 @@ public class SftpFileStorage implements FileStorage {
     /** 服务器端绝对根目录：basePath 为空 / {@code /} 时为 {@code /}，否则强制绝对化。 */
     private final String root;
     private final boolean strictHostKeyChecking;
+    /** 期望的主机指纹（SHA256:... 或 md5 冒号串）；非空时指纹匹配才接受新主机。 */
+    private final String hostKeyFingerprint;
+    /** known_hosts 文件路径；null 用默认（user.home/.jkit-storage/known_hosts）。 */
+    private final String knownHostsPath;
+
     /** SFTP 通道池上限（默认 4；1 = 实例级串行）。 */
     private final int poolSize;
     /** 懒建立的 SFTP 通道：构造不连接，首次操作才建立（缺 jsch 依赖时在此暴露）。 */
@@ -107,15 +112,17 @@ public class SftpFileStorage implements FileStorage {
         this.privateKeyPassphrase = blankToNull(config.get("privateKeyPassphrase"));
         this.root = rootOf(config.getOr("basePath", "/"));
         this.strictHostKeyChecking = resolveStrictHostKeyChecking(config);
+        this.hostKeyFingerprint = blankToNull(config.get("hostKeyFingerprint"));
+        this.knownHostsPath = blankToNull(config.get("knownHosts"));
         this.poolSize = Math.max(1, Math.min(16, config.intOr("channelPool", 4)));
     }
 
     /**
-     * 解析 strictHostKeyChecking：显式配置 &gt; 系统属性 &gt; 默认 false。
+     * 解析 strictHostKeyChecking：显式配置 &gt; 系统属性 &gt; 默认 true。
      *
-     * <p>默认 false 是历史行为（向后兼容）；生产部署可通过
-     * {@code -Djkit.storage.sftp.defaultStrictHostKeyChecking=true} 在 JVM 级别
-     * 统一强制开启。</p>
+     * <p>默认 true（2.0.5 安全默认）：中间人可截获明文密码与传输文件，主机指纹
+     * 首连确认一次后写入 known_hosts 即长期免打扰。显式配置 {@code false} 可关闭
+     * （等价旧行为）；系统属性可整机强制（true/false 皆可）。</p>
      *
      * @param config 连接配置
      * @return 是否开启严格主机密钥校验
@@ -127,7 +134,11 @@ public class SftpFileStorage implements FileStorage {
                     || "1".equals(explicit.trim())
                     || "yes".equalsIgnoreCase(explicit.trim());
         }
-        return Boolean.getBoolean(SYS_PROP_DEFAULT_STRICT_HOST_KEY_CHECKING);
+        String prop = System.getProperty(SYS_PROP_DEFAULT_STRICT_HOST_KEY_CHECKING);
+        if (prop != null && !prop.trim().isEmpty()) {
+            return "true".equalsIgnoreCase(prop.trim()) || "1".equals(prop.trim());
+        }
+        return true;
     }
 
     @Override
@@ -344,7 +355,8 @@ public class SftpFileStorage implements FileStorage {
         synchronized (this) {
             if (bridge == null) {
                 bridge = JschBridge.open(host, port, user, password, privateKey,
-                        privateKeyPassphrase, strictHostKeyChecking, poolSize);
+                        privateKeyPassphrase, strictHostKeyChecking, knownHostsPath,
+                        hostKeyFingerprint, poolSize);
             }
             return bridge;
         }
@@ -547,7 +559,7 @@ public class SftpFileStorage implements FileStorage {
      * 异常会把通道标记为损坏并弃用（下次借时新建），SftpException 属于
      * 协议级应答，通道仍可用。
      */
-    private static final class JschBridge {
+    static final class JschBridge {
         /** Method 句柄缓存（类名#方法名 → Method），避免列表逐条目重复反射查找。 */
         private static final Map<String, Method> METHODS = new HashMap<String, Method>();
         /** Field 句柄缓存（如 ChannelSftp.OVERWRITE、SftpException.id）。 */
@@ -652,7 +664,8 @@ public class SftpFileStorage implements FileStorage {
         /** 建立 SFTP 连接（单 Session）；classpath 缺 jsch 时抛 UNSUPPORTED。 */
         static JschBridge open(String host, int port, String user, String password,
                                String privateKey, String privateKeyPassphrase,
-                               boolean strictHostKeyChecking, int poolSize) {
+                               boolean strictHostKeyChecking, String knownHostsPath,
+                               String hostKeyFingerprint, int poolSize) {
             Class<?> jschClass;
             try {
                 jschClass = Class.forName("com.jcraft.jsch.JSch");
@@ -660,6 +673,8 @@ public class SftpFileStorage implements FileStorage {
                 throw StorageException.unsupported("SFTP 引擎需要 jsch 依赖"
                         + "（com.github.mwiede:jsch 或 com.jcraft:jsch），请将其加入 classpath");
             }
+            java.util.concurrent.atomic.AtomicReference<String> promptedFingerprint =
+                    new java.util.concurrent.atomic.AtomicReference<String>(null);
             try {
                 Object jsch = jschClass.newInstance();
                 if (privateKey != null) {
@@ -671,16 +686,129 @@ public class SftpFileStorage implements FileStorage {
                 if (password != null) {
                     method(session.getClass(), "setPassword", String.class).invoke(session, password);
                 }
-                method(session.getClass(), "setConfig", String.class, String.class)
-                        .invoke(session, "StrictHostKeyChecking", strictHostKeyChecking ? "yes" : "no");
+                if (strictHostKeyChecking) {
+                    // ask：known_hosts 已信任的直接过；新主机经 UserInfo 征询指纹
+                    method(session.getClass(), "setConfig", String.class, String.class)
+                            .invoke(session, "StrictHostKeyChecking", "ask");
+                    String knownHosts = knownHostsPath != null
+                            ? knownHostsPath : defaultKnownHostsPath();
+                    java.nio.file.Path file = java.nio.file.Paths.get(knownHosts);
+                    if (!java.nio.file.Files.exists(file)) {
+                        java.nio.file.Path parent = file.getParent();
+                        if (parent != null) {
+                            java.nio.file.Files.createDirectories(parent);
+                        }
+                        java.nio.file.Files.createFile(file);
+                    }
+                    method(jschClass, "setKnownHosts", String.class)
+                            .invoke(jsch, knownHosts);
+                    final String expectedFingerprint = hostKeyFingerprint;
+                    method(session.getClass(), "setUserInfo",
+                            new Class<?>[]{Class.forName("com.jcraft.jsch.UserInfo")})
+                            .invoke(session, fingerprintProxy(promptedFingerprint, expectedFingerprint));
+                } else {
+                    method(session.getClass(), "setConfig", String.class, String.class)
+                            .invoke(session, "StrictHostKeyChecking", "no");
+                }
                 method(session.getClass(), "setTimeout", int.class).invoke(session, CONNECT_TIMEOUT_MS);
                 method(session.getClass(), "connect", int.class).invoke(session, CONNECT_TIMEOUT_MS);
                 return new JschBridge(session, poolSize, overwriteOf(session));
             } catch (InvocationTargetException e) {
-                throw mapThrowable(e.getCause(), "-", "连接");
+                StorageException mapped = mapThrowable(e.getCause(), "-", "连接");
+                if (strictHostKeyChecking && promptedFingerprint.get() != null) {
+                    throw StorageException.connectFailed(
+                            "SFTP 主机指纹未确认（" + promptedFingerprint.get()
+                                    + "）：核对无误后在连接配置「主机指纹」中填入该值再重试；"
+                                    + "确认服务器不可信请勿连接。原始错误：" + mapped.getMessage());
+                }
+                throw mapped;
             } catch (ReflectiveOperationException e) {
                 throw StorageException.io("JSch 反射调用失败: " + e.getMessage(), "-", e);
+            } catch (java.io.IOException e) {
+                throw StorageException.io("known_hosts 初始化失败: " + e.getMessage(), "-", e);
             }
+        }
+
+        /**
+         * 指纹征询代理（实现 com.jcraft.jsch.UserInfo + UIKeyboardInteractive）：
+         * promptYesNo 的问句里带服务器指纹——配置了期望指纹且匹配才接受
+         * （jsch 随即把主机写进 known_hosts），否则拒绝；问到的指纹记下来供报错带出。
+         */
+        private static Object fingerprintProxy(
+                final java.util.concurrent.atomic.AtomicReference<String> captured,
+                final String expectedFingerprint) {
+            Class<?> userInfo;
+            Class<?> keyboard;
+            try {
+                userInfo = Class.forName("com.jcraft.jsch.UserInfo");
+                keyboard = Class.forName("com.jcraft.jsch.UIKeyboardInteractive");
+            } catch (ClassNotFoundException e) {
+                throw StorageException.unsupported("SFTP 引擎需要 jsch 依赖（UserInfo）");
+            }
+            return java.lang.reflect.Proxy.newProxyInstance(
+                    SftpFileStorage.class.getClassLoader(),
+                    new Class<?>[]{userInfo, keyboard},
+                    new java.lang.reflect.InvocationHandler() {
+                        @Override
+                        public Object invoke(Object proxy, Method m, Object[] args) {
+                            String name = m.getName();
+                            if ("promptYesNo".equals(name)) {
+                                String question = args != null && args.length > 0
+                                        && args[0] instanceof String ? (String) args[0] : "";
+                                String fingerprint = extractFingerprint(question);
+                                if (fingerprint != null) {
+                                    captured.set(fingerprint);
+                                }
+                                return Boolean.valueOf(shouldAcceptPrompt(
+                                        question, expectedFingerprint));
+                            }
+                            // 其余征询（键盘交互 / 密码再问 / 提示信息）一律拒绝或留空
+                            if (name.startsWith("prompt")) {
+                                return Boolean.FALSE;
+                            }
+                            return null;
+                        }
+                    });
+        }
+
+        /** 从 jsch 征询问句中提取指纹（SHA256:Base64 或 md5 冒号十六进制）。 */
+        static String extractFingerprint(String prompt) {
+            if (prompt == null) {
+                return null;
+            }
+            java.util.regex.Matcher sha256 = java.util.regex.Pattern
+                    .compile("SHA256:[A-Za-z0-9+/=]+").matcher(prompt);
+            if (sha256.find()) {
+                return sha256.group();
+            }
+            java.util.regex.Matcher md5 = java.util.regex.Pattern
+                    .compile("\\b([0-9a-fA-F]{2}:){15}[0-9a-fA-F]{2}\\b").matcher(prompt);
+            if (md5.find()) {
+                return md5.group().toLowerCase(java.util.Locale.ROOT);
+            }
+            return null;
+        }
+
+        /** 配置了期望指纹且问句里包含才算接受；未配置一律拒绝（首连必须确认）。 */
+        static boolean shouldAcceptPrompt(String prompt, String configuredFingerprint) {
+            if (configuredFingerprint == null || configuredFingerprint.trim().isEmpty()) {
+                return false;
+            }
+            String expected = configuredFingerprint.trim();
+            if (prompt == null) {
+                return false;
+            }
+            if (prompt.contains(expected)) {
+                return true;
+            }
+            String extracted = extractFingerprint(prompt);
+            return extracted != null && extracted.equalsIgnoreCase(expected);
+        }
+
+        /** 默认 known_hosts：user.home/.jkit-storage/known_hosts。 */
+        static String defaultKnownHostsPath() {
+            return java.nio.file.Paths.get(System.getProperty("user.home"),
+                    ".jkit-storage", "known_hosts").toString();
         }
 
         /** 借一条临时通道取 OVERWRITE 常量（Put 用），取完即还。 */

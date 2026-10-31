@@ -282,15 +282,47 @@ public class CopypartyRealStorageTest {
         }
     }
 
-    @Test
-    public void sftpRealServer() throws Exception {
-        Assume.assumeTrue(sftpUp);
+
+    /**
+     * SFTP 连接配置（按 2.0.5 安全默认走完整确认流）：
+     * 首连抛「主机指纹未确认」→ 从报错提取指纹 → 配置 hostKeyFingerprint 重试。
+     * 同时端到端验证指纹确认流本身。
+     */
+    private static Map<String, String> confirmedSftpValues(String host, int port) {
         Map<String, String> values = new LinkedHashMap<String, String>();
-        values.put("host", "127.0.0.1");
-        values.put("port", String.valueOf(sftpPort));
+        values.put("host", host);
+        values.put("port", String.valueOf(port));
         values.put("user", USER);
         values.put("password", PASSWORD);
         values.put("basePath", "/data");
+        try {
+            FileStorage probe = FileStorages.of("sftp", values);
+            try {
+                probe.list("");
+                // known_hosts 已有该主机（上次运行写入）：直接可用
+                return values;
+            } catch (StorageException e) {
+                java.util.regex.Matcher m = java.util.regex.Pattern
+                        .compile("SHA256:[A-Za-z0-9+/=]+").matcher(String.valueOf(e.getMessage()));
+                Assume.assumeTrue("首连报错应带出主机指纹：" + e.getMessage(), m.find());
+                values.put("hostKeyFingerprint", m.group());
+                return values;
+            } finally {
+                probe.close();
+            }
+        } catch (StorageException e) {
+            java.util.regex.Matcher m = java.util.regex.Pattern
+                    .compile("SHA256:[A-Za-z0-9+/=]+").matcher(String.valueOf(e.getMessage()));
+            Assume.assumeTrue("首连报错应带出主机指纹：" + e.getMessage(), m.find());
+            values.put("hostKeyFingerprint", m.group());
+            return values;
+        }
+    }
+
+    @Test
+    public void sftpRealServer() throws Exception {
+        Assume.assumeTrue(sftpUp);
+        Map<String, String> values = confirmedSftpValues("127.0.0.1", sftpPort);
         String root = "jkit-sftp-" + System.nanoTime();
         try {
             // paramiko 只回数字 uid/gid（longname 与 attrs 一致）
@@ -358,12 +390,7 @@ public class CopypartyRealStorageTest {
             assertEquals(2L, second.copied());
 
             // WebDAV → SFTP（镜像：多出的文件被删除）
-            Map<String, String> sftpValues = new LinkedHashMap<String, String>();
-            sftpValues.put("host", "127.0.0.1");
-            sftpValues.put("port", String.valueOf(sftpPort));
-            sftpValues.put("user", USER);
-            sftpValues.put("password", PASSWORD);
-            sftpValues.put("basePath", "/data");
+            Map<String, String> sftpValues = confirmedSftpValues("127.0.0.1", sftpPort);
             FileStorage sftp = FileStorages.of("sftp", sftpValues);
             sftp.upload(stage3 + "/stale.txt", "old".getBytes(StandardCharsets.UTF_8));
             dav.upload(stage2 + "/new.txt", "new".getBytes(StandardCharsets.UTF_8));
