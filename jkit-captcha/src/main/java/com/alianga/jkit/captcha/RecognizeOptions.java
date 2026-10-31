@@ -39,7 +39,7 @@ public final class RecognizeOptions {
     /**
      * 限定候选字符。未设置时按类型使用内置字符集。
      *
-     * @param alphabet 允许出现的字符，空字符串视为不限制
+     * @param alphabet 允许出现的字符；空字符串与未设置一样，按类型使用内置字符集
      * @return 新的参数
      */
     public RecognizeOptions withAlphabet(String alphabet) {

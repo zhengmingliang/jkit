@@ -63,10 +63,14 @@ final class WhitePlate {
         }
         long started = System.nanoTime();
         String user = options.getAlphabet();
+        if (user != null && user.length() == 0) {
+            // 空串与未设置一样按类型取默认字符集，与模板路径一致。
+            user = null;
+        }
         TextModel.Reading reading;
         boolean arithmetic = false;
         if (user != null) {
-            reading = model.readBetaReading(image, user.length() == 0 ? null : user);
+            reading = model.readBetaReading(image, user);
         } else if (options.getType() == CaptchaType.ARITHMETIC) {
             reading = model.readBetaReading(maskTail(image), OPERATORS);
             arithmetic = true;
@@ -97,10 +101,14 @@ final class WhitePlate {
             return fonts;
         }
         String user = options.getAlphabet();
+        if (user != null && user.length() == 0) {
+            // 空串与未设置一样按类型取默认字符集，与模板路径一致。
+            user = null;
+        }
         String alphabet;
         boolean arithmetic = false;
         if (user != null) {
-            alphabet = user.length() == 0 ? null : user;
+            alphabet = user;
         } else if (options.getType() == CaptchaType.ARITHMETIC) {
             alphabet = OPERATORS;
             arithmetic = true;

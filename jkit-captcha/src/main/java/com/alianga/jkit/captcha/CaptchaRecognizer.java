@@ -154,11 +154,6 @@ public final class CaptchaRecognizer implements AutoCloseable {
     }
 
     /**
-     * 调用方给了字符集就用它。空串表示不限制。
-     * 只有调用方明确指定算术型时才带运算符。自动判断里的深色图会先被标成算术型，
-     * 蓝字车牌仍要输出字母，不能跟着这个临时类型把字母从模型里拿掉。
-     */
-    /**
      * 宽高都够大、墨迹不少于 100、并且没有一个墨迹通道低于 80，才算浅色大图。
      * 饱和的政务图和 130×48 的彩色字都有深色通道，不会被拉开。
      */
@@ -262,15 +257,24 @@ public final class CaptchaRecognizer implements AutoCloseable {
                 result.getElapsedMillis(), result.getGlyphs());
     }
 
-    private static String modelAlphabet(RecognizeOptions options) {
+    /**
+     * 模型解码用的字符集。调用方给了字符集就用它；空串与未设置一样按类型取默认值，
+     * 与模板路径的 {@code alphabetFor} 保持同一语义，模型不会因此拿到全字符集。
+     * 只有调用方明确指定算术型时才带运算符。自动判断里的深色图会先被标成算术型，
+     * 蓝字车牌仍要输出字母，不能跟着这个临时类型把字母从模型里拿掉。
+     */
+    static String modelAlphabet(RecognizeOptions options) {
         String chosen = options.getAlphabet();
-        if (chosen != null) {
-            return chosen.length() == 0 ? null : chosen;
+        if (chosen != null && chosen.length() == 0) {
+            chosen = null;
         }
-        if (options.getType() == CaptchaType.ARITHMETIC) {
-            return TemplateBank.ALPHANUMERIC + "+-=?*/";
+        if (chosen == null) {
+            if (options.getType() == CaptchaType.ARITHMETIC) {
+                return TemplateBank.ALPHANUMERIC + "+-=?*/";
+            }
+            return TemplateBank.ALPHANUMERIC;
         }
-        return TemplateBank.ALPHANUMERIC;
+        return chosen;
     }
 
     private static RecognizeResult rewrite(RecognizeResult result, String text) {
