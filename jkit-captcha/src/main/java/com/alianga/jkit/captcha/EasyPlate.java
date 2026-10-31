@@ -46,8 +46,9 @@ final class EasyPlate {
     };
 
     private static boolean loaded;
-    private static Glyph[][] letterBanks;
-    private static Glyph[][] operatorBanks;
+    // 识别入口可能多线程并发调用：bank 字段会被 ensure() 之外的 match 路径直接读到，需要 volatile 发布。
+    private static volatile Glyph[][] letterBanks;
+    private static volatile Glyph[][] operatorBanks;
 
     private EasyPlate() {
     }
@@ -440,7 +441,7 @@ final class EasyPlate {
         return alphabet.indexOf('+') >= 0 || alphabet.indexOf('-') >= 0 || alphabet.indexOf('x') >= 0;
     }
 
-    private static boolean ensure() {
+    private static synchronized boolean ensure() {
         if (loaded) {
             return letterBanks != null;
         }

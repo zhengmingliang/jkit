@@ -286,7 +286,7 @@ final class WhitePlate {
         return count;
     }
 
-    private static String hanCharset() {
+    private static synchronized String hanCharset() {
         if (hanLoaded) {
             return hanChars;
         }
