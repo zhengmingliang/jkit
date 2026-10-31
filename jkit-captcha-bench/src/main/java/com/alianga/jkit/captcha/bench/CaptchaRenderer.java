@@ -269,7 +269,22 @@ public final class CaptchaRenderer {
         }
         int[] rgb = PALETTE[random.nextInt(PALETTE.length)];
         int jitter = random.nextInt(30) - 15;
-        return new Color(clamp(rgb[0] + jitter), clamp(rgb[1] + jitter), clamp(rgb[2] + jitter));
+        int red = clamp(rgb[0] + jitter);
+        int green = clamp(rgb[1] + jitter);
+        int blue = clamp(rgb[2] + jitter);
+        if (style.getSurface() == CaptchaStyle.Surface.DARK) {
+            // 深色底上要保证笔画对底色有足够对比，否则棕、暗绿这类颜色会消失在背景里，
+            // 那样连人都读不出来，拿它测识别率没有意义。
+            red = liftOnDark(red);
+            green = liftOnDark(green);
+            blue = liftOnDark(blue);
+        }
+        return new Color(red, green, blue);
+    }
+
+    /** 深色底每个通道至少抬到 110，保证与 22–70 的底色拉开对比。 */
+    private static int liftOnDark(int value) {
+        return Math.max(110, value);
     }
 
     private static int clamp(int value) {
