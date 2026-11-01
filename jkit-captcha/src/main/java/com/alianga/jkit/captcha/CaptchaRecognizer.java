@@ -85,7 +85,21 @@ public final class CaptchaRecognizer implements AutoCloseable {
      * @return 识别结果
      */
     public RecognizeResult recognize(BufferedImage image, RecognizeOptions options) {
-        return recognize(image, options, true);
+        RecognizeResult result = recognize(image, options, true);
+        return applyPlateCase(image, result);
+    }
+
+    /** 只改 47 像素高的浅色板上分得开的短身字母，其它版式原样返回。 */
+    private static RecognizeResult applyPlateCase(BufferedImage image, RecognizeResult result) {
+        String adjusted = PlateCase.adjust(result.getText(), result.getGlyphs(), image.getHeight());
+        if (adjusted.equals(result.getText())) {
+            return result;
+        }
+        ArithmeticEvaluator.Value value = ArithmeticEvaluator.evaluate(adjusted);
+        String expression = value == null ? null : value.expression;
+        Integer number = value == null ? null : Integer.valueOf(value.result);
+        return new RecognizeResult(adjusted, expression, number, result.getConfidence(), result.getType(),
+                result.getElapsedMillis(), result.getGlyphs());
     }
 
     private RecognizeResult recognize(BufferedImage image, RecognizeOptions options, boolean refine) {
