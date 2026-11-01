@@ -17,6 +17,8 @@ final class DefaultCaptchaSolver implements CaptchaSolver {
     private final TemplateBank bank;
     private final SpecRefiner refiner = new SpecRefiner();
     private final HaloBank halo = new HaloBank();
+    /** 学习字形原型池：从标注数据集学出的真实字形，与渲染模板同池按分竞争。 */
+    private final LearnedGlyphBank learned = new LearnedGlyphBank();
 
     DefaultCaptchaSolver(TemplateBank bank) {
         this.bank = bank;
@@ -40,9 +42,12 @@ final class DefaultCaptchaSolver implements CaptchaSolver {
         Segmented segmented = segment(rgb, options);
         CaptchaType type = options.getType() == CaptchaType.AUTO ? segmented.type : options.getType();
         String alphabet = alphabetFor(type, options, segmented.narrow);
+        // 学习原型来自 50/58 高的真实样本，只对同风格高度区间启用，别的历史版式不受影响
+        boolean learnedAllowed = rgb.height >= 46 && rgb.height <= 66;
         List<GlyphHit> hits = segmented.halo
                 ? classifyHalo(segmented.glyphs, alphabet)
-                : classify(segmented.glyphs, alphabet, segmented.stroke, segmented.narrow);
+                : classify(segmented.glyphs, alphabet, segmented.stroke, segmented.narrow,
+                        learnedAllowed);
         String text = GlyphHit.textOf(hits);
         // 深色图可能是算术也可能是字母：自动判断一律先按算术字母表分类，字母图会被强套上
         // 数字标签，减号被当干扰线擦掉的算术图又只剩裸数字算不出值。这里把两套字母表各打
@@ -52,7 +57,7 @@ final class DefaultCaptchaSolver implements CaptchaSolver {
                 && options.getType() == CaptchaType.AUTO && options.getAlphabet() == null) {
             List<GlyphHit> letters = classify(segmented.glyphs,
                     alphabetFor(CaptchaType.ALPHANUMERIC, options, segmented.narrow),
-                    segmented.stroke, segmented.narrow);
+                    segmented.stroke, segmented.narrow, learnedAllowed);
             if (GlyphHit.confidence(letters) > GlyphHit.confidence(hits) + DARK_LETTER_MARGIN) {
                 type = CaptchaType.ALPHANUMERIC;
                 hits = letters;
@@ -134,7 +139,7 @@ final class DefaultCaptchaSolver implements CaptchaSolver {
         double sum = 0;
         double lowest = 1;
         for (int i = 0; i < glyphs.size(); i++) {
-            Pick pick = classifyOne(glyphs.get(i), alphabet, false, 0);
+            Pick pick = classifyOne(glyphs.get(i), alphabet, false, 0, false);
             sum += pick.score;
             if (pick.score < lowest) {
                 lowest = pick.score;
@@ -147,7 +152,8 @@ final class DefaultCaptchaSolver implements CaptchaSolver {
         return mean;
     }
 
-    private List<GlyphHit> classify(List<RawGlyph> glyphs, String alphabet, boolean stroke, boolean specCase) {
+    private List<GlyphHit> classify(List<RawGlyph> glyphs, String alphabet, boolean stroke, boolean specCase,
+                                    boolean learnedAllowed) {
         List<RawGlyph> kept = suppressOverlaps(glyphs);
         int[] heights = new int[kept.size()];
         for (int i = 0; i < kept.size(); i++) {
@@ -157,7 +163,7 @@ final class DefaultCaptchaSolver implements CaptchaSolver {
         int medianHeight = heights.length == 0 ? 0 : heights[heights.length / 2];
         List<Pick> picks = new ArrayList<Pick>();
         for (int i = 0; i < kept.size(); i++) {
-            Pick pick = classifyOne(kept.get(i), alphabet, stroke, medianHeight);
+            Pick pick = classifyOne(kept.get(i), alphabet, stroke, medianHeight, learnedAllowed);
             if (pick.score < 0.50) {
                 continue;
             }
@@ -175,7 +181,8 @@ final class DefaultCaptchaSolver implements CaptchaSolver {
         return hits;
     }
 
-    private Pick classifyOne(RawGlyph glyph, String alphabet, boolean stroke, int medianHeight) {
+    private Pick classifyOne(RawGlyph glyph, String alphabet, boolean stroke, int medianHeight,
+                             boolean learnedAllowed) {
         if (glyph.forced != 0 && alphabet.indexOf(glyph.forced) >= 0) {
             return new Pick(glyph, glyph.forced, FORCED_CONFIDENCE, (char) 0, 0);
         }
@@ -183,6 +190,10 @@ final class DefaultCaptchaSolver implements CaptchaSolver {
         byte[] grid = GlyphNormalizer.toGrid(glyph.pixels, glyph.width, glyph.height);
         boolean plainOnly = !stroke && glyph.width <= 14 && glyph.height <= 15;
         List<TemplateBank.Scored> ranked = bank.rank(grid, candidates, 6, plainOnly, stroke);
+        if (learnedAllowed) {
+            ranked = mergeCandidates(ranked,
+                    learned.rank(grid, glyph.width, glyph.height, candidates));
+        }
         if (ranked.isEmpty()) {
             return new Pick(glyph, '?', 0, (char) 0, 0);
         }
@@ -245,11 +256,8 @@ final class DefaultCaptchaSolver implements CaptchaSolver {
         double rivalScore = 0;
         char flipped = flipCase(label);
         if (flipped != 0 && candidates.indexOf(flipped) >= 0) {
-            List<TemplateBank.Scored> otherCase = bank.rank(grid, String.valueOf(flipped), 1, plainOnly, stroke);
-            if (!otherCase.isEmpty()) {
-                rival = flipped;
-                rivalScore = otherCase.get(0).score;
-            }
+            rival = flipped;
+            rivalScore = candidateScore(grid, flipped, glyph, plainOnly, stroke, learnedAllowed);
         }
         return new Pick(glyph, label, score, rival, rivalScore);
     }
@@ -524,6 +532,51 @@ final class DefaultCaptchaSolver implements CaptchaSolver {
             }
         }
         return fallback;
+    }
+
+    /** 渲染模板与学习原型同池合并：同标签取高分，按分排序后截 8 个。 */
+    private static List<TemplateBank.Scored> mergeCandidates(List<TemplateBank.Scored> classic,
+                                                             List<TemplateBank.Scored> learned) {
+        if (learned.isEmpty()) {
+            return classic;
+        }
+        List<TemplateBank.Scored> merged = new ArrayList<TemplateBank.Scored>(classic);
+        for (int i = 0; i < learned.size(); i++) {
+            TemplateBank.Scored candidate = learned.get(i);
+            boolean present = false;
+            for (int j = 0; j < merged.size(); j++) {
+                if (merged.get(j).label == candidate.label) {
+                    if (candidate.score > merged.get(j).score) {
+                        merged.set(j, candidate);
+                    }
+                    present = true;
+                    break;
+                }
+            }
+            if (!present) {
+                merged.add(candidate);
+            }
+        }
+        merged.sort((left, right) -> Double.compare(right.score, left.score));
+        return merged.size() > 8 ? new ArrayList<TemplateBank.Scored>(merged.subList(0, 8)) : merged;
+    }
+
+    /** 指定字符的最佳得分：渲染模板与学习原型取高。 */
+    private double candidateScore(byte[] grid, char ch, RawGlyph glyph, boolean plainOnly,
+                                  boolean stroke, boolean learnedAllowed) {
+        double best = 0;
+        List<TemplateBank.Scored> ranked = bank.rank(grid, String.valueOf(ch), 1, plainOnly, stroke);
+        if (!ranked.isEmpty()) {
+            best = ranked.get(0).score;
+        }
+        if (learnedAllowed) {
+            List<TemplateBank.Scored> learnedRanked =
+                    learned.rank(grid, glyph.width, glyph.height, String.valueOf(ch));
+            if (!learnedRanked.isEmpty() && learnedRanked.get(0).score > best) {
+                best = learnedRanked.get(0).score;
+            }
+        }
+        return best;
     }
 
     /** ranked 里得分最高的 x 高度字母；没有返回 0。 */
