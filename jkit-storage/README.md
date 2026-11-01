@@ -1,6 +1,6 @@
 # jkit-storage — 统一多存储平台文件管理
 
-零第三方依赖的统一文件存储引擎：一套 `FileStorage` 接口读写 **本地文件系统、FTP、SFTP、WebDAV、Amazon S3 与三十余个 S3 兼容云**（阿里云 OSS、华为云 OBS、腾讯云 COS、七牛云 Kodo、百度云 BOS、又拍云 USS、MinIO、Google Cloud Storage、Azure Blob Storage、go-fastdfs、多吉云、火山引擎 TOS、Cloudflare R2、金山云 KS3、京东云 OSS、天翼云 OOS、IBM COS 等），**Git 托管四平台**（GitHub / Gitee / Gitea / Gogs，仓库内容当文件盘、写操作以提交落盘、jsDelivr / 自建 CDN 加速链接），内置**跨存储内容对比、增量同步与全量迁移**引擎。除 SFTP 的可选 jsch 外，全部传输逻辑基于 JDK 标准库实现，引入本模块不会向宿主应用传递任何强制的外部依赖。
+零第三方依赖的统一文件存储引擎：一套 `FileStorage` 接口读写 **本地文件系统、FTP/FTPS（显式 AUTH TLS 与隐式 TLS）、SFTP、WebDAV、Amazon S3 与三十余个 S3 兼容云**（阿里云 OSS、华为云 OBS、腾讯云 COS、七牛云 Kodo、百度云 BOS、又拍云 USS、MinIO、Google Cloud Storage、Azure Blob Storage、go-fastdfs、多吉云、火山引擎 TOS、Cloudflare R2、金山云 KS3、京东云 OSS、天翼云 OOS、IBM COS 等），**Git 托管四平台**（GitHub / Gitee / Gitea / Gogs，仓库内容当文件盘、写操作以提交落盘、jsDelivr / 自建 CDN 加速链接），内置**跨存储内容对比、增量同步与全量迁移**引擎。除 SFTP 的可选 jsch 外，全部传输逻辑基于 JDK 标准库实现，引入本模块不会向宿主应用传递任何强制的外部依赖。
 
 ## 引入
 

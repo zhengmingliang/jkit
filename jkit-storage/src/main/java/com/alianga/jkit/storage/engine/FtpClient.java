@@ -3,6 +3,12 @@ package com.alianga.jkit.storage.engine;
 import com.alianga.jkit.storage.StorageErrorCode;
 import com.alianga.jkit.storage.StorageException;
 
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLSocket;
+import javax.net.ssl.SSLSocketFactory;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509TrustManager;
+
 import java.io.BufferedOutputStream;
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -43,12 +49,24 @@ final class FtpClient {
     private static final Pattern PASV_ADDRESS = Pattern.compile(
             "(\\d{1,3}),(\\d{1,3}),(\\d{1,3}),(\\d{1,3}),(\\d{1,3}),(\\d{1,3})");
 
+    /** FTPS 模式。 */
+    enum TlsMode {
+        /** 明文 FTP（不加密）。 */
+        OFF,
+        /** 显式 FTPS：明文连上后 AUTH TLS 升级（RFC 4217，常用 21 口）。 */
+        EXPLICIT,
+        /** 隐式 FTPS：连上即 TLS 握手（惯例 990 口）。 */
+        IMPLICIT
+    }
+
     private final String host;
     private final int port;
     private final String user;
     private final String password;
     private final boolean passive;
     private final Charset charset;
+    private final TlsMode tlsMode;
+    private final boolean trustAllCerts;
     private Socket control;
     private BufferedReader reader;
     private OutputStream writer;
@@ -66,14 +84,19 @@ final class FtpClient {
      * @param password 口令
      * @param passive  true 为被动模式，false 为主动模式
      * @param charset  控制连接编码
+     * @param tlsMode  FTPS 模式（OFF / EXPLICIT / IMPLICIT）
+     * @param trustAllCerts true 信任全部服务器证书（自签名场景；默认应走 CA 校验）
      */
-    FtpClient(String host, int port, String user, String password, boolean passive, Charset charset) {
+    FtpClient(String host, int port, String user, String password, boolean passive, Charset charset,
+              TlsMode tlsMode, boolean trustAllCerts) {
         this.host = host;
         this.port = port;
         this.user = user;
         this.password = password;
         this.passive = passive;
         this.charset = charset;
+        this.tlsMode = tlsMode;
+        this.trustAllCerts = trustAllCerts;
     }
 
     /**
@@ -119,16 +142,106 @@ final class FtpClient {
             throw e;
         }
         socket.setSoTimeout(SO_TIMEOUT_MS);
-        control = socket;
-        reader = new BufferedReader(new InputStreamReader(socket.getInputStream(), charset), 8192);
-        writer = new BufferedOutputStream(socket.getOutputStream());
+        if (tlsMode == TlsMode.IMPLICIT) {
+            // 隐式 FTPS：TCP 建连后立即 TLS 握手，问候语在加密通道内
+            control = wrapTls(socket);
+        } else {
+            control = socket;
+        }
+        resetStreams();
         Reply greeting = readReply();
         if (greeting.code() != 220) {
             close();
             throw new StorageException(StorageErrorCode.CONNECT_FAILED,
                     "FTP 服务未就绪（" + greeting.code() + " " + greeting.text() + "）", "-");
         }
+        if (tlsMode == TlsMode.EXPLICIT) {
+            upgradeControl();
+        }
         login();
+        if (tlsMode != TlsMode.OFF) {
+            protectDataChannel();
+        }
+    }
+
+    /**
+     * 显式 FTPS：在明文控制连接上发 AUTH TLS（期望 234），随后整个控制通道
+     * 升级为 TLS——reader/writer 必须基于新流重建。服务器拒绝时抛 UNSUPPORTED。
+     */
+    private void upgradeControl() throws IOException {
+        Reply auth = command("AUTH TLS");
+        if (auth.code() != 234) {
+            close();
+            throw StorageException.unsupported("服务器不支持 FTPS（AUTH TLS 回 "
+                    + auth.code() + " " + flatten(auth.text()) + "）；如服务器只支持明文 FTP，"
+                    + "请把连接配置的「加密」设为不加密");
+        }
+        control = wrapTls(control);
+        resetStreams();
+    }
+
+    /** 数据通道保护：PBSZ 0 → PROT P（RFC 4217 固定顺序）。 */
+    private void protectDataChannel() throws IOException {
+        Reply pbsz = command("PBSZ 0");
+        if (!pbsz.isPositive()) {
+            throw new IOException("PBSZ 失败（" + pbsz.code() + " " + flatten(pbsz.text()) + "）");
+        }
+        Reply prot = command("PROT P");
+        if (!prot.isPositive()) {
+            throw new IOException("数据通道保护失败（" + prot.code() + " " + flatten(prot.text()) + "）");
+        }
+    }
+
+    /**
+     * 把既有明文 socket 升级为 TLS（控制与数据通道共用）：trustAllCerts 时信任全部
+     * 证书，否则走 JVM 默认信任链并开启主机名校验。
+     */
+    private Socket wrapTls(Socket plain) throws IOException {
+        SSLSocketFactory factory;
+        if (trustAllCerts) {
+            try {
+                SSLContext context = SSLContext.getInstance("TLS");
+                context.init(null, new TrustManager[]{new TrustAllManager()}, null);
+                factory = context.getSocketFactory();
+            } catch (Exception e) {
+                throw new IOException("初始化信任全部证书的 SSL 上下文失败: " + e.getMessage(), e);
+            }
+        } else {
+            factory = (SSLSocketFactory) SSLSocketFactory.getDefault();
+        }
+        SSLSocket tls = (SSLSocket) factory.createSocket(plain, host, port, true);
+        if (!trustAllCerts) {
+            // 主机名校验：SSLSocket 需显式开启端点识别
+            javax.net.ssl.SSLParameters parameters = tls.getSSLParameters();
+            parameters.setEndpointIdentificationAlgorithm("HTTPS");
+            tls.setSSLParameters(parameters);
+        }
+        tls.startHandshake();
+        return tls;
+    }
+
+    /** reader/writer 基于（可能已升级的）控制连接流重建。 */
+    private void resetStreams() throws IOException {
+        reader = new BufferedReader(new InputStreamReader(control.getInputStream(), charset), 8192);
+        writer = new BufferedOutputStream(control.getOutputStream());
+    }
+
+    /** 信任全部证书的 TrustManager（自签名服务器场景；仅显式 opt-in 时使用）。 */
+    private static final class TrustAllManager implements X509TrustManager {
+        @Override
+        public void checkClientTrusted(java.security.cert.X509Certificate[] chain, String authType) {
+            // 显式选择信任所有证书
+        }
+
+        @Override
+        public void checkServerTrusted(java.security.cert.X509Certificate[] chain, String authType) {
+            // 显式选择信任所有证书
+        }
+
+        @Override
+        public java.security.cert.X509Certificate[] getAcceptedIssuers() {
+            return new java.security.cert.X509Certificate[0];
+        }
     }
 
     /**
@@ -402,7 +515,7 @@ final class FtpClient {
             throw new IOException("数据连接失败: " + ip + ":" + port + "（" + e.getMessage() + "）");
         }
         socket.setSoTimeout(SO_TIMEOUT_MS);
-        return socket;
+        return tlsMode == TlsMode.OFF ? socket : wrapTls(socket);
     }
 
     private int[] parsePasvAddress(String text) throws IOException {
@@ -426,7 +539,7 @@ final class FtpClient {
         try {
             Socket socket = listener.accept();
             socket.setSoTimeout(SO_TIMEOUT_MS);
-            return socket;
+            return tlsMode == TlsMode.OFF ? socket : wrapTls(socket);
         } finally {
             closeQuietly(listener);
         }

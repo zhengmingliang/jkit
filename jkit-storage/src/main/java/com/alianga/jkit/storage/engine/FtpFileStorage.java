@@ -54,6 +54,10 @@ public class FtpFileStorage implements FileStorage {
     private final String user;
     private final String password;
     private final boolean passive;
+    /** FTPS 模式（off / explicit / implicit）。 */
+    private final FtpClient.TlsMode tlsMode;
+    /** true 信任全部服务器证书（自签名场景）。 */
+    private final boolean trustAllCerts;
     private final Charset charset;
     /** 服务器端绝对根目录：basePath 为空 / {@code /} 时为 {@code /}，否则强制绝对化。 */
     private final String root;
@@ -75,8 +79,26 @@ public class FtpFileStorage implements FileStorage {
         this.user = config.getOr("user", "");
         this.password = config.getOr("password", "");
         this.passive = config.boolOr("passive", true);
+        this.tlsMode = resolveTlsMode(config);
+        this.trustAllCerts = config.boolOr("trustAllCerts", false);
         this.root = rootOf(config.getOr("basePath", "/"));
         this.charset = resolveCharset(config.getOr("encoding", "UTF-8"));
+    }
+
+    /**
+     * 解析 FTPS 模式：{@code explicit}（或 true/auth）= 显式 AUTH TLS；
+     * {@code implicit} = 隐式 TLS（惯例 990 口）；其余 = 明文。
+     */
+    private static FtpClient.TlsMode resolveTlsMode(StorageConfig config) {
+        String value = config.getOr("ftps", "").trim().toLowerCase(java.util.Locale.ROOT);
+        if (value.equals("explicit") || value.equals("true") || value.equals("auth")
+                || value.equals("ftps")) {
+            return FtpClient.TlsMode.EXPLICIT;
+        }
+        if (value.equals("implicit") || value.equals("tls")) {
+            return FtpClient.TlsMode.IMPLICIT;
+        }
+        return FtpClient.TlsMode.OFF;
     }
 
     @Override
@@ -500,7 +522,8 @@ public class FtpFileStorage implements FileStorage {
             }
         }
         closeClientQuietly();
-        FtpClient fresh = new FtpClient(host, port, user, password, passive, charset);
+        FtpClient fresh = new FtpClient(host, port, user, password, passive, charset,
+                tlsMode, trustAllCerts);
         fresh.connect();
         client = fresh;
         lastUsedAt = System.currentTimeMillis();
