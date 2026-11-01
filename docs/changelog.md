@@ -45,6 +45,7 @@
 
 - `TextModel` / `CaptchaRecognizer` 实现 `AutoCloseable`：`close()` 释放 ONNX Runtime native 资源（幂等），close 后再次识别会延迟重新加载模型；支持 try-with-resources。
 - 新增 `behavior` 包：行为验证码（滑块类）通用解算。`SliderGapLocator` 三策略缺口定位（形状环梯度匹配 / 内容区 SSD / 平铺灰芯反推，summed-area table 腐蚀，纯 Java 无外部依赖），`SliderCaptchaSolver` 按置信度融合并把缺口坐标转成轨迹；`HumanTrajectoryGenerator` 合成缓入加速 + 过冲回修 + 微抖的人类拖拽轨迹；`TianaiTrackRules` 本地移植 tianai-captcha 开源版 `BasicCaptchaTrackValidator` 的 7 条行为规则供出门前自检；`TianaiCaptchaClient` 实现开源 demo 协议（/gen 取图兼容 data URI / 裸 base64 / URL，/check 提交 `{id, data:{...trackList}}`）。内嵌同契约 HTTP 服务端实测：定位 100/100（最大误差 2px）、端到端 20/20 通过（行为规则全开，单次 ~117ms）。方案与实验数据见 `docs/captcha-behavior.md`。
+- 新增厂商 SPI：`BehaviorCaptchaProtocol`（取验证码/提交答案的厂商契约翻译）与 `TrackRulePack`（厂商行为规则自检）两个适配点 + 厂商无关编排器 `BehaviorCaptchaSolver`（失败码驱动重试：过期/位置错换图重试，轨迹被拒/参数错立即停止）；tianai 实现为 `TianaiBehaviorProtocol` / `TianaiTrackRulePack`，新厂商只需填两个实现类（可运行样例见 `BehaviorCaptchaSolverTest` 的假厂商）。
 
 ### 修复
 

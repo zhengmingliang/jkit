@@ -124,15 +124,22 @@ public final class SliderCaptchaSolver {
     }
 
     /**
-     * 为解算结果合成可通过行为校验的拖拽轨迹。坐标为相对位移；
-     * bgImageWidth 传提交时使用的背景宽度（自然宽或显示宽均可，需与轨迹坐标系一致）。
+     * 为解算结果合成可通过行为校验的拖拽轨迹（tianai 开源规则）。
+     * 坐标为相对位移；bgImageWidth 传提交时使用的背景宽度（自然宽或显示宽均可，需与轨迹坐标系一致）。
      */
     public List<TrackPoint> buildTrack(Solution solution, float bgImageWidth, Random random) {
+        return buildTrack(solution, bgImageWidth, random, TianaiTrackRulePack.INSTANCE);
+    }
+
+    /**
+     * 同上，但行为规则包由调用方指定（厂商适配点）：规则包返回 null 才视为通过。
+     */
+    public List<TrackPoint> buildTrack(Solution solution, float bgImageWidth, Random random, TrackRulePack rulePack) {
         for (int attempt = 0; attempt < 8; attempt++) {
             List<TrackPoint> track = trajectoryGenerator.generate(solution.gapX, random);
             long start = System.currentTimeMillis();
             long stop = start + (long) track.get(track.size() - 1).getT();
-            TianaiTrackRules.Failure failure = TianaiTrackRules.validate(track, bgImageWidth, start, stop);
+            String failure = rulePack.validate(track, (int) bgImageWidth, start, stop);
             if (failure == null) {
                 return track;
             }

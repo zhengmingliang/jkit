@@ -143,28 +143,51 @@ __ki__` 全局函数完成（AES 族分组密码，9 字节明文 → 16 字节�
 依赖（`jkit-captcha`，纯 JDK8 + jkit-core JSON，无新增第三方依赖）：
 
 ```java
-TianaiCaptchaClient client = new TianaiCaptchaClient();
-SliderCaptchaSolver solver = new SliderCaptchaSolver();
-Random random = new Random();
+// 推荐入口：厂商无关编排器（带失败码驱动的重试，默认 3 轮）
+BehaviorCaptchaSolver solver = new BehaviorCaptchaSolver(
+        new TianaiBehaviorProtocol(new TianaiCaptchaClient(), genUrl, checkUrl),
+        new Random());
 
-// ① 取验证码（开源 demo 协议；图字段兼容 data URI / 裸 base64 / URL）
-TianaiCaptchaClient.TianaiChallenge challenge = client.generate(genUrl);
-
-// ② 解算缺口 + ③ 合成轨迹（轨迹已通过 TianaiTrackRules 7 条规则自检）
-SliderCaptchaSolver.Solution solution = solver.solve(challenge.background, challenge.template);
-List<TrackPoint> track = solver.buildTrack(solution, challenge.backgroundImageWidth, random);
-
-// ④ 提交（自然坐标：轨迹与 bgImageWidth 同系即可）
-long start = System.currentTimeMillis();
-long stop = start + (long) track.get(track.size() - 1).getT();
-int code = client.check(checkUrl, challenge.id,
-        challenge.backgroundImageWidth, challenge.backgroundImageHeight,
-        challenge.templateImageWidth, challenge.templateImageHeight,
-        track, start, stop);
-// code==200 通过；4001 位置不对；50001 行为轨迹不过；4000 过期
+BehaviorCaptchaSolver.Attempt attempt = solver.solve();
+attempt.isSuccess();  // true=通过
+attempt.getLog();     // 每轮明细：sessionId、定位策略/置信度、厂商原始码
 ```
 
-基准工具（`jkit-captcha-bench`，依赖 `cloud.tianai.captcha:tianai-captcha:1.5.6`，仅基准使用）：
+也可分层使用：`TianaiCaptchaClient`（协议细节）→ `SliderCaptchaSolver.solve/buildTrack`
+（解算与轨迹）→ `TianaiTrackRules.validate`（规则自检）。
+
+### 新增厂商（SPI）
+
+厂商差异收敛在两个适配点，解算与轨迹层零改动复用：
+
+```java
+public interface BehaviorCaptchaProtocol {
+    String vendor();
+    BehaviorChallenge fetch() throws IOException;                       // 装图 + 会话标识（自然尺寸）
+    SubmitResult submit(BehaviorChallenge c, BehaviorAnswer a) throws IOException;
+}                                                                       // 翻译报文/加密，并把厂商码映射为
+                                                                        // SUCCESS/POSITION_MISMATCH/TRACK_REJECTED/
+                                                                        // EXPIRED/BAD_PARAM/UNKNOWN
+public interface TrackRulePack {
+    String validate(List<TrackPoint> track, int bgWidth, long startMs, long stopMs);
+}                                                                       // null=通过；按厂商已知规则自检
+```
+
+接入步骤：① `fetch()` 把厂商响应的图与会话标识装入 `BehaviorChallenge`；
+② `submit()` 把答案翻译成厂商报文（轨迹坐标系/字段名/加密指纹按厂商处理，
+增强厂商建议 SDK 执行器）；③ 码值映射到 `FailureKind`——编排器据此决定
+换图重试（过期/位置错）还是立即停止（轨迹被拒/参数错）；④ 有已知规则就写
+`TrackRulePack`，没有则先用 `TianaiTrackRulePack` 之外的宽松实现。
+完整可运行样例见 `BehaviorCaptchaSolverTest` 里的 `FakeVendorProtocol`（假厂商）。
+
+```java
+// 新厂商即插即用
+BehaviorCaptchaSolver solver = new BehaviorCaptchaSolver(
+        new GeetestProtocol(config), new GeetestRulePack(), new SliderCaptchaSolver(), new Random());
+```
+
+基准工具（`jkit-captcha-bench`，依赖 `cloud.tianai.captcha:tianai-captcha:1.5.6`，仅基准使用；
+`TianaiServerBenchMain` 已改走编排器 + 协议 SPI，自证适配层全链路）：
 
 ```bash
 # 离线校准：定位误差分布 + 轨迹规则自检（带 randomX 真值）

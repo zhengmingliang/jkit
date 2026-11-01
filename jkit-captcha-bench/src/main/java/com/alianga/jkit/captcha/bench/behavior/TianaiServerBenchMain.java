@@ -6,9 +6,9 @@ import cloud.tianai.captcha.common.response.ApiResponse;
 import cloud.tianai.captcha.resource.common.model.dto.Resource;
 import cloud.tianai.captcha.validator.common.model.dto.ImageCaptchaTrack;
 import cloud.tianai.captcha.validator.impl.BasicCaptchaTrackValidator;
-import com.alianga.jkit.captcha.behavior.SliderCaptchaSolver;
+import com.alianga.jkit.captcha.behavior.BehaviorCaptchaSolver;
+import com.alianga.jkit.captcha.behavior.TianaiBehaviorProtocol;
 import com.alianga.jkit.captcha.behavior.TianaiCaptchaClient;
-import com.alianga.jkit.captcha.behavior.TrackPoint;
 import com.alianga.jkit.json.JSON;
 
 import java.io.IOException;
@@ -36,31 +36,23 @@ public final class TianaiServerBenchMain {
         RawMiniServer server = startServer();
         String base = "http://127.0.0.1:" + server.port();
 
-        TianaiCaptchaClient client = new TianaiCaptchaClient();
-        SliderCaptchaSolver solver = new SliderCaptchaSolver();
-        Random random = new Random(20261101L);
+        // 走厂商无关编排器：协议适配 tianai 开源版，解算/轨迹层通用
+        BehaviorCaptchaSolver solver = new BehaviorCaptchaSolver(
+                new TianaiBehaviorProtocol(new TianaiCaptchaClient(), base + "/gen", base + "/check"),
+                new Random(20261101L));
         int pass = 0;
         int fail = 0;
         long begin = System.currentTimeMillis();
 
         for (int i = 0; i < count; i++) {
-            long startMs = System.currentTimeMillis();
             try {
-                TianaiCaptchaClient.TianaiChallenge challenge = client.generate(base + "/gen");
-                SliderCaptchaSolver.Solution solution = solver.solve(challenge.background, challenge.template);
-                List<TrackPoint> track = solver.buildTrack(solution, challenge.backgroundImageWidth, random);
-                // 轨迹的 t 是相对毫秒，把 startTime/stopTime 与轨迹时长对齐
-                long trackSpan = (long) track.get(track.size() - 1).getT();
-                int code = client.check(base + "/check", challenge.id,
-                        challenge.backgroundImageWidth, challenge.backgroundImageHeight,
-                        challenge.templateImageWidth, challenge.templateImageHeight,
-                        track, startMs, startMs + trackSpan);
-                if (code == TianaiCaptchaClient.CODE_SUCCESS) {
+                BehaviorCaptchaSolver.Attempt attempt = solver.solve(2);
+                if (attempt.isSuccess()) {
                     pass++;
-                    System.out.println("[" + i + "] PASS " + solution);
+                    System.out.println("[" + i + "] PASS " + attempt.getLog().get(attempt.getLog().size() - 1));
                 } else {
                     fail++;
-                    System.out.println("[" + i + "] FAIL code=" + code + " " + solution);
+                    System.out.println("[" + i + "] FAIL " + attempt.getLog());
                 }
             } catch (IOException | IllegalStateException e) {
                 fail++;
