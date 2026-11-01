@@ -11,6 +11,8 @@ import java.util.List;
 final class DefaultCaptchaSolver implements CaptchaSolver {
     private static final double PLUS_OVERRIDE = 0.80;
     private static final double FORCED_CONFIDENCE = 0.92;
+    /** 深色图仲裁门槛：字母均值比算术均值高出这个值时按字母图处理。字母图实测高 0.10 以上，真算术低 0.04 以上。 */
+    private static final double DARK_LETTER_MARGIN = 0.05;
 
     private final TemplateBank bank;
     private final SpecRefiner refiner = new SpecRefiner();
@@ -42,12 +44,20 @@ final class DefaultCaptchaSolver implements CaptchaSolver {
                 ? classifyHalo(segmented.glyphs, alphabet)
                 : classify(segmented.glyphs, alphabet, segmented.stroke, segmented.narrow);
         String text = GlyphHit.textOf(hits);
-        if (!segmented.halo && options.getType() == CaptchaType.AUTO && type == CaptchaType.ARITHMETIC
-                && options.getAlphabet() == null && ArithmeticEvaluator.evaluate(text) == null) {
-            type = CaptchaType.ALPHANUMERIC;
-            hits = classify(segmented.glyphs, alphabetFor(type, options, segmented.narrow), segmented.stroke,
-                    segmented.narrow);
-            text = GlyphHit.textOf(hits);
+        // 深色图可能是算术也可能是字母：自动判断一律先按算术字母表分类，字母图会被强套上
+        // 数字标签，减号被当干扰线擦掉的算术图又只剩裸数字算不出值。这里把两套字母表各打
+        // 一遍分：字母均值明显更高的是字母图，翻转过去；否则维持算术路径，算式的运算符
+        // 缺损交给 MinusInsert/OpRepair 在外层补回。这个仲裁是权威决策，不再做算不出值的重试。
+        if (!segmented.halo && segmented.type == CaptchaType.ARITHMETIC
+                && options.getType() == CaptchaType.AUTO && options.getAlphabet() == null) {
+            List<GlyphHit> letters = classify(segmented.glyphs,
+                    alphabetFor(CaptchaType.ALPHANUMERIC, options, segmented.narrow),
+                    segmented.stroke, segmented.narrow);
+            if (GlyphHit.confidence(letters) > GlyphHit.confidence(hits) + DARK_LETTER_MARGIN) {
+                type = CaptchaType.ALPHANUMERIC;
+                hits = letters;
+                text = GlyphHit.textOf(hits);
+            }
         }
         ArithmeticEvaluator.Value value = ArithmeticEvaluator.evaluate(text);
         String expression = value == null ? null : value.expression;
@@ -124,7 +134,7 @@ final class DefaultCaptchaSolver implements CaptchaSolver {
         double sum = 0;
         double lowest = 1;
         for (int i = 0; i < glyphs.size(); i++) {
-            Pick pick = classifyOne(glyphs.get(i), alphabet, false);
+            Pick pick = classifyOne(glyphs.get(i), alphabet, false, 0);
             sum += pick.score;
             if (pick.score < lowest) {
                 lowest = pick.score;
@@ -139,9 +149,15 @@ final class DefaultCaptchaSolver implements CaptchaSolver {
 
     private List<GlyphHit> classify(List<RawGlyph> glyphs, String alphabet, boolean stroke, boolean specCase) {
         List<RawGlyph> kept = suppressOverlaps(glyphs);
+        int[] heights = new int[kept.size()];
+        for (int i = 0; i < kept.size(); i++) {
+            heights[i] = kept.get(i).height;
+        }
+        Arrays.sort(heights);
+        int medianHeight = heights.length == 0 ? 0 : heights[heights.length / 2];
         List<Pick> picks = new ArrayList<Pick>();
         for (int i = 0; i < kept.size(); i++) {
-            Pick pick = classifyOne(kept.get(i), alphabet, stroke);
+            Pick pick = classifyOne(kept.get(i), alphabet, stroke, medianHeight);
             if (pick.score < 0.50) {
                 continue;
             }
@@ -159,7 +175,7 @@ final class DefaultCaptchaSolver implements CaptchaSolver {
         return hits;
     }
 
-    private Pick classifyOne(RawGlyph glyph, String alphabet, boolean stroke) {
+    private Pick classifyOne(RawGlyph glyph, String alphabet, boolean stroke, int medianHeight) {
         if (glyph.forced != 0 && alphabet.indexOf(glyph.forced) >= 0) {
             return new Pick(glyph, glyph.forced, FORCED_CONFIDENCE, (char) 0, 0);
         }
@@ -203,6 +219,17 @@ final class DefaultCaptchaSolver implements CaptchaSolver {
             if (holed != null) {
                 label = holed.label;
                 score = holed.score;
+            }
+        }
+        label = adjudicateNarrow(glyph, candidates, ranked, label);
+        score = scoreOf(ranked, label, score);
+        // 字高证据：0 顶在大写线，明显矮于中位数的字形不可能是 0，
+        // 改判 ranked 里最好的 x 高度字母（o u c s e a z x n m w v r 这批矮身字母）。
+        if (label == '0' && medianHeight > 0 && glyph.height <= medianHeight - 4) {
+            char shorter = bestXHeight(ranked);
+            if (shorter != 0) {
+                label = shorter;
+                score = scoreOf(ranked, shorter, score);
             }
         }
         char rival = 0;
@@ -341,6 +368,164 @@ final class DefaultCaptchaSolver implements CaptchaSolver {
             }
         }
         return null;
+    }
+
+    /**
+     * 窄长条字形（i I l）的几何仲裁。竖条模板彼此本来就像，模板分拉不开；
+     * 小写 i 的点断、大写 I 的上下衬线是分割连通域里稳定可测的形状证据
+     * （噪点是独立连通域，不进字形框，不会伪造点断）。只在窄而高的连通域上生效，
+     * 且模板分差超过护栏时不动，避免几何证据推翻强模板证据。
+     */
+    private static char adjudicateNarrow(RawGlyph glyph, String candidates, List<TemplateBank.Scored> ranked,
+                                         char label) {
+        if (glyph.width > 14 || glyph.height < 14 || glyph.pixels.length == 0) {
+            return label;
+        }
+        boolean family = label == 'i' || label == 'I' || label == 'l' || label == 'L';
+        if (!family) {
+            return label;
+        }
+        char want;
+        if (stemRuns(glyph) >= 2) {
+            want = Character.isUpperCase(label) ? 'I' : 'i';
+        } else if (label == 'i') {
+            want = 'l';
+        } else if (label == 'l') {
+            want = hasSerifs(glyph) ? 'I' : 'l';
+        } else {
+            want = label;
+        }
+        if (want == label || candidates.indexOf(want) < 0) {
+            return label;
+        }
+        double wantScore = -1;
+        for (int i = 0; i < ranked.size(); i++) {
+            if (ranked.get(i).label == want) {
+                wantScore = ranked.get(i).score;
+                break;
+            }
+        }
+        if (wantScore < 0) {
+            return label;
+        }
+        double best = ranked.get(0).score;
+        if (best - wantScore > 0.30) {
+            return label;
+        }
+        return want;
+    }
+
+    /** 主茎列（含左右各一列）上的垂直墨段数；小写 i 是点、隙、茎三段，l 是连续一段。 */
+    private static int stemRuns(RawGlyph glyph) {
+        int[] colInk = new int[glyph.width];
+        for (int y = 0; y < glyph.height; y++) {
+            for (int x = 0; x < glyph.width; x++) {
+                if (glyph.pixels[y * glyph.width + x] != 0) {
+                    colInk[x]++;
+                }
+            }
+        }
+        int stem = 0;
+        for (int x = 1; x < glyph.width; x++) {
+            if (colInk[x] > colInk[stem]) {
+                stem = x;
+            }
+        }
+        int runs = 0;
+        boolean inInk = false;
+        for (int y = 0; y < glyph.height; y++) {
+            boolean on = false;
+            int left = Math.max(0, stem - 1);
+            int right = Math.min(glyph.width - 1, stem + 1);
+            for (int x = left; x <= right; x++) {
+                if (glyph.pixels[y * glyph.width + x] != 0) {
+                    on = true;
+                    break;
+                }
+            }
+            if (on && !inInk) {
+                runs++;
+            }
+            inInk = on;
+        }
+        return runs;
+    }
+
+    /** 上下两端都比主茎宽出 4 像素以上，是 Verdana 大写 I 的衬线。 */
+    private static boolean hasSerifs(RawGlyph glyph) {
+        int[] colInk = new int[glyph.width];
+        int stem = 0;
+        for (int y = 0; y < glyph.height; y++) {
+            for (int x = 0; x < glyph.width; x++) {
+                if (glyph.pixels[y * glyph.width + x] != 0) {
+                    colInk[x]++;
+                }
+            }
+        }
+        for (int x = 1; x < glyph.width; x++) {
+            if (colInk[x] > colInk[stem]) {
+                stem = x;
+            }
+        }
+        return rowWidth(glyph, 0) >= stemSpan(glyph, stem) + 4
+                && rowWidth(glyph, glyph.height - 1) >= stemSpan(glyph, stem) + 4;
+    }
+
+    /** 一行内最左到最右墨的跨度，没有墨返回 0。 */
+    private static int rowWidth(RawGlyph glyph, int y) {
+        int left = -1;
+        int right = -1;
+        for (int x = 0; x < glyph.width; x++) {
+            if (glyph.pixels[y * glyph.width + x] != 0) {
+                if (left < 0) {
+                    left = x;
+                }
+                right = x;
+            }
+        }
+        return left < 0 ? 0 : right - left + 1;
+    }
+
+    /** 主茎列附近三列的墨宽。 */
+    private static int stemSpan(RawGlyph glyph, int stem) {
+        int count = 0;
+        int left = Math.max(0, stem - 1);
+        int right = Math.min(glyph.width - 1, stem + 1);
+        for (int x = left; x <= right; x++) {
+            if (colHasInk(glyph, x)) {
+                count++;
+            }
+        }
+        return Math.max(1, count);
+    }
+
+    private static boolean colHasInk(RawGlyph glyph, int x) {
+        for (int y = 0; y < glyph.height; y++) {
+            if (glyph.pixels[y * glyph.width + x] != 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static double scoreOf(List<TemplateBank.Scored> ranked, char label, double fallback) {
+        for (int i = 0; i < ranked.size(); i++) {
+            if (ranked.get(i).label == label) {
+                return ranked.get(i).score;
+            }
+        }
+        return fallback;
+    }
+
+    /** ranked 里得分最高的 x 高度字母；没有返回 0。 */
+    private static char bestXHeight(List<TemplateBank.Scored> ranked) {
+        for (int i = 0; i < ranked.size(); i++) {
+            char label = ranked.get(i).label;
+            if ("ocuserazxnmwv".indexOf(label) >= 0) {
+                return label;
+            }
+        }
+        return 0;
     }
 
     private static String alphabetFor(CaptchaType type, RecognizeOptions options, boolean narrow) {

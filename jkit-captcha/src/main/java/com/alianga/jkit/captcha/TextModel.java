@@ -61,27 +61,6 @@ final class TextModel implements AutoCloseable {
         return read(image, true, alphabet);
     }
 
-    /**
-     * 用 {@code common_old.onnx} 读图，并保留每个字的时间步。加载失败时文本为空。
-     */
-    Reading readReading(BufferedImage image, String alphabet) {
-        if (image == null || image.getWidth() <= 0 || image.getHeight() <= 0) {
-            return emptyReading();
-        }
-        try {
-            float[][] rows = logits(image, false);
-            if (rows == null) {
-                return emptyReading();
-            }
-            return decodeReading(rows, charset, alphabet);
-        } catch (OrtException ex) {
-            return emptyReading();
-        }
-    }
-
-    /**
-     * 用 {@code common.onnx} 读图，并保留每个字的时间步和分数。加载失败时文本为空。
-     */
     Reading readBetaReading(BufferedImage image, String alphabet) {
         if (image == null || image.getWidth() <= 0 || image.getHeight() <= 0) {
             return emptyReading();

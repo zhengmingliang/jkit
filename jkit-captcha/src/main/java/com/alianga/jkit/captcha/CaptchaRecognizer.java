@@ -95,9 +95,11 @@ public final class CaptchaRecognizer implements AutoCloseable {
             return result;
         }
         String adjusted = PlateCase.adjust(result.getText(), result.getGlyphs(), image.getHeight());
-        adjusted = CaseVote.vote(image, adjusted, textModel);
-        adjusted = MinusInsert.insert(image, adjusted);
-        adjusted = OpRepair.repair(adjusted);
+        // 减号补回和算式修复只服务真算术图；字母图被读成数字串时进来只会把它包装成假算式。
+        if (result.getType() == CaptchaType.ARITHMETIC) {
+            adjusted = MinusInsert.insert(image, adjusted);
+            adjusted = OpRepair.repair(adjusted);
+        }
         if (adjusted.equals(result.getText())) {
             return result;
         }
