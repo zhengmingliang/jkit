@@ -201,6 +201,13 @@ public final class CaptchaRecognizer implements AutoCloseable {
      */
     private RecognizeResult refine(BufferedImage image, RecognizeResult result, RecognizeOptions options) {
         String alphabet = modelAlphabet(options);
+        // 深色算术图模型也别拿全字母数字表：算式里的斜杠会被它读成 l，减号读成 s，
+        // CaseAlign 合并时这些字母就进了算式。只在模板串里确有运算符时才限到算术字符集——
+        // 裸数字串可能是字母图被强套的数字标签，锁死字符集会断掉模型对字母的救援。
+        if (result.getType() == CaptchaType.ARITHMETIC && options.getType() == CaptchaType.AUTO
+                && options.getAlphabet() == null && containsOperator(result.getText())) {
+            alphabet = TemplateBank.ARITHMETIC;
+        }
         String plate = BluePlate.read(image, textModel, alphabet);
         if (plate != null) {
             return rewrite(result, plate);
@@ -215,10 +222,65 @@ public final class CaptchaRecognizer implements AutoCloseable {
             return result;
         }
         String merged = CaseAlign.align(result.getText(), model);
+        if (result.getType() == CaptchaType.ARITHMETIC && containsOperator(result.getText())) {
+            merged = repairOperators(result.getText(), merged);
+        }
         if (merged.equals(result.getText())) {
             return result;
         }
         return rewrite(result, merged);
+    }
+
+    private static boolean containsOperator(String text) {
+        if (text == null) {
+            return false;
+        }
+        for (int i = 0; i < text.length(); i++) {
+            if ("+-*/".indexOf(text.charAt(i)) >= 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 算术图的合并修复。模板串常带着裂开数字的垃圾（7 裂成两块，一块丢一块误标成斜杠）
+     * 导致算不出值才进到这里，CaseAlign 又会拿模型字覆盖模板里正确的运算符。
+     * 把模板里的加减乘除按位还原回去，在所有还原组合里挑唯一能算出值的那个；
+     * 有歧义或都算不出值时保守维持原合并。
+     */
+    private static String repairOperators(String template, String merged) {
+        if (template == null || merged == null || template.length() != merged.length()
+                || template.equals(merged)) {
+            return merged;
+        }
+        List<Integer> spots = new ArrayList<Integer>();
+        for (int i = 0; i < template.length(); i++) {
+            char t = template.charAt(i);
+            if (t != merged.charAt(i) && "+-*/".indexOf(t) >= 0) {
+                spots.add(Integer.valueOf(i));
+            }
+        }
+        if (spots.isEmpty() || spots.size() > 4) {
+            return merged;
+        }
+        String found = null;
+        for (int mask = 1; mask < 1 << spots.size(); mask++) {
+            StringBuilder builder = new StringBuilder(merged);
+            for (int i = 0; i < spots.size(); i++) {
+                if ((mask & 1 << i) != 0) {
+                    builder.setCharAt(spots.get(i).intValue(), template.charAt(spots.get(i).intValue()));
+                }
+            }
+            String candidate = builder.toString();
+            if (ArithmeticEvaluator.evaluate(candidate) != null) {
+                if (found != null) {
+                    return merged;
+                }
+                found = candidate;
+            }
+        }
+        return found == null ? merged : found;
     }
 
     private static RecognizeResult rewrite(RecognizeResult result, String text) {

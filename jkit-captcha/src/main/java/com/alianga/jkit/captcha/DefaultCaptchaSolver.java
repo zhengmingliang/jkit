@@ -189,9 +189,12 @@ final class DefaultCaptchaSolver implements CaptchaSolver {
         TemplateBank.Scored best = ranked.get(0);
         char label = best.label;
         double score = best.score;
+        boolean asterisk = candidates.indexOf('*') >= 0 && looksLikeAsterisk(glyph);
         if (!stroke && candidates.indexOf('+') >= 0) {
             boolean plus = PlusShape.looksLikePlus(glyph.pixels, glyph.width, glyph.height);
-            if (plus && best.score < PLUS_OVERRIDE) {
+            // 加号是十字几何验证过的：模板把十字打成 x/X 或星号时，几何证据说了算，不看分数。
+            // 星号也有竖笔但没有横笔，过不了加号验证；通过验证又不是星号的才拨回加号。
+            if (plus && !asterisk && best.score < PLUS_OVERRIDE) {
                 label = '+';
                 score = Math.max(best.score, PLUS_OVERRIDE);
             } else if (best.label == '+' && !plus && best.score < 0.85) {
@@ -231,6 +234,12 @@ final class DefaultCaptchaSolver implements CaptchaSolver {
                 label = shorter;
                 score = scoreOf(ranked, shorter, score);
             }
+        }
+        // 星号几何仲裁：深色算术的乘号画成 Verdana 星号，模板分常被字母 x 压过去。
+        // 星号六条辐、字母 x 四条对角臂，中心圆周数墨臂分得开。只对模板说是 x 的拨回。
+        if (asterisk && (label == 'x' || label == 'X')) {
+            label = '*';
+            score = scoreOf(ranked, '*', score);
         }
         char rival = 0;
         double rivalScore = 0;
@@ -526,6 +535,60 @@ final class DefaultCaptchaSolver implements CaptchaSolver {
             }
         }
         return 0;
+    }
+
+    /**
+     * 星号形状：以墨迹质心为圆心，在多个半径的圆周上数墨臂条数取最大。
+     * Verdana 粗体星号六条辐（实测 6），字母 x 只有两条对角线（实测 4），
+     * 加号 5 且另有十字验证兜着。星号字形小，半径太小六条辐还没分开，
+     * 单一半径会数成一块，所以从小到大扫三档。旋转 8° 不影响条数。
+     */
+    private static boolean looksLikeAsterisk(RawGlyph glyph) {
+        if (glyph.width < 10 || glyph.height < 10 || glyph.area == 0) {
+            return false;
+        }
+        long sumX = 0;
+        long sumY = 0;
+        long ink = 0;
+        for (int y = 0; y < glyph.height; y++) {
+            for (int x = 0; x < glyph.width; x++) {
+                if (glyph.pixels[y * glyph.width + x] != 0) {
+                    sumX += x;
+                    sumY += y;
+                    ink++;
+                }
+            }
+        }
+        if (ink == 0) {
+            return false;
+        }
+        double centerX = sumX / (double) ink;
+        double centerY = sumY / (double) ink;
+        double minSide = Math.min(glyph.width, glyph.height);
+        for (int scale = 1; scale <= 3; scale++) {
+            if (asteriskArms(glyph, centerX, centerY, minSide * 0.18 * scale) >= 6) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 给定半径的圆周墨臂条数。 */
+    private static int asteriskArms(RawGlyph glyph, double centerX, double centerY, double radius) {
+        int runs = 0;
+        boolean inInk = false;
+        for (int i = 0; i < 72; i++) {
+            double angle = i * Math.PI / 36;
+            int x = (int) Math.round(centerX + radius * Math.cos(angle));
+            int y = (int) Math.round(centerY + radius * Math.sin(angle));
+            boolean on = x >= 0 && x < glyph.width && y >= 0 && y < glyph.height
+                    && glyph.pixels[y * glyph.width + x] != 0;
+            if (on && !inInk) {
+                runs++;
+            }
+            inInk = on;
+        }
+        return runs;
     }
 
     private static String alphabetFor(CaptchaType type, RecognizeOptions options, boolean narrow) {
