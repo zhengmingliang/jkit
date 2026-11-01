@@ -42,6 +42,13 @@
             <artifactId>onnxruntime</artifactId>
             <version>1.20.0</version>
         </dependency>
+        <!-- 行为验证码实验靶场：用开源 tianai-captcha 本地生成带真值的滑块验证码。
+             仅基准工具使用，不进入 jkit-captcha 业务依赖。 -->
+        <dependency>
+            <groupId>cloud.tianai.captcha</groupId>
+            <artifactId>tianai-captcha</artifactId>
+            <version>1.5.6</version>
+        </dependency>
         <dependency>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>

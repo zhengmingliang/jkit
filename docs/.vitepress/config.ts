@@ -126,6 +126,7 @@ const zhSidebar: DefaultTheme.Sidebar = [
       { text: '自动建表', link: '/sql-auto' },
       { text: '消息通知', link: '/notify' },
       { text: '文件存储', link: '/storage' },
+      { text: '行为验证码', link: '/captcha-behavior' },
     ],
   },
   {
