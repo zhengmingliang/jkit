@@ -37,3 +37,5 @@ docs/.vitepress/cache/
 
 # 公众号文章（本地草稿，不纳入版本库）
 articles/
+.zcodeignore
+.openidea
