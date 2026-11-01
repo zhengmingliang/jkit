@@ -2,6 +2,7 @@ package com.alianga.jkit.captcha.bench;
 
 import javax.imageio.ImageIO;
 
+import java.awt.Font;
 import java.awt.GraphicsEnvironment;
 import java.io.BufferedWriter;
 import java.io.File;
@@ -19,7 +20,7 @@ import java.util.Set;
  * 批量生成验证码数据集。
  *
  * <p>四类各占一份：纯英文、纯数字、英文数字混合、算术运算。字体、旋转、噪点、
- * 干扰线、背景纹理、字距、缩放各自至少有两个取值，干扰项不同时叠到字连在一起。
+ * 穿越字符的干扰线、背景纹理、字距、缩放都取多个值，画布高度也不固定。
  *
  * <p>产出目录下一份 {@code manifest.tsv} 和 {@code images}。清单是后续基准测试的
  * 唯一真值来源。同一序号用同一个随机种子，可以重画出同一张图。
@@ -28,13 +29,22 @@ public final class DatasetGenerator {
     /** 默认每类生成 25000 张，四类合计 10 万张。 */
     public static final int DEFAULT_PER_CATEGORY = 25000;
 
-    /** 识别器对这两套无衬线黑体最稳。本机缺哪套就跳过，一套都没有时退回 SansSerif。 */
+    /** 本机已安装的才会用上，一套都没有时退回 SansSerif。 */
     private static final String[] FONT_FAMILIES = {"Verdana", "Arial"};
-    private static final float[] FONT_SIZES = {32f, 34f};
-    private static final float[] NOISE_LEVELS = {0f, 0.08f};
-    private static final float[] ROTATIONS = {0f, 2f};
-    private static final float[] SPACINGS = {1f, 1.4f};
-    private static final float[] SCALES = {0.94f, 1.06f};
+    private static final int[] FONT_STYLES = {Font.BOLD};
+    private static final float[] FONT_SIZES = {32f, 36f};
+    private static final float[] NOISE_LEVELS = {0f, 0.1f};
+    private static final float[] ROTATIONS = {0f, 8f};
+    private static final float[] SPACINGS = {1.05f, 1.35f};
+    private static final float[] SCALES = {0.95f, 1.05f};
+    private static final int[] HEIGHTS = {50, 58};
+    private static final CaptchaStyle.Lines[] LINE_KINDS = {CaptchaStyle.Lines.NONE, CaptchaStyle.Lines.FEW};
+    private static final CaptchaStyle.Texture[] TEXTURES = {
+            CaptchaStyle.Texture.NONE, CaptchaStyle.Texture.NOISE
+    };
+    private static final CaptchaStyle.Surface[] SURFACES = {
+            CaptchaStyle.Surface.PLAIN_WHITE, CaptchaStyle.Surface.LIGHT_GRAY, CaptchaStyle.Surface.DARK
+    };
 
     private final List<String> usableFonts = new ArrayList<String>();
 
@@ -122,7 +132,7 @@ public final class DatasetGenerator {
         Integer value = null;
         if (category == Sample.Category.ARITHMETIC) {
             TextGen.Expression expression = TextGen.arithmetic(random, ordinal);
-            drawn = expression.getText() + "=?";
+            drawn = expression.getText();
             expected = expression.getText();
             value = Integer.valueOf(expression.getValue());
         } else if (category == Sample.Category.LETTERS) {
@@ -135,9 +145,8 @@ public final class DatasetGenerator {
             drawn = TextGen.mixed(random, ordinal);
             expected = drawn;
         }
-        int width = category == Sample.Category.ARITHMETIC ? 260 : 220;
-        int height = category == Sample.Category.ARITHMETIC
-                ? CaptchaRenderer.ARITHMETIC_HEIGHT : CaptchaRenderer.PLATE_HEIGHT;
+        int height = HEIGHTS[random.nextInt(HEIGHTS.length)];
+        int width = 96 + drawn.length() * 28;
         String name = category.name().toLowerCase() + '-' + serial + ".png";
         File file = new File(images, name);
         ImageIO.write(CaptchaRenderer.render(drawn, style, width, height, random), "png", file);
@@ -145,28 +154,25 @@ public final class DatasetGenerator {
     }
 
     /**
-     * 七个风格轴各自在两个取值里抽。取值都落在识别器还能分开字符的范围内，
-     * 不把旋转、扭曲、密噪点和网格叠到同一张上。
+     * 字体、旋转、噪点、穿越画面的干扰线、背景纹理、字距、缩放都在多个取值里抽。
+     * 旋转含 0° 和 8°，干扰线穿过字符，噪点压在笔画上。算术题用深色底，运算符仍是字体字形。
      */
     private CaptchaStyle styleFor(Sample.Category category, Random random) {
         CaptchaStyle.Surface surface = category == Sample.Category.ARITHMETIC
                 ? CaptchaStyle.Surface.DARK
-                : (random.nextBoolean() ? CaptchaStyle.Surface.PLAIN_WHITE : CaptchaStyle.Surface.LIGHT_GRAY);
-        CaptchaStyle.Lines lines = random.nextBoolean() ? CaptchaStyle.Lines.NONE : CaptchaStyle.Lines.FEW;
-        CaptchaStyle.Texture texture = random.nextBoolean()
-                ? CaptchaStyle.Texture.NONE : CaptchaStyle.Texture.GRID;
+                : SURFACES[random.nextInt(SURFACES.length)];
         return new CaptchaStyle.Builder()
                 .fontFamily(usableFonts.get(random.nextInt(usableFonts.size())))
-                .fontStyle(java.awt.Font.BOLD)
+                .fontStyle(FONT_STYLES[random.nextInt(FONT_STYLES.length)])
                 .fontSize(FONT_SIZES[random.nextInt(FONT_SIZES.length)])
                 .surface(surface)
-                .lines(lines)
-                .texture(texture)
+                .lines(LINE_KINDS[random.nextInt(LINE_KINDS.length)])
+                .texture(TEXTURES[random.nextInt(TEXTURES.length)])
                 .noise(NOISE_LEVELS[random.nextInt(NOISE_LEVELS.length)])
                 .rotation(ROTATIONS[random.nextInt(ROTATIONS.length)])
                 .spacing(SPACINGS[random.nextInt(SPACINGS.length)])
                 .scaleX(SCALES[random.nextInt(SCALES.length)])
-                .colorPerChar(category == Sample.Category.ARITHMETIC)
+                .colorPerChar(random.nextBoolean())
                 .build();
     }
 

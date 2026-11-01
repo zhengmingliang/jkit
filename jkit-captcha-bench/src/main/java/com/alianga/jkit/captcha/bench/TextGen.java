@@ -5,8 +5,7 @@ import java.util.Random;
 /**
  * 四类验证码的文本与算式生成。
  *
- * <p>字符表收在现有识别器能稳定分开的字形里：去掉 I/l、O/0、S/s 这类
- * 大小写或数字缠在一起的字。算术题的期望答案与 jkit-captcha 的
+ * <p>纯英文、纯数字用完整字符表。算术题的期望答案与 jkit-captcha 的
  * {@code ArithmeticEvaluator} 同规则：乘除优先、从左到右、整数除法向零截断、
  * 除数不为 0、减法结果不为负。
  */
@@ -17,13 +16,10 @@ public final class TextGen {
     public static final int DIGIT_LENGTH = 4;
     /** 英文数字混合固定长度。 */
     public static final int MIXED_LENGTH = 4;
-    /**
-     * 大小写都有、且字形互不缠绕的字母。
-     * 大写与小写不是逐对出现：只保留识别器对大小写都稳的那些字。
-     */
-    public static final String LETTERS = "ACGKLMNRTYaeghkmnprtvz";
-    /** 不与字母缠在一起的数字。 */
-    public static final String DIGITS = "234578";
+    /** 大小写都有的完整字母表。 */
+    public static final String LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    /** 完整数字表。 */
+    public static final String DIGITS = "0123456789";
     private static final char[] OPERATORS = {'+', '-', '*', '/'};
 
     private TextGen() {
