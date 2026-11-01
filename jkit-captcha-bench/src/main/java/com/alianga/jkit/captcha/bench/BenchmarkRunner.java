@@ -138,25 +138,27 @@ public final class BenchmarkRunner {
         Map<String, Bucket> byCategory = new ConcurrentHashMap<String, Bucket>();
         Map<String, Bucket> byStyle = new ConcurrentHashMap<String, Bucket>();
         List<Verdict> wrong = new ArrayList<Verdict>();
+        List<Verdict> failures = new ArrayList<Verdict>();
         List<Verdict> lowConfidenceHits = new ArrayList<Verdict>();
         long totalMillis = 0;
         int readable = 0;
         for (int i = 0; i < verdicts.size(); i++) {
             Verdict verdict = verdicts.get(i);
             Bucket category = bucket(byCategory, verdict.getSample().getCategory().name());
-            Bucket style = bucket(byStyle, verdict.getSample().getCategory().name()
-                    + "/" + verdict.getSample().getStyleTag());
+            Bucket style = bucket(byStyle, verdict.getSample().getStyleTag());
             category.add(verdict);
             style.add(verdict);
-            if (verdict.getKind() != Kind.READ_ERROR && verdict.getKind() != Kind.ERROR) {
+            if (verdict.getKind() == Kind.READ_ERROR || verdict.getKind() == Kind.ERROR) {
+                failures.add(verdict);
+            } else {
                 readable++;
                 totalMillis += verdict.getElapsedMillis();
+                if (verdict.getConfidence() < lowConfidence) {
+                    lowConfidenceHits.add(verdict);
+                }
             }
             if (verdict.getKind() == Kind.WRONG) {
                 wrong.add(verdict);
-            } else if (verdict.getConfidence() < lowConfidence
-                    && verdict.getKind() != Kind.READ_ERROR && verdict.getKind() != Kind.ERROR) {
-                lowConfidenceHits.add(verdict);
             }
         }
         List<String> names = new ArrayList<String>(byCategory.keySet());
@@ -172,7 +174,7 @@ public final class BenchmarkRunner {
             styles.add(byStyle.get(styleNames.get(i)));
         }
         double meanMillis = readable == 0 ? 0d : (double) totalMillis / readable;
-        return new Outcome(verdicts.size(), categories, styles, wrong, lowConfidenceHits, meanMillis);
+        return new Outcome(verdicts.size(), categories, styles, wrong, failures, lowConfidenceHits, meanMillis);
     }
 
     private static Bucket bucket(Map<String, Bucket> map, String key) {
@@ -260,6 +262,15 @@ public final class BenchmarkRunner {
             this.name = name;
         }
 
+        void absorb(Bucket other) {
+            total += other.total;
+            correct += other.correct;
+            wrong += other.wrong;
+            errors += other.errors;
+            caseInsensitive += other.caseInsensitive;
+            millis += other.millis;
+        }
+
         void add(Verdict verdict) {
             total++;
             if (verdict.getKind() == Kind.CORRECT) {
@@ -328,15 +339,17 @@ public final class BenchmarkRunner {
         private final List<Bucket> categories;
         private final List<Bucket> styles;
         private final List<Verdict> wrong;
+        private final List<Verdict> failures;
         private final List<Verdict> lowConfidence;
         private final double meanMillis;
 
         Outcome(int total, List<Bucket> categories, List<Bucket> styles, List<Verdict> wrong,
-                List<Verdict> lowConfidence, double meanMillis) {
+                List<Verdict> failures, List<Verdict> lowConfidence, double meanMillis) {
             this.total = total;
             this.categories = categories;
             this.styles = styles;
             this.wrong = wrong;
+            this.failures = failures;
             this.lowConfidence = lowConfidence;
             this.meanMillis = meanMillis;
         }
@@ -356,12 +369,17 @@ public final class BenchmarkRunner {
             return styles;
         }
 
-        /** @return 识别错误的样本 */
+        /** @return 识别错误的样本，文本或算术结果和标签不一致 */
         public List<Verdict> getWrong() {
             return wrong;
         }
 
-        /** @return 置信度低于阈值的样本 */
+        /** @return 识别失败的样本，读图失败或识别过程抛异常 */
+        public List<Verdict> getFailures() {
+            return failures;
+        }
+
+        /** @return 置信度低于阈值、且已经给出文本的样本。可以和识别错误重叠 */
         public List<Verdict> getLowConfidence() {
             return lowConfidence;
         }

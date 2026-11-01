@@ -74,8 +74,14 @@ public final class BenchMain {
         File report = new File(output, "report-" + tag + ".md");
         ReportWriter.write(report, outcome, "jkit-captcha 全量识别基准（" + tag + "）",
                 "数据集由 jkit-captcha-bench 生成，共 " + outcome.getTotal() + " 张。");
-        ReportWriter.writeFailures(new File(output, "failures-" + tag + ".tsv"), outcome);
+        ReportWriter.writeSet(new File(output, "failures-" + tag + ".tsv"), outcome.getFailures());
+        ReportWriter.writeSet(new File(output, "low-confidence-" + tag + ".tsv"), outcome.getLowConfidence());
+        ReportWriter.writeSet(new File(output, "wrong-" + tag + ".tsv"), outcome.getWrong());
         System.out.println("报告 -> " + report.getAbsolutePath());
+        System.out.printf(Locale.ROOT, "识别失败 %d，识别错误 %d，低置信 %d%n",
+                Integer.valueOf(outcome.getFailures().size()),
+                Integer.valueOf(outcome.getWrong().size()),
+                Integer.valueOf(outcome.getLowConfidence().size()));
 
         for (int i = 0; i < outcome.getCategories().size(); i++) {
             BenchmarkRunner.Bucket bucket = outcome.getCategories().get(i);

@@ -150,25 +150,41 @@ public final class CaptchaStyle {
         return colorPerChar;
     }
 
-    /** @return 一段便于人工定位风格组合的短标签 */
+    /**
+     * 风格轴标签。键固定为字体 {@code f}、旋转 {@code r}、噪点 {@code n}、
+     * 线条 {@code l}、纹理 {@code t}、字距 {@code g}、缩放 {@code s}。
+     *
+     * @return 可按逗号拆开的标签
+     */
     public String tag() {
-        StringBuilder builder = new StringBuilder();
-        builder.append(fontFamily).append('_').append(fontStyle).append('_').append((int) fontSize);
-        builder.append('_').append(surface).append('_').append(lines).append('_').append(texture);
-        builder.append("_n").append(Math.round(noise * 100));
-        builder.append("_r").append(Math.round(rotation));
-        builder.append("_s").append(Math.round(spacing * 100));
-        builder.append("_x").append(Math.round(scaleX * 100));
-        if (wave > 0) {
-            builder.append("_w").append(Math.round(wave));
+        return "f=" + fontFamily
+                + ",r=" + Math.round(rotation)
+                + ",n=" + Math.round(noise * 100f)
+                + ",l=" + lines.name()
+                + ",t=" + texture.name()
+                + ",g=" + Math.round(spacing * 100f)
+                + ",s=" + Math.round(scaleX * 100f);
+    }
+
+    /**
+     * 从 {@link #tag()} 里取出一个轴的取值。
+     *
+     * @param tag 风格标签
+     * @param key 轴键，例如 {@code f}、{@code r}
+     * @return 取值；标签里没有这个键时返回空串
+     */
+    public static String axis(String tag, String key) {
+        if (tag == null || key == null) {
+            return "";
         }
-        if (outline) {
-            builder.append("_outline");
+        String[] parts = tag.split(",");
+        String prefix = key + "=";
+        for (int i = 0; i < parts.length; i++) {
+            if (parts[i].startsWith(prefix)) {
+                return parts[i].substring(prefix.length());
+            }
         }
-        if (alphaBlend) {
-            builder.append("_alpha");
-        }
-        return builder.toString();
+        return "";
     }
 
     /** 逐步构造 {@link CaptchaStyle}。 */

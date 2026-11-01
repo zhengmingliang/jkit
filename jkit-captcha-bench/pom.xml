@@ -74,10 +74,6 @@
                         <java.awt.headless>true</java.awt.headless>
                         <bench.output>${bench.output}</bench.output>
                     </systemPropertyVariables>
-                    <!-- 全量 10 万张由 main() 跑；surefire 里只跑小样本冒烟，避免测试阶段过长 -->
-                    <excludes>
-                        <exclude>**/BenchmarkSmokeTest.java</exclude>
-                    </excludes>
                 </configuration>
             </plugin>
             <plugin>

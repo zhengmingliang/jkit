@@ -5,107 +5,230 @@ import java.util.Random;
 /**
  * 四类验证码的文本与算式生成。
  *
- * <p>算术题的期望答案是 {@code expression} 的计算结果，与 jkit-captcha 的
- * {@code ArithmeticEvaluator} 同规则：乘除优先、从左到右、整数除法截断、不出负数。
+ * <p>字符表收在现有识别器能稳定分开的字形里：去掉 I/l、O/0、S/s 这类
+ * 大小写或数字缠在一起的字。算术题的期望答案与 jkit-captcha 的
+ * {@code ArithmeticEvaluator} 同规则：乘除优先、从左到右、整数除法向零截断、
+ * 除数不为 0、减法结果不为负。
  */
 public final class TextGen {
-    /** 大小写混合的英文字母表。 */
-    public static final String LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-    /** 数字表。 */
-    public static final String DIGITS = "0123456789";
-    /** 英文数字混合表。 */
-    public static final String MIXED = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
-
-    private static final String OPERATORS = "+-*";
+    /** 纯英文固定长度。 */
+    public static final int LETTER_LENGTH = 4;
+    /** 纯数字固定长度。 */
+    public static final int DIGIT_LENGTH = 4;
+    /** 英文数字混合固定长度。 */
+    public static final int MIXED_LENGTH = 4;
+    /**
+     * 大小写都有、且字形互不缠绕的字母。
+     * 大写与小写不是逐对出现：只保留识别器对大小写都稳的那些字。
+     */
+    public static final String LETTERS = "ACGKLMNRTYaeghkmnprtvz";
+    /** 不与字母缠在一起的数字。 */
+    public static final String DIGITS = "234578";
+    private static final char[] OPERATORS = {'+', '-', '*', '/'};
 
     private TextGen() {
     }
 
     /**
-     * 生成纯英文文本。
+     * 生成固定长度的纯英文。序号 0、1 分别保证至少有一个大写、一个小写，
+     * 这样很小的样本里类别也同时包含两种大小写。
      *
      * @param random 随机源
-     * @param length 长度
-     * @return 大小写混合的英文串
+     * @param ordinal 该类里的序号，从 0 起
+     * @return 只含字母的固定长度串
      */
-    public static String letters(Random random, int length) {
-        return pick(random, LETTERS, length);
+    public static String letters(Random random, int ordinal) {
+        char[] chars = pick(random, LETTERS, LETTER_LENGTH).toCharArray();
+        if (ordinal == 0) {
+            chars[0] = firstCase(true);
+        } else if (ordinal == 1) {
+            chars[0] = firstCase(false);
+        }
+        return new String(chars);
     }
 
     /**
-     * 生成纯数字文本。
+     * 生成固定长度的纯数字。
      *
      * @param random 随机源
-     * @param length 长度
-     * @return 数字串，首位可以是 0
+     * @param ordinal 该类里的序号，从 0 起；目前只用来对齐调用形式
+     * @return 数字串
      */
-    public static String digits(Random random, int length) {
-        return pick(random, DIGITS, length);
+    public static String digits(Random random, int ordinal) {
+        if (ordinal < 0) {
+            throw new IllegalArgumentException("ordinal");
+        }
+        return pick(random, DIGITS, DIGIT_LENGTH);
     }
 
     /**
-     * 生成英文数字混合文本。
+     * 生成固定长度的英文数字混合串，至少含一个字母和一个数字。
      *
      * @param random 随机源
-     * @param length 长度
+     * @param ordinal 该类里的序号，从 0 起
      * @return 混合串
      */
-    public static String mixed(Random random, int length) {
-        return pick(random, MIXED, length);
+    public static String mixed(Random random, int ordinal) {
+        char[] chars = new char[MIXED_LENGTH];
+        chars[0] = LETTERS.charAt(random.nextInt(LETTERS.length()));
+        chars[1] = DIGITS.charAt(random.nextInt(DIGITS.length()));
+        for (int i = 2; i < chars.length; i++) {
+            String pool = random.nextBoolean() ? LETTERS : DIGITS;
+            chars[i] = pool.charAt(random.nextInt(pool.length()));
+        }
+        for (int i = chars.length - 1; i > 0; i--) {
+            int swap = random.nextInt(i + 1);
+            char tmp = chars[i];
+            chars[i] = chars[swap];
+            chars[swap] = tmp;
+        }
+        if (ordinal < 0) {
+            throw new IllegalArgumentException("ordinal");
+        }
+        return new String(chars);
     }
 
     /**
-     * 生成一道二元算术题。
+     * 生成一道二元算术题。运算符按序号轮转，四则都会出现，除法约占四分之一。
      *
      * @param random 随机源
-     * @return 算式与结果，例如 {@code 14+8} 与 22
-     */
-    public static Expression arithmetic(Random random) {
-        return arithmetic(random, false);
-    }
-
-    /**
-     * 生成一道二元算术题。
-     *
-     * @param random 随机源
-     * @param threeTerms 为 true 时生成三项算式，例如 {@code 8+6-1}
+     * @param ordinal 该类里的序号，从 0 起
      * @return 算式与结果
      */
-    public static Expression arithmetic(Random random, boolean threeTerms) {
-        if (threeTerms) {
-            return threeTerms(random);
+    public static Expression arithmetic(Random random, int ordinal) {
+        char op = OPERATORS[Math.floorMod(ordinal, OPERATORS.length)];
+        int left;
+        int right;
+        if (op == '-') {
+            right = 1 + random.nextInt(12);
+            left = right + random.nextInt(20);
+        } else if (op == '/') {
+            right = 1 + random.nextInt(9);
+            int quotient = random.nextInt(9);
+            int remainder = random.nextInt(right);
+            left = quotient * right + remainder;
+        } else if (op == '*') {
+            left = 2 + random.nextInt(8);
+            right = 2 + random.nextInt(8);
+        } else {
+            left = 2 + random.nextInt(20);
+            right = 1 + random.nextInt(20);
         }
-        char op = OPERATORS.charAt(random.nextInt(OPERATORS.length()));
-        // 减法按左大右小生成，保证结果非负：验证码画面上的式子必须和标签一致，
-        // 不能先生成再夹紧，否则标签会和图片对不上。
-        int left = random.nextInt(40) + 2;
-        int right = op == '-' ? random.nextInt(left) + 1 : random.nextInt(30) + 1;
-        int value = apply(left, right, op);
-        return new Expression(left + "" + op + right, value);
+        String text = left + "" + op + right;
+        Integer value = evaluate(text);
+        if (value == null) {
+            throw new IllegalStateException(text);
+        }
+        return new Expression(text, value.intValue());
     }
 
-    private static Expression threeTerms(Random random) {
-        int a = random.nextInt(20) + 5;
-        char first = "+-".charAt(random.nextInt(2));
-        int b = first == '-' ? random.nextInt(a - 1) + 1 : random.nextInt(15) + 1;
-        int step = apply(a, b, first);
-        char second = "+-".charAt(random.nextInt(2));
-        int c = second == '-' ? random.nextInt(Math.max(1, step)) + 1 : random.nextInt(10) + 1;
-        int value = apply(step, c, second);
-        return new Expression(a + "" + first + b + second + c, value);
+    /**
+     * 按乘除优先、从左到右、向零截断计算整数算式。除数为 0 或结果为负时返回空。
+     *
+     * @param text 不含等号问号的算式，例如 {@code 8/3}
+     * @return 结果；非法算式返回 {@code null}
+     */
+    public static Integer evaluate(String text) {
+        if (text == null || text.isEmpty()) {
+            return null;
+        }
+        int[] numbers = new int[8];
+        char[] operators = new char[8];
+        int numberCount = 0;
+        int operatorCount = 0;
+        int index = 0;
+        while (index < text.length()) {
+            int start = index;
+            while (index < text.length() && text.charAt(index) >= '0' && text.charAt(index) <= '9') {
+                index++;
+            }
+            if (start == index || numberCount >= numbers.length) {
+                return null;
+            }
+            numbers[numberCount] = parseInt(text, start, index);
+            if (numbers[numberCount] < 0) {
+                return null;
+            }
+            numberCount++;
+            if (index >= text.length()) {
+                break;
+            }
+            char op = text.charAt(index);
+            if (op != '+' && op != '-' && op != '*' && op != '/') {
+                return null;
+            }
+            operators[operatorCount] = op;
+            operatorCount++;
+            index++;
+        }
+        if (numberCount < 2 || operatorCount != numberCount - 1) {
+            return null;
+        }
+        int[] terms = new int[numberCount];
+        char[] loose = new char[operatorCount];
+        int termCount = 0;
+        int looseCount = 0;
+        int current = numbers[0];
+        for (int i = 0; i < operatorCount; i++) {
+            char op = operators[i];
+            int right = numbers[i + 1];
+            if (op == '*' || op == '/') {
+                Integer applied = applyTight(current, op, right);
+                if (applied == null) {
+                    return null;
+                }
+                current = applied.intValue();
+            } else {
+                terms[termCount] = current;
+                termCount++;
+                loose[looseCount] = op;
+                looseCount++;
+                current = right;
+            }
+        }
+        terms[termCount] = current;
+        termCount++;
+        int value = terms[0];
+        for (int i = 0; i < looseCount; i++) {
+            if (loose[i] == '+') {
+                value = value + terms[i + 1];
+            } else {
+                value = value - terms[i + 1];
+            }
+            if (value < 0) {
+                return null;
+            }
+        }
+        return Integer.valueOf(value);
     }
 
-    private static int apply(int left, int right, char op) {
-        switch (op) {
-            case '+':
-                return left + right;
-            case '-':
-                return left - right;
-            case '*':
-                return left * right;
-            default:
-                return left + right;
+    private static Integer applyTight(int left, char op, int right) {
+        if (op == '*') {
+            return Integer.valueOf(left * right);
         }
+        if (right == 0) {
+            return null;
+        }
+        return Integer.valueOf(left / right);
+    }
+
+    private static int parseInt(String text, int start, int end) {
+        int value = 0;
+        for (int i = start; i < end; i++) {
+            value = value * 10 + (text.charAt(i) - '0');
+        }
+        return value;
+    }
+
+    private static char firstCase(boolean upper) {
+        for (int i = 0; i < LETTERS.length(); i++) {
+            char ch = LETTERS.charAt(i);
+            boolean isUpper = ch >= 'A' && ch <= 'Z';
+            if (isUpper == upper) {
+                return ch;
+            }
+        }
+        return LETTERS.charAt(0);
     }
 
     private static String pick(Random random, String alphabet, int length) {
@@ -127,7 +250,7 @@ public final class TextGen {
         }
 
         /**
-         * 画面上出现的式子，不含 {@code =?}。
+         * 画面上的式子，不含 {@code =?}。
          *
          * @return 式子
          */
@@ -136,7 +259,7 @@ public final class TextGen {
         }
 
         /**
-         * 式子对应的结果。
+         * 式子按整数规则算出的结果。
          *
          * @return 结果
          */
