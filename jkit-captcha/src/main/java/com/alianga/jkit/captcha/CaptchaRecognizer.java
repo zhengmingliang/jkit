@@ -89,9 +89,15 @@ public final class CaptchaRecognizer implements AutoCloseable {
         return applyPlateCase(image, result);
     }
 
-    /** 只改 47 像素高的浅色板上分得开的短身字母，其它版式原样返回。 */
-    private static RecognizeResult applyPlateCase(BufferedImage image, RecognizeResult result) {
+    /** 按同一张图里的字高差距拨正短身字母。130×48 的白底字已经由字形表定过大小写，这里不再改。 */
+    private RecognizeResult applyPlateCase(BufferedImage image, RecognizeResult result) {
+        if (WhitePlate.matches(image)) {
+            return result;
+        }
         String adjusted = PlateCase.adjust(result.getText(), result.getGlyphs(), image.getHeight());
+        adjusted = CaseVote.vote(image, adjusted, textModel);
+        adjusted = MinusInsert.insert(image, adjusted);
+        adjusted = OpRepair.repair(adjusted);
         if (adjusted.equals(result.getText())) {
             return result;
         }

@@ -1,30 +1,43 @@
 package com.alianga.jkit.captcha;
 
+import java.util.Arrays;
 import java.util.List;
 
 /**
- * 高度 47 的浅色板上，用字框高度把短身字母的大小写拨正。
+ * 同一张图里，用字框高度的相对差距拨正短身字母的大小写。
  *
- * <p>这类板上大写字高大约 23 以上、顶在 12 以内，x 高度的小写大约高 20 以内、顶在 15 以下。
- * 只处理上下两档分得开的字母。带升部或降部的字（比如 b、g、y）高度和对方重叠，不动。
- * 其他高度的图沿用原来的结果，避免改到 SpecCaptcha 和 130×48 的样例。
+ * <p>大写短身字母比同图的 x 高度小写高出一截。只在这截差距够大时改，
+ * 不绑某一种画布高度。带升部或降部的字母高度重叠，不动。
  */
 final class PlateCase {
-    static final int PLATE_HEIGHT = 47;
     /** 短身字母：大写明显更高，小写停在 x 高度。 */
     private static final String TALL_WHEN_UPPER = "ACEMNRVZ";
-    private static final int LOWER_MAX_HEIGHT = 20;
-    private static final int LOWER_MIN_TOP = 15;
-    private static final int UPPER_MIN_HEIGHT = 24;
-    private static final int UPPER_MAX_TOP = 12;
+    private static final int GAP = 4;
 
     private PlateCase() {
     }
 
     static String adjust(String text, List<GlyphHit> glyphs, int imageHeight) {
-        if (text == null || text.isEmpty() || imageHeight != PLATE_HEIGHT || glyphs == null
-                || glyphs.size() != text.length()) {
+        if (text == null || text.isEmpty() || imageHeight <= 0 || glyphs == null
+                || glyphs.size() != text.length() || text.length() < 2) {
             return text == null ? "" : text;
+        }
+        int[] heights = new int[text.length()];
+        for (int i = 0; i < text.length(); i++) {
+            heights[i] = glyphs.get(i).getHeight();
+        }
+        int[] sorted = heights.clone();
+        Arrays.sort(sorted);
+        int median = sorted[sorted.length / 2];
+        boolean shorter = false;
+        for (int i = 0; i < heights.length; i++) {
+            if (heights[i] <= median - GAP) {
+                shorter = true;
+                break;
+            }
+        }
+        if (!shorter) {
+            return text;
         }
         StringBuilder builder = new StringBuilder(text);
         for (int i = 0; i < text.length(); i++) {
@@ -32,12 +45,11 @@ final class PlateCase {
             if (TALL_WHEN_UPPER.indexOf(Character.toUpperCase(ch)) < 0) {
                 continue;
             }
-            GlyphHit glyph = glyphs.get(i);
-            if (ch >= 'A' && ch <= 'Z' && glyph.getHeight() <= LOWER_MAX_HEIGHT && glyph.getY() >= LOWER_MIN_TOP) {
-                builder.setCharAt(i, Character.toLowerCase(ch));
-            } else if (ch >= 'a' && ch <= 'z' && glyph.getHeight() >= UPPER_MIN_HEIGHT
-                    && glyph.getY() <= UPPER_MAX_TOP) {
+            int height = heights[i];
+            if (ch >= 'a' && ch <= 'z' && height >= median) {
                 builder.setCharAt(i, Character.toUpperCase(ch));
+            } else if (ch >= 'A' && ch <= 'Z' && height <= median - GAP) {
+                builder.setCharAt(i, Character.toLowerCase(ch));
             }
         }
         return builder.toString();
