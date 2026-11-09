@@ -16,6 +16,7 @@ import com.alianga.jkit.storage.engine.cmcloud.CmCloudFileStorage;
 import com.alianga.jkit.storage.engine.cmcloud.CmCloudStorageSupport;
 import com.alianga.jkit.storage.engine.cmcloud.Yun139FileStorage;
 import com.alianga.jkit.storage.engine.cmcloud.Yun139StorageSupport;
+import com.alianga.jkit.storage.engine.gist.GistStorageSupport;
 import com.alianga.jkit.storage.engine.googledrive.GoogleDriveFileStorage;
 import com.alianga.jkit.storage.engine.googledrive.GoogleDriveStorageSupport;
 import com.alianga.jkit.storage.preset.StoragePresets;
@@ -107,6 +108,8 @@ public final class FileStorages {
         Yun139StorageSupport.register();
         // Google Drive 云端硬盘（OAuth2 认证 + REST API v3）
         GoogleDriveStorageSupport.register();
+        // GitHub Gist（扁平文本片段，一条连接对应一个 Gist）
+        GistStorageSupport.register();
         // Git 托管四平台（github / gitee / gitea / gogs 共用 git 引擎，纯 JDK 实现）
         com.alianga.jkit.storage.git.GitStorageSupport.register();
         // 引擎级能力注册：界面按能力渲染，不按平台 id 写 if
