@@ -32,6 +32,10 @@ public final class GistClient {
     private final StorageConfig config;
     private final String apiBase;
     private final String token;
+    /** 是否开启写入加密（读取按信封前缀判定，不依赖这个开关）。 */
+    private final boolean encryptionOn;
+    /** 写入用的加密口令；读取时若为空但遇到信封会明确报错。 */
+    private final String password;
 
     /**
      * @param config 连接配置
@@ -41,6 +45,8 @@ public final class GistClient {
         this.apiBase = GistConfig.apiBase(config.get(GistConfig.API_BASE));
         String raw = config.getOr(GistConfig.TOKEN, "");
         this.token = raw.trim();
+        this.encryptionOn = GistConfig.encryptionOn(config);
+        this.password = config.getOr(GistConfig.CONTENT_PASSWORD, "").trim();
     }
 
     /** @return 归一化后的 API 基础地址 */
@@ -81,17 +87,20 @@ public final class GistClient {
             if (name == null || name.isEmpty()) {
                 name = entry.getKey();
             }
-            byte[] bytes;
+            String stored;
             if (Boolean.TRUE.equals(file.get("truncated"))) {
                 String rawUrl = stringOf(file.get("raw_url"));
                 if (rawUrl == null || rawUrl.isEmpty()) {
                     throw StorageException.io("Gist 文件被截断但缺少 raw_url: " + name, gistId, null);
                 }
-                bytes = getRaw(rawUrl, name);
+                stored = new String(getRaw(rawUrl, name), StandardCharsets.UTF_8);
             } else {
-                bytes = GistPaths.decodeContent(stringOf(file.get("content")));
+                stored = stringOf(file.get("content"));
             }
-            result.put(name, bytes);
+            // 解密按「信封前缀」判定，不看开关：旧明文、混合 gist、关了开关但留着口令都能读
+            String encoded = GistContentCipher.isEncrypted(stored)
+                    ? GistContentCipher.decrypt(password, stored, name) : stored;
+            result.put(name, GistPaths.decodeContent(encoded));
         }
         return result;
     }
@@ -141,7 +150,7 @@ public final class GistClient {
         body.put("description", description);
         body.put("public", publicGist);
         Map<String, Object> files = new LinkedHashMap<String, Object>();
-        files.put(seedFile.getKey(), contentNode(seedFile.getValue()));
+        files.put(seedFile.getKey(), contentNode(seedFile.getValue(), seedFile.getKey()));
         body.put("files", files);
         HttpCore.Response response = executeJson("POST", apiBase + "/gists", SimpleJson.toJson(body));
         String text = readBody(response, "-");
@@ -179,11 +188,11 @@ public final class GistClient {
                 Map<String, Object> node = new LinkedHashMap<String, Object>();
                 node.put("filename", change.newName);
                 if (change.content != null) {
-                    node.put("content", GistPaths.encodeContent(change.content));
+                    node.put("content", storedContent(change.content, entry.getKey()));
                 }
                 files.put(entry.getKey(), node);
             } else {
-                files.put(entry.getKey(), contentNode(change.content));
+                files.put(entry.getKey(), contentNode(change.content, entry.getKey()));
             }
         }
         Map<String, Object> body = new LinkedHashMap<String, Object>();
@@ -287,10 +296,33 @@ public final class GistClient {
         return text;
     }
 
-    private static Map<String, Object> contentNode(byte[] bytes) {
+    private Map<String, Object> contentNode(byte[] bytes, String objectPath) {
         Map<String, Object> node = new LinkedHashMap<String, Object>();
-        node.put("content", GistPaths.encodeContent(bytes == null ? new byte[0] : bytes));
+        node.put("content", storedContent(bytes == null ? new byte[0] : bytes, objectPath));
         return node;
+    }
+
+    /**
+     * 所有写点的唯一入口：明文字节 → UTF-8/Base64 编码 → （开启时）加密信封 →
+     * 校验最终存储文本长度。这样 PATCH / 改名带内容 / createGist 三条路径不会漏加密。
+     *
+     * <p><b>为什么在这里校验 1 MB</b>：GitHub 的 1 MB 上限针对的是最终写进
+     * {@code content} 的文本，而不是原始字节。二进制 Base64 会膨胀约 1/3，加密信封
+     * 又叠加 JSON + Base64（salt/iv/tag/密文），一个接近 1 MB 的明文最终可能超过上限
+     * 被 GitHub 截断或拒收。这里按 UTF-8 字节精确拦截，明确报 CONFLICT，不静默截断。</p>
+     */
+    private String storedContent(byte[] bytes, String objectPath) {
+        String encoded = GistPaths.encodeContent(bytes == null ? new byte[0] : bytes);
+        String stored = encryptionOn
+                ? GistContentCipher.encrypt(password, encoded, objectPath) : encoded;
+        long storedBytes = stored.getBytes(StandardCharsets.UTF_8).length;
+        if (storedBytes > GistConfig.MAX_UPLOAD_BYTES) {
+            throw StorageException.conflict("GitHub Gist 存储内容超过 1 MB 上限：明文 "
+                    + (bytes == null ? 0 : bytes.length) + " 字节，编码"
+                    + (encryptionOn ? "并加密" : "") + "后 " + storedBytes
+                    + " 字节；请缩小文件或改用 Git 托管平台（仓库）", objectPath);
+        }
+        return stored;
     }
 
     private HttpCore.Response execute(String method, String url, String jsonBody) {

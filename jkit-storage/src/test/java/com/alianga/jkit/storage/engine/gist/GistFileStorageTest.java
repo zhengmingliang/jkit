@@ -56,10 +56,19 @@ public class GistFileStorageTest {
     }
 
     private FileStorage storage() {
+        return storage(null);
+    }
+
+    /** @param password null / 空表示不开加密；非空则开客户端加密 */
+    private FileStorage storage(String password) {
         Map<String, String> values = new LinkedHashMap<String, String>();
         values.put("token", "fake-token");
         values.put("gistId", GIST_ID);
         values.put("apiBase", apiBase);
+        if (password != null) {
+            values.put(GistConfig.ENCRYPTION, "on");
+            values.put(GistConfig.CONTENT_PASSWORD, password);
+        }
         return FileStorages.of("github-gist", values);
     }
 
@@ -439,6 +448,159 @@ public class GistFileStorageTest {
         byte[] raw = new byte[]{(byte) 0xFF, (byte) 0xFE, 0x00, 0x41};
         assertArrayEquals(raw, GistPaths.decodeContent(GistPaths.encodeContent(raw)));
         assertArrayEquals(new byte[0], GistPaths.decodeContent(GistPaths.encodeContent(new byte[0])));
+    }
+
+    // ---------------------------------------------------------------- 可选客户端加密
+
+    @Test
+    public void encryptionOffByDefaultKeepsServerContentPlaintext() {
+        FileStorage fs = storage();
+        fs.writeString("plain.txt", "visible");
+        assertEquals("加密关闭时服务端必须是明文", "visible", server.files(GIST_ID).get("plain.txt"));
+    }
+
+    @Test
+    public void encryptionStoresOnlyCiphertextOnServer() {
+        FileStorage fs = storage("my-passphrase");
+        fs.writeString("secret/笔记.txt", "账号密码：Passphrase");
+        String stored = server.files(GIST_ID).get("secret~笔记.txt");
+        assertNotNull("文件应已写入", stored);
+        assertTrue("服务端必须是加密信封", GistContentCipher.isEncrypted(stored));
+        assertFalse("服务端绝不能出现明文", stored.contains("账号密码"));
+        assertFalse("服务端绝不能出现二进制标记（明文包装）", stored.contains(GistPaths.BINARY_MARKER));
+        assertEquals("账号密码：Passphrase", fs.readString("secret/笔记.txt"));
+    }
+
+    @Test
+    public void encryptedTextBinaryChineseAndEmptyRoundTrip() {
+        FileStorage fs = storage("pwd-123");
+        fs.writeString("code/Main.java", "class Main { /* 中文注释 */ }");
+        assertEquals("class Main { /* 中文注释 */ }", fs.readString("code/Main.java"));
+
+        byte[] binary = new byte[256];
+        for (int i = 0; i < binary.length; i++) {
+            binary[i] = (byte) (i - 128);
+        }
+        fs.upload("bin/blob.bin", binary);
+        assertArrayEquals("二进制加密后仍字节级往返", binary, fs.readBytes("bin/blob.bin"));
+
+        fs.upload("empty.txt", new byte[0]);
+        assertArrayEquals("空文件加密后仍往返为空", new byte[0], fs.readBytes("empty.txt"));
+    }
+
+    @Test
+    public void encryptedStatAndListStillReportPlaintextSizes() {
+        FileStorage fs = storage("pwd");
+        fs.writeString("a.txt", "12345");
+        assertEquals("stat 必须报明文大小，不能报密文长度", 5L, fs.stat("a.txt").size());
+        List<StorageEntry> entries = fs.list("");
+        StorageEntry a = entries.stream().filter(e -> "a.txt".equals(e.path())).findFirst().orElse(null);
+        assertNotNull(a);
+        assertEquals("list 必须报明文大小（同步/对比依赖它）", 5L, a.size());
+    }
+
+    @Test
+    public void wrongPasswordFailsLoudlyOnRead() {
+        FileStorage writer = storage("correct-pwd");
+        writer.writeString("a.txt", "secret data");
+        // 换「机器」：只换口令、不换服务器状态，模拟恢复场景
+        Map<String, String> values = new LinkedHashMap<String, String>();
+        values.put("token", "fake-token");
+        values.put("gistId", GIST_ID);
+        values.put("apiBase", apiBase);
+        values.put(GistConfig.ENCRYPTION, "on");
+        values.put(GistConfig.CONTENT_PASSWORD, "wrong-pwd");
+        FileStorage reader = FileStorages.of("github-gist", values);
+        try {
+            reader.readString("a.txt");
+            fail("错口令必须明确报错");
+        } catch (StorageException e) {
+            assertTrue("应提示口令错误: " + e.getMessage(), e.getMessage().contains("口令错误"));
+        }
+    }
+
+    @Test
+    public void missingPasswordWhenReadingCiphertextIsActionable() {
+        storage("correct-pwd").writeString("a.txt", "secret data");
+        // 恢复时只填了 token + gistId，忘了填加密口令
+        Map<String, String> values = new LinkedHashMap<String, String>();
+        values.put("token", "fake-token");
+        values.put("gistId", GIST_ID);
+        values.put("apiBase", apiBase);
+        FileStorage reader = FileStorages.of("github-gist", values);
+        try {
+            reader.readString("a.txt");
+            fail("缺口令读密文必须明确报错");
+        } catch (StorageException e) {
+            assertTrue("应提示填写口令: " + e.getMessage(), e.getMessage().contains("填写加密口令"));
+        }
+    }
+
+    @Test
+    public void mixedPlainAndEncryptedGistCanBeRestored() {
+        // 旧明文数据与新密文共存于同一 gist：读取按信封前缀逐文件判定
+        FileStorage plain = storage();
+        plain.writeString("legacy.txt", "old plaintext");
+        FileStorage enc = storage("pwd");
+        enc.writeString("new.txt", "new secret");
+        assertEquals("旧明文仍可读", "old plaintext", enc.readString("legacy.txt"));
+        assertEquals("新密文也可读", "new secret", enc.readString("new.txt"));
+    }
+
+    @Test
+    public void encryptionOnWithoutPasswordIsRejectedAtConstruction() {
+        Map<String, String> values = new LinkedHashMap<String, String>();
+        values.put("token", "fake-token");
+        values.put("gistId", GIST_ID);
+        values.put("apiBase", apiBase);
+        values.put(GistConfig.ENCRYPTION, "on");
+        try {
+            FileStorages.of("github-gist", values);
+            fail("开加密却不填口令是矛盾配置，必须拒绝");
+        } catch (StorageException e) {
+            assertEquals(StorageErrorCode.INVALID_CONFIG, e.code());
+        }
+    }
+
+    @Test
+    public void createGistSeedIsEncrypted() {
+        GistClient client = new GistClient(StorageConfig.empty()
+                .set("token", "fake-token").set("apiBase", apiBase)
+                .set(GistConfig.ENCRYPTION, "on").set(GistConfig.CONTENT_PASSWORD, "pwd"));
+        String id = client.createGist("enc", false,
+                new java.util.AbstractMap.SimpleEntry<String, byte[]>("hello.txt",
+                        "hi".getBytes(StandardCharsets.UTF_8)));
+        assertTrue("createGist 的首个文件也必须加密",
+                GistContentCipher.isEncrypted(server.files(id).get("hello.txt")));
+    }
+
+    @Test
+    public void encryptedTruncatedFileRoundTripsViaRawUrl() {
+        // 桩：把某个文件标记为 truncated，raw_url 返回的是「存储文本」本身（信封）
+        FileStorage enc = storage("pwd");
+        enc.writeString("big.txt", "RAW-FULL-CONTENT");
+        String stored = server.files(GIST_ID).get("big.txt");
+        server.truncatedFile = "big.txt";
+        server.truncatedPreview = stored; // API 只给前若干字节的场景这里给完整信封
+        server.truncatedFull = stored.getBytes(StandardCharsets.UTF_8);
+        assertEquals("截断文件走 raw_url 回源后仍能解密", "RAW-FULL-CONTENT",
+                enc.readString("big.txt"));
+    }
+
+    @Test
+    public void encryptionExpansionOverLimitIsRejected() {
+        FileStorage fs = storage("pwd");
+        // 明文接近 1MB，加密信封膨胀后必然超过 1MB：必须明确报 CONFLICT
+        byte[] near = new byte[(int) GistConfig.MAX_UPLOAD_BYTES - 4096];
+        java.util.Arrays.fill(near, (byte) 'A');
+        try {
+            fs.upload("big.bin", near);
+            fail("编码+加密后超 1MB 应被拒绝，不能被 GitHub 静默截断");
+        } catch (StorageException e) {
+            assertEquals(StorageErrorCode.CONFLICT, e.code());
+            assertTrue("应说明是加密膨胀导致: " + e.getMessage(),
+                    e.getMessage().contains("加密") || e.getMessage().contains("编码"));
+        }
     }
 
     private static StorageField findField(StoragePlatform platform, String key) {

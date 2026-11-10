@@ -31,6 +31,12 @@ public final class GistConfig {
     public static final String GIST_ID = "gistId";
     /** API 基础地址（GitHub Enterprise 覆盖为 {@code https://host/api/v3}）。 */
     public static final String API_BASE = "apiBase";
+    /** 客户端加密开关：{@code on} 开启，其余（含 {@code off} / 未设置）关闭。 */
+    public static final String ENCRYPTION = "encryption";
+    /** 内容加密口令（含 password，被 StorageConfig 自动脱敏、ConnectionStore 加密落库）。 */
+    public static final String CONTENT_PASSWORD = "contentPassword";
+    /** 确认口令：仅表单校验用，绝不写入连接配置（见 ConnectionDialog.collect）。 */
+    public static final String CONTENT_PASSWORD_CONFIRM = "contentPasswordConfirm";
 
     /** 公网 API 默认地址。 */
     public static final String DEFAULT_API_BASE = "https://api.github.com";
@@ -52,7 +58,16 @@ public final class GistConfig {
     }
 
     /**
-     * 校验连接配置：令牌与 Gist ID 必填。
+     * @param config 连接配置
+     * @return true 表示开启了客户端内容加密
+     */
+    public static boolean encryptionOn(StorageConfig config) {
+        return config != null && "on".equalsIgnoreCase(config.getOr(ENCRYPTION, "off"));
+    }
+
+    /**
+     * 校验连接配置：令牌与 Gist ID 必填；开了加密却没填口令是矛盾配置，直接拒绝，
+     * 避免存出「声称加密、写进去却是明文」或「读不出还以为没加密」的状态。
      *
      * @param config 连接配置
      * @throws StorageException 配置不合法时抛 INVALID_CONFIG
@@ -63,6 +78,10 @@ public final class GistConfig {
         }
         config.require(TOKEN);
         config.require(GIST_ID);
+        if (encryptionOn(config) && config.getOr(CONTENT_PASSWORD, "").isEmpty()) {
+            throw StorageException.invalidConfig("已开启 GitHub Gist 客户端加密，请填写加密口令"
+                    + "（口令丢失将无法恢复数据）");
+        }
     }
 
     /**

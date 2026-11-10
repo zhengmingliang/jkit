@@ -40,6 +40,8 @@
 **jkit-storage**
 
 - SFTP `strictHostKeyChecking` 支持系统属性 `-Djkit.storage.sftp.defaultStrictHostKeyChecking=true` 在部署级默认开启主机指纹校验；解析顺序为显式配置 > 系统属性 > 默认 `false`（向后兼容）。
+- 新增 GitHub Gist 存储引擎（`github-gist`）：一条连接对应一个 Gist，REST + Bearer；扁平文本片段以可逆文件名编码模拟虚拟目录树，二进制字节 Base64 包装保证往返，`truncated` 文件走 `raw_url` 回源，分页列举，统一错误码映射。
+- GitHub Gist 新增**可选客户端内容加密**：开启并填口令后，写入前委托 `PassphraseCipher`（PBKDF2/AES-256-GCM）把内容包成 `JKIT-GIST-ENC:v1:` 自描述信封，gist 里只存密文；恢复只需口令、不依赖本机密钥，读取按信封前缀逐文件判定（旧明文 / 混合数据 / 关开关留口令均可读），口令错误 / 篡改 / 缺口令明确报错。只加密内容、文件名仍可见；按最终存储文本精确校验 1 MB 上限，阻止编码+加密膨胀被 GitHub 静默截断。
 
 **jkit-captcha**
 
